@@ -39,8 +39,12 @@ def out(db: Session, row: Suite, with_cases: bool = False) -> dict:
     return body
 
 
-def list_suites(db: Session, project_id: int, search: Optional[str] = None) -> List[Suite]:
+def list_suites(
+    db: Session, project_id: int, search: Optional[str] = None, created_by: Optional[int] = None,
+) -> List[Suite]:
     query = db.query(Suite).filter(Suite.project_id == project_id)
+    if created_by is not None:
+        query = query.filter(Suite.created_by == created_by)
     if search:
         query = query.filter(Suite.name.ilike(f"%{_escape_like(search)}%", escape="\\"))
     return query.order_by(Suite.name).all()

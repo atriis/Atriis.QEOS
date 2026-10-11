@@ -152,7 +152,7 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   stores the duration estimate, and lists run URLs for the report.
 - **Suites**: unique name per project, ordered cases replaced as a whole by
   `PUT /suites/{id}/cases` (≤1000, unknown or repeated numbers are a 422); deleting a suite keeps
-  its cases.
+  its cases. `GET /suites?created_by=me` lists the caller's own suites.
 - Access: user JWT + project role via project-service (every role reads; owner/admin/member
   edit), the same contract as ingestion. The client is a copy of ingestion's (ADR-022).
 

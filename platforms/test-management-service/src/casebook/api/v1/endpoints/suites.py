@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
@@ -22,10 +22,14 @@ def _suite_or_404(db: Session, access: ProjectAccess, suite_id: int):
 @router.get("", response_model=list[SuiteOut])
 def list_suites(
     search: Optional[str] = Query(None, min_length=1, max_length=200, pattern=r"^[^\x00]*$"),
+    # "me": the caller's own suites (the Overview's My suites widget); no other value is accepted
+    created_by: Optional[Literal["me"]] = Query(None),
     db: Session = Depends(get_db),
     access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
 ):
-    return [suite_service.out(db, row) for row in suite_service.list_suites(db, access.project_id, search)]
+    mine = access.user_id if created_by == "me" else None
+    rows = suite_service.list_suites(db, access.project_id, search, created_by=mine)
+    return [suite_service.out(db, row) for row in rows]
 
 
 @router.post("", response_model=SuiteOut, status_code=status.HTTP_201_CREATED)
