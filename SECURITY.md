@@ -104,7 +104,8 @@ details.
   only, no redirects).
 - **Monitoring database role.** With monitoring on, PostgreSQL gets a login role
   `qeos_monitor` that is a member of `pg_monitor` only: it reads statistics and
-  settings and cannot read table data.
+  settings and cannot read table data. It can still see query text in
+  `pg_stat_activity` and `pg_stat_statements`, which may contain literals.
 - **Data.** Per-project retention, legal hold and a full NDJSON export.
 - **Production package** (`deploy/`). A Caddy TLS edge with Let's Encrypt and
   HSTS is the only published service. Secrets are generated into a mode-600
