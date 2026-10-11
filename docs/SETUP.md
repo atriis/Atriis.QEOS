@@ -16,8 +16,9 @@ path (`& "C:\Program Files\Git\bin\bash.exe"`). A plain `bash` typed in PowerShe
 instead.
 
 > **Names.** The product is QEOS. It used to be called QA Vision, and some technical names
-> stay on purpose: the Compose project is still `qa-vision`, the Docker volumes are still
-> `qa-vision_qav_*`, and the repository is `carneiru/QA-Vision-Platform`. The collector is
+> stay on purpose: the Docker volumes are still `qa-vision_qav_*` (and `qa-vision_qeos_*` for
+> monitoring), and the repository is `carneiru/QA-Vision-Platform`. The Compose project, and so the
+> container names, became `qeos` on 2026-10-11 ([7.1](#71-updating)). The collector is
 > `qeos-collector` and reads `QEOS_URL` / `QEOS_API_KEY`. The old `qav-collector` command and
 > the `QAV_*` variables still work, with a deprecation warning.
 
@@ -1410,7 +1411,7 @@ restore it on the VM (`deploy/README.md` §7), and copy the local `TM_SECRETS_KE
   `qavCollectorUpload` Jenkins step and old GitLab template variables all still work, with a
   deprecation warning. Move to `QEOS_*` and `collector-v0.4.1` when convenient. On Azure, a
   secret still named `QAV_API_KEY` must be renamed, or mapped as `QEOS_API_KEY: $(QAV_API_KEY)`.
-- Data does not move: the volumes keep their `qa-vision_qav_*` names. If Compose asks to
+- Data does not move: the volumes keep their `qa-vision_qav_*` names, pinned in the compose files. If Compose asks to
   recreate a volume, answer **N**.
 
 ---
@@ -1443,6 +1444,11 @@ qeos up -d --build --wait edge
   rules, run the `remask` job ([4.6](#46-masking)).
 - **Collector:** CI pins a tag (`collector-v0.4.1`). Upgrading the platform does not change it.
   Move pipelines to a new tag when the release notes ask for it.
+- **Compose project renamed to `qeos` (2026-10-11).** Containers are now `qeos-*` and local images
+  `qeos/*`. Once, before the first `up` after pulling this change, stop the old project:
+  `docker compose -p qa-vision down` (never `-v`; the volumes keep their pinned names and data). Without
+  it the old containers still hold port 8443 and the fixed subnet, and `up` fails. The old
+  `qa-vision/*:local` images can then go: `docker image ls -q 'qa-vision/*' | xargs docker image rm`.
 - Old images pile up: `docker image prune` removes the unused ones. Never prune volumes
   ([2.5](#25-stop-restart-and-why-never-down--v)).
 

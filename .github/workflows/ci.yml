@@ -253,10 +253,10 @@ jobs:
 
       - name: Check the NGINX configuration
         run: |
-          docker build -t qa-vision/gateway:ci gateway
-          docker run --rm qa-vision/gateway:ci nginx -t
+          docker build -t qeos/gateway:ci gateway
+          docker run --rm qeos/gateway:ci nginx -t
           # The gated /grafana/ location (ADR-027)
-          docker run --rm -e MONITORING_ENABLED=true qa-vision/gateway:ci nginx -t
+          docker run --rm -e MONITORING_ENABLED=true qeos/gateway:ci nginx -t
 
       # Waiting on the gateway waits on everything it depends on: postgres, db-init, the three
       # migrations and the three services. The one-shot jobs are not waited on themselves.

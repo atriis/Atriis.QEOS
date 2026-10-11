@@ -96,8 +96,8 @@ request.
 ## Checking a change
 
 ```bash
-docker build -t qa-vision/gateway:local gateway && docker run --rm qa-vision/gateway:local nginx -t
-docker run --rm -e MONITORING_ENABLED=true qa-vision/gateway:local nginx -t   # the gated /grafana/
+docker build -t qeos/gateway:local gateway && docker run --rm qeos/gateway:local nginx -t
+docker run --rm -e MONITORING_ENABLED=true qeos/gateway:local nginx -t   # the gated /grafana/
 export SECRET_KEY=dev        # every docker compose command needs it, not just `up`
 docker compose up -d --build --wait gateway
 bash scripts/smoke_gateway.sh

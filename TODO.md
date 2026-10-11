@@ -92,7 +92,7 @@
 - [x] NGINX gateway: routing, per-IP rate limits, self-signed TLS, JSON errors, request ids, JSON access log
 - [x] Repository-root docker-compose: one Postgres, db-init, per-service migration jobs, shared SECRET_KEY
 - [x] CI: full-stack smoke test through the gateway
-- [ ] Rename the compose project `qa-vision` to `qeos` (containers `qeos-*`, local images `qeos/*`) — agreed 2026-10-11, after the monitoring push. The data volumes keep their pinned names (`qa-vision_qav_postgres_data`, `qa-vision_qav_gateway_certs`), so no data moves; one `docker compose -p qa-vision down` (no `-v`) per host, then update scripts/CI/docs that name `qa-vision-*` containers and check `deploy/`
+- [x] Rename the compose project `qa-vision` to `qeos` (done 2026-10-11; Prometheus and Grafana volumes pinned too) (containers `qeos-*`, local images `qeos/*`) — agreed 2026-10-11, after the monitoring push. The data volumes keep their pinned names (`qa-vision_qav_postgres_data`, `qa-vision_qav_gateway_certs`), so no data moves; one `docker compose -p qa-vision down` (no `-v`) per host, then update scripts/CI/docs that name `qa-vision-*` containers and check `deploy/`
 - [ ] Monitoring follow-ups (Phase 3 final review, 2026-10-11): drop cAdvisor's `/:/rootfs` mount and narrow `/var/run` to the Docker socket, after checking container discovery live; strip `qeos_grafana` from the Cookie header the gateway forwards to Grafana (targeted map, Grafana's own cookies kept); job panel "time since success" value mapping for 0 (never); smoke refuses a remote `DOCKER_HOST`/docker context; smoke check that a forged header on the break-glass port `127.0.0.1:3000` is refused
 
 ### Gateway follow-ups

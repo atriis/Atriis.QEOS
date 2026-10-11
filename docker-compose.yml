@@ -1,7 +1,7 @@
 # The whole platform on one host: `SECRET_KEY=... INTERNAL_API_PASSWORD=... docker compose up -d --build --wait gateway`.
 # Each service's own docker-compose.yml under platforms/ still works for developing it alone;
 # this stack uses its own volumes and never touches theirs.
-name: qa-vision
+name: qeos
 
 x-app-healthcheck: &app-healthcheck
   # The slim images have no curl; probe with Python's stdlib
@@ -143,7 +143,7 @@ services:
 
   auth-migrate:
     # Same image as auth-service, which builds it; never pulled from a registry
-    image: qa-vision/auth-service:local
+    image: qeos/auth-service:local
     pull_policy: never
     environment: *auth-env
     command: ["alembic", "upgrade", "head"]
@@ -153,7 +153,7 @@ services:
 
   organization-migrate:
     # Same image as organization-service, which builds it; never pulled from a registry
-    image: qa-vision/organization-service:local
+    image: qeos/organization-service:local
     pull_policy: never
     environment: *organization-env
     command: ["alembic", "upgrade", "head"]
@@ -163,7 +163,7 @@ services:
 
   project-migrate:
     # Same image as project-service, which builds it; never pulled from a registry
-    image: qa-vision/project-service:local
+    image: qeos/project-service:local
     pull_policy: never
     environment: *project-env
     command: ["alembic", "upgrade", "head"]
@@ -173,7 +173,7 @@ services:
 
   ingestion-migrate:
     # Same image as ingestion-service, which builds it; never pulled from a registry
-    image: qa-vision/ingestion-service:local
+    image: qeos/ingestion-service:local
     pull_policy: never
     environment: *ingestion-env
     command: ["alembic", "upgrade", "head"]
@@ -183,7 +183,7 @@ services:
 
   test-management-migrate:
     # Same image as test-management-service, which builds it; never pulled from a registry
-    image: qa-vision/test-management-service:local
+    image: qeos/test-management-service:local
     pull_policy: never
     environment: *testmgmt-env
     command: ["alembic", "upgrade", "head"]
@@ -193,7 +193,7 @@ services:
 
   auth-service:
     build: *auth-build
-    image: qa-vision/auth-service:local
+    image: qeos/auth-service:local
     environment: *auth-env
     healthcheck: *app-healthcheck
     depends_on:
@@ -202,7 +202,7 @@ services:
 
   organization-service:
     build: *organization-build
-    image: qa-vision/organization-service:local
+    image: qeos/organization-service:local
     environment: *organization-env
     healthcheck: *app-healthcheck
     depends_on:
@@ -211,7 +211,7 @@ services:
 
   project-service:
     build: *project-build
-    image: qa-vision/project-service:local
+    image: qeos/project-service:local
     environment: *project-env
     healthcheck: *app-healthcheck
     depends_on:
@@ -220,7 +220,7 @@ services:
 
   ingestion-service:
     build: *ingestion-build
-    image: qa-vision/ingestion-service:local
+    image: qeos/ingestion-service:local
     environment: *ingestion-env
     healthcheck: *app-healthcheck
     depends_on:
@@ -230,7 +230,7 @@ services:
   # Test cases and suites (ADR-022)
   test-management-service:
     build: *testmgmt-build
-    image: qa-vision/test-management-service:local
+    image: qeos/test-management-service:local
     environment: *testmgmt-env
     healthcheck: *app-healthcheck
     depends_on:
@@ -241,7 +241,7 @@ services:
   # RETENTION_INTERVAL_HOURS. One pass at a time across copies (PostgreSQL advisory lock).
   ingestion-retention:
     # Same image as ingestion-service, which builds it; never pulled from a registry
-    image: qa-vision/ingestion-service:local
+    image: qeos/ingestion-service:local
     pull_policy: never
     environment:
       <<: *ingestion-env
@@ -256,7 +256,7 @@ services:
 
   dashboard:
     build: *dashboard-build
-    image: qa-vision/dashboard:local
+    image: qeos/dashboard:local
     restart: unless-stopped
     # nginx:alpine has no python; busybox wget instead of the shared healthcheck
     healthcheck:
@@ -268,7 +268,7 @@ services:
 
   # Keeps the flaky_daily rollups current: backfill on start, then every 6 hours.
   analytics-rollup:
-    image: qa-vision/ingestion-service:local
+    image: qeos/ingestion-service:local
     pull_policy: never
     environment: *ingestion-env
     command: ["python", "-m", "src.ingestion.jobs.rollup", "--loop"]
@@ -279,7 +279,7 @@ services:
   # Sends last week's summary to channels that ask for it, Mondays from
   # WEEKLY_SUMMARY_HOUR_UTC; once per channel per week (see the job's docstring)
   weekly-summary:
-    image: qa-vision/ingestion-service:local
+    image: qeos/ingestion-service:local
     pull_policy: never
     environment: *ingestion-env
     command: ["python", "-m", "src.ingestion.jobs.weekly_summary", "--loop"]
@@ -289,7 +289,7 @@ services:
 
   gateway:
     build: ./gateway
-    image: qa-vision/gateway:local
+    image: qeos/gateway:local
     ports:
       - "${GATEWAY_HTTPS_PORT:-8443}:443"
       - "${GATEWAY_HTTP_PORT:-8080}:80"
@@ -517,12 +517,14 @@ networks:
   monitoring:
 
 volumes:
-  # Explicit names: the physical volumes keep the names they had before the QEOS rename
-  # (compose project "qa-vision", keys "qav_*"), so no data moves and nothing is recreated.
+  # Explicit names: the physical volumes keep the names they had under the old compose project
+  # "qa-vision" (keys "qav_*" before the QEOS rename), so renaming the project to "qeos" moves no data.
   qeos_postgres_data:
     name: qa-vision_qav_postgres_data
   qeos_gateway_certs:
     name: qa-vision_qav_gateway_certs
   # Monitoring profile (Ruling 16). Grafana needs no backup: everything in it is provisioned from the repo
   qeos_prometheus_data:
+    name: qa-vision_qeos_prometheus_data
   qeos_grafana_data:
+    name: qa-vision_qeos_grafana_data

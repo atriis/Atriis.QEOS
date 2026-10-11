@@ -137,6 +137,15 @@ the gateway, which joins a new network, even with monitoring off. Expect a short
 
 Database migrations run automatically on every start.
 
+**Compose project renamed to `qeos` (2026-10-11).** Containers are now `qeos-*` instead of `qa-vision-*`.
+Once, before the first update past this change, stop the old project, then update as above:
+
+```bash
+docker compose -p qa-vision down        # never -v: the volumes keep their names and their data
+```
+
+Without this step the old containers still hold port 443 and the fixed subnets, and `up` fails.
+
 **Existing installs and `TM_SECRETS_KEY`.** `init-env.sh` never overwrites an existing `.env`, so an install
 made before "Run from QEOS" has no `TM_SECRETS_KEY`. Add it once, by hand, then restart:
 
@@ -168,9 +177,10 @@ working after `git pull`; only these settings change name:
   and signed-in browsers: the old `qav_refresh` cookie is accepted once and replaced by
   `qeos_refresh`, so nobody is logged out.
 - **Data:** the Docker volumes keep their physical names (`qa-vision_qav_postgres_data`,
-  `qa-vision_qav_gateway_certs`, `qa-vision_qav_caddy_data`, `qa-vision_qav_caddy_config`) and
-  the compose project is still `qa-vision`, so no data moves. If Compose ever asks to recreate a
-  volume, answer N.
+  `qa-vision_qav_gateway_certs`, `qa-vision_qav_caddy_data`, `qa-vision_qav_caddy_config`, and with
+  monitoring `qa-vision_qeos_prometheus_data`, `qa-vision_qeos_grafana_data`), pinned in the compose
+  files, so no data moves although the compose project is now `qeos` (section 8). If Compose ever asks
+  to recreate a volume, answer N.
 
 ## 9. Security notes
 

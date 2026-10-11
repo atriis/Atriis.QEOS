@@ -206,14 +206,14 @@ tests:
   - name: MemoryPressure for a restarting container
     interval: 1m
     input_series:
-      - series: 'container_start_time_seconds{name="qa-vision-project-service-1",instance="cadvisor:8080",job="cadvisor"}'
+      - series: 'container_start_time_seconds{name="qeos-project-service-1",instance="cadvisor:8080",job="cadvisor"}'
         values: '100 200 300 400 500 500 500'
     alert_rule_test:
       - eval_time: 5m
         alertname: MemoryPressure
         exp_alerts:
-          - exp_labels: {severity: warning, kind: container, name: qa-vision-project-service-1, instance: "cadvisor:8080", job: cadvisor}
-            exp_annotations: {summary: "Container qa-vision-project-service-1 restarted more than 3 times in 15 minutes"}
+          - exp_labels: {severity: warning, kind: container, name: qeos-project-service-1, instance: "cadvisor:8080", job: cadvisor}
+            exp_annotations: {summary: "Container qeos-project-service-1 restarted more than 3 times in 15 minutes"}
 
   - name: PostgresDown after two minutes
     interval: 1m
