@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -92,6 +92,43 @@ test("saving keeps the stored token; Replace token sends a new one", async () =>
   await userEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(bodies).toHaveLength(2));
   expect(bodies[1]).toMatchObject({ token: "github_pat_new0000000000000000zzzz" });
+});
+
+test("a saved token is a Token row that says so, with Replace beside it", async () => {
+  server.use(http.get(`${P}/ci-target`, () => HttpResponse.json(CONNECTED)));
+  renderCard();
+  const replace = await screen.findByRole("button", { name: "Replace token" });
+  expect(replace).toHaveTextContent(/^Replace$/);
+  const row = replace.closest(".field-static") as HTMLElement;
+  expect(within(row).getByText("Token")).toBeInTheDocument();
+  expect(within(row).getByText("Saved (…a1b2)")).toBeInTheDocument();
+});
+
+test("Keep current token backs out of a replacement without sending a token", async () => {
+  const bodies: unknown[] = [];
+  server.use(
+    http.get(`${P}/ci-target`, () => HttpResponse.json(CONNECTED)),
+    http.put(`${P}/ci-target`, async ({ request }) => { bodies.push(await request.json()); return HttpResponse.json(CONNECTED); }),
+  );
+  renderCard();
+  await userEvent.click(await screen.findByRole("button", { name: "Replace token" }));
+  await userEvent.type(screen.getByLabelText("Token"), "github_pat_typo");
+  await userEvent.click(screen.getByRole("button", { name: "Keep current token" }));
+  expect(screen.queryByLabelText("Token")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Replace token" })).toHaveFocus();
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(bodies).toHaveLength(1));
+  expect(bodies[0]).not.toHaveProperty("token");
+});
+
+test("Disconnect sits on the connection line, before the form and away from Save", async () => {
+  server.use(http.get(`${P}/ci-target`, () => HttpResponse.json(CONNECTED)));
+  renderCard();
+  const disconnect = await screen.findByRole("button", { name: "Disconnect" });
+  const line = disconnect.closest(".connection-line") as HTMLElement;
+  expect(within(line).getByText(/^Connected: acme\/obt/)).toBeInTheDocument();
+  const save = screen.getByRole("button", { name: "Save" });
+  expect(disconnect.compareDocumentPosition(save) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 test("disconnect asks first, then removes the target", async () => {
