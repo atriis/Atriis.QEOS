@@ -96,6 +96,8 @@ the same filters (Trends, Report, Flaky, Runs, Branches, Cases, Suites).
 - **Failures:** each widget loads, fails and retries on its own (ErrorBanner with Retry); a widget that
   throws while rendering shows "This widget failed to load · Retry" via its own error boundary, and the
   rest of the page keeps working.
+- **A branch without data:** a widget set to a branch with no runs in its period says "No runs on
+  <branch> in the last N days" with its Settings button, never an error.
 - No undo history: Cancel discards the draft and Reset brings the project default back.
 
 ## 3. Data and API (project-service)
@@ -144,6 +146,9 @@ registry and the file disagree.
 
 A 409 body carries `{version, updated_by, updated_at}` of the stored row.
 
+**Gateway:** no change. The path falls under the existing `location /api/v1/projects` (project-service);
+no regex location matches `overview-layout`. The smoke proves the route end to end.
+
 ### 3.4 Lifecycle
 - Deleting a project deletes its layouts (cascade).
 - A personal layout whose user no longer has a role in the project is never served (the role check runs
@@ -161,6 +166,12 @@ The suites list gains `created_by=me` (the caller's user id), for *My suites*.
   stored layout are skipped (logged once).
 - **Shared queries:** a widget uses the owning screen's query hook under the same key, so identical
   widgets cost one request and refresh behaviour comes from those hooks once (DESIGN.md "Requests").
+- **Report widgets ask for their own section only:** `POST /analytics/report` takes `sections` and
+  `branch`, so *Failure causes* sends `sections: ["failure_causes"]`, *Regressions* `["regressions"]`,
+  *Slowest tests* `["duration"]`. Run-driven widgets follow the 30 s refresh; report-driven widgets
+  refetch when a new latest run arrives, not on every tick.
+- **Coverage** reuses the Report's existing dashboard join of test-management cases with ingestion results
+  (ADR-022) unchanged.
 - **Lazy loading:** each widget component is code-split (`React.lazy`) and loads only when placed.
 - **Layout state:** `useOverviewLayout(projectId)` (React Query GET, mutations for PUT/DELETE);
   `overview/templates.ts` holds the built-in default and the three templates as stored-layout JSON.
