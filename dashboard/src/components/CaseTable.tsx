@@ -165,22 +165,24 @@ interface RowProps {
   lastRuns: (key: string | null) => ReactNode;
   lastRunsSummary: (key: string | null) => string | null;
   className?: string;
+  /** A feature's expanded scenario: the checkbox moves into the title cell, indented under the feature's chevron. */
+  nested?: boolean;
 }
 
 /** One scenario row: shared by the Scenario view and a feature's expanded scenarios in the Feature view. */
-export function CaseRow({ projectId, c, selectable, picked, onToggle, lastRuns, lastRunsSummary, className }: RowProps) {
+export function CaseRow({ projectId, c, selectable, picked, onToggle, lastRuns, lastRunsSummary, className, nested }: RowProps) {
+  const box = selectable && isRunnable(c) ? (
+    <input type="checkbox" aria-label={`Select ${c.key} ${c.title}`} checked={picked.has(c.number)}
+      disabled={!picked.has(c.number) && picked.size >= MAX_RUN_CASES} onChange={() => onToggle(c)}
+      onFocus={(e) => e.currentTarget.scrollIntoView?.({ block: "nearest" })} />
+  ) : null;
   return (
     <tr className={className}>
       {selectable && (
-        <td className="select-col">
-          {isRunnable(c) && (
-            <input type="checkbox" aria-label={`Select ${c.key} ${c.title}`} checked={picked.has(c.number)}
-              disabled={!picked.has(c.number) && picked.size >= MAX_RUN_CASES} onChange={() => onToggle(c)}
-              onFocus={(e) => e.currentTarget.scrollIntoView?.({ block: "nearest" })} />
-          )}
-        </td>
+        <td className="select-col">{!nested && box}</td>
       )}
       <td className="wrap-anywhere">
+        {nested && box && <span className="nested-check">{box}</span>}
         {c.source_path && <FileCode size={14} aria-label="Imported" role="img" />}{c.source_path && " "}
         <Link className="case-title truncate" title={c.title} to={`/projects/${projectId}/cases/${c.number}`}>{c.title}</Link>
         <Labels labels={c.labels ?? []} />

@@ -194,6 +194,22 @@ test("feature and scenario rows share one table with the Scenario view's columns
   expect(within(featureRow("Login")).getAllByRole("cell")).toHaveLength(heads.length);
 });
 
+test("an expanded scenario's checkbox sits indented in its title cell, not in the feature's select column", async () => {
+  renderCases();
+  await screen.findByRole("link", { name: "Login" });
+  await userEvent.click(within(featureRow("Login")).getByRole("button", { name: "Show scenarios of Login" }));
+  const scenarios = await screen.findByRole("rowgroup", { name: "Scenarios of Login" });
+  const box = within(scenarios).getByRole("checkbox", { name: "Select TC-1 Case 1" });
+  const row = box.closest("tr")!;
+  const cells = within(row).getAllByRole("cell");
+  // The select column stays empty; the box lives in the title cell, inside the nested-check slot
+  expect(within(cells[0]).queryByRole("checkbox")).not.toBeInTheDocument();
+  expect(cells[1]).toContainElement(box);
+  expect(box.closest(".nested-check")).not.toBeNull();
+  await userEvent.click(box);
+  expect(await screen.findByRole("button", { name: "Run selected (1)" })).toBeInTheDocument();
+});
+
 test("the manual group expands to the manual cases", async () => {
   renderCases();
   await screen.findByText("No feature (manual)");

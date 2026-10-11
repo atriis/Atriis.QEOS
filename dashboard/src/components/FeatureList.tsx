@@ -178,7 +178,7 @@ function GroupCases({ projectId, row, label, selectable, picked, onToggle, filte
         : (
           <>
             {cases.data.map((c) => (
-              <CaseRow key={c.number} className="scenario-row" projectId={projectId} c={c} selectable={selectable} picked={picked}
+              <CaseRow key={c.number} className="scenario-row" nested projectId={projectId} c={c} selectable={selectable} picked={picked}
                 onToggle={onToggle} lastRuns={lastRuns} lastRunsSummary={lastRunsSummary} />
             ))}
             {row.case_count > cases.data.length && note(

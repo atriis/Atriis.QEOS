@@ -745,6 +745,11 @@ button.disclosure[aria-expanded="true"] svg { transform: rotate(90deg); }
 table.data tbody.feature-cases > tr > td { background: var(--surface-2); }
 table.data tbody.feature-cases > tr:hover > td { background: var(--hover); }
 table.data tbody.feature-cases > tr.scenario-row > td.wrap-anywhere { padding-left: calc(var(--space-3) + var(--disclosure-size) + var(--space-2)); }
+/* A scenario's checkbox: smaller, in the slot under the feature's chevron, so the rows read as children of the feature (24px target) */
+table.data tbody.feature-cases > tr.scenario-row > td.wrap-anywhere { position: relative; }
+.nested-check { position: absolute; left: var(--space-3); top: 8px; width: var(--disclosure-size); height: 24px; display: flex; align-items: center; justify-content: center; }
+.nested-check input[type="checkbox"] { width: 18px; height: 18px; background-size: 12px 12px; border-radius: 4px; margin: 0; }
+@media (pointer: coarse) { .nested-check { height: 44px; top: 0; } .nested-check input[type="checkbox"] { width: 24px; height: 24px; background-size: 16px 16px; } }
 table.data tbody.feature-cases > tr.feature-note > td { padding-left: calc(var(--space-3) + var(--disclosure-size) + var(--space-2)); }
 table.data tbody.feature-cases > tr.feature-note:hover > td { background: var(--surface-2); }
 .source-badge { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
