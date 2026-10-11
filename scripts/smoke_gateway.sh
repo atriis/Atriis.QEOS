@@ -597,13 +597,19 @@ print(jwt.encode({"sub": sys.argv[1], "exp": exp}, os.environ["SECRET_KEY"], alg
 
   # The break-glass port bypasses the gateway: a forged user header there, even claiming to come from
   # the gateway's grafana-front address, must not sign anyone in (Grafana checks the socket address)
-  bg_status="$(curl -s -o "$TMP/body" -w '%{http_code}' --max-time 10     -H 'X-QEOS-User-Email: admin@example.com' -H "X-Forwarded-For: ${GATEWAY_GRAFANA_FRONT_IP:-172.30.1.10}"     -H "X-Real-IP: ${GATEWAY_GRAFANA_FRONT_IP:-172.30.1.10}" http://127.0.0.1:3000/grafana/api/user)"
-  if [ "$bg_status" = "000" ]; then
-    pass "a forged user header on the break-glass port: skipped, 127.0.0.1:3000 not reachable"
+  # Skipped only when nothing listens (curl exit 7, connection refused); a timeout or a reset fails
+  bg_status="$(curl -s -o "$TMP/body" -w '%{http_code}' --max-time 10 \
+    -H 'X-QEOS-User-Email: admin@example.com' \
+    -H "X-Forwarded-For: ${GATEWAY_GRAFANA_FRONT_IP:-172.30.1.10}" \
+    -H "X-Real-IP: ${GATEWAY_GRAFANA_FRONT_IP:-172.30.1.10}" \
+    http://127.0.0.1:3000/grafana/api/user)"
+  bg_rc=$?
+  if [ "$bg_rc" = 7 ]; then
+    pass "a forged user header on the break-glass port: skipped, nothing listens on 127.0.0.1:3000"
   elif [ "$bg_status" = "401" ] && grep -qF 'auth-proxy.invalid-ip' "$TMP/body"; then
     pass "a forged user header on the break-glass port is refused (401 auth-proxy.invalid-ip)"
   else
-    fail "a forged user header on the break-glass port: expected 401 auth-proxy.invalid-ip, got $bg_status: $(head -c 300 "$TMP/body")"
+    fail "a forged user header on the break-glass port: expected 401 auth-proxy.invalid-ip, got $bg_status (curl exit $bg_rc): $(head -c 300 "$TMP/body" 2>/dev/null)"
   fi
 
   # qeos_monitor reads statistics, never table data. First prove it can connect at all, so a wrong

@@ -43,7 +43,9 @@ they fall through to the dashboard.
     (`GATEWAY_GRAFANA_FRONT_IP`). `Authorization` is removed toward Grafana, and so is the `qeos_grafana`
     cookie: Grafana gets `$grafana_cookie`, the browser's `Cookie` header without it (two chained maps in
     `nginx.conf.template`; Grafana's own cookies such as `grafana_session` pass unchanged). The check
-    itself still receives the full `$http_cookie`.
+    itself still receives the full `$http_cookie`. Fail closed: if a `qeos_grafana` is still in
+    `$grafana_cookie` (only a hand-made header does that: a third copy, a space before `=`), the request
+    gets `400 {"detail":"Bad Request"}` and never reaches Grafana.
   - 401: `302 /monitoring?next=<path>`. The dashboard's `/monitoring` page signs in if needed, mints the
     cookie and comes back. `next` is the path of the raw request line, still percent-encoded as the
     client sent it (`$grafana_next`, a map on `$request_uri`), never NGINX's decoded `$uri`: a decoded
