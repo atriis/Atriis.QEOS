@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { server } from "../test/server";
@@ -32,7 +32,9 @@ test("a template replaces the draft, says so, and Cancel still undoes it", async
   expect(titles()).toEqual(["Pass-rate trend", "Failure causes", "Regressions and flips", "Coverage", "Test cases"]);
   expect(screen.getByText("QA lead layout applied: 5 widgets")).toBeInTheDocument();
   expect(screen.queryByRole("region", { name: "Add a widget" })).not.toBeInTheDocument();
-  expect(screen.getByRole("region", { name: "Pass-rate trend" })).toHaveFocus();
+  // The widget code loads on demand; on a slow machine its card settles after the first render
+  const trend = await screen.findByRole("region", { name: "Pass-rate trend" });
+  await waitFor(() => expect(trend).toHaveFocus());
   await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
   await userEvent.click(screen.getByRole("button", { name: "Discard" }));
   expect(titles()).toEqual(["Latest run", "Failing in latest run", "Pass rate this week", "Flaky tests, last 14 days"]);
