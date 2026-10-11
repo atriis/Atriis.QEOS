@@ -328,4 +328,4 @@ are not shipped functionality.
 
 ## License
 
-MIT, as stated since the first commit. The `LICENSE` file itself is not in the repository yet.
+[MIT](LICENSE) © 2026 Pedro Carneiro.
