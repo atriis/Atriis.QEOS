@@ -170,8 +170,9 @@ details.
   try that password; keep it long and random (`init-env.sh` does).
 - **cAdvisor (monitoring).** It runs as root with `/:/rootfs:ro` and `/var/run` (the Docker
   socket) mounted, so it can read the whole host filesystem, including `.env` and the PostgreSQL
-  data, and has root-equivalent Docker API access. It is opt-in and publishes no port; dropping the
-  `/:/rootfs` mount is planned (Phase 3).
+  data, and has root-equivalent Docker API access. It is opt-in and publishes no port. Dropping the
+  `/:/rootfs` mount and narrowing `/var/run` to the Docker socket is an open follow-up (TODO.md),
+  pending a check that container discovery still works without them.
 - **Data.** Per-project retention, legal hold and a full NDJSON export.
 - **Production package** (`deploy/`). A Caddy TLS edge with Let's Encrypt and
   HSTS is the only published service. Secrets are generated into a mode-600

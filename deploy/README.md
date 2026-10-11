@@ -312,8 +312,9 @@ header they send, and they get nothing beyond Grafana's own login, which still n
 password. Keep `GRAFANA_ADMIN_PASSWORD` strong; `init-env.sh` generates 32 characters. The query text
 visible to `qeos_monitor` is described in `SECURITY.md`. cAdvisor runs as root with `/:/rootfs:ro` and the
 `/var/run` (the Docker socket) mounted, so it can read the whole VM filesystem, including `.env` and the
-PostgreSQL data, and has root-equivalent Docker API access; it is opt-in and publishes no port, and
-dropping the `/:/rootfs` mount is planned (Phase 3).
+PostgreSQL data, and has root-equivalent Docker API access; it is opt-in and publishes no port.
+Dropping the `/:/rootfs` mount (and narrowing `/var/run` to the Docker socket) is an open follow-up in
+`TODO.md`.
 
 **Dead-man's switch (not built).** The `Watchdog` alert always fires and goes nowhere. To be told when the
 whole VM or Alertmanager is gone, route `Watchdog` to an external heartbeat service (any hosted "dead

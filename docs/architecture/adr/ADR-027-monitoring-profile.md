@@ -56,6 +56,10 @@ The blueprint (§11) is binding for names: `api_requests_total`, `http_requests_
   `GF_AUTH_PROXY_WHITELIST` lists exactly that address, so a user header from any other container is
   refused.
 - **Warning alerts reach email only when it is the only channel**, to keep a mailbox for criticals.
+- **Per-endpoint latency shows p95 only.** The spec asks for p50/p95/p99 per route; the overview shows
+  p50/p95/p99 for the whole service and p95 per endpoint, to keep the per-endpoint panel readable.
+- **cAdvisor still mounts `/:/rootfs` and `/var/run`.** Dropping them was planned for Phase 3 but needs a
+  live check that container discovery survives; it is a TODO follow-up.
 
 ## Stays TARGET (blueprint §11), each behind its trigger
 | Piece | Trigger |
@@ -79,8 +83,14 @@ The blueprint (§11) is binding for names: `api_requests_total`, `http_requests_
 - **An NGINX exporter:** `stub_status` gives connection counts only; `up == 0` and service metrics cover more.
 
 ## Consequences
-- Anything on the compose network that reaches `grafana:3000` with `X-QEOS-User-Email` is signed in;
-  only our own containers and the VM's loopback can.
+- Grafana trusts `X-QEOS-User-Email` only from the gateway's fixed `grafana-front` address
+  (`GF_AUTH_PROXY_WHITELIST`). Grafana checks the real socket address, so the header from any other container,
+  from the break-glass port `127.0.0.1:3000` or behind a spoofed `X-Forwarded-For`/`X-Real-IP` is refused
+  (`auth-proxy.invalid-ip`). Residual: on Docker 28's bridge, other containers can reach Grafana's admin
+  login page, which still needs `GRAFANA_ADMIN_PASSWORD`.
+- The `qeos_grafana` cookie lasts 8 h. Signing out clears it in that browser, and a password change,
+  demotion or deactivation stops it on the next request; a copy of the cookie elsewhere stays valid until
+  one of those happens or it expires.
 - A deep link to Grafana from Slack or email always passes `/monitoring` once (SameSite=Strict), and
   loses its query string.
 - More uvicorn workers per service need prometheus_client's multi-process mode first.
