@@ -47,7 +47,9 @@ def test_a_token_without_expiry_stores_null(client, auth, owner, github):
 
 @pytest.mark.parametrize("status, message", [
     (401, "token invalid or expired"),
-    (403, "token has no Actions access to this repository"),
+    (403, "token has no Actions access to this repository. Check that the token's resource owner is \"acme\" (the "
+          "repository's owner, not your own account unless you own it), that it can reach this repository with "
+          "Actions: Read and write, and that \"acme\" has approved it"),
     (404, "repository or workflow not found. The workflow file must exist on the repository's default branch")])
 def test_github_refusals_are_422_with_a_specific_message(client, auth, owner, github, db, status, message):
     github.check(status=status)

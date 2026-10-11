@@ -20,6 +20,14 @@ NOT_FOUND = ("repository or workflow not found. The workflow file must exist on 
              "default branch")
 
 
+def forbidden(owner: str) -> str:
+    """The 403 message, naming the account the token must belong to: a fine-grained token made under the
+    user's own account (the default) cannot reach an organization's repository, which is the usual cause."""
+    return (f"{FORBIDDEN}. Check that the token's resource owner is \"{owner}\" (the repository's owner, not your "
+            f"own account unless you own it), that it can reach this repository with Actions: Read and write, and "
+            f"that \"{owner}\" has approved it")
+
+
 class GitHubError(Exception):
     """GitHub refused, or could not be reached (status 0)."""
 
@@ -80,7 +88,7 @@ def _send(token: str, method: str, path: str, **kwargs) -> httpx.Response:
     if response.status_code == 401:
         raise GitHubError(401, UNAUTHORIZED)
     if response.status_code == 403:
-        raise GitHubError(403, FORBIDDEN)
+        raise GitHubError(403, forbidden(path.split("/")[2]) if path.startswith("/repos/") else FORBIDDEN)
     if response.status_code == 404:
         raise GitHubError(404, NOT_FOUND)
     if response.status_code >= 400:

@@ -33,7 +33,7 @@ def test_expiry_header_parsing(value, expected):
     assert gh.parse_expiry(value) == expected
 
 
-@pytest.mark.parametrize("status, message", [(401, gh.UNAUTHORIZED), (403, gh.FORBIDDEN), (404, gh.NOT_FOUND)])
+@pytest.mark.parametrize("status, message", [(401, gh.UNAUTHORIZED), (403, gh.forbidden("acme")), (404, gh.NOT_FOUND)])
 def test_check_failures_have_specific_messages_without_the_token(github, status, message):
     github.check(status=status)
     with pytest.raises(gh.GitHubError) as err:
@@ -207,3 +207,10 @@ def test_a_rate_limited_dispatch_raises_rate_limited(github):
     with pytest.raises(gh.RateLimited) as err:
         gh.dispatch(TOKEN, github.repo, github.workflow, "main", {"request_id": "7"})
     assert err.value.retry_after == 30
+
+
+def test_the_403_message_names_the_owner_the_token_must_belong_to():
+    message = gh.forbidden("example-org")
+    assert message.startswith("token has no Actions access to this repository. ")
+    assert 'resource owner is "example-org"' in message and "Actions: Read and write" in message
+    assert "approve" in message and len(message) <= 500  # run_requests.error is String(500)
