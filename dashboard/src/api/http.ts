@@ -6,6 +6,8 @@ export class ApiError extends Error {
     public detail: string,
     /** Machine-readable reason, when the API sends an object detail ({code, message}). */
     public code?: string,
+    /** The parsed JSON body, for callers that need more than the message (a 409's stored version). */
+    public body?: unknown,
   ) {
     super(detail);
     this.name = "ApiError";
@@ -32,8 +34,10 @@ export function buildQuery(params: Record<string, string | number | undefined | 
 async function errorFrom(response: Response): Promise<ApiError> {
   let detail = `Request failed with status ${response.status}`;
   let code: string | undefined;
+  let parsed: unknown;
   try {
     const body = await response.json();
+    parsed = body;
     if (typeof body?.detail === "string") detail = body.detail;
     else if (Array.isArray(body?.detail) && typeof body.detail[0]?.msg === "string") {
       // FastAPI's 422: a list of {loc, msg}; the first one, named after its field, says enough
@@ -47,7 +51,7 @@ async function errorFrom(response: Response): Promise<ApiError> {
   } catch {
     // non-JSON body (gateway HTML error page): keep the generic detail
   }
-  return new ApiError(response.status, detail, code);
+  return new ApiError(response.status, detail, code, parsed);
 }
 
 // A single in-flight refresh shared by every 401 that hits while it runs.

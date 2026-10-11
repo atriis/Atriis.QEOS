@@ -172,3 +172,17 @@ test("a validation error list surfaces its first message and field", async () =>
     status: 422, detail: "path: Value error, path not allowed",
   });
 });
+
+test("an error keeps its parsed body for callers that need more than the message", async () => {
+  setAccessToken("acc");
+  server.use(
+    http.put("/api/v1/thing", () => HttpResponse.json(
+      { detail: { code: "stale_version", message: "Changed meanwhile", current: { version: 4 } } }, { status: 409 },
+    )),
+  );
+  const error = await apiFetch("/api/v1/thing", { method: "PUT", body: "{}" }).catch((e: unknown) => e);
+  expect(error).toBeInstanceOf(ApiError);
+  expect((error as ApiError).detail).toBe("Changed meanwhile");
+  expect((error as ApiError).code).toBe("stale_version");
+  expect((error as ApiError).body).toEqual({ detail: { code: "stale_version", message: "Changed meanwhile", current: { version: 4 } } });
+});
