@@ -86,8 +86,6 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
   const [replacing, setReplacing] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [repoNote, setRepoNote] = useState<string | null>(null);
-  const replaceRef = useRef<HTMLButtonElement>(null);
-  const returnToReplace = useRef(false);
   const edited = useRef(false); // unsaved edits: a refetch must not overwrite them
   const ids = useId();
   const clip = useCopyState();
@@ -103,18 +101,6 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
     setSubmitted(false);
   }, [data]);
   const edit = (set: (v: string) => void) => (v: string) => { edited.current = true; set(v); };
-  /** Back out of a replacement: the stored token stays, and focus returns to Replace. */
-  function keepToken() {
-    setToken("");
-    setReplacing(false);
-    returnToReplace.current = true;
-  }
-  useEffect(() => {
-    if (!replacing && returnToReplace.current) {
-      returnToReplace.current = false;
-      replaceRef.current?.focus();
-    }
-  }, [replacing]);
 
   const save = useMutation({
     mutationFn: () => saveCiTarget(projectId, {
@@ -196,8 +182,6 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
         <>
           {data.configured && (
             <>
-              {/* The connection and the action that ends it, together, away from Save */}
-              <div className="connection-line">
               {tokenState(data) === "expired" && data.token_expires_at ? (
                 <p className="muted" role="status">
                   <CircleAlert size={16} aria-hidden="true" />{" "}
@@ -212,15 +196,6 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
                   </span>
                 </p>
               )}
-                <ConfirmButton
-                  label="Disconnect"
-                  question={`Disconnect ${data.repo}? Nobody can run tests from QEOS until a token is saved again.`}
-                  confirmLabel="Disconnect"
-                  onConfirm={() => { save.reset(); disconnect.mutate(); }}
-                  disabled={disconnect.isPending}
-                />
-              </div>
-              {disconnect.error != null && <ErrorBanner error={disconnect.error} />}
               <ExpiryWarning target={data} />
             </>
           )}
@@ -254,24 +229,14 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
               {fieldError("ref")}
             </label>
             {data.configured && !replacing ? (
-              <div className="field-static">
-                <span className="field-label">Token</span>
-                <span className="token-saved">
-                  <span>{`Saved (…${data.token_last4})`}</span>
-                  <button type="button" ref={replaceRef} aria-label="Replace token"
-                    onClick={() => { save.reset(); setReplacing(true); }}>Replace</button>
-                </span>
+              <div>
+                <button type="button" onClick={() => { save.reset(); setReplacing(true); }}>Replace token</button>
               </div>
             ) : (
               <label>
                 Token
-                <span className="token-saved">
-                  <input type="password" required={!data.configured} value={token} autoFocus={replacing}
-                    onChange={(e) => edit(setToken)(e.target.value)} {...field("token")} autoComplete="off" spellCheck={false} />
-                  {replacing && (
-                    <button type="button" onClick={keepToken}>Keep current token</button>
-                  )}
-                </span>
+                <input type="password" required={!data.configured} value={token} autoFocus={replacing}
+                  onChange={(e) => edit(setToken)(e.target.value)} {...field("token")} autoComplete="off" spellCheck={false} />
                 {fieldError("token")}
               </label>
             )}
@@ -283,6 +248,16 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
           </form>
           {save.error != null && <ErrorBanner error={save.error} />}
           {repoNote && <p className="muted" role="status">{repoNote}</p>}
+          {data.configured && (
+            <ConfirmButton
+              label="Disconnect"
+              question={`Disconnect ${data.repo}? Nobody can run tests from QEOS until a token is saved again.`}
+              confirmLabel="Disconnect"
+              onConfirm={() => { save.reset(); disconnect.mutate(); }}
+              disabled={disconnect.isPending}
+            />
+          )}
+          {disconnect.error != null && <ErrorBanner error={disconnect.error} />}
           <details className="run-help">
             <summary>How to set it up</summary>
             <p>

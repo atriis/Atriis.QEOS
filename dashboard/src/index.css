@@ -264,14 +264,6 @@ input[aria-invalid="true"] { border-color: var(--danger-text); }
 .form-stack select { width: 100%; max-width: 360px; }
 input.mono { font-family: var(--font-mono); }
 .button-row { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-/* A connection's state with the action that ends it (Settings › Run from QEOS): Disconnect sits at the line's end */
-.connection-line { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); margin: 0 0 var(--space-3); }
-.connection-line > p { margin: 0; }
-/* A form row that shows a stored value instead of an input (a saved token), with its action beside it */
-.field-static { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-3); }
-.field-static > .field-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
-.token-saved { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); color: var(--text-primary); font-weight: 400; }
-.token-saved > input { flex: 1 1 220px; }
 /* A sub-form under a list in the same card: a rule and a smaller heading set it apart */
 .masking-form { border-top: 1px solid var(--grid); margin-top: var(--space-4); padding-top: var(--space-4); }
 .masking-form h4 { font-size: 14px; font-weight: 600; margin: 0 0 var(--space-3); }
