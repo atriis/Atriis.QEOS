@@ -84,6 +84,12 @@ details.
 - **Access control.** Organisation roles (owner, admin, member, viewer,
   billing_manager) checked on every request; project access follows the
   organisation role; non-members get 404.
+- **Overview layouts.** A personal layout belongs to one user in one project:
+  only that user reads or changes it (every role, viewers included). The
+  project default is changed only by owners and admins. Every saved layout is
+  validated on the server against the shared widget catalogue (known types,
+  allowed settings, at most 24 widgets, a 64 KB body) and carries a version,
+  so a save over a newer one is refused (409).
 - **CI uploads.** Per-project API keys, stored as SHA-256 hashes and shown once.
   A key can also be traded for a 5-minute service token that only the Gherkin
   import accepts.

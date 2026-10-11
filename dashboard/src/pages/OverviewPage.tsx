@@ -5,6 +5,7 @@ import type { LayoutMode } from "../api/overviewLayout";
 import ErrorBanner from "../components/ErrorBanner";
 import PageHeader from "../components/PageHeader";
 import { SkeletonCard, SkeletonStatus } from "../components/Skeleton";
+import { useCanManage } from "../lib/useCanEdit";
 import CustomiseMenu from "../overview/CustomiseMenu";
 import OverviewEditor from "../overview/OverviewEditor";
 import { type EditSession, startSession } from "../overview/session";
@@ -27,6 +28,8 @@ function ProjectOverview({ id }: { id: number }) {
   // The latest run decides between the widgets and "No runs yet"; a new one refreshes the figures that are not polled
   const { runs, latest } = useLatestRun(id);
   const { query: layout } = useOverviewLayout(id);
+  // Owners and admins may also edit the project default (spec §2.3)
+  const canManage = useCanManage(id);
   const [session, setSession] = useState<EditSession | null>(null);
   // A new key for every start, so Reload after a conflict always begins a fresh draft
   const [sessionKey, setSessionKey] = useState(0);
@@ -108,7 +111,7 @@ function ProjectOverview({ id }: { id: number }) {
     <>
       <PageHeader
         title="Overview"
-        actions={canCustomise ? <CustomiseMenu canManage={false} triggerRef={customiseRef} onPick={(mode) => begin(mode)} /> : undefined}
+        actions={canCustomise ? <CustomiseMenu canManage={canManage === true} triggerRef={customiseRef} onPick={(mode) => begin(mode)} /> : undefined}
       />
       {body()}
     </>

@@ -1095,7 +1095,7 @@ everything listed here.
 
 | View (sidebar) | What it shows | Options |
 |---|---|---|
-| **Overview** | Widgets; by default the latest run, its failures grouped by cause, the pass rate this week and flaky tests in the last 14 days. | **Customise** (every role): move, resize, remove and add widgets, change their settings, then **Save**. See [Customise the Overview](#customise-the-overview). |
+| **Overview** | Widgets; by default the latest run, its failures grouped by cause, the pass rate this week and flaky tests in the last 14 days. | **Customise** (every role): move, resize, remove and add widgets, change their settings, then **Save**. Owners and admins: **Edit project default**. See [Customise the Overview](#customise-the-overview). |
 | **Runs** | Every run, newest first, with counts and duration. | Status (With failures / All green), Branch; **More filters**: Environment, CI, Commit (4+ hex), Pull request, Author, From, To; sort by Failed or Duration. Tab **Requested runs** ([4.3](#43-run-from-qeos-play-and-stop)). |
 | Run page | Results, failures grouped by cause (new, or failing for N runs in a row), owners from CODEOWNERS, changed files, components, a link to the CI job. | **Compare with previous run #N**. |
 | Compare (`runs/<id>/compare/<base>`) | New failures, fixed, still failing, slower (≥1 s and ≥50 %), added, removed. Up to 200 each. | Choose any other run of the project. |
@@ -1129,6 +1129,10 @@ discards the draft, asking first when you changed something. If the same layout 
 meanwhile, Save offers **Reload** (start again from the stored layout) or **Overwrite**. A layout
 holds at most 24 widgets. This release offers today's four widgets (Latest run, Failing in latest
 run, Pass rate this week, Flaky tests); more widgets come in the next release.
+
+Owners and admins also set the **project default**, which everyone without a personal layout sees:
+**Customise → Edit project default**. The bar says who changed it last; Save asks for confirmation
+(**Save for everyone**); **Reset to built-in default** goes back to the four standard widgets.
 
 **Verify (4.4):** after two or more uploads, **Trends** shows points, and **Compare with previous
 run** appears on the newer run.
