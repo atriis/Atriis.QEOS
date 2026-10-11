@@ -27,10 +27,10 @@ banner says what is built and what waits for an adoption trigger); the item-leve
 - **Run from QEOS** — start a selection, a case or a suite in your GitHub Actions workflow, with a
   duration estimate before, during and after the run.
 - **Operations** — Slack, Teams and email notifications (failed runs, weekly summary), data
-  retention and legal hold, full export, `/metrics` in Prometheus format on every service, with job heartbeats for the
-  background jobs (the opt-in monitoring stack — Prometheus, Alertmanager, Grafana, which superusers open from the
-  account menu's **Monitoring** item — is being added; see
-  [`docs/superpowers/specs/2026-10-10-monitoring-design.md`](docs/superpowers/specs/2026-10-10-monitoring-design.md)).
+  retention and legal hold, full export, `/metrics` in Prometheus format on every service, job heartbeats for the
+  background jobs, and an opt-in monitoring stack (Prometheus, Alertmanager with email/Slack/Teams,
+  Grafana with five dashboards) that superusers open from the account menu's **Monitoring** item
+  (ADR-027; [`docs/superpowers/specs/2026-10-10-monitoring-design.md`](docs/superpowers/specs/2026-10-10-monitoring-design.md)).
 
 ## What runs
 

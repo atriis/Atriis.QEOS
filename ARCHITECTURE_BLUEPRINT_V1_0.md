@@ -13,7 +13,7 @@
 > | Security (sect. 10) | CURRENT: JWT + rotation + replay detection, httpOnly refresh cookie, email verification, password reset/change, TOTP MFA, Google/Microsoft SSO (tenant allowlist), org roles, per-project API keys, gateway rate zones, built-in + per-project masking, retention, legal hold, export, GitHub tokens encrypted at rest. OPA/ABAC/SPIFFE/Vault/audit log: TARGET |
 > | Analytics | CURRENT: ingestion-service analytics API (trends incl. weekly/monthly, tests, history, flaky with daily rollups and quarantine, branches, run compare, failures by cause) and the Report (summary, failure causes, regressions, by area, coverage, duration; ADR-026) on PostgreSQL — fulfils the role sect. 8's "QIP Analytics Service" targets. No AI/ML |
 > | Test management / execution | CURRENT: test-management-service (ADR-022): cases, suites, Gherkin import and sync (ADR-023, ADR-024); runs started in the customer's GitHub Actions (ADR-025). Environment orchestration, artifacts: TARGET |
-> | Observability (sect. 11) | IN PROGRESS: phases 1 and 2 of 3 built — `/metrics` with sect. 11.2 names on every service, process metrics, business metrics and job heartbeats; the opt-in `monitoring` compose profile (Prometheus, Alertmanager with email/Slack/Teams, node-exporter, cAdvisor, postgres-exporter, alert rules); five provisioned Grafana dashboards (phase 3, `docs/superpowers/plans/2026-10-10-monitoring.md`); the Grafana sign-in gate is in progress (auth-service's cookie and per-request check, the gateway's gated `/grafana/` location; the dashboard's Monitoring item is next) |
+> | Observability (sect. 11) | CURRENT: `/metrics` on every service with §11.2 names (`api_requests_total`, `http_requests_duration_seconds`, process metrics, `test_executions_total`, `test_case_creation_total`), job heartbeats, opt-in Prometheus + Alertmanager (email/Slack/Teams) + Grafana compose profile with node, container and PostgreSQL exporters, Grafana at `/grafana/` behind the QEOS sign-in (ADR-027). Logs, tracing, profiling, synthetic checks: TARGET |
 > | Capability map (sect. 3) | Platform Foundation largely realized (no billing); partial: Execution Platform (test management, runs via customer CI), QIP (analytics and report, no AI), Collaboration (dashboards, report, notifications), Integrations (CI collector, GitHub Actions dispatch, Slack/Teams/email). Automation, Marketplace, AI Runtime: not started |
 > | `execution/`, `automation/`, `marketplace/`, `collaboration/`, `intelligence/`, `platforms/qip-service` | UNWIRED PROTOTYPES: not in docker-compose, CI, gateway routing or migrations. See ARCHITECTURE_EVOLUTION.md |
 >
@@ -28,6 +28,9 @@
 > | Kubernetes + real certificates | First multi-node deployment |
 > | Qdrant / Neo4j / QIP services | Phase 6 AI engine work begins |
 > | MongoDB / Elasticsearch | Only with evidence PostgreSQL JSONB / full-text cannot serve the need |
+> | Loki (logs with `traceId`) | An incident cannot be diagnosed from `docker compose logs`, or a second VM |
+> | OpenTelemetry tracing | A request crosses more than two services synchronously, or latency cannot be placed from per-service metrics |
+> | Metrics downsampling / long retention | Metrics older than 15 days are needed, or Prometheus's disk passes its 5 GB cap |
 >
 > The live delivery record is TODO.md; the forward plan is IMPLEMENTATION_PLAN.md.
 > Known defect left in place this pass: appendix section numbers duplicate 22-24.
@@ -594,6 +597,35 @@ Open, in rough order:
 ## 11. Observability & Monitoring
 
 QEOS implements comprehensive observability following the four pillars: logs, metrics, traces, and profiles.
+
+> **As built (2026-10, ADR-027).** Metrics and alerting are CURRENT; everything else in this section
+> stays TARGET behind its trigger.
+>
+> - **Every service** serves `/metrics` (inside the compose network only) through
+>   `qeos_shared.metrics`: `api_requests_total{service, endpoint, method, status_code}`,
+>   `http_requests_duration_seconds{service, endpoint, method}`, `http_requests_in_flight{service}`,
+>   `build_info{service, version, commit}`, `process_cpu_seconds_total`,
+>   `process_resident_memory_bytes`, `process_open_fds`. `endpoint` is the route template.
+> - **Business metrics:** `test_executions_total{status}` (ingestion),
+>   `test_case_creation_total{type="manual|api"}` (test-management); `"generated"` waits for the AI
+>   engine. Ingestion's `qav_ingest_*` upload metrics are kept.
+> - **Jobs:** `job_last_success_timestamp_seconds{job}`, `job_last_error_timestamp_seconds{job}` from the
+>   `job_heartbeats` table (retention, rollup, weekly summary).
+> - **Database:** `postgresql_database_size_bytes{datname}` and `postgresql_connections{state}` are
+>   Prometheus recording rules over postgres-exporter (which exports no query text).
+> - **Stack:** the compose profile `monitoring` (Prometheus 15 d / 5 GB, Alertmanager, Grafana, node,
+>   container and PostgreSQL exporters, five provisioned dashboards) on the one VM; Grafana at
+>   `/grafana/` for QEOS superusers.
+> - **Alerts (11.6):** critical (service down, 5xx share, disk, PostgreSQL down) to every configured
+>   channel among email, Slack and Teams; warnings (latency, jobs, rejected uploads, memory,
+>   connections, database size) to Slack and Teams (email only when it is the sole channel).
+>   Inhibition: a down service silences its 5xx and latency alerts; PostgreSQL down silences the other
+>   PostgreSQL alerts. PagerDuty, SMS and webhooks remain TARGET.
+> - **Stays TARGET:** Kubernetes service discovery and federation (Kubernetes trigger); downsampling
+>   and the 3-month / 3-year retention; Loki with JSON logs carrying `traceId` (11.1); OpenTelemetry
+>   tracing (11.3); profiling (11.4); synthetic monitoring (11.5); the `role` label on
+>   `api_requests_total` (needs a per-request role lookup); metrics for components that do not exist
+>   yet (Kafka, MongoDB, Redis, Elasticsearch, workflows, knowledge).
 
 ### 11.1 Logging Strategy
 #### Structured Logging (JSON Format)

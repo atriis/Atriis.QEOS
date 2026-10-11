@@ -178,7 +178,7 @@ bash deploy/init-env.sh localhost you@example.com
 | `VITE_MSAL_CLIENT_ID` | empty | Shows the Microsoft button. Baked in at build time. |
 | `VITE_MSAL_AUTHORITY` | `https://login.microsoftonline.com/organizations` | MSAL authority. |
 | `COMPOSE_PROFILES` | empty | `monitoring` starts Prometheus, Alertmanager, Grafana and the exporters ([7.4](#74-monitoring-optional)). |
-| `MONITORING_ENABLED` | `false` | The QEOS sign-in to Grafana: when true, the gateway opens `/grafana/` to active superusers (checked by auth-service on every request); otherwise `/grafana/` is a 404. The dashboard's **Monitoring** item that hands over the sign-in is not built yet. |
+| `MONITORING_ENABLED` | `false` | The QEOS sign-in to Grafana: when true, the gateway opens `/grafana/` to active superusers (checked by auth-service on every request); otherwise `/grafana/` is a 404. Superusers open it from the dashboard's **Monitoring** item. |
 | `GRAFANA_ADMIN_PASSWORD`, `MONITORING_DB_PASSWORD` | empty | Required with monitoring: Grafana's admin login (read on its first start only), and the password of PostgreSQL role `qeos_monitor`. |
 | `ALERT_EMAIL_TO`, `ALERT_SLACK_WEBHOOK_URL`, `ALERT_TEAMS_WEBHOOK_URL` | empty | Alert channels; each turns on when set. Email also needs `SMTP_HOST`. |
 | `PROMETHEUS_RETENTION`, `PROMETHEUS_RETENTION_SIZE`, `POSTGRES_DB_SIZE_ALERT_GB` | `15d`, `5GB`, `20` | Metrics kept, their disk cap, and the database size alert. |

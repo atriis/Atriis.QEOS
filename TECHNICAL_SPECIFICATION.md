@@ -31,7 +31,7 @@ service serves Prometheus `/metrics` (never routed by the gateway); ingestion al
 exposes job heartbeats (`job_last_success_timestamp_seconds{job}`, from the
 `job_heartbeats` table, migration 017). The opt-in `monitoring` compose profile (Prometheus, Alertmanager,
 node-exporter, cAdvisor, postgres-exporter, alert rules) scrapes them; Grafana
-ships five provisioned dashboards. Its sign-in gate is in progress: with `MONITORING_ENABLED` on, the
+ships five provisioned dashboards (ADR-027). Its sign-in gate: with `MONITORING_ENABLED` on, the
 gateway's `/grafana/` checks the `qeos_grafana` cookie with auth-service on every request and signs the
 superuser into Grafana's auth proxy (otherwise `/grafana/` is a 404). The dashboard shows superusers a
 Monitoring item (from `monitoring_url` on `/users/me`) that calls `POST /auth/grafana-session` and opens
@@ -245,7 +245,7 @@ Azure templates (`templates/`), and per release tag a zipapp and a GHCR image.
 Event bus/Kafka, CDC, data lake/warehouse, knowledge graph, vector store,
 Redis, MinIO, Elasticsearch, Kubernetes/service mesh/Vault/GitOps, QIP
 services, SDKs, mobile, AI features. Monitoring stack (Prometheus,
-Alertmanager, Grafana as an opt-in compose profile): stack and dashboards built, Grafana sign-in in progress (gateway gate built, dashboard item next), plan
+Alertmanager, Grafana as an opt-in compose profile): shipped 2026-10-11 (ADR-027), plan
 `docs/superpowers/plans/2026-10-10-monitoring.md`. `execution/`, `automation/`, `marketplace/`,
 `collaboration/`, `intelligence/`, `platforms/qip-service` are unwired
 prototypes excluded from compose/CI/gateway.

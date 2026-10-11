@@ -188,7 +188,7 @@ details.
 - Planned, not built: SAML, GitHub sign-in (answers 501), an audit log,
   secrets management (Vault), a GitHub App instead of personal tokens for Run
   from QEOS, and per-action permissions. Monitoring: the Prometheus, Alertmanager and exporter
-  stack is built; the QEOS sign-in to Grafana and its dashboards are in progress
+  stack, the QEOS sign-in to Grafana and its dashboards are built (ADR-027)
   (`docs/superpowers/specs/2026-10-10-monitoring-design.md`).
 
 ## Acknowledgments

@@ -40,16 +40,12 @@ numbers in platforms/ingestion-service/README.md.
 6. ~~Components under test~~ — done 2026-10-02: runs may record which
    repo/versions they exercised (`--component NAME@SHA`); dormant data for
    Phase 6 cross-repo correlation (ADR-018).
-7. Monitoring — in progress: Prometheus, Alertmanager and Grafana as an
-   opt-in compose profile (spec `docs/superpowers/specs/2026-10-10-monitoring-design.md`,
-   plan `docs/superpowers/plans/2026-10-10-monitoring.md`). Phase 1 of 3
-   shipped 2026-10-11: `/metrics` with blueprint names on every service and job
-   heartbeats. Phase 2 (the stack: Prometheus, Alertmanager, exporters, alert
-   rules) built and pushed with this phase; Phase 3: the five Grafana dashboards
-   are provisioned; the Grafana sign-in gate is in progress (auth-service's
-   cookie and check, the gateway's gated `/grafana/` location, the dashboard's
-   Monitoring item and `/monitoring` hand-off page); CI smoke checks, ADR-027
-   and the Phase 3 gate are next.
+7. ~~Monitoring~~ — shipped 2026-10-11: Prometheus, Alertmanager and Grafana as an
+   opt-in compose profile (ADR-027, spec `docs/superpowers/specs/2026-10-10-monitoring-design.md`,
+   plan `docs/superpowers/plans/2026-10-10-monitoring.md`): `/metrics` with blueprint names on
+   every service, job heartbeats, the stack with alert rules, five provisioned Grafana dashboards,
+   Grafana at `/grafana/` behind the QEOS sign-in, and CI smoke checks run with and without the
+   profile. Logs, tracing and long retention stay TARGET behind their triggers (blueprint §11).
 8. Then, in the order agreed 2026-10-08 (TODO.md "Execution intelligence and
    operations"): customisable Overview, test impact analysis.
 
@@ -68,7 +64,7 @@ numbers in platforms/ingestion-service/README.md.
 | Redis shared rate limits / cache | second gateway instance |
 | ClickHouse analytics warehouse | rollups stop holding at ~10× data |
 | Artifact storage (MinIO) | artifacts feature starts (screenshots/videos/traces) |
-| Kubernetes + real certs | first multi-node deployment (the monitoring stack does not wait for it: it is in progress as a compose profile, §2) |
+| Kubernetes + real certs | first multi-node deployment (the monitoring stack did not wait for it: it shipped as a compose profile, §2) |
 | ~~Test Management service (blueprint capability)~~ | started 2026-10-06 on product pull (ADR-022): cases, suites, link to automated tests, Gherkin import (ADR-023) and sync (`qeos-collector import-features`, ADR-024), Run from QEOS (ADR-025). Next slices: versioning, dynamic suites, ticket links |
 | Workspaces: group QA projects with the product repos they test (Phase 4) | product pull, after Phase 2 exit; components-under-test data (ADR-018) is already being captured |
 | GitHub App "connect repository" (commits/PRs of product repos via API + webhooks) | cross-repo correlation work begins (Phase 6); ingestion stays push-based regardless |

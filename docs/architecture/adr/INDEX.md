@@ -21,6 +21,7 @@ TODO.md, commit messages and benchmark rulings:
 | [ADR-024](ADR-024-service-tokens-for-ci-imports.md) | Service tokens for CI imports: ingestion trades a project API key for a 5-minute JWT that only the import route accepts |
 | [ADR-025](ADR-025-run-tests-through-customer-ci.md) | Run tests from QEOS through the customer's CI: `workflow_dispatch`, an encrypted personal access token, no execution on our side |
 | [ADR-026](ADR-026-report-joins-in-the-dashboard.md) | The report joins in the dashboard (case-areas + test keys); run origin is matched by CI run URL |
+| [ADR-027](ADR-027-monitoring-profile.md) | Monitoring is an opt-in Prometheus/Alertmanager/Grafana compose profile; blueprint metric names; job heartbeats in a table; Grafana behind a QEOS cookie hand-off |
 
 **Proposed** — ADR-001..010 describe the TARGET architecture (DDD, Kafka,
 Kubernetes, Go services, Neo4j, Qdrant, ...). Reclassified 2026-10-02: their

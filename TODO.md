@@ -94,7 +94,7 @@
 - [x] CI: full-stack smoke test through the gateway
 
 ### Gateway follow-ups
-- [ ] Monitoring dashboards (Prometheus/Grafana) — *Phase 1, "Basic monitoring stack"*. In progress: see "Execution intelligence and operations" item 2
+- [x] Monitoring dashboards (Prometheus/Grafana) — *Phase 1, "Basic monitoring stack"*. Done 2026-10 (ADR-027): see "Execution intelligence and operations" item 2
 - [x] Single-VM production deployment package — `deploy/` (ADR-019): Caddy TLS edge with Let's Encrypt as the only published service, gateway real-IP rate limits trusting only Caddy's fixed address, restart policies, `init-env.sh` strong secrets, daily `backup.sh` with restore verified, installation guide. Waiting on a VM + domain
 - [ ] Kubernetes ingress; real certificates — *Phase 1 infra, when a cluster exists*
 - [x] Service-to-service auth so organization-service can check users in auth-service — auth-service gained `GET /internal/v1/users/{id}` (HTTP Basic, same INTERNAL_API_PASSWORD pattern as project-service's retention API); the superuser `AUTH_SERVICE_TOKEN` is gone from config, compose and docs
@@ -269,7 +269,7 @@ item-level record is "Analytics API (Phase 3, step 1)" and "Dashboard follow-ups
 ### Execution intelligence and operations (agreed 2026-10-08, in this order)
 Kubernetes stays out until its blueprint trigger fires (first multi-node deployment); Docker Compose on one VM is the production target.
 1. [x] Suite duration prediction (done 2026-10-08): ingestion `POST /analytics/duration-estimate` (per-test p50 of passed runs, p90 of all, per-environment with fallback, project overhead + parallelism fitted on the last 20 runs); estimate in the Run dialog, live in the selection bar and on suite detail; stored on run requests (test-management migration 008) for "≈ n min left" and "estimated vs took". Later: warn when the estimate exceeds the workflow timeout
-2. [~] Monitoring: Prometheus, Grafana and Alertmanager as an opt-in profile of the production compose; `/metrics` on every service, Postgres and container exporters, starter dashboards and alerts (service down, 5xx rate, disk). In progress: spec `docs/superpowers/specs/2026-10-10-monitoring-design.md`, plan `docs/superpowers/plans/2026-10-10-monitoring.md`; Phase 1 of 3 shipped 2026-10-11: `/metrics` with blueprint §11.2 names on every service, process metrics, `test_executions_total`, `test_case_creation_total`, and job heartbeats (`job_heartbeats`, migration 017) exposed as `job_last_*_timestamp_seconds`. Phase 2 (stack) built and pushed with this phase: Prometheus, Alertmanager with email/Slack/Teams channels, node-exporter, cAdvisor, postgres-exporter and the alert rules, as the `monitoring` compose profile (operator docs: `deploy/README.md` section 10). Phase 3 in progress: the five Grafana dashboards are provisioned read-only from `monitoring/grafana` (overview, service detail, jobs and uploads, PostgreSQL, host and containers, with a CI lint); the Grafana sign-in gate is in progress: auth-service mints the `qeos_grafana` cookie for superusers and re-checks it on every request, and the gateway's `/grafana/` location gates Grafana's auth proxy with that check (a 404 while `MONITORING_ENABLED` is off), and the dashboard's account menu shows a **Monitoring** item to superusers while it is on: it hands the cookie over and opens Grafana, and the `/monitoring` page does the same for a Grafana link opened without the cookie (validated `next`, no hand-off loop). The CI smoke checks, ADR-027 and the Phase 3 gate are next
+2. [x] Monitoring: Prometheus, Grafana and Alertmanager as an opt-in profile of the production compose; `/metrics` on every service, Postgres and container exporters, starter dashboards and alerts (service down, 5xx rate, disk). Done 2026-10: ADR-027, spec `docs/superpowers/specs/2026-10-10-monitoring-design.md`; blueprint §11 names, job heartbeats (ingestion migration 017), five dashboards, alerts to email/Slack/Teams, Grafana at `/grafana/` for superusers
 3. [ ] Customisable Overview: a widget catalogue over the existing analytics; a project default layout set by owners/admins, a personal layout per user with "reset to project default"
 4. [ ] Test impact analysis: from collected commits' changed files and later failures, suggest which tests to run for a change (history-based; no coverage instrumentation)
 - [ ] Report origin marker (ADR-026 fallback): a Play workflow input → collector field → ingestion `test_runs.origin` column and a backfill. Only if the URL match proves unreliable.
@@ -428,6 +428,6 @@ All architectural specifications and design documents from the initial brainstor
 
 ## Current Status
 Updated 2026-10-11. Phases 1–3 are delivered, test management (Phase 4) is in use, and the Report,
-notifications, Run from QEOS and the single-VM production package have shipped. Monitoring is in
-progress (item 2 under "Execution intelligence and operations"). What runs today: README.md and
+notifications, Run from QEOS and the single-VM production package have shipped. Monitoring has
+shipped (item 2 under "Execution intelligence and operations", ADR-027). What runs today: README.md and
 TECHNICAL_SPECIFICATION.md; next steps: IMPLEMENTATION_PLAN.md §2.
