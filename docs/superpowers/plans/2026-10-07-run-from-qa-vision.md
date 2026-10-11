@@ -79,7 +79,7 @@ Copied from the spec. Every task implicitly includes all of them.
   - Work on `master` and never push.
   - Commit only your own paths: `git add <paths> && git commit -m "<msg>" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" -- <paths>`.
   - Never `docker compose down -v`.
-  - Never commit to `C:/dev/github/Atriis.Test.Automation.OBT`, which is read-only for this plan.
+  - Never commit to the real test repository, which is read-only for this plan.
 - **Test commands:**
   - **test-management**: from the service folder, `cd platforms/test-management-service`, run `SECRET_KEY=test .venv/Scripts/python -m pytest <target> -q` in Git Bash. The venv is Python 3.11 (`.venv/Scripts/python`). `SECRET_KEY` is the only env var the tests need; CI sets `SECRET_KEY: ci-test-secret`.
   - The tests share `./test.db`, so **never run two pytest processes in this service at once.**
@@ -4604,7 +4604,7 @@ This is the spec's "End to end" check. It is not a task: it needs the user's Git
 
 1. `TM_SECRETS_KEY` is in `.env` (Task 6 Step 3b). Then run `set -a; . ./.env; set +a; docker compose up -d --build --wait` and `bash scripts/smoke_gateway.sh`. Never use `down -v`.
 2. The user copies `templates/github/qa-vision-run.yml` and `.mjs` into the OBT repository on its default branch. The user adds `QAV_API_KEY` and `QAV_URL` there, with the tunnel's public URL, because hosted runners cannot reach localhost.
-3. An owner saves `owner/Atriis.Test.Automation.OBT`, `qa-vision-run.yml`, the branch and the token in Settings. The card reads "Connected: … · token …xxxx · expires …".
+3. An owner saves `owner/test-repo`, `qa-vision-run.yml`, the branch and the token in Settings. The card reads "Connected: … · token …xxxx · expires …".
 4. Run a full import of OBT's `.feature` files, which fills `scenario_name`.
 5. Press Run on one OBT case.
    - The panel goes from "Queued" to "Running · 1 test · …", then to "Passed" or "Failed".

@@ -2082,7 +2082,7 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 - [ ] **Step 4: Acceptance on real files (manual, nothing committed)**
 
 With the stack up and a logged-in token, write a throwaway script in the scratchpad. It should:
-1. read every `*.feature` under `C:\dev\github\Atriis.Test.Automation.OBT\tests\features`;
+1. read every `*.feature` under `tests/features` of a real Cucumber test repository;
 2. post them to `cases/import?dry_run=true` for a test project, with paths prefixed `tests/features/...`, relative to the repository root.
 
 Expect:

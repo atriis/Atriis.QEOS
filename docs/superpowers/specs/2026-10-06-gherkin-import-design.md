@@ -18,7 +18,7 @@ Roadmap Phase 4 ("Test Management"), the slice named "Gherkin import" in IMPLEME
 
 ## What real files look like
 
-The design was checked against `Atriis.Test.Automation.OBT/tests/features` (2026-10-06):
+The design was checked against a real Cucumber repository's `tests/features` (2026-10-06):
 
 - 991 files, 1 042 scenarios, 13 outlines, 5 Backgrounds, no `Rule`, no `# language` header.
   The folder is 4.7 MB.
@@ -237,7 +237,7 @@ Dashboard, vitest:
 - the imported editor's read-only state;
 - the origin filter.
 
-**Acceptance (manual, not committed):** dry-run `Atriis.Test.Automation.OBT/tests/features` with
+**Acceptance (manual, not committed):** dry-run a real Cucumber repository's `tests/features` with
 prefix `tests/`. Expect 0 parse errors and about 1 042 scenarios. A sample of the computed
 `automated_test_key`s must exist among that project's results in QA Vision. The company's files are
 not copied into this repository.

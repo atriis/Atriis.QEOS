@@ -386,7 +386,7 @@ test("an owner alone is refused with a message that names what is missing", asyn
   server.use(http.get(`${P}/ci-target`, () => HttpResponse.json(NONE)));
   renderCard();
   const repo = await screen.findByLabelText("Repository link");
-  await userEvent.type(repo, "AtriisPedroCarneiro");
+  await userEvent.type(repo, "octocat");
   await userEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(repo).toHaveAccessibleDescription(
     "Paste the repository's GitHub address. owner/name also works. Add the repository name after the owner: owner/name");
