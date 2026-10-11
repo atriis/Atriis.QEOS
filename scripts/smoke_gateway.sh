@@ -437,6 +437,33 @@ check "the member list carries emails from auth-service" 200 GET \
   "$BASE/api/v1/organizations/$ORG_ID/members" "${INVITEE_AUTH[@]}"
 body_has "... the invitee's email is on their row" "$INVITEE"
 
+# ---- Overview layouts -> project-service (spec 2026-10-11 §3.3): no gateway rule names the path ----
+LAYOUT_URL="$BASE/api/v1/projects/$PROJECT_ID/overview-layout"
+LAYOUT_BODY='{"version":0,"layout":{"schema":1,"widgets":[{"id":"w1","type":"pass_rate_trend","size":"wide","settings":{"granularity":"week","branch":"main"}}]}}'
+check "overview layout -> project-service (nothing saved yet)" 200 GET "$LAYOUT_URL" "${INVITEE_AUTH[@]}"
+body_has "... the built-in default" '"source":"builtin"'
+check "save a personal overview layout" 200 PUT "$LAYOUT_URL/personal" "${INVITEE_AUTH[@]}" \
+  -H "Content-Type: application/json" -d "$LAYOUT_BODY"
+body_has "... version 1" '"version":1'
+check "read the personal layout back" 200 GET "$LAYOUT_URL" "${INVITEE_AUTH[@]}"
+body_has "... served as personal" '"source":"personal"'
+body_has "... with its widget" '"type":"pass_rate_trend"'
+# A viewer keeps a personal layout but never sets the project default: make the invitee a viewer
+check "list members to find the invitee" 200 GET "$BASE/api/v1/organizations/$ORG_ID/members" "${AUTH[@]}"
+INVITEE_ROW="$(grep -o "\"id\":[0-9]*,\"organization_id\":$ORG_ID,\"user_id\":[0-9]*,\"email\":\"$INVITEE\"" "$TMP/body" | head -1)"
+INVITEE_MEMBER_ID="$(printf '%s' "$INVITEE_ROW" | sed -n 's/^"id":\([0-9]*\),.*/\1/p')"
+INVITEE_USER_ID="$(printf '%s' "$INVITEE_ROW" | sed -n 's/.*"user_id":\([0-9]*\),.*/\1/p')"
+check "remove the invitee's member role" 204 DELETE \
+  "$BASE/api/v1/organizations/$ORG_ID/members/${INVITEE_MEMBER_ID:-0}" "${AUTH[@]}"
+check "add the invitee back as a viewer" 201 POST "$BASE/api/v1/organizations/$ORG_ID/members" "${AUTH[@]}" \
+  -H "Content-Type: application/json" -d "{\"user_id\":${INVITEE_USER_ID:-0},\"role\":\"viewer\"}"
+check "a viewer's PUT of the project default is refused" 403 PUT "$LAYOUT_URL/project" "${INVITEE_AUTH[@]}" \
+  -H "Content-Type: application/json" -d "$LAYOUT_BODY"
+check "the viewer's personal layout survived the role change" 200 GET "$LAYOUT_URL" "${INVITEE_AUTH[@]}"
+body_has "... still personal" '"source":"personal"'
+check "the owner sets the project default" 200 PUT "$LAYOUT_URL/project" "${AUTH[@]}" \
+  -H "Content-Type: application/json" -d "$LAYOUT_BODY"
+
 # The catch-all now serves the dashboard SPA, so these paths answer its HTML,
 # never a proxied service: the security intent is "not reachable", not "404".
 check "/metrics is not proxied (SPA fallback)" 200 GET "$BASE/metrics"
