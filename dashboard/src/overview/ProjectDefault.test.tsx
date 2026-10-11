@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { server } from "../test/server";
@@ -93,4 +93,57 @@ test("Reset to built-in default then Save deletes the project default", async ()
   await userEvent.click(screen.getByRole("button", { name: "Save" }));
   await userEvent.click(screen.getByRole("button", { name: "Save for everyone" }));
   await waitFor(() => expect(deleted).toEqual(["project"]));
+});
+
+test("a stale project save shows the conflict; Overwrite resends the stored version without asking again", async () => {
+  mockOverviewData({ role: "owner", layout: projectState(TEAM) });
+  const versions: number[] = [];
+  server.use(http.put(PUT_PROJECT, async ({ request }) => {
+    const body = (await request.json()) as { version: number; layout: StoredLayout };
+    versions.push(body.version);
+    if (versions.length === 1) {
+      return HttpResponse.json({ detail: { code: "stale_version", message: "Changed",
+        current: { version: 7, updated_by: 7, updated_at: "2026-10-11T09:00:00Z" } } }, { status: 409 });
+    }
+    return HttpResponse.json({ layout: body.layout, version: 8, updated_by: 7, updated_at: "2026-10-11T10:00:00Z" });
+  }));
+  renderOverview();
+  await openProjectEditor();
+  await userEvent.click(await screen.findByRole("button", { name: "Remove Latest run" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save for everyone" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "The layout changed while you were editing" });
+  expect(dialog).toHaveTextContent(/Changed by ada@example\.com on .+ since you started/);
+  await userEvent.click(within(dialog).getByRole("button", { name: "Overwrite" }));
+  // Overwrite was the decision: the "Save for everyone" question does not come back
+  expect(screen.queryByRole("button", { name: "Save for everyone" })).not.toBeInTheDocument();
+  expect(screen.queryByText("Everyone without a personal layout will see this layout.")).not.toBeInTheDocument();
+  await waitFor(() => expect(versions).toEqual([2, 7]));
+  expect(await screen.findByRole("button", { name: "Customise", expanded: false })).toBeInTheDocument();
+});
+
+test("while Save for everyone runs, focus stays on the editor, never on the page body", async () => {
+  mockOverviewData({ role: "owner", layout: projectState(TEAM) });
+  let release: () => void = () => {};
+  let puts = 0;
+  server.use(http.put(PUT_PROJECT, async ({ request }) => {
+    puts += 1;
+    const body = (await request.json()) as { version: number; layout: StoredLayout };
+    await new Promise<void>((resolve) => { release = resolve; });
+    return HttpResponse.json({ layout: body.layout, version: 3, updated_by: 7, updated_at: "2026-10-11T10:00:00Z" });
+  }));
+  renderOverview();
+  await openProjectEditor();
+  await userEvent.click(await screen.findByRole("button", { name: "Remove Latest run" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save for everyone" }));
+  await waitFor(() => expect(puts).toBe(1));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Save" })).toBeDisabled());
+  const focused = document.activeElement as HTMLElement | null;
+  expect(focused).not.toBe(document.body);
+  expect(focused).not.toBeNull();
+  expect((focused as HTMLButtonElement).disabled ?? false).toBe(false);
+  expect(screen.getByRole("region", { name: "Overview editor" })).toContainElement(focused);
+  release();
+  expect(await screen.findByRole("button", { name: "Customise", expanded: false })).toHaveFocus();
 });

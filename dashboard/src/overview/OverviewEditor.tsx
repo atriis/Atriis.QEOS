@@ -58,10 +58,16 @@ export default function OverviewEditor({ projectId, session, onClose, onReload }
     titleRef.current?.focus();
   }, []);
 
-  // A conflict takes focus on Reload, and gets it back when a request ends (its buttons were disabled meanwhile, which
-  // drops focus to the page)
+  // While a request runs the button that started it is disabled (or gone, after "Save for everyone"), which would drop
+  // focus to the page: the bar's title holds it instead. When the request ends, a conflict puts focus on Reload; a
+  // successful save closes the editor and the page hands focus to Customise
   useEffect(() => {
-    if (conflict !== undefined && !busy) reloadRef.current?.focus();
+    if (busy) {
+      const active = document.activeElement as HTMLButtonElement | null;
+      if (active === null || active === document.body || active.disabled === true) titleRef.current?.focus();
+      return;
+    }
+    if (conflict !== undefined) reloadRef.current?.focus();
   }, [conflict, busy]);
 
   // Focus follows the widget that moved, the neighbour of one removed, or the one added
@@ -162,7 +168,7 @@ export default function OverviewEditor({ projectId, session, onClose, onReload }
   return (
     <>
       <UnsavedGuard dirty={dirty} />
-      <div className="overview-edit-bar" role="region" aria-label="Overview editor" ref={barRef}>
+      <div className="overview-edit-bar" role="region" aria-label="Overview editor" aria-busy={busy} ref={barRef}>
         <div>
           <p className="overview-edit-title" ref={titleRef} tabIndex={-1}>
             {project ? "Editing the project default · everyone without a personal layout sees this" : "Editing your Overview"}
