@@ -142,8 +142,10 @@ details.
   proxy believes that header only from the gateway's fixed `grafana-front`
   address. The gateway also removes `Authorization` toward Grafana, so the
   QEOS access token never reaches it, and strips the `qeos_grafana` cookie from
-  the `Cookie` header it forwards (Grafana keeps its own cookies), so Grafana
-  never holds the QEOS credential. With `MONITORING_ENABLED` unset or false,
+  the `Cookie` header it forwards (Grafana keeps its own cookies). A hand-made
+  header the stripping cannot clean (a third copy, a space before `=`) is
+  refused with 400 before it is proxied, so Grafana does not receive the QEOS
+  credential either way. With `MONITORING_ENABLED` unset or false,
   `/grafana/` is a JSON 404 for everyone.
 - **The `/monitoring` hand-off page (monitoring).** Anyone can craft a
   `/monitoring?next=` link, so the dashboard does not rely on the gateway's
@@ -173,9 +175,11 @@ details.
 - **cAdvisor (monitoring).** It runs as root with only the Docker socket, the containerd socket,
   `/sys` and `/var/lib/docker` mounted, all read-only; there is no `/:/rootfs` mount and no whole
   `/var/run`, so it no longer sees the rest of the host filesystem (`.env` included). It still reads
-  `/var/lib/docker`, which holds the volumes and so the PostgreSQL data, and the Docker socket is
-  root-equivalent API access: treat it as trusted. It is opt-in and publishes no port. The containerd
-  socket is required: without it cAdvisor discovers no container.
+  `/var/lib/docker`, which holds the volumes and so the PostgreSQL data, and both sockets are
+  root-equivalent API access (`:ro` makes the socket file read-only, not the API behind it: a process
+  that can write to either socket can start, stop or exec into containers): treat cAdvisor as trusted.
+  It is opt-in and publishes no port. The containerd socket is required: without it cAdvisor discovers
+  no container, and `CadvisorNoContainers` fires after 10 minutes.
 - **Data.** Per-project retention, legal hold and a full NDJSON export.
 - **Production package** (`deploy/`). A Caddy TLS edge with Let's Encrypt and
   HSTS is the only published service. Secrets are generated into a mode-600

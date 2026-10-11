@@ -215,6 +215,36 @@ tests:
           - exp_labels: {severity: warning, kind: container, name: qeos-project-service-1, instance: "cadvisor:8080", job: cadvisor}
             exp_annotations: {summary: "Container qeos-project-service-1 restarted more than 3 times in 15 minutes"}
 
+  - name: CadvisorNoContainers when cAdvisor is up but sees no compose container
+    interval: 1m
+    input_series:
+      - series: 'up{instance="cadvisor:8080",job="cadvisor"}'
+        values: '1+0x20'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: CadvisorNoContainers
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: CadvisorNoContainers
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: "cadvisor:8080", job: cadvisor}
+            exp_annotations: {summary: "cAdvisor is up but reports no container metrics: check its Docker and containerd socket mounts"}
+
+  - name: CadvisorNoContainers stays quiet while containers are seen, or when cAdvisor is down
+    interval: 1m
+    input_series:
+      - series: 'up{instance="cadvisor:8080",job="cadvisor"}'
+        values: '1+0x10 0+0x10'
+      - series: 'container_start_time_seconds{container_label_com_docker_compose_service="gateway",name="qeos-gateway-1",instance="cadvisor:8080",job="cadvisor"}'
+        values: '100+0x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: CadvisorNoContainers
+        exp_alerts: []
+      - eval_time: 20m
+        alertname: CadvisorNoContainers
+        exp_alerts: []
+
   - name: PostgresDown after two minutes
     interval: 1m
     input_series:

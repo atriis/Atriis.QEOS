@@ -96,6 +96,16 @@ groups:
         annotations:
           summary: "Container {{ $labels.name }} restarted more than 3 times in 15 minutes"
 
+      # cAdvisor answers its scrape but sees no compose container: a socket mount is missing or wrong, and
+      # every container panel and the restart alert above go quiet. cAdvisor down is ServiceDown's job
+      - alert: CadvisorNoContainers
+        expr: up{job="cadvisor"} == 1 unless on() count(container_start_time_seconds{container_label_com_docker_compose_service!=""}) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "cAdvisor is up but reports no container metrics: check its Docker and containerd socket mounts"
+
   - name: qeos-postgres
     rules:
       - alert: PostgresDown

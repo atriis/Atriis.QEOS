@@ -142,6 +142,7 @@ Rules in `monitoring/prometheus/alerts.yml`:
 | `UploadsRejected` | rejected uploads > 25 % of uploads for 15 min (with ≥ 10 uploads) | warning |
 | `DiskFillingUp` | VM disk > 85 % used, or predicted full within 24 h | critical |
 | `MemoryPressure` | VM memory available < 10 % for 10 min, or a container restarted > 3 times in 15 min (`changes(container_start_time_seconds[15m])`, cAdvisor has no restart counter) | warning |
+| `CadvisorNoContainers` | cAdvisor is up but reports no compose container for 10 min (a socket mount is missing or wrong; added 2026-10-11) | warning |
 | `PostgresDown` | the exporter cannot reach PostgreSQL for 2 min | critical |
 | `PostgresTooManyConnections` | connections > 80 % of `max_connections` for 5 min | warning |
 | `PostgresDatabaseGrowing` | a database larger than `POSTGRES_DB_SIZE_ALERT_GB` (default 20) | warning |

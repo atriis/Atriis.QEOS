@@ -323,9 +323,16 @@ password. Keep `GRAFANA_ADMIN_PASSWORD` strong; `init-env.sh` generates 32 chara
 visible to `qeos_monitor` is described in `SECURITY.md`. cAdvisor runs as root with the Docker socket, the
 containerd socket, `/sys` and `/var/lib/docker` mounted read-only (no `/:/rootfs`, no whole `/var/run`). It
 can no longer read the rest of the VM filesystem such as `.env`, but `/var/lib/docker` holds the volumes
-(the PostgreSQL data included) and the Docker socket is root-equivalent API access, so treat it as
-trusted; it is opt-in and publishes no port. Both sockets are needed: without the containerd socket the
-Docker factory does not register and no container is discovered.
+(the PostgreSQL data included) and both sockets are root-equivalent API access: read-only on a socket
+limits the file, not the API, so treat cAdvisor as trusted. It is opt-in and publishes no port.
+
+Both sockets are required, at `/var/run/docker.sock` and `/var/run/containerd/containerd.sock` on the VM:
+without the containerd socket the Docker factory does not register and no container is discovered. The
+mounts use `create_host_path: false`, so a missing socket stops cAdvisor at start-up instead of leaving
+an empty directory. If your engine keeps containerd's socket elsewhere (for example a dockerd-managed
+`/var/run/docker/containerd/containerd.sock`; find it with `ls /run/containerd /var/run/docker/containerd`),
+change the cAdvisor mount's `source` in `docker-compose.yml` and keep the `target`. If cAdvisor runs but
+sees no container for 10 minutes, the `CadvisorNoContainers` warning fires.
 
 **Dead-man's switch (not built).** The `Watchdog` alert always fires and goes nowhere. To be told when the
 whole VM or Alertmanager is gone, route `Watchdog` to an external heartbeat service (any hosted "dead
