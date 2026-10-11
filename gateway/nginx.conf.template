@@ -21,9 +21,10 @@ http {
 
     # The sign-in redirect's `next` for /grafana/ (grafana-on.conf): the path of the RAW request line, so
     # it stays percent-encoded. $uri is decoded: an encoded CR LF in it would split the Location header
-    # and let a link set any response header. Anything but a /grafana/ path falls back to /grafana/
+    # and let a link set any response header. RFC 3986 path characters only, without `&` (which would
+    # start a second query parameter) or raw non-ASCII bytes; anything else falls back to /grafana/
     map $request_uri $grafana_next {
-        "~^(?<grafana_path>/grafana/[^?#]*)" $grafana_path;
+        "~^(?<grafana_path>/grafana/[A-Za-z0-9._~!$'()*+,;=:@%/-]*)(\?|$)" $grafana_path;
         default "/grafana/";
     }
 

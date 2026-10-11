@@ -45,7 +45,8 @@ they fall through to the dashboard.
     cookie and comes back. `next` is the path of the raw request line, still percent-encoded as the
     client sent it (`$grafana_next`, a map on `$request_uri`), never NGINX's decoded `$uri`: a decoded
     `%0d%0a` would split the `Location` header and inject response headers. A deep link's query string is
-    dropped (Ruling 4); a path that does not start with `/grafana/` falls back to `/grafana/`.
+    dropped (Ruling 4). RFC 3986 path characters only (no raw `&`, no raw non-ASCII); anything else, or a path
+    that does not start with `/grafana/`, falls back to `/grafana/`.
   - `location ^~ /grafana/`, so no regex location can take a `/grafana/` path past the check.
   - 403: `403 {"detail":"Forbidden"}`. auth-service down, or any other answer: `502 {"detail":"Bad Gateway"}`.
     Nothing but a 2xx reaches Grafana.

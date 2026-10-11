@@ -428,6 +428,17 @@ if grep -qiE '^set-cookie:[[:space:]]*pwn' "$TMP/headers"; then
 else
   pass "... and injects no response header"
 fi
+# With monitoring on, a raw & in the path never adds a second `next` to the redirect (off: a 404)
+status="$(curl -ks -o "$TMP/body" -D "$TMP/headers" -w '%{http_code}' "$BASE/grafana/a&next=//evil.com")"
+case "$status" in
+  302|404) pass "/grafana/ with a raw & answers $status" ;;
+  *) fail "/grafana/ with a raw &: expected 302 or 404, got $status" ;;
+esac
+if grep -qiE '^location:.*next=.*next=' "$TMP/headers"; then
+  fail "/grafana/ with a raw & put a second next into the redirect"
+else
+  pass "... and adds no second next"
+fi
 
 # ---- retention: the job runs, and really reaches project-service inside the stack ----
 if docker compose ps --status running --services 2>/dev/null | grep -qx ingestion-retention; then
