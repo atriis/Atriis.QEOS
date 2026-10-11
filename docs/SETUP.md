@@ -1132,8 +1132,10 @@ run, Pass rate this week, Flaky tests) and **Pass-rate trend** (the pass rate pe
 per week or month over 90 days, the Trends view's chart), **Failure causes**, **Regressions and
 flips** and **Slowest tests** (the Report's figures over 7, 14 or 30 days, 30 by default, on all
 branches or one; the title opens the Report at that section) and **Coverage** (active, linked and
-manual cases, automated cases not run in the period and tests without a case, across every branch);
-more widgets come in the next release. A
+manual cases, automated cases not run in the period and tests without a case, across every branch),
+**Recent runs** (the newest runs with their verdicts, on all branches or one) and **Branch health**
+(each branch's pass rate, runs and last run over 30 days, newest first); more widgets come in the
+next release. A
 widget set to a branch with no runs in its period says so ("No runs on release in the last 30 days")
 with **Change settings**, which opens edit mode on that widget's settings.
 

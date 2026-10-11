@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { listRuns, RunFilters } from "../api/runs";
+import { RUNS_PAGE_SIZE } from "../lib/runQueries";
 import { formatDuration } from "../api/analytics";
 import ErrorBanner from "../components/ErrorBanner";
 import FilterBar from "../components/FilterBar";
@@ -19,7 +20,8 @@ import PageHeader from "../components/PageHeader";
 import { tableCardClass, useIsWide } from "../lib/useIsWide";
 import { CI_LABELS } from "../lib/ciProviders";
 
-const PAGE = 50;
+// Shared with the Overview's run widgets, so their first page is this view's answer
+const PAGE = RUNS_PAGE_SIZE;
 // The API has no sort parameter for runs: the columns sort the page that is loaded
 const SORT_KEYS = ["started", "duration", "failed"] as const;
 type SortKey = (typeof SORT_KEYS)[number];
