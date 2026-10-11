@@ -1717,6 +1717,8 @@ QEOS follows a set of architectural principles that govern every technical and b
 
 ### Level 2 — Container Diagram
 
+Target view. The same domains with today's containers are drawn in the README's [Architecture](README.md#architecture) section.
+
 ```
 Browser / Mobile
 
@@ -2321,13 +2323,11 @@ Each risk shall have an assigned owner, mitigation strategy, monitoring mechanis
 
 ## 23.1 Current State
 
-Current implementation includes:
-
-- Authentication Platform
-- Initial AI Engine Foundation
-- Architecture Blueprint
-- Technical Specifications
-- Shared Platform Foundations
+What runs today is listed in the implementation status at the top of this document and drawn, on the
+domains of §21's Level 2 view, in the README's [Architecture](README.md#architecture) section: Platform
+(auth, organization, project), Execution (test-management, runs in the customer's CI), Intelligence
+(ingestion analytics and the Report, no AI), Collaboration (dashboard, notifications), Integrations
+(collector, GitHub Actions dispatch, email/Slack/Teams), all on PostgreSQL behind an NGINX gateway.
 
 ---
 

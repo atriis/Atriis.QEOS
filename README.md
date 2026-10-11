@@ -100,33 +100,92 @@ pipeline already produces, and it starts runs only through workflows you own.
 
 ## Architecture
 
+The diagram follows the blueprint's container view ([§21, Level 2](ARCHITECTURE_BLUEPRINT_V1_0.md#21-c4-architecture-model)):
+the same domains, filled with what runs today. Dotted arrows are the role checks one service asks
+another for; the grey box is the blueprint's target infrastructure, none of it deployed.
+
 ```mermaid
-flowchart LR
-    CI["CI pipeline<br/>qeos-collector"] -->|HTTPS + API key| GW
-    Browser["Browser<br/>React dashboard"] -->|HTTPS| GW
-    GW["NGINX gateway<br/>TLS · routing · rate limits"]
-    GW --> AUTH[auth-service]
-    GW --> ORG[organization-service]
-    GW --> PROJ[project-service]
-    GW --> ING[ingestion-service]
-    GW --> TM[test-management-service]
-    AUTH & ORG & PROJ & ING & TM --> PG[("PostgreSQL 15<br/>one database per service")]
-    TM -->|workflow_dispatch| GHA["Your GitHub Actions"]
+flowchart TB
+    Browser["Browser<br/>QA engineers · developers · product owners"]
+    subgraph CI["Your CI: GitHub Actions · GitLab · Jenkins"]
+        COL["qeos-collector<br/>upload · import-features"]
+    end
+    Browser -->|HTTPS| GW
+    COL -->|HTTPS + API key| GW
+    GW["API gateway: NGINX<br/>TLS · routing · rate limits"]
+
+    subgraph QEOS["QEOS"]
+        subgraph PLAT["Platform"]
+            AUTH[auth-service]
+            ORG[organization-service]
+            PROJ[project-service]
+        end
+        subgraph EXEC["Execution"]
+            TM["test-management-service<br/>cases · suites · run requests"]
+        end
+        subgraph QIP["Intelligence (QIP)"]
+            ING["ingestion-service<br/>runs · analytics · Report"]
+            JOBS["jobs: retention · rollup<br/>· weekly summary"]
+        end
+        subgraph COLLAB["Collaboration"]
+            DASH["dashboard<br/>React SPA"]
+        end
+    end
+    GW --> DASH
+    GW --> AUTH & ORG & PROJ
+    GW --> TM & ING
+    ORG -.->|user exists| AUTH
+    PROJ -.->|org role| ORG
+    TM & ING -.->|project role| PROJ
+    JOBS -.->|retention periods| PROJ
+
+    subgraph INFRA["Infrastructure"]
+        PG[("PostgreSQL 15<br/>one database per service")]
+        TARGET["target, not deployed:<br/>Redis · Kafka · Neo4j · Qdrant<br/>ClickHouse · object storage"]
+    end
+    PLAT & EXEC & QIP --> PG
+
+    subgraph INTEG["Integrations"]
+        GH["GitHub · GitLab APIs"]
+        IDP["Microsoft · Google SSO"]
+        NOTIFY["Email · Slack · Teams"]
+    end
+    TM -->|workflow_dispatch| CI
+    PROJ -->|verify repository| GH
+    AUTH --> IDP
+    AUTH & ING & JOBS --> NOTIFY
+
+    subgraph MON["Monitoring: opt-in profile"]
+        PROM[Prometheus] --> AM[Alertmanager]
+        GRAF[Grafana]
+    end
+    GW -->|/grafana/ behind the QEOS sign-in| GRAF
+    AM --> NOTIFY
+
+    classDef target fill:#eee,stroke:#999,stroke-dasharray:4 3,color:#555
+    class TARGET target
 ```
 
-| Component | Path | Responsibility |
-|---|---|---|
-| Gateway | [`gateway/`](gateway/README.md) | NGINX: TLS, routing, per-IP rate limits, JSON errors; serves the dashboard |
-| Dashboard | [`dashboard/`](dashboard/) | React 19 + TypeScript single-page app |
-| auth-service | [`platforms/auth-service/auth-service/`](platforms/auth-service/auth-service/) | Users, sign-in, tokens, SSO, MFA |
-| organization-service | [`platforms/organization-service/`](platforms/organization-service/) | Organisations, members, invitations |
-| project-service | [`platforms/project-service/`](platforms/project-service/) | Projects, repositories, settings, retention |
-| ingestion-service | [`platforms/ingestion-service/`](platforms/ingestion-service/README.md) | Uploads, runs, analytics, the report; jobs for retention, rollups and the weekly summary |
-| test-management-service | [`platforms/test-management-service/`](platforms/test-management-service/README.md) | Test cases, suites, Gherkin import and sync, run requests |
-| Shared library | [`shared/qeos_shared/`](shared/) | Settings, database session, mail and metrics helpers |
-| Collector | [`collector/`](collector/README.md) | The CI-side uploader (`pip`, single-file `.pyz` or container image) |
-| Monitoring | [`monitoring/`](monitoring/) | Prometheus, Alertmanager and Grafana configuration (opt-in profile) |
-| Production package | [`deploy/`](deploy/README.md) | Single-VM deployment behind a Caddy TLS edge |
+The run loop: test-management-service dispatches the customer's workflow, which runs the tests and sends
+the results back through the collector to ingestion-service. A second workflow syncs the `.feature`
+files into test-management-service ([SETUP §4.2.3](docs/SETUP.md)).
+
+| Component | Path | Blueprint domain | Responsibility |
+|---|---|---|---|
+| Gateway | [`gateway/`](gateway/README.md) | API gateway | NGINX: TLS, routing, per-IP rate limits, JSON errors; proxies to the dashboard and the services |
+| Dashboard | [`dashboard/`](dashboard/) | Collaboration | React 19 + TypeScript single-page app, served by its own NGINX container |
+| auth-service | [`platforms/auth-service/auth-service/`](platforms/auth-service/auth-service/) | Platform | Users, sign-in, tokens, SSO, MFA |
+| organization-service | [`platforms/organization-service/`](platforms/organization-service/) | Platform | Organisations, members, invitations |
+| project-service | [`platforms/project-service/`](platforms/project-service/) | Platform | Projects, repositories, settings, retention |
+| test-management-service | [`platforms/test-management-service/`](platforms/test-management-service/README.md) | Execution | Test cases, suites, Gherkin import and sync, run requests |
+| ingestion-service | [`platforms/ingestion-service/`](platforms/ingestion-service/README.md) | Intelligence (QIP), Collaboration | Uploads, runs, analytics, the Report, notification channels |
+| Jobs | [`platforms/ingestion-service/src/ingestion/jobs/`](platforms/ingestion-service/src/ingestion/jobs/) | Intelligence (QIP) | Retention, flaky rollups and the weekly summary; containers of the ingestion image |
+| Collector | [`collector/`](collector/README.md) | Integrations | The CI-side uploader and feature sync (`pip`, single-file `.pyz` or container image) |
+| Shared library | [`shared/qeos_shared/`](shared/) | Shared kernel | Settings, database session, mail and metrics helpers |
+| Monitoring | [`monitoring/`](monitoring/) | Observability (§11) | Prometheus, Alertmanager and Grafana configuration (opt-in profile) |
+| Production package | [`deploy/`](deploy/README.md) | Deployment (§9, L0) | Single-VM deployment behind a Caddy TLS edge |
+
+Blueprint domains not started: Automation, Marketplace, AI runtime. Administration lives in the Platform services for now.
 
 **Stack:** Python 3.11 with FastAPI, SQLAlchemy and Alembic, PostgreSQL 15, React 19, NGINX and Docker Compose.
 
