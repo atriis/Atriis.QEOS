@@ -47,8 +47,9 @@ numbers in platforms/ingestion-service/README.md.
    heartbeats. Phase 2 (the stack: Prometheus, Alertmanager, exporters, alert
    rules) built and pushed with this phase; Phase 3: the five Grafana dashboards
    are provisioned; the Grafana sign-in gate is in progress (auth-service's
-   cookie and check, the gateway's gated `/grafana/` location); the dashboard's
-   Monitoring item and `/monitoring` page are next.
+   cookie and check, the gateway's gated `/grafana/` location, the dashboard's
+   Monitoring item and `/monitoring` hand-off page); CI smoke checks, ADR-027
+   and the Phase 3 gate are next.
 8. Then, in the order agreed 2026-10-08 (TODO.md "Execution intelligence and
    operations"): customisable Overview, test impact analysis.
 

@@ -23,6 +23,7 @@ function renderAt(path: string) {
 const ROUTES: [string, string][] = [
   ["/", "Projects"],
   ["/account/security", "Security"],
+  ["/monitoring", "Monitoring"],
   ["/organizations/1", "Organization 1"],
   ["/projects/42/overview", "Overview"],
   ["/projects/42/runs", "Runs"],

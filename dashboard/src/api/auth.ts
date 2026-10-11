@@ -71,9 +71,16 @@ export async function mfaVerify(mfaToken: string, code: string): Promise<void> {
   setAccessToken(tokens.access_token);
 }
 
-/** The signed-in account; `mfa_enabled` says whether two-factor sign-in is on. */
-export function getMe(): Promise<{ id: number; email: string; mfa_enabled: boolean }> {
+/** The signed-in account; `mfa_enabled` says whether two-factor sign-in is on, and `monitoring_url` is set
+ *  only for a superuser while monitoring is on (ADR-027). */
+export function getMe(): Promise<{ id: number; email: string; mfa_enabled: boolean; monitoring_url?: string | null }> {
   return apiFetch("/api/v1/users/me");
+}
+
+/** Hands over the qeos_grafana cookie (8 hours, /grafana only); resolves to where Grafana lives. */
+export async function startGrafanaSession(): Promise<string> {
+  const body = await apiFetch<{ url: string }>("/api/v1/auth/grafana-session", { method: "POST", body: "{}" });
+  return body.url;
 }
 
 export function mfaEnroll(): Promise<{ secret: string; otpauth_uri: string }> {

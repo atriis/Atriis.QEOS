@@ -528,6 +528,8 @@ button.palette-trigger.compact { flex: none; width: 32px; padding: 0; justify-co
 .menu-item svg { color: var(--text-secondary); flex-shrink: 0; }
 .menu-item:hover, .menu-item:focus { background: var(--hover-strong); text-decoration: none; }
 .user-menu-list { list-style: none; margin: 0; padding: 0; }
+.user-menu-error { padding: var(--space-1) var(--space-3); }
+.monitoring-actions { align-items: center; gap: var(--space-4); }
 /* Sign out sits apart from the rest */
 .user-menu-list .menu-signout { margin-top: var(--space-1); padding-top: var(--space-1); border-top: 1px solid var(--border); }
 

@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, LogOut, ShieldCheck } from "lucide-react";
-import { getMe, logout } from "../api/auth";
+import { Activity, Building2, LogOut, ShieldCheck } from "lucide-react";
+import { getMe, logout, startGrafanaSession } from "../api/auth";
+import { ApiError } from "../api/http";
+import { goTo } from "../lib/browser";
+import { grafanaPath, markHandoff } from "../lib/grafanaHandoff";
 import { clearRecent } from "../lib/recentItems";
 
 /** "pedro.carneiro@x.com" -> "PC", "ana@x.com" -> "AN" */
@@ -20,7 +23,8 @@ interface Props {
   orgId?: number;
 }
 
-/** The avatar in the top bar and what it discloses: who is signed in, Security, Organization and Sign out.
+/** The avatar in the top bar and what it discloses: who is signed in, Security, Organization, Monitoring (superusers, while it is
+ *  on) and Sign out.
  *  A disclosure (button + plain list in Tab order), not an ARIA menu: the items are navigation links.
  *  Escape closes it and returns focus to the avatar; a click or focus outside, or following an item, closes it. */
 export default function UserMenu({ orgId }: Props) {
@@ -33,8 +37,15 @@ export default function UserMenu({ orgId }: Props) {
   const box = useRef<HTMLDivElement>(null);
 
   const email = me.data?.email;
+  const monitoringUrl = me.data?.monitoring_url ?? null;
+  const [monitoringBusy, setMonitoringBusy] = useState(false);
+  const [monitoringError, setMonitoringError] = useState<string | null>(null);
 
   useEffect(() => setOpen(false), [pathname]);
+  // A refusal is about that click; reopening the menu starts clean
+  useEffect(() => {
+    if (!open) setMonitoringError(null);
+  }, [open]);
 
   // A press or focus outside closes it, leaving focus where it went
   useEffect(() => {
@@ -57,6 +68,23 @@ export default function UserMenu({ orgId }: Props) {
     queryClient.clear();
     clearRecent();
     navigate("/login", { replace: true });
+  }
+
+  // Grafana is outside the SPA: hand over its cookie first, then leave (ADR-027). The hand-off is marked
+  // so /monitoring asks instead of handing over again if Grafana sends the browser straight back
+  async function onMonitoring() {
+    setMonitoringError(null);
+    setMonitoringBusy(true);
+    try {
+      const url = await startGrafanaSession();
+      markHandoff();
+      setOpen(false);
+      goTo(grafanaPath(url));
+    } catch (error) {
+      setMonitoringError(error instanceof ApiError ? error.detail : "Monitoring could not be opened.");
+    } finally {
+      setMonitoringBusy(false);
+    }
   }
 
   return (
@@ -96,6 +124,18 @@ export default function UserMenu({ orgId }: Props) {
                 <Link to={`/organizations/${orgId}`} className="menu-item" onClick={() => setOpen(false)}>
                   <Building2 size={16} aria-hidden="true" /> Organization
                 </Link>
+              </li>
+            )}
+            {monitoringUrl && (
+              <li>
+                <button type="button" className="menu-item" onClick={onMonitoring} disabled={monitoringBusy}>
+                  <Activity size={16} aria-hidden="true" /> Monitoring
+                </button>
+                {monitoringError && (
+                  <p className="field-error user-menu-error" role="alert">
+                    {monitoringError}
+                  </p>
+                )}
               </li>
             )}
             <li className="menu-signout">

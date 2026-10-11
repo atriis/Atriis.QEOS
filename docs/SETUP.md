@@ -1482,10 +1482,10 @@ MONITORING_DB_PASSWORD=<letters and digits>
 
 then `docker compose up -d --build --wait gateway prometheus alertmanager grafana node-exporter cadvisor postgres-exporter`. Prometheus then scrapes every service, and Alertmanager sends alerts to the channels you
 set. Five dashboards are provisioned. With `MONITORING_ENABLED=true` the gateway serves Grafana at
-`https://localhost:8443/grafana/` to superusers only, but the dashboard's **Monitoring** menu item and
-`/monitoring` page, which hand the sign-in over, are not built yet (a visit is sent to `/monitoring`); for
-now open Grafana's own admin login on the machine that runs the stack:
-`http://localhost:3000/grafana/login`, user `admin`. Alert channels, resources,
+`https://localhost:8443/grafana/` to superusers only: sign in to the dashboard as a superuser and choose
+**Monitoring** in the account menu (any Grafana link works too: the dashboard's `/monitoring` page hands
+the sign-in over and comes back). Break-glass, when auth-service is down: Grafana's own admin login on
+the machine that runs the stack, `http://localhost:3000/grafana/login`, user `admin`. Alert channels, resources,
 break-glass access from a VM, the security notes and turning it off: `deploy/README.md` section 10.
 Every service also serves `/metrics` inside the compose network whether or not the profile is on; the
 gateway never routes it.

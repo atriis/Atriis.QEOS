@@ -187,14 +187,13 @@ Prometheus, Alertmanager and Grafana run as the compose profile `monitoring`, wi
 VM), cAdvisor (containers) and postgres-exporter. Off by default; an install without it runs exactly as
 before. Design: `docs/superpowers/specs/2026-10-10-monitoring-design.md`.
 
-> **Status.** The stack, the metrics, the alert rules, the alert channels and the five dashboards are
-> built. The QEOS sign-in to Grafana is half built: with `MONITORING_ENABLED=true` the gateway serves
+> **Status.** The stack, the metrics, the alert rules, the alert channels, the five dashboards and the
+> QEOS sign-in to Grafana are built. With `MONITORING_ENABLED=true` the gateway serves
 > `https://<domain>/grafana/` to active superusers only (auth-service checks the `qeos_grafana` cookie
-> on every request and Grafana signs the user in by the header the gateway sets), but the account-menu
-> **Monitoring** item and the dashboard's `/monitoring` page that hand the cookie over are **not built
-> yet**, so a browser visit to `/grafana/` is sent to `/monitoring` and stops there. Today the way into
-> Grafana is still the break-glass login below. Prometheus is not published; it works and fires alerts
-> regardless.
+> on every request and Grafana signs the user in by the header the gateway sets). A superuser opens it
+> from **Monitoring** in the account menu, or by any Grafana link: without the cookie the gateway sends
+> the browser to the dashboard's `/monitoring` page, which hands the cookie over and comes back. The
+> CI smoke checks are still to come. Prometheus is not published; it works and fires alerts regardless.
 
 **Turn it on.** A new install's `.env` already holds the four lines below, commented out, with
 generated passwords: uncomment them. (An install from before monitoring: add them by hand, passwords of
@@ -233,10 +232,12 @@ within a minute. The first is Grafana's home page.
 | PostgreSQL | connections, database sizes, transactions, cache hit rate, locks, slowest statements |
 | Host and containers | VM CPU, memory and disk with a 24 hour disk prediction; per container CPU, memory and restarts |
 
-How to open them today: the break-glass login, `ssh -L 3000:127.0.0.1:3000 <vm>` (or on the VM itself)
-and then `http://127.0.0.1:3000/grafana/`, user `admin` and `GRAFANA_ADMIN_PASSWORD` (the login form and
-basic auth stay on for this; through the gateway nobody reaches them without passing auth-service's check).
-Once the dashboard's **Monitoring** item is built, a superuser opens `https://<domain>/grafana/` (or **Monitoring** in the account menu) with the usual QEOS login. The
+How to open them: a superuser chooses **Monitoring** in the account menu (or opens `https://<domain>/grafana/`)
+with the usual QEOS login; the item shows only to superusers while `MONITORING_ENABLED` is true. A
+non-superuser who follows a Grafana link is told that monitoring is for superusers. When auth-service is
+down, use the break-glass login: `ssh -L 3000:127.0.0.1:3000 <vm>` (or on the VM itself) and then
+`http://127.0.0.1:3000/grafana/`, user `admin` and `GRAFANA_ADMIN_PASSWORD` (the login form and basic auth
+stay on for this; through the gateway nobody reaches them without passing auth-service's check). The
 "Slowest statements" table lists `queryid`, database, user, calls and mean time only: statement text is not
 collected on purpose (it could carry secrets or personal data); look a `queryid` up in `pg_stat_statements`.
 

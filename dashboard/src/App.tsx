@@ -14,6 +14,7 @@ import ResetPasswordPage from "./pages/ResetPasswordPage";
 import PickerPage from "./pages/PickerPage";
 import ProjectLayout from "./pages/ProjectLayout";
 import SecurityPage from "./pages/SecurityPage";
+import MonitoringPage from "./pages/MonitoringPage";
 import TestsPage from "./pages/TestsPage";
 import HistoryPage from "./pages/HistoryPage";
 import FlakyPage from "./pages/FlakyPage";
@@ -46,6 +47,7 @@ const TITLES: [string, string][] = [
   ["/forgot-password", "Reset password"],
   ["/reset-password", "Choose a new password"],
   ["/account/security", "Security"],
+  ["/monitoring", "Monitoring"],
   ["/organizations/", "Organization"],
   ["/invitations/", "Invitation"],
 ];
@@ -108,6 +110,7 @@ export function AppRoutes() {
         <Route element={<RequireAuth><AppShell /></RequireAuth>}>
           <Route path="/" element={<PickerPage />} />
           <Route path="/account/security" element={<SecurityPage />} />
+          <Route path="/monitoring" element={<MonitoringPage />} />
           <Route path="/organizations/:orgId" element={<OrganizationPage />} />
           <Route path="/invitations/:token" element={<InvitationAcceptPage />} />
           <Route path="/projects/:projectId" element={<ProjectLayout />}>

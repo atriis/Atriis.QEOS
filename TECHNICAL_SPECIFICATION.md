@@ -33,7 +33,9 @@ exposes job heartbeats (`job_last_success_timestamp_seconds{job}`, from the
 node-exporter, cAdvisor, postgres-exporter, alert rules) scrapes them; Grafana
 ships five provisioned dashboards. Its sign-in gate is in progress: with `MONITORING_ENABLED` on, the
 gateway's `/grafana/` checks the `qeos_grafana` cookie with auth-service on every request and signs the
-superuser into Grafana's auth proxy (otherwise `/grafana/` is a 404); the dashboard's Monitoring item is next
+superuser into Grafana's auth proxy (otherwise `/grafana/` is a 404). The dashboard shows superusers a
+Monitoring item (from `monitoring_url` on `/users/me`) that calls `POST /auth/grafana-session` and opens
+Grafana; its `/monitoring?next=` page does the same when the gateway sends a cookieless visit there
 (`docs/superpowers/specs/2026-10-10-monitoring-design.md`).
 
 ## 2. Services

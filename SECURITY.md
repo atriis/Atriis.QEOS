@@ -143,6 +143,21 @@ details.
   address. The gateway also removes `Authorization` toward Grafana, so the
   QEOS access token never reaches it. With `MONITORING_ENABLED` unset or false,
   `/grafana/` is a JSON 404 for everyone.
+- **The `/monitoring` hand-off page (monitoring).** Anyone can craft a
+  `/monitoring?next=` link, so the dashboard does not rely on the gateway's
+  own restriction of `next`. It reads the raw value, decodes it exactly once
+  (`decodeURIComponent` in try/catch; malformed encoding is refused), and
+  follows it only when the decoded path starts with `/grafana/` and holds no
+  `//` after the first character, no backslash, no scheme, no `.` or `..`
+  segment (also spelled `%2e`) and no whitespace or control character;
+  anything else opens `/grafana/`. It navigates with
+  `window.location.assign` on that relative path only, never an absolute URL
+  built from input (the menu item checks the server's `url` the same way).
+  The cookie is minted only by the bearer-token POST, so a crafted link
+  cannot mint it for a visitor who is not signed in to the dashboard. A
+  hand-off is marked in `sessionStorage` for 10 seconds: if Grafana sends
+  the browser straight back, the page asks (Try again) instead of handing
+  over again, so it cannot loop.
 - **Grafana break-glass port (monitoring).** Grafana publishes `127.0.0.1:3000`
   for an admin login when auth-service is down. Because that port is published,
   Docker 28 and later makes Grafana's address on its `grafana-front` network
