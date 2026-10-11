@@ -40,7 +40,10 @@ they fall through to the dashboard.
   - 200: the request goes to `grafana:3000` with `X-QEOS-User-Email` set from the check's answer.
     The gateway **always overwrites** that header, so a client sending its own never chooses who Grafana
     signs in; Grafana trusts it only from the gateway's fixed `grafana-front` address
-    (`GATEWAY_GRAFANA_FRONT_IP`). `Authorization` is removed toward Grafana.
+    (`GATEWAY_GRAFANA_FRONT_IP`). `Authorization` is removed toward Grafana, and so is the `qeos_grafana`
+    cookie: Grafana gets `$grafana_cookie`, the browser's `Cookie` header without it (two chained maps in
+    `nginx.conf.template`; Grafana's own cookies such as `grafana_session` pass unchanged). The check
+    itself still receives the full `$http_cookie`.
   - 401: `302 /monitoring?next=<path>`. The dashboard's `/monitoring` page signs in if needed, mints the
     cookie and comes back. `next` is the path of the raw request line, still percent-encoded as the
     client sent it (`$grafana_next`, a map on `$request_uri`), never NGINX's decoded `$uri`: a decoded

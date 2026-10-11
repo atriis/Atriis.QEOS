@@ -141,7 +141,9 @@ details.
   header for another address still shows the cookie owner). Grafana's auth
   proxy believes that header only from the gateway's fixed `grafana-front`
   address. The gateway also removes `Authorization` toward Grafana, so the
-  QEOS access token never reaches it. With `MONITORING_ENABLED` unset or false,
+  QEOS access token never reaches it, and strips the `qeos_grafana` cookie from
+  the `Cookie` header it forwards (Grafana keeps its own cookies), so Grafana
+  never holds the QEOS credential. With `MONITORING_ENABLED` unset or false,
   `/grafana/` is a JSON 404 for everyone.
 - **The `/monitoring` hand-off page (monitoring).** Anyone can craft a
   `/monitoring?next=` link, so the dashboard does not rely on the gateway's

@@ -28,6 +28,22 @@ http {
         default "/grafana/";
     }
 
+    # The Cookie header sent on to Grafana (grafana-on.conf): the browser's cookies without qeos_grafana,
+    # which is the gateway's credential and none of Grafana's business; Grafana's own (grafana_session...)
+    # pass unchanged. One pass removes one occurrence, wherever it sits (alone, first, middle, last) and
+    # never leaves a stray "; "; two passes cover a browser that sends the cookie twice (two paths). No
+    # Cookie header gives "", and proxy_set_header sends nothing. The check keeps $http_cookie
+    map $http_cookie $grafana_cookie_pass1 {
+        "~^qeos_grafana=[^;]*(;\s*)?(?<gc1_rest>.*)$"                     $gc1_rest;
+        "~^(?<gc1_head>.*?);\s*qeos_grafana=[^;]*(?<gc1_tail>(;.*)?)$"   "$gc1_head$gc1_tail";
+        default $http_cookie;
+    }
+    map $grafana_cookie_pass1 $grafana_cookie {
+        "~^qeos_grafana=[^;]*(;\s*)?(?<gc2_rest>.*)$"                     $gc2_rest;
+        "~^(?<gc2_head>.*?);\s*qeos_grafana=[^;]*(?<gc2_tail>(;.*)?)$"   "$gc2_head$gc2_tail";
+        default $grafana_cookie_pass1;
+    }
+
     log_format json escape=json '{'
         '"time":"$time_iso8601",'
         '"request_id":"$req_id",'

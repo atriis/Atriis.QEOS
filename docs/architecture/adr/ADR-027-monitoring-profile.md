@@ -91,6 +91,8 @@ The blueprint (§11) is binding for names: `api_requests_total`, `http_requests_
   from the break-glass port `127.0.0.1:3000` or behind a spoofed `X-Forwarded-For`/`X-Real-IP` is refused
   (`auth-proxy.invalid-ip`). Residual: on Docker 28's bridge, other containers can reach Grafana's admin
   login page, which still needs `GRAFANA_ADMIN_PASSWORD`.
+- Grafana never sees the `qeos_grafana` cookie: the gateway strips it from the `Cookie` header it forwards,
+  keeping Grafana's own cookies; only auth-service's check reads it.
 - The `qeos_grafana` cookie lasts 8 h. Signing out clears it in that browser, and a password change,
   demotion or deactivation stops it on the next request; a copy of the cookie elsewhere stays valid until
   one of those happens or it expires.
