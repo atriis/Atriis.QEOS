@@ -15,12 +15,15 @@ import type { WidgetProps } from "./types";
  *  (spec §2.4). The default name is the QEOS full name; the setting holds the name as git records it. */
 export default function MyFailuresWidget({ projectId, settings, heading, onOpenSettings }: WidgetProps) {
   const rows = settings.rows ?? 5;
-  const named = settings.author !== undefined;
+  // A stored name that is only spaces counts as none: the QEOS full name applies
+  const stored = settings.author?.trim() || undefined;
+  const named = stored !== undefined;
   const me = useQuery({ ...meQuery, enabled: !named });
-  const author = (settings.author ?? me.data?.full_name ?? "").trim();
+  const author = (stored ?? me.data?.full_name ?? "").trim();
   // An empty author would match every run (the filter is a substring match): never ask without a name (plan Ruling 24)
   const runs = useQuery({ ...runsFirstPageQuery(projectId, { status: "failing", author }), enabled: author !== "" });
-  const list = runs.data ?? [];
+  // The server matches a substring ("Ann" finds "Joanna"): keep only runs whose commit author is exactly the name
+  const list = (runs.data ?? []).filter((run) => run.commit_author?.trim().toLowerCase() === author.toLowerCase());
   const waitingForName = !named && me.isPending;
   return (
     <>
@@ -34,7 +37,7 @@ export default function MyFailuresWidget({ projectId, settings, heading, onOpenS
         </WidgetEmpty>
       )}
       {runs.error != null && <ErrorBanner error={runs.error} onRetry={() => runs.refetch()} />}
-      {runs.data && list.length === 0 && (
+      {runs.data !== undefined && list.length === 0 && (
         <WidgetEmpty onOpenSettings={onOpenSettings}>
           No failed runs by “{author}”. If git records your name differently, set "Your name in git" in this widget's settings.
         </WidgetEmpty>

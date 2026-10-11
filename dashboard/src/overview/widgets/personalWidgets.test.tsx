@@ -2,7 +2,9 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { server } from "../../test/server";
+import { runsPagesStaleKey } from "../../lib/runQueries";
 import { FAILING_RUN, RUN, mockOverviewData, personalState, renderOverview } from "../testing";
+import { REGISTRY } from "./registry";
 
 const me = (full_name: string | null) =>
   server.use(http.get("/api/v1/users/me", () => HttpResponse.json({ id: 7, email: "ada@example.com", mfa_enabled: false, full_name })));
@@ -102,4 +104,37 @@ test("Test cases shows the Cases tiles under their own keys, links to Cases, and
   expect(await headingLink("Test cases")).toHaveAttribute("href", "/projects/42/cases");
   await waitFor(() => expect(screen.getByRole("region", { name: "Test cases" })).toHaveClass("wide"));
   expect(qc.getQueryData(["cases-total", 42])).toBe(12);
+});
+
+test("the runs widgets declare the runs pages' stale key", () => {
+  expect(REGISTRY.recent_runs!.staleKeys!(42)).toEqual([runsPagesStaleKey(42)]);
+  expect(REGISTRY.my_failures!.staleKeys!(42)).toEqual([runsPagesStaleKey(42)]);
+});
+
+test("My recent failures keeps only runs whose commit author is exactly the name, ignoring case and spaces", async () => {
+  mockOverviewData({ layout: personalState({ id: "f", type: "my_failures", size: "normal" }) });
+  me("Ann");
+  // The server's author filter is a substring match, so it also answers Joanna's run
+  failingRunsAsked([{ ...FAILING_RUN, id: 61, commit_author: "Joanna Smith" }, { ...FAILING_RUN, id: 62, commit_author: " ann " }]);
+  renderOverview();
+  expect(await screen.findByRole("link", { name: "Run #62" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: "Run #61" })).not.toBeInTheDocument();
+});
+
+test("My recent failures says nothing matched when the server's matches are all other people", async () => {
+  mockOverviewData({ layout: personalState({ id: "f", type: "my_failures", size: "normal" }) });
+  me("Ann");
+  failingRunsAsked([{ ...FAILING_RUN, commit_author: "Joanna Smith" }]);
+  renderOverview();
+  expect(await screen.findByText(/No failed runs by “Ann”/)).toBeInTheDocument();
+});
+
+test("a stored author of only spaces counts as unset: the full name applies, and the link names no author", async () => {
+  mockOverviewData({ layout: personalState({ id: "f", type: "my_failures", size: "normal", settings: { author: "   " } }) });
+  me("Ada Lovelace");
+  const asked = failingRunsAsked([FAILING_RUN]);
+  renderOverview();
+  expect(await screen.findByRole("link", { name: "Run #61" })).toBeInTheDocument();
+  expect(asked[0].get("author")).toBe("Ada Lovelace");
+  expect(await headingLink("My recent failures")).toHaveAttribute("href", "/projects/42/runs?status=failing");
 });

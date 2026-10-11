@@ -13,7 +13,9 @@ export const myFailures: WidgetDefinition = {
   defaults: { rows: 5 },
   Component: lazy(() => import("./MyFailuresWidget")),
   // The default name is not known here, so only a set author joins the link (plan Ruling 19)
-  link: (projectId, settings) =>
-    viewLink(`/projects/${projectId}/runs`, settings.author ? { status: "failing", author: settings.author } : { status: "failing" }, undefined),
+  link: (projectId, settings) => {
+    const author = settings.author?.trim();
+    return viewLink(`/projects/${projectId}/runs`, author ? { status: "failing", author } : { status: "failing" }, undefined);
+  },
   staleKeys: (projectId) => [runsPagesStaleKey(projectId)],
 };
