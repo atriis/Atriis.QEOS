@@ -246,3 +246,30 @@ def test_the_largest_valid_layout_fits(client, auth, org_role, make_project):
     raw = json.dumps({"layout": {"schema": 1, "widgets": widgets}, "version": 0}, ensure_ascii=False).encode("utf-8")
     assert len(raw) <= LIMIT
     assert put_bytes(client, auth, project.id, "personal", raw).status_code == 200
+
+
+def test_get_reports_the_same_updated_at_as_the_save(client, auth, org_role, make_project):
+    project = make_project()
+    org_role("member")
+    saved = put(client, auth, project.id, "personal", layout("latest_run"), 0, user=5).json()
+    fetched = client.get(url(project.id), headers=auth(5)).json()
+    assert fetched["personal"]["updated_at"] == saved["updated_at"]
+
+
+def test_a_create_that_loses_the_race_is_409_with_the_stored_row(client, auth, org_role, make_project, monkeypatch):
+    from src.project.service import overview_layout_service as service
+
+    project = make_project()
+    org_role("member")
+    assert put(client, auth, project.id, "personal", layout("latest_run"), 0, user=5).status_code == 200
+    real, calls = service.get_row, []
+
+    def row_missing_once(*args, **kwargs):
+        calls.append(args)
+        return None if len(calls) == 1 else real(*args, **kwargs)  # the first look misses a row that is already there
+
+    monkeypatch.setattr(service, "get_row", row_missing_once)
+    response = put(client, auth, project.id, "personal", layout("coverage"), 0, user=5)  # insert hits the unique index
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "stale_version"
+    assert response.json()["detail"]["current"]["version"] == 1
