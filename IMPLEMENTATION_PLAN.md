@@ -47,7 +47,8 @@ numbers in platforms/ingestion-service/README.md.
    Grafana at `/grafana/` behind the QEOS sign-in, and CI smoke checks run with and without the
    profile. Logs, tracing and long retention stay TARGET behind their triggers (blueprint §11).
 8. Then, in the order agreed 2026-10-08 (TODO.md "Execution intelligence and
-   operations"): customisable Overview, test impact analysis.
+   operations"): customisable Overview (done 2026-10-11, ADR-028: 14 widgets, three templates, a
+   project default and personal layouts), then test impact analysis.
 
 ## 3. Blocked on external input
 

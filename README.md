@@ -383,13 +383,12 @@ The threat model and operational guidance are in [`SECURITY.md`](SECURITY.md).
 **Built and running:**
 - the platform foundation: accounts, organisations, projects and the gateway;
 - ingestion with the collector and its CI integrations;
-- analytics, the report and notifications;
+- analytics, the report, notifications and the customisable Overview;
 - test management with Gherkin sync and Run from QEOS;
 - the optional monitoring stack;
 - the single-VM production package.
 
-**Next**, in the agreed order: the rest of the customisable Overview (more widgets; its first part, Customise with today's four widgets, is built), then test impact analysis. The full plan is in
-[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
+**Next:** test impact analysis. The full plan is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
 
 The directories `execution/`, `automation/`, `marketplace/`, `collaboration/`, `intelligence/` and
 `platforms/qip-service` are **unwired prototypes**. They are not in Compose, CI or the gateway, and they

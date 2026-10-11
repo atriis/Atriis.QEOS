@@ -14,7 +14,7 @@
 > | Analytics | CURRENT: ingestion-service analytics API (trends incl. weekly/monthly, tests, history, flaky with daily rollups and quarantine, branches, run compare, failures by cause) and the Report (summary, failure causes, regressions, by area, coverage, duration; ADR-026) on PostgreSQL — fulfils the role sect. 8's "QIP Analytics Service" targets. No AI/ML |
 > | Test management / execution | CURRENT: test-management-service (ADR-022): cases, suites, Gherkin import and sync (ADR-023, ADR-024); runs started in the customer's GitHub Actions (ADR-025). Environment orchestration, artifacts: TARGET |
 > | Observability (sect. 11) | CURRENT: `/metrics` on every service with §11.2 names (`api_requests_total`, `http_requests_duration_seconds`, process metrics, `test_executions_total`, `test_case_creation_total`), job heartbeats, opt-in Prometheus + Alertmanager (email/Slack/Teams) + Grafana compose profile with node, container and PostgreSQL exporters, Grafana at `/grafana/` behind the QEOS sign-in (ADR-027). Logs, tracing, profiling, synthetic checks: TARGET |
-> | Capability map (sect. 3) | Platform Foundation largely realized (no billing); partial: Execution Platform (test management, runs via customer CI), QIP (analytics and report, no AI), Collaboration (dashboards, report, notifications), Integrations (CI collector, GitHub Actions dispatch, Slack/Teams/email). Automation, Marketplace, AI Runtime: not started |
+> | Capability map (sect. 3) | Platform Foundation largely realized (no billing); partial: Execution Platform (test management, runs via customer CI), QIP (analytics and report, no AI), Collaboration (customisable Overview dashboards with a project default and personal layouts, report, notifications), Integrations (CI collector, GitHub Actions dispatch, Slack/Teams/email). Automation, Marketplace, AI Runtime: not started |
 > | `execution/`, `automation/`, `marketplace/`, `collaboration/`, `intelligence/`, `platforms/qip-service` | UNWIRED PROTOTYPES: not in docker-compose, CI, gateway routing or migrations. See ARCHITECTURE_EVOLUTION.md |
 >
 > **Adoption triggers** — a TARGET piece is pulled in only when its trigger fires:
@@ -999,7 +999,7 @@ KnowledgeObject {
 - Approval workflows for manual gates
 
 #### Enhanced Collaboration
-- Interactive dashboards with customizable widgets
+- Interactive dashboards with customizable widgets (realized for the project Overview: 14 widgets, templates, project default and personal layouts; ADR-028)
 - Basic reporting engine with export capabilities
 - Commenting and discussion features
 - Notification system (email, in-app)
@@ -2326,7 +2326,7 @@ Each risk shall have an assigned owner, mitigation strategy, monitoring mechanis
 What runs today is listed in the implementation status at the top of this document and drawn, on the
 domains of §22's Level 2 view, in the README's [Architecture](README.md#architecture) section: Platform
 (auth, organization, project), Execution (test-management, runs in the customer's CI), Intelligence
-(ingestion analytics and the Report, no AI), Collaboration (dashboard, notifications), Integrations
+(ingestion analytics and the Report, no AI), Collaboration (customisable Overview, notifications), Integrations
 (collector, GitHub Actions dispatch, email/Slack/Teams), all on PostgreSQL behind an NGINX gateway.
 
 ---

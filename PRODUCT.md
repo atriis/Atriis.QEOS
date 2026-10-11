@@ -86,6 +86,26 @@ yet.
 5. Self-hosted modesty: no claims (AI or otherwise) ahead of shipped
    capability.
 
+## Overview Rules
+
+- The Overview is the triage screen (Principle 2), built from widgets over the existing analytics: no
+  widget computes a new metric, and none uses AI.
+- What a person sees: their personal layout for the project, else the project default (set by owners
+  and admins), else the built-in four cards (latest run, failing in latest run, pass rate this week,
+  flaky tests in 14 days). With nothing configured it looks as it always did.
+- Every role, viewers included, may keep a personal layout; "Reset to project default" removes it, so
+  later changes to the default reach that person again.
+- Fourteen widget types; a type may appear more than once with different settings (period 7, 14 or
+  30 days; 5 or 10 rows; all branches or one, where no branch setting means all branches). Three
+  templates: QA lead, Developer, Flaky hunt. At most 24 widgets per layout.
+- "My" widgets match by name: My recent failures shows failed runs whose commit author, as git records
+  it, is exactly the person's name (ignoring case): their QEOS full name by default, or how git spells
+  it, set in the widget. It reads the newest 50 runs. Matching by email is a later improvement
+  (TODO.md). My suites lists the suites the person created.
+- Honest states per widget (Principle 1): a branch with no runs in the period says "No runs on
+  <branch> in the last N days"; a failure stays in its own card with Retry; missing data is never
+  shown as zero.
+
 ## Accessibility & Inclusion
 
 - WCAG AA: chart and table contrast meets AA; status is never conveyed by

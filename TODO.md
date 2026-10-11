@@ -272,10 +272,12 @@ item-level record is "Analytics API (Phase 3, step 1)" and "Dashboard follow-ups
 Kubernetes stays out until its blueprint trigger fires (first multi-node deployment); Docker Compose on one VM is the production target.
 1. [x] Suite duration prediction (done 2026-10-08): ingestion `POST /analytics/duration-estimate` (per-test p50 of passed runs, p90 of all, per-environment with fallback, project overhead + parallelism fitted on the last 20 runs); estimate in the Run dialog, live in the selection bar and on suite detail; stored on run requests (test-management migration 008) for "≈ n min left" and "estimated vs took". Later: warn when the estimate exceeds the workflow timeout
 2. [x] Monitoring: Prometheus, Grafana and Alertmanager as an opt-in profile of the production compose; `/metrics` on every service, Postgres and container exporters, starter dashboards and alerts (service down, 5xx rate, disk). Done 2026-10: ADR-027, spec `docs/superpowers/specs/2026-10-10-monitoring-design.md`; blueprint §11 names, job heartbeats (ingestion migration 017), five dashboards, alerts to email/Slack/Teams, Grafana at `/grafana/` for superusers
-3. [ ] Customisable Overview: a widget catalogue over the existing analytics; a project default layout set by owners/admins, a personal layout per user with "reset to project default"
+3. [x] Customisable Overview (done 2026-10-11, ADR-028, spec `docs/superpowers/specs/2026-10-11-customisable-overview-design.md`): 14 widgets over the existing analytics and three templates (QA lead, Developer, Flaky hunt); a project default (owners/admins) and a personal layout per user with "reset to project default" (project-service migration 004, optimistic versions, 409 Reload/Overwrite); one widget catalogue file shared by validation and the dashboard registry (24 widgets, 64 KB); refresh on a new run driven by each widget's stale keys; test-management `GET /suites?created_by=me`
    - [ ] Follow-up (Phase 2 review, 2026-10-11): `DELETE /overview-layout/project` carries no version (spec §3.3), so one admin's stale "Reset to built-in default" removes another admin's newer default; give DELETE the same version check as PUT in a later spec revision
 4. [ ] Test impact analysis: from collected commits' changed files and later failures, suggest which tests to run for a change (history-based; no coverage instrumentation)
 - [ ] Report origin marker (ADR-026 fallback): a Play workflow input → collector field → ingestion `test_runs.origin` column and a backfill. Only if the URL match proves unreliable.
+- [ ] My recent failures by email (ADR-028 follow-up): the collector records the commit author's email (`git log --format=%ae`), ingestion stores it (column and migration), and the widget matches the signed-in user's email instead of a name
+- [ ] The project export includes the Overview project default (ADR-028, spec §3.4): needs project-service data in the export, which today holds ingestion data only
 
 ### Phase 6: AI Engine (Original Starting Point)
 73. [ ] Design AI/ML model architecture for test analysis
@@ -406,7 +408,7 @@ Requested 2026-10-07. Users create or import `*.md` files as **skills**: reusabl
 - [ ] Onboarding wizard: connect a repository, install the collector, first run *(suggested)*
 - [x] Global search: the Ctrl K command palette covers test cases, tests, runs (by number or exact branch), pages and projects (layout phase 3)
 - [x] Search suites from the palette, and runs by partial branch name, with case-key search and a run summary read for "#N" (`branch_contains`, `/runs/{id}/summary`, suites `search`)
-- [ ] Personal dashboard: my suites, my recent failures *(suggested)*
+- [x] Personal dashboard: my suites, my recent failures — the My suites and My recent failures Overview widgets (2026-10-11, ADR-028)
 
 ### G. Built-in terminal
 A terminal in the browser (xterm.js over a WebSocket). An interactive shell is remote code
@@ -432,5 +434,6 @@ All architectural specifications and design documents from the initial brainstor
 ## Current Status
 Updated 2026-10-11. Phases 1–3 are delivered, test management (Phase 4) is in use, and the Report,
 notifications, Run from QEOS and the single-VM production package have shipped. Monitoring has
-shipped (item 2 under "Execution intelligence and operations", ADR-027). What runs today: README.md and
+shipped (item 2 under "Execution intelligence and operations", ADR-027), and so has the customisable
+Overview (item 3, ADR-028). What runs today: README.md and
 TECHNICAL_SPECIFICATION.md; next steps: IMPLEMENTATION_PLAN.md §2.

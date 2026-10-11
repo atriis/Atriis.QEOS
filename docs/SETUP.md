@@ -1131,19 +1131,29 @@ nothing changes until **Save**. **Reset to project default** puts the default ba
 Save then removes your own layout, so later changes to the default reach you again. **Cancel**
 discards the draft, asking first when you changed something. If the same layout was saved elsewhere
 meanwhile, Save offers **Reload** (start again from the stored layout) or **Overwrite**. A layout
-holds at most 24 widgets. This release offers today's four widgets (Latest run, Failing in latest
-run, Pass rate this week, Flaky tests) and **Pass-rate trend** (the pass rate per day over 30 days, or
-per week or month over 90 days, the Trends view's chart), **Failure causes**, **Regressions and
-flips** and **Slowest tests** (the Report's figures over 7, 14 or 30 days, 30 by default, on all
-branches or one; the title opens the Report at that section) and **Coverage** (active, linked and
-manual cases, automated cases not run in the period and tests without a case, across every branch),
-**Recent runs** (the newest runs with their verdicts, on all branches or one) and **Branch health**
-(each branch's pass rate, runs and last run over 30 days, newest first), **Test cases** (the Cases
-tiles, wide by default), **My suites** (the suites you created) and **My recent failures** (failed runs
-whose commit author is you, matched by your QEOS full name or by "Your name in git" in its settings;
-with neither, it asks for the name and loads nothing). A
-widget set to a branch with no runs in its period says so ("No runs on release in the last 30 days")
-with **Change settings**, which opens edit mode on that widget's settings.
+holds at most 24 widgets, and a widget type may appear more than once with different settings.
+
+**Widgets** (14; settings are a period of 7, 14 or 30 days, 5 or 10 rows, a view, a branch or a name):
+
+- **Latest run**, **Failing in latest run**, **Pass rate this week** and **Flaky tests**: the built-in
+  four cards.
+- **Pass-rate trend:** the Trends view's chart, per day over 30 days or per week or month over 90 days.
+- **Failure causes**, **Regressions and flips** and **Slowest tests:** the Report's figures over the
+  period (30 days by default), on all branches or one; the title opens the Report at that section.
+- **Coverage:** active, linked and manual cases, automated cases not run in the period, and tests
+  without a case, across every branch.
+- **Recent runs:** the newest runs with their verdicts, on all branches or one.
+- **Branch health:** each branch's pass rate, runs and last run over 30 days, newest first.
+- **Test cases:** the Cases tiles, wide by default.
+- **My suites:** the suites you created.
+- **My recent failures:** failed runs whose commit author is you. It matches the name git records
+  exactly (ignoring case): by default your QEOS full name. If git spells it differently, or your profile
+  has no full name, set **Your name in git** in its settings; with no name at all it says so and loads
+  nothing.
+
+Recent runs and My recent failures read the newest page of runs (50), so older failures beyond that
+page do not appear. A widget set to a branch with no runs in its period says so ("No runs on release
+in the last 30 days") with **Change settings**, which opens edit mode on that widget's settings.
 
 Owners and admins also set the **project default**, which everyone without a personal layout sees:
 **Customise → Edit project default**. The bar says who changed it last; Save asks for confirmation
