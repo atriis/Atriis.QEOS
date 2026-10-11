@@ -22,6 +22,8 @@ test("each of the first four widgets links its title to the full view with the s
   expect(await headingLink("Latest run")).toHaveAttribute("href", "/projects/42/runs");
   expect(await headingLink("Failing in latest run")).toHaveAttribute("href", "/projects/42/runs?status=failing");
   expect(await headingLink("Pass rate this week")).toHaveAttribute("href", "/projects/42/trends?bucket=week&branch=main");
+  // The card foot opens the same filtered view as the title
+  expect(await screen.findByRole("link", { name: "Trends" })).toHaveAttribute("href", "/projects/42/trends?bucket=week&branch=main");
   expect(await headingLink("Flaky tests, last 30 days")).toHaveAttribute("href", "/projects/42/flaky?window=30");
 });
 

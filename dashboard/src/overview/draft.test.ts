@@ -70,3 +70,10 @@ test("isDirty compares with where editing started", () => {
   expect(isDirty(draftReducer(moved, { kind: "move", id: "b", by: 1 }), start)).toBe(false);
   expect(isDirty({ layout: start, reset: true }, start)).toBe(true);
 });
+
+test("size, remove and settings on an id not in the draft change nothing, not even the reset mark", () => {
+  const reset = draftReducer(draft(["a"]), { kind: "reset", layout: layout(["d1"]) });
+  expect(draftReducer(reset, { kind: "size", id: "nope" })).toBe(reset);
+  expect(draftReducer(reset, { kind: "remove", id: "nope" })).toBe(reset);
+  expect(draftReducer(reset, { kind: "settings", id: "nope", settings: { rows: 10 } })).toBe(reset);
+});

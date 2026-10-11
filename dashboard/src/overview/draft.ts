@@ -35,6 +35,8 @@ function edited(draft: Draft, widgets: StoredWidget[]): Draft {
 
 export function draftReducer(draft: Draft, action: DraftAction): Draft {
   const widgets = draft.layout.widgets;
+  // An edit of a widget that is not in the draft changes nothing (the reset mark included)
+  const absent = (id: string) => !widgets.some((w) => w.id === id);
   switch (action.kind) {
     case "move": {
       const from = widgets.findIndex((w) => w.id === action.id);
@@ -45,13 +47,16 @@ export function draftReducer(draft: Draft, action: DraftAction): Draft {
       return edited(draft, next);
     }
     case "size":
+      if (absent(action.id)) return draft;
       return edited(draft, widgets.map((w): StoredWidget => (w.id === action.id ? { ...w, size: w.size === "wide" ? "normal" : "wide" } : w)));
     case "remove":
+      if (absent(action.id)) return draft;
       return edited(draft, widgets.filter((w) => w.id !== action.id));
     case "add":
       if (widgets.length >= MAX_WIDGETS || widgets.some((w) => w.id === action.id)) return draft;
       return edited(draft, [...widgets, { id: action.id, type: action.type, size: action.size, settings: { ...action.settings } }]);
     case "settings":
+      if (absent(action.id)) return draft;
       return edited(draft, widgets.map((w): StoredWidget => (w.id === action.id ? { ...w, settings: { ...action.settings } } : w)));
     case "replace":
       return { layout: copy(action.layout), reset: false };

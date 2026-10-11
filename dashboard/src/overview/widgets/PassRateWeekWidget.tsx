@@ -5,6 +5,7 @@ import { formatPassRate } from "../../api/analytics";
 import ErrorBanner from "../../components/ErrorBanner";
 import { SkeletonStat } from "../../components/Skeleton";
 import { passRateWeeksQuery } from "../../lib/healthQueries";
+import { passRateWeek } from "./passRateWeek";
 import type { WidgetProps } from "./types";
 
 /** This week's pass rate against last week's, as the API computed them (today's card; one branch when set, else every
@@ -33,7 +34,7 @@ export default function PassRateWeekWidget({ projectId, settings, heading }: Wid
         </>
       )}
       <div className="card-foot">
-        <Link className="link-arrow" to={`/projects/${projectId}/trends`}>Trends <ArrowRight size={14} aria-hidden="true" /></Link>
+        <Link className="link-arrow" to={passRateWeek.link(projectId, settings)}>Trends <ArrowRight size={14} aria-hidden="true" /></Link>
       </div>
     </>
   );
