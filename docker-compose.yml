@@ -38,6 +38,8 @@ x-auth-env: &auth-env
   BASE_URL: https://localhost:${GATEWAY_HTTPS_PORT:-8443}
   # Internal API (GET /internal/v1/users/{id}), used by organization-service's member add
   INTERNAL_API_PASSWORD: ${INTERNAL_API_PASSWORD:?set INTERNAL_API_PASSWORD (service-to-service internal APIs; URL-safe characters)}
+  # Offer Grafana to superusers (ADR-027); set with COMPOSE_PROFILES=monitoring
+  MONITORING_ENABLED: ${MONITORING_ENABLED:-false}
 
 x-organization-env: &organization-env
   <<: *build-env
@@ -295,6 +297,8 @@ services:
       # Must equal the published HTTPS port: the HTTP -> HTTPS redirect is built from it
       GATEWAY_HTTPS_PORT: ${GATEWAY_HTTPS_PORT:-8443}
       GATEWAY_IMPORT_MAX_BODY: ${GATEWAY_IMPORT_MAX_BODY:-25m}
+      # /grafana/ gated by auth-service when true, a 404 otherwise (ADR-027)
+      MONITORING_ENABLED: ${MONITORING_ENABLED:-false}
     volumes:
       - qeos_gateway_certs:/etc/nginx/certs
     networks:
@@ -404,9 +408,18 @@ services:
       # Data source and dashboards come from the repository, read-only (monitoring/grafana)
       GF_PATHS_PROVISIONING: /etc/qeos/grafana/provisioning
       GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/qeos/grafana/dashboards/overview.json
-      # The auth proxy (Task 17 adds the rest of its settings) believes its user header from the
-      # gateway's fixed grafana-front address only
+      # Signed in by the gateway (ADR-027): it sets this header from auth-service's check and always
+      # overwrites a client's. A user is created on first visit, as an Admin of the main organization
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: X-QEOS-User-Email
+      GF_AUTH_PROXY_HEADER_PROPERTY: email
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: Admin
+      # The header is believed from the gateway's fixed grafana-front address only
       GF_AUTH_PROXY_WHITELIST: ${GATEWAY_GRAFANA_FRONT_IP:-172.30.1.10}
+      # The login form and basic auth stay on for the break-glass admin on 127.0.0.1:3000 (the same
+      # Grafana: GF_AUTH_DISABLE_LOGIN_FORM would hide the form there too). Through the gateway nobody
+      # reaches the form without passing auth-service's check first
     ports:
       # Break-glass admin login when auth-service is down: ssh -L 3000:127.0.0.1:3000 <vm>
       - "127.0.0.1:3000:3000"

@@ -5,6 +5,7 @@ FROM nginx:1.27-alpine
 RUN apk add --no-cache openssl gettext curl
 
 COPY nginx.conf.template /etc/qeos/nginx.conf.template
+COPY grafana-on.conf grafana-off.conf /etc/qeos/
 COPY entrypoint.sh /usr/local/bin/qeos-gateway-entrypoint
 RUN chmod +x /usr/local/bin/qeos-gateway-entrypoint
 

@@ -10,6 +10,15 @@ export GATEWAY_HTTPS_PORT GATEWAY_IMPORT_MAX_BODY
 # Substitute ONLY these variables, so NGINX's own $host, $request_uri, ... are left alone
 envsubst '${GATEWAY_HTTPS_PORT} ${GATEWAY_IMPORT_MAX_BODY}' < /etc/qeos/nginx.conf.template > /etc/nginx/nginx.conf
 
+# /grafana/ (ADR-027): the gated Grafana location when monitoring is on, a plain 404 when it is off.
+# The same MONITORING_ENABLED value that makes auth-service offer the Monitoring item, read with the
+# same true values as its settings (pydantic: 1, on, t, true, y, yes, any case).
+: "${MONITORING_ENABLED:=false}"
+case "$(printf '%s' "$MONITORING_ENABLED" | tr '[:upper:]' '[:lower:]')" in
+  1|on|t|true|y|yes) cp /etc/qeos/grafana-on.conf /etc/nginx/grafana.conf ;;
+  *) cp /etc/qeos/grafana-off.conf /etc/nginx/grafana.conf ;;
+esac
+
 # Behind a TLS edge proxy (deploy/ on a VM) every request arrives from the proxy's
 # address, so per-IP rate limits would be shared by all users. GATEWAY_TRUSTED_PROXIES
 # (space-separated CIDRs) names the proxies whose X-Forwarded-For is believed; nginx

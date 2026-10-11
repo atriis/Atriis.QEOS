@@ -296,6 +296,10 @@ http {
             proxy_pass $upstream;
         }
 
+        # ---- Grafana (monitoring profile, ADR-027): grafana-on.conf or grafana-off.conf, chosen by
+        # entrypoint.sh from MONITORING_ENABLED ----
+        include /etc/nginx/grafana.conf;
+
         # ---- unknown API paths ----
         # Longer prefixes and the regex locations above take every routed API path;
         # whatever is left under /api/ keeps the JSON 404 contract instead of
