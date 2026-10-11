@@ -14,7 +14,7 @@
 - **`docker-compose.yml`** gains profile `monitoring` (six containers, pinned tags, memory limits); `scripts/postgres-init.sh` creates role `qeos_monitor` on every `up`.
 - **The sign-in gate:** auth-service adds `monitoring_url` to `/users/me`, `POST /api/v1/auth/grafana-session` (sets the `qeos_grafana` cookie, `Path=/grafana`, 8 h), `GET /internal/v1/grafana-check` (NGINX `auth_request`), and logout clears the cookie. The gateway's `/grafana/` location runs `auth_request`, overwrites `X-QEOS-User-Email`, and answers 404 when monitoring is off. The dashboard gets a **Monitoring** item in the account menu and a `/monitoring` hand-off page.
 
-**Tech Stack:** FastAPI 0.142, Starlette, prometheus-client 0.26.0, SQLAlchemy 2.1, Alembic 1.20, PyJWT 2.15, pytest 9 (SQLite in tests). Prometheus v3.5.0, Alertmanager v0.28.1, Grafana 12.0.2, node-exporter v1.9.1, cAdvisor v0.52.1, postgres-exporter v0.17.1, PostgreSQL 15, NGINX 1.27 (`auth_request`). React 19, TypeScript 6, TanStack Query 5, vitest + msw + Testing Library, lucide-react.
+**Tech Stack:** FastAPI 0.142, Starlette, prometheus-client 0.26.0, SQLAlchemy 2.1, Alembic 1.20, PyJWT 2.15, pytest 9 (SQLite in tests). Prometheus v3.5.0, Alertmanager v0.28.1, Grafana 12.0.2, node-exporter v1.9.1, cAdvisor v0.54.1 (not v0.52.1: it finds no container under Docker's containerd image store), postgres-exporter v0.17.1, PostgreSQL 15, NGINX 1.27 (`auth_request`). React 19, TypeScript 6, TanStack Query 5, vitest + msw + Testing Library, lucide-react.
 
 **Spec:** `docs/superpowers/specs/2026-10-10-monitoring-design.md`, as amended 2026-10-10 to make blueprint §11 (`ARCHITECTURE_BLUEPRINT_V1_0.md`) binding: metric names and labels from §11.2, the process collector, two business metrics, recording rules for the blueprint's PostgreSQL names, and the list of what stays TARGET. Executors read the spec with this plan. Where this plan decides something the spec left open or got wrong against the code, the decision is under **Rulings** and repeated in the task.
 
@@ -75,7 +75,7 @@ Decisions where the spec is silent or wrong against the code. Each is repeated i
 19. **Alertmanager keeps silences only until it restarts** (no volume; the spec lists two volumes).
 20. **`test_case_creation_total{type="api"}`** counts the cases an applied import creates (`summary["created"]`), whether a person or CI sends it; dry runs count nothing. `type="manual"` counts `POST /cases`.
 21. **`ProcessCollector` reads `/proc`:** it exposes nothing on Windows, so tests assert the process series only on Linux (CI).
-22. **Image tags** are versions published well before today: `prom/prometheus:v3.5.0`, `prom/alertmanager:v0.28.1`, `grafana/grafana:12.0.2`, `prom/node-exporter:v1.9.1`, `gcr.io/cadvisor/cadvisor:v0.52.1`, `quay.io/prometheuscommunity/postgres-exporter:v0.17.1`. Task 11 checks each with `docker manifest inspect` before use.
+22. **Image tags** are versions published well before today: `prom/prometheus:v3.5.0`, `prom/alertmanager:v0.28.1`, `grafana/grafana:12.0.2`, `prom/node-exporter:v1.9.1`, `gcr.io/cadvisor/cadvisor:v0.54.1` (v0.52.1 finds no container under Docker's containerd image store, Docker Desktop's default), `quay.io/prometheuscommunity/postgres-exporter:v0.17.1`. Task 11 checks each with `docker manifest inspect` before use.
 
 ## Review Focus
 
@@ -2463,7 +2463,7 @@ git commit -m "feat(monitoring): role qeos_monitor (pg_monitor only) on every up
 - [ ] **Step 1: Check that every pinned image exists**
 
 ```bash
-for image in prom/prometheus:v3.5.0 prom/alertmanager:v0.28.1 grafana/grafana:12.0.2 prom/node-exporter:v1.9.1 gcr.io/cadvisor/cadvisor:v0.52.1 quay.io/prometheuscommunity/postgres-exporter:v0.17.1; do
+for image in prom/prometheus:v3.5.0 prom/alertmanager:v0.28.1 grafana/grafana:12.0.2 prom/node-exporter:v1.9.1 gcr.io/cadvisor/cadvisor:v0.54.1 quay.io/prometheuscommunity/postgres-exporter:v0.17.1; do
   docker manifest inspect "$image" >/dev/null && echo "ok $image" || echo "MISSING $image"
 done
 ```
@@ -2583,7 +2583,8 @@ In `docker-compose.yml`, add before `volumes:` (after `gateway:`):
       retries: 12
 
   cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.52.1
+    # v0.54.1, not v0.52.1: v0.52.1 finds no container under Docker's containerd image store
+    image: gcr.io/cadvisor/cadvisor:v0.54.1
     profiles: [monitoring]
     restart: unless-stopped
     mem_limit: 128m

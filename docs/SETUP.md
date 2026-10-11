@@ -177,6 +177,13 @@ bash deploy/init-env.sh localhost you@example.com
 | `VITE_GOOGLE_CLIENT_ID` | empty | Shows the Google button. Baked in at build time. See [3.8](#38-single-sign-on-google-and-microsoft). |
 | `VITE_MSAL_CLIENT_ID` | empty | Shows the Microsoft button. Baked in at build time. |
 | `VITE_MSAL_AUTHORITY` | `https://login.microsoftonline.com/organizations` | MSAL authority. |
+| `COMPOSE_PROFILES` | empty | `monitoring` starts Prometheus, Alertmanager, Grafana and the exporters ([7.4](#74-monitoring-optional)). |
+| `MONITORING_ENABLED` | `false` | For the QEOS sign-in to Grafana, which is not built yet; nothing reads it today. |
+| `GRAFANA_ADMIN_PASSWORD`, `MONITORING_DB_PASSWORD` | empty | Required with monitoring: Grafana's admin login (read on its first start only), and the password of PostgreSQL role `qeos_monitor`. |
+| `ALERT_EMAIL_TO`, `ALERT_SLACK_WEBHOOK_URL`, `ALERT_TEAMS_WEBHOOK_URL` | empty | Alert channels; each turns on when set. Email also needs `SMTP_HOST`. |
+| `PROMETHEUS_RETENTION`, `PROMETHEUS_RETENTION_SIZE`, `POSTGRES_DB_SIZE_ALERT_GB` | `15d`, `5GB`, `20` | Metrics kept, their disk cap, and the database size alert. |
+| `GRAFANA_FRONT_SUBNET`, `GRAFANA_FRONT_IP_RANGE`, `GATEWAY_GRAFANA_FRONT_IP` | `172.30.1.0/24`, `172.30.1.128/25`, `172.30.1.10` | The gateway always joins a network with this fixed range, monitoring or not. Change all three only if the host already uses it ([7.4](#74-monitoring-optional)). |
+| `QEOS_COMMIT`, `QEOS_VERSION` | `unknown`, `dev` | Reported by every service in its `build_info` metric. |
 
 **Production only** (written by `init-env.sh` and read by `deploy/docker-compose.prod.yml`):
 `QEOS_DOMAIN` (the public host name) and `ACME_EMAIL` (Let's Encrypt notices). Optional:
@@ -1354,7 +1361,7 @@ Move to a VM when colleagues depend on the data, hosted CI must report all the t
 become worth keeping. The full guide is **[`deploy/README.md`](../deploy/README.md)**. In short:
 
 1. An Ubuntu 24.04 VM (2 vCPU, 4 GB RAM, 30 GB disk is enough for a pilot), a DNS A record, and
-   inbound 443 and 80 from anywhere, plus 22 from your IP only.
+   inbound 443 and 80 from anywhere, plus 22 from your IP only. With monitoring ([7.4](#74-monitoring-optional)), use 8 GB RAM.
 2. Install Docker, clone the repository, then:
    ```bash
    bash deploy/init-env.sh qeos.example.com ops@example.com
@@ -1461,6 +1468,30 @@ docker compose exec -T postgres psql -U postgres -f /tmp/qeos-backup.sql
 docker compose up -d --build --wait gateway
 ```
 One `ERROR: role "postgres" already exists` during the restore is expected.
+
+### 7.4 Monitoring (optional)
+
+Prometheus, Alertmanager and Grafana with node-exporter, cAdvisor and postgres-exporter, as the compose
+profile `monitoring`. In `.env`:
+
+```
+COMPOSE_PROFILES=monitoring
+GRAFANA_ADMIN_PASSWORD=<letters and digits>
+MONITORING_DB_PASSWORD=<letters and digits>
+```
+
+then `docker compose up -d --build --wait` (without a service name, which would start only the
+platform). Prometheus then scrapes every service, and Alertmanager sends alerts to the channels you
+set. The QEOS sign-in to Grafana (the **Monitoring** menu item and `https://localhost:8443/grafana/`)
+and the starter dashboards are not built yet; for now open Grafana's own admin login on the machine
+that runs the stack: `http://localhost:3000/grafana/login`, user `admin`. Alert channels, resources,
+break-glass access from a VM, the security notes and turning it off: `deploy/README.md` section 10.
+Every service also serves `/metrics` inside the compose network whether or not the profile is on; the
+gateway never routes it.
+
+The gateway always joins a Docker network fixed at `172.30.1.0/24`, with monitoring on or off. If
+`docker compose up` fails with an address-pool overlap, set `GRAFANA_FRONT_SUBNET`,
+`GRAFANA_FRONT_IP_RANGE` and `GATEWAY_GRAFANA_FRONT_IP` in `.env` (`deploy/README.md`, "Address range").
 
 ---
 

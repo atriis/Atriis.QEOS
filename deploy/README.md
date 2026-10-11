@@ -14,6 +14,8 @@ internet ──443──▶ edge (Caddy, Let's Encrypt) ──▶ gateway (NGINX
 
 - **A VM**: Ubuntu 24.04 LTS, 2 vCPU, 4 GB RAM, 30 GB disk is enough for a pilot
   (Azure `B2s`, AWS `t3.medium` or similar).
+  With the optional monitoring profile (section 10), use **8 GB RAM** (`B2ms`, `t3.large`): its six
+  containers can use about 1.1 GB together.
 - **A domain name** you can add a DNS record to, e.g. `qeos.example.com`.
 - **An email address** for Let's Encrypt certificate-expiry notices.
 
@@ -26,6 +28,8 @@ internet ──443──▶ edge (Caddy, Let's Encrypt) ──▶ gateway (NGINX
    - `22/tcp` from your own IP only (SSH)
 
    Nothing else: PostgreSQL and the services are never published.
+3. The gateway always joins a small Docker network, `grafana-front`, fixed at `172.30.1.0/24`, even
+   with monitoring off. If the VM already uses that range, `up` fails: see "Address range" in section 10.
 
 ## 3. Install Docker
 
@@ -45,7 +49,7 @@ bash deploy/init-env.sh qeos.example.com ops@example.com
 ```
 
 `init-env.sh` writes `.env` (mode 600, git-ignored) with the domain and freshly generated
-secrets: `SECRET_KEY`, `INTERNAL_API_PASSWORD`, `POSTGRES_PASSWORD`, `TM_SECRETS_KEY`. It refuses to overwrite
+secrets: `SECRET_KEY`, `INTERNAL_API_PASSWORD`, `POSTGRES_PASSWORD`, `TM_SECRETS_KEY`, `GRAFANA_ADMIN_PASSWORD`, `MONITORING_DB_PASSWORD`. It refuses to overwrite
 an existing `.env`. **Back this file up somewhere safe**: losing it means losing access to
 the database. Include it in every `.env` backup: `TM_SECRETS_KEY` encrypts the GitHub tokens used to
 run tests from QEOS, and losing it means re-entering each project's GitHub token.
@@ -163,8 +167,122 @@ working after `git pull`; only these settings change name:
 
 ## 9. Security notes
 
-- Only Caddy publishes ports. The gateway trusts `X-Forwarded-For` from Caddy's fixed
+- Only Caddy publishes ports to the network (with monitoring on, Grafana also listens on `127.0.0.1:3000`
+  of the VM itself, see section 10). The gateway trusts `X-Forwarded-For` from Caddy's fixed
   address alone, so per-IP rate limits (login: 5 requests/s) apply to each real client.
 - Caddy sends `Strict-Transport-Security`, and renews the certificate on its own.
 - `.env` holds every secret. Changing `SECRET_KEY` signs everyone out; API keys keep working.
 - Keep the OS patched: `sudo apt-get upgrade` monthly, or enable unattended upgrades.
+
+## 10. Monitoring (optional)
+
+Prometheus, Alertmanager and Grafana run as the compose profile `monitoring`, with node-exporter (the
+VM), cAdvisor (containers) and postgres-exporter. Off by default; an install without it runs exactly as
+before. Design: `docs/superpowers/specs/2026-10-10-monitoring-design.md`.
+
+> **Status.** The stack, the metrics, the alert rules and the alert channels are built. The QEOS sign-in
+> to Grafana (the account-menu **Monitoring** item and `https://<domain>/grafana/` through the gateway)
+> and the starter dashboards are the next phase and are **not built yet**. Today the way into Grafana is
+> the break-glass login below, and it shows no dashboards yet. Prometheus is not published; it works
+> and fires alerts regardless.
+
+**Turn it on.** In `.env` (an install from before monitoring: add the two passwords by hand, letters and
+digits, 32+ characters):
+
+```bash
+COMPOSE_PROFILES=monitoring
+GRAFANA_ADMIN_PASSWORD=...
+MONITORING_DB_PASSWORD=...
+```
+
+`MONITORING_ENABLED=true` belongs to the sign-in phase; nothing reads it yet, so leaving it out is fine.
+Then `qeos up -d --build --wait` (no service name: naming `edge` or `gateway` starts only the platform,
+not the profile's containers). `db-init` creates the PostgreSQL role `qeos_monitor` on that `up`: it is a
+member of `pg_monitor` only, so it reads statistics and settings and no table data, but it can see query
+text in `pg_stat_activity`. The first `up` after this release also restarts PostgreSQL once, to load
+`pg_stat_statements`. Grafana and postgres-exporter refuse to start while their password is empty.
+
+**Grafana's admin password is read on its first start only.** Changing `GRAFANA_ADMIN_PASSWORD`
+afterwards does not change the login. Either reset it in place:
+`qeos exec grafana grafana cli admin reset-admin-password '<new password>'`, or, since Grafana keeps nothing
+you would miss (its dashboards will be provisioned from the repository), delete its volume (`qeos rm -sf grafana`, then
+`docker volume rm qa-vision_qeos_grafana_data`) and start again.
+
+**Resources.** Six containers with these memory limits: Prometheus 512 MB, Grafana 256 MB, cAdvisor
+128 MB, Alertmanager, node-exporter and postgres-exporter 64 MB each, about 1.1 GB in all. Use a VM with
+8 GB RAM (4 GB is enough without monitoring).
+
+**What the exporters show.**
+
+- node-exporter runs on the compose network, not with `network_mode: host`, so its **network** metrics
+  are the container's, not the VM's. CPU, memory and disk are the VM's. Disk metrics of a mount added
+  after start need a restart of node-exporter.
+- postgres-exporter (v0.17.1) is deliberately run **without statement query text**: query literals could
+  copy secrets or personal data into Prometheus. The slowest-statements view shows the `queryid` and
+  timings only.
+- cAdvisor is v0.54.1: v0.52.1 finds no container under Docker's containerd image store.
+
+**Alerts.** Each channel turns on when its settings are present; an unset one is left out:
+
+| Variable | Channel |
+|---|---|
+| `ALERT_EMAIL_TO` | Email (comma-separated addresses). Reuses `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_TLS`, `EMAILS_FROM_EMAIL`; without `SMTP_HOST` email stays off. |
+| `ALERT_SLACK_WEBHOOK_URL` | Slack incoming webhook |
+| `ALERT_TEAMS_WEBHOOK_URL` | Microsoft Teams workflow webhook |
+
+Critical alerts (service down, 5xx burst, disk filling up, PostgreSQL down) go to every channel; warnings
+(slow requests, stale or failing jobs, rejected uploads, memory pressure, connections, database size) go
+to Slack and Teams, or to email when it is the only channel. With no channel, alerts are only held in
+Alertmanager. The channel settings are read when Alertmanager starts: after changing them, run
+`qeos up -d --force-recreate alertmanager`. Check what was configured:
+`qeos logs alertmanager | grep channels`. Silences last until Alertmanager restarts.
+
+| Variable | Default | |
+|---|---|---|
+| `PROMETHEUS_RETENTION` | `15d` | How long metrics are kept |
+| `PROMETHEUS_RETENTION_SIZE` | `5GB` | Cap on Prometheus's disk use |
+| `POSTGRES_DB_SIZE_ALERT_GB` | `20` | `PostgresDatabaseGrowing` fires above this |
+
+**Version.** `QEOS_COMMIT=$(git rev-parse --short HEAD) qeos up -d --build --wait` makes every service
+report the deployed commit in its `build_info` metric (`unknown` otherwise; `QEOS_VERSION` defaults to
+`dev`).
+
+**Address range.** The gateway has a fixed address on the network it shares with Grafana, and Grafana
+trusts the user header only from that address. The defaults are `172.30.1.0/24`, the gateway at
+`172.30.1.10`. The network is created even with monitoring off, so if the VM already uses that range
+`up` fails. Pick a free range and set all three in `.env` (the Grafana whitelist follows the gateway
+address):
+
+```bash
+GRAFANA_FRONT_SUBNET=10.99.7.0/24
+GRAFANA_FRONT_IP_RANGE=10.99.7.128/25   # the upper half: Docker hands out addresses from here
+GATEWAY_GRAFANA_FRONT_IP=10.99.7.10     # inside the subnet, outside that range
+```
+
+The production edge's own network uses `172.30.0.0/24`; keep the two apart. Changing the range of an
+existing install needs the network recreated: `qeos down`, then `up` (data volumes are kept).
+
+**Break-glass.** Grafana's own admin login works from the VM only. From your machine:
+`ssh -L 3000:127.0.0.1:3000 <vm>`, then `http://localhost:3000/grafana/login`, user `admin`, password
+`GRAFANA_ADMIN_PASSWORD`. Port 3000 is bound to `127.0.0.1` of the VM and is not reachable from outside.
+
+**Security.** Grafana is on the `grafana-front` network (with the gateway only) and on `monitoring`, not
+on the platform's network, so no service container can resolve it by name. Its auth proxy
+(`GF_AUTH_PROXY_WHITELIST`) believes a user header only from the gateway's fixed address. One residual
+remains: because the break-glass port is published, Docker 28 and later makes Grafana's `grafana-front`
+address reachable by IP from other containers on the host. Such requests arrive from the network's
+bridge gateway (`172.30.1.128`), not from the whitelisted gateway, so the auth proxy ignores any user
+header they send, and they get nothing beyond Grafana's own login, which still needs the admin
+password. Keep `GRAFANA_ADMIN_PASSWORD` strong; `init-env.sh` generates 32 characters. The query text
+visible to `qeos_monitor` is described in `SECURITY.md`.
+
+**Dead-man's switch (not built).** The `Watchdog` alert always fires and goes nowhere. To be told when the
+whole VM or Alertmanager is gone, route `Watchdog` to an external heartbeat service (any hosted "dead
+man's snitch") by editing `monitoring/alertmanager/alertmanager.yml.template`.
+
+**Data.** Volumes `qa-vision_qeos_prometheus_data` and `qa-vision_qeos_grafana_data`. Grafana needs no
+backup (its dashboards will be provisioned from the repository); `deploy/backup.sh` is unchanged.
+
+**Turn it off.** Remove `COMPOSE_PROFILES=monitoring`, then stop and remove the six containers (Compose
+does not do this for a profile that was switched off):
+`qeos --profile monitoring rm -sf prometheus alertmanager grafana node-exporter cadvisor postgres-exporter`.

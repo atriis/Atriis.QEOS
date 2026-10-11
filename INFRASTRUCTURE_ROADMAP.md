@@ -3,8 +3,8 @@
 > **Status (2026-10-11): a target plan written in July 2026, not a description of what runs.**
 > None of the `infra/` deliverables below exist. What is true today: services log to stdout
 > (the gateway writes one JSON line per request) and every service serves Prometheus `/metrics`;
-> the monitoring stack (Prometheus, Alertmanager, Grafana as an opt-in compose profile) is in
-> progress (`docs/superpowers/specs/2026-10-10-monitoring-design.md`). CI runs every test suite,
+> the monitoring stack is an opt-in compose profile (Prometheus, Alertmanager, exporters and alert rules built; Grafana
+> sign-in and dashboards in progress, `docs/superpowers/specs/2026-10-10-monitoring-design.md`). CI runs every test suite,
 > container smoke tests and a full-stack gateway smoke (`.github/workflows/ci.yml`); CodeQL and
 > Dependabot cover security scanning (2.2, in part); the gateway enforces per-IP rate limits (2.3,
 > in part). No Loki, Jaeger, Istio, Vault, Kafka/schema registry, autoscaling, chaos tooling,

@@ -105,7 +105,18 @@ details.
 - **Monitoring database role.** With monitoring on, PostgreSQL gets a login role
   `qeos_monitor` that is a member of `pg_monitor` only: it reads statistics and
   settings and cannot read table data. It can still see query text in
-  `pg_stat_activity` and `pg_stat_statements`, which may contain literals.
+  `pg_stat_activity` and `pg_stat_statements`, which may contain literals. The
+  exporter that feeds Prometheus runs without statement text, so query literals
+  are not copied into the metrics.
+- **Grafana break-glass port (monitoring).** Grafana publishes `127.0.0.1:3000`
+  for an admin login when auth-service is down. Because that port is published,
+  Docker 28 and later makes Grafana's address on its `grafana-front` network
+  reachable by IP from other containers on the host. Their requests arrive from
+  the network's bridge gateway (`172.30.1.128`), not from the gateway's fixed
+  address that Grafana's auth proxy trusts (`GF_AUTH_PROXY_WHITELIST`), so a user
+  header they send is ignored and they reach only Grafana's own login, which
+  needs `GRAFANA_ADMIN_PASSWORD`. A container that is already compromised could
+  try that password; keep it long and random (`init-env.sh` does).
 - **Data.** Per-project retention, legal hold and a full NDJSON export.
 - **Production package** (`deploy/`). A Caddy TLS edge with Let's Encrypt and
   HSTS is the only published service. Secrets are generated into a mode-600
@@ -121,8 +132,9 @@ details.
 - Rate limits are per gateway instance (no shared store).
 - Planned, not built: SAML, GitHub sign-in (answers 501), an audit log,
   secrets management (Vault), a GitHub App instead of personal tokens for Run
-  from QEOS, and per-action permissions. Monitoring and alerting are in
-  progress (`docs/superpowers/specs/2026-10-10-monitoring-design.md`).
+  from QEOS, and per-action permissions. Monitoring: the Prometheus, Alertmanager and exporter
+  stack is built; the QEOS sign-in to Grafana and its dashboards are in progress
+  (`docs/superpowers/specs/2026-10-10-monitoring-design.md`).
 
 ## Acknowledgments
 

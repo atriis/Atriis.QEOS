@@ -44,7 +44,9 @@ numbers in platforms/ingestion-service/README.md.
    opt-in compose profile (spec `docs/superpowers/specs/2026-10-10-monitoring-design.md`,
    plan `docs/superpowers/plans/2026-10-10-monitoring.md`). Phase 1 of 3
    shipped 2026-10-11: `/metrics` with blueprint names on every service and job
-   heartbeats; Phase 2 (the stack) and Phase 3 (Grafana) follow.
+   heartbeats. Phase 2 (the stack: Prometheus, Alertmanager, exporters, alert
+   rules) built and pushed with this phase; Grafana sign-in and dashboards
+   (Phase 3) next.
 8. Then, in the order agreed 2026-10-08 (TODO.md "Execution intelligence and
    operations"): customisable Overview, test impact analysis.
 

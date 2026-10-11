@@ -29,8 +29,10 @@ providers (verification), notification webhooks and SMTP. No event bus exists
 (Kafka is a blueprint target gated on the 1000+ events/s trigger). Every
 service serves Prometheus `/metrics` (never routed by the gateway); ingestion also
 exposes job heartbeats (`job_last_success_timestamp_seconds{job}`, from the
-`job_heartbeats` table, migration 017). The monitoring stack that will scrape them is
-in progress (`docs/superpowers/specs/2026-10-10-monitoring-design.md`).
+`job_heartbeats` table, migration 017). The opt-in `monitoring` compose profile (Prometheus, Alertmanager,
+node-exporter, cAdvisor, postgres-exporter, alert rules) scrapes them; Grafana
+sign-in and dashboards are next
+(`docs/superpowers/specs/2026-10-10-monitoring-design.md`).
 
 ## 2. Services
 
@@ -238,7 +240,7 @@ Azure templates (`templates/`), and per release tag a zipapp and a GHCR image.
 Event bus/Kafka, CDC, data lake/warehouse, knowledge graph, vector store,
 Redis, MinIO, Elasticsearch, Kubernetes/service mesh/Vault/GitOps, QIP
 services, SDKs, mobile, AI features. Monitoring stack (Prometheus,
-Alertmanager, Grafana as an opt-in compose profile): in progress, plan
+Alertmanager, Grafana as an opt-in compose profile): stack built, Grafana sign-in and dashboards in progress, plan
 `docs/superpowers/plans/2026-10-10-monitoring.md`. `execution/`, `automation/`, `marketplace/`,
 `collaboration/`, `intelligence/`, `platforms/qip-service` are unwired
 prototypes excluded from compose/CI/gateway.
