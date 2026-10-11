@@ -81,6 +81,29 @@ describe("Monitoring item", () => {
     expect(goTo).not.toHaveBeenCalled();
   });
 
+  test("while the hand-off runs the item is aria-disabled, keeps focus and ignores more clicks", async () => {
+    let calls = 0;
+    let release: () => void = () => {};
+    server.use(
+      http.post("/api/v1/auth/grafana-session", async () => {
+        calls += 1;
+        await new Promise<void>((r) => { release = r; });
+        return HttpResponse.json({ url: "/grafana/" });
+      }),
+    );
+    renderMenu({ monitoring_url: "/grafana/" });
+    const popup = await openMenu();
+    const item = within(popup).getByRole("button", { name: "Monitoring" });
+    await userEvent.click(item);
+    await vi.waitFor(() => expect(item).toHaveAttribute("aria-disabled", "true"));
+    expect(item).toHaveFocus();
+    await userEvent.click(item);
+    await vi.waitFor(() => expect(calls).toBe(1));
+    release();
+    await vi.waitFor(() => expect(goTo).toHaveBeenCalledTimes(1));
+    expect(calls).toBe(1);
+  });
+
   test("a URL the server answers that is not inside Grafana is not followed", async () => {
     server.use(http.post("/api/v1/auth/grafana-session", () => HttpResponse.json({ url: "https://evil.example/" })));
     renderMenu({ monitoring_url: "/grafana/" });

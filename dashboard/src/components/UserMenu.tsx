@@ -72,7 +72,9 @@ export default function UserMenu({ orgId }: Props) {
 
   // Grafana is outside the SPA: hand over its cookie first, then leave (ADR-027). The hand-off is marked
   // so /monitoring asks instead of handing over again if Grafana sends the browser straight back
+  // aria-disabled, not disabled, while it runs: a disabled button would drop focus to <body>
   async function onMonitoring() {
+    if (monitoringBusy) return;
     setMonitoringError(null);
     setMonitoringBusy(true);
     try {
@@ -128,7 +130,7 @@ export default function UserMenu({ orgId }: Props) {
             )}
             {monitoringUrl && (
               <li>
-                <button type="button" className="menu-item" onClick={onMonitoring} disabled={monitoringBusy}>
+                <button type="button" className="menu-item" onClick={onMonitoring} aria-disabled={monitoringBusy || undefined}>
                   <Activity size={16} aria-hidden="true" /> Monitoring
                 </button>
                 {monitoringError && (

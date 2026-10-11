@@ -40,8 +40,8 @@ describe("MonitoringPage", () => {
 
   test("next is decoded exactly once, and + stays a +", async () => {
     server.use(http.post("/api/v1/auth/grafana-session", () => HttpResponse.json({ url: "/grafana/" })));
-    renderAt("/monitoring?next=/grafana/d/a%2520b+c");
-    await vi.waitFor(() => expect(goTo).toHaveBeenCalledWith("/grafana/d/a%20b+c"));
+    renderAt("/monitoring?next=/grafana/d/a%2Db+c");
+    await vi.waitFor(() => expect(goTo).toHaveBeenCalledWith("/grafana/d/a-b+c"));
   });
 
   test("a hostile next opens Grafana's home", async () => {
@@ -105,6 +105,28 @@ describe("MonitoringPage", () => {
     expect(calls).toBe(1);
   });
 
+  test("sessionStorage that throws: asks instead of handing over (no loop)", async () => {
+    let calls = 0;
+    server.use(
+      http.post("/api/v1/auth/grafana-session", () => {
+        calls += 1;
+        return HttpResponse.json({ url: "/grafana/" });
+      }),
+    );
+    const getItem = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("blocked", "SecurityError");
+    });
+    try {
+      renderAt("/monitoring?next=/grafana/d/qeos-overview");
+      expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
+      await new Promise((r) => setTimeout(r, 50));
+      expect(calls).toBe(0);
+      expect(goTo).not.toHaveBeenCalled();
+    } finally {
+      getItem.mockRestore();
+    }
+  });
+
   test("an old hand-off mark does not stop a fresh one", async () => {
     server.use(http.post("/api/v1/auth/grafana-session", () => HttpResponse.json({ url: "/grafana/" })));
     sessionStorage.setItem("qeos.grafanaHandoff", String(Date.now() - 60_000));
@@ -120,6 +142,7 @@ describe("grafanaPath", () => {
     ["/grafana/", "/grafana/"],
     ["/grafana/d/qeos-overview", "/grafana/d/qeos-overview"],
     ["/grafana/d/qeos-overview/overview%3ForgId%3D1", "/grafana/d/qeos-overview/overview?orgId=1"],
+    ["/grafana/d/qeos-postgresql/postgresql", "/grafana/d/qeos-postgresql/postgresql"],
     ["%2Fgrafana%2Fd%2Fx", "/grafana/d/x"],
     ["/projects/1", "/grafana/"],
     ["/grafana", "/grafana/"],
@@ -146,6 +169,11 @@ describe("grafanaPath", () => {
     ["/grafana/%00", "/grafana/"],
     ["/grafana/%E0%A4%A", "/grafana/"],
     ["/grafana/%", "/grafana/"],
+    ["/grafana/..%252fprojects/1", "/grafana/"],
+    ["/grafana/..%252fmonitoring", "/grafana/"],
+    ["/grafana/%252e%252e%252f", "/grafana/"],
+    ["/grafana/%255cevil", "/grafana/"],
+    ["/grafana/d/x%2541", "/grafana/"],
   ])("%s -> %s", (raw, expected) => {
     expect(grafanaPath(raw)).toBe(expected);
   });

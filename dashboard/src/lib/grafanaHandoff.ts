@@ -19,9 +19,9 @@ export function rawQueryParam(search: string, name: string): string | null {
 /**
  * Where a raw (percent-encoded) `next` may lead: the decoded path when it is plainly inside Grafana on this
  * site, else Grafana's home. Anyone can craft a /monitoring?next= link, so the gateway's own restriction is
- * not relied on. Decoded exactly once; refused when the result does not start with "/grafana/", or holds
- * "//" after the first character, a backslash, a scheme (":" before the first "/"), a "." or ".." segment
- * (also as %2e, which browsers resolve too), or any whitespace or control character.
+ * not relied on. Decoded exactly once; refused when the result does not start with "/grafana/", or still
+ * holds a "%" (a second decode downstream could turn it into "../" or "/"), "//" after the first character,
+ * a backslash, a "." or ".." segment, or any whitespace or control character.
  */
 export function grafanaPath(raw: string | null): string {
   if (!raw) return GRAFANA_HOME;
@@ -31,14 +31,16 @@ export function grafanaPath(raw: string | null): string {
   } catch {
     return GRAFANA_HOME; // malformed percent-encoding
   }
+  // The prefix is the guard against other sites and schemes: nothing before it can name a host
   if (!path.startsWith(GRAFANA_HOME)) return GRAFANA_HOME;
+  // A "%" left after the one decode would be decoded again by the gateway ("..%2f" -> "../", leaving the
+  // gated location). Grafana's uid/slug paths never need one, and the gateway drops the query anyway
+  if (path.includes("%")) return GRAFANA_HOME;
   if (path.indexOf("//", 1) !== -1) return GRAFANA_HOME;
   // eslint-disable-next-line no-control-regex
   if (/[\\\s\u0000-\u001f\u007f-\u009f]/.test(path)) return GRAFANA_HOME;
-  const colon = path.indexOf(":");
-  if (colon !== -1 && colon < path.indexOf("/")) return GRAFANA_HOME;
   const segments = path.split(/[?#]/)[0].split("/");
-  if (segments.some((s) => /^(?:\.|%2e){1,2}$/i.test(s))) return GRAFANA_HOME;
+  if (segments.some((s) => s === "." || s === "..")) return GRAFANA_HOME;
   return path;
 }
 
