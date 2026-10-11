@@ -45,7 +45,8 @@ ships five provisioned dashboards, and its sign-in gate is next
   body token kept for API clients; `/auth/refresh-token` and `/auth/logout`
   accept body or cookie. The pre-rename cookie `qav_refresh` is still read when
   `qeos_refresh` is absent; every token issue clears it, and logout clears both
-  cookies and revokes the session behind each.
+  cookies (and `qeos_grafana`) on every answer, even with an expired access
+  token, and revokes the session behind each.
 - Password reset and change: `/auth/forgot-password` sends a single-use link
   (token stored SHA-256-hashed, 30 min); `/auth/reset-password`,
   `/auth/change-password`; a reset or change ends every session.

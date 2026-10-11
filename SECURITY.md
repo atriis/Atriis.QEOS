@@ -114,7 +114,12 @@ details.
   superuser, and only while `MONITORING_ENABLED` is true, the `qeos_grafana`
   cookie: httpOnly, Secure, SameSite=Strict, `Path=/grafana`, 8 hours. It is a
   JWT with its own audience (`grafana`), so it is refused as an API bearer
-  token, and an access token is refused in its place. Logout clears it.
+  token, and an access token is refused in its place. Logout clears it on
+  every answer, including when the access token has already expired. It is
+  bound to the password: a `pwv` claim (a keyed digest of the password hash)
+  makes a password change or reset invalidate every Grafana cookie. Logging
+  out on another device does not: a copied cookie keeps working until it
+  expires, an accepted residual like the 60-minute access token.
 - **Grafana break-glass port (monitoring).** Grafana publishes `127.0.0.1:3000`
   for an admin login when auth-service is down. Because that port is published,
   Docker 28 and later makes Grafana's address on its `grafana-front` network

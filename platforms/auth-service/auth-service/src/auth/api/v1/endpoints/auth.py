@@ -1,7 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 import hashlib
 import logging
 import secrets
@@ -25,7 +27,13 @@ from src.auth.utils.refresh_cookie import (
     read_refresh_cookie,
     set_refresh_cookie,
 )
-from src.auth.utils.grafana_session import MONITORING_URL, clear_grafana_cookie, create_grafana_token, set_grafana_cookie
+from src.auth.utils.grafana_session import (
+    MONITORING_URL,
+    clear_grafana_cookie,
+    create_grafana_token,
+    password_version,
+    set_grafana_cookie,
+)
 from src.auth.config import settings
 
 logger = logging.getLogger(__name__)
@@ -387,30 +395,50 @@ def logout_user(
     *,
     db: Session = Depends(deps.get_db),
     http_request: Request,
-    response: Response,
-    request: RefreshTokenRequest,
-    current_user: dict = Depends(deps.get_current_active_user)
+    request: Optional[RefreshTokenRequest] = None,
+    token: Optional[str] = Depends(deps.optional_oauth2_scheme),
 ):
     """
-    Logout user by revoking the refresh token (body or cookie). The cookie is
-    cleared either way, so logout is idempotent for browsers.
+    Logout user by revoking the refresh token (body or cookie). Every answer -- 200, 400 and 401
+    alike -- clears the refresh cookies and the Grafana cookie, so a browser always ends signed
+    out. An HTTPException would drop those Set-Cookie headers, which left both cookies alive on a
+    shared machine whenever the tab had idled past the access token's 60 minutes.
     """
-    presented = request.refresh_token or read_refresh_cookie(http_request)[0]
+    status_code, body = _end_session(db, http_request, request, token)
+    response = JSONResponse(status_code=status_code, content=body)
+    if status_code == status.HTTP_401_UNAUTHORIZED:
+        response.headers["WWW-Authenticate"] = "Bearer"
     clear_refresh_cookie(response)
     clear_grafana_cookie(response)  # the Grafana hand-off ends with the session (ADR-027)
+    return response
+
+
+def _end_session(
+    db: Session, http_request: Request, request: Optional[RefreshTokenRequest], token: Optional[str]
+) -> tuple[int, dict]:
+    """Revokes what can be revoked and says how logout should answer.
+
+    With a valid access token, only refresh tokens of that user are revoked (knowing someone else's
+    token value does not let you end their session), and an unknown token is a 400. Without one
+    (expired, missing), the refresh tokens presented are themselves the credential: whoever holds
+    one can already spend it at /auth/refresh-token, which revokes it on rotation, so revoking it
+    here grants nothing more. That case still answers 401."""
+    presented = (request.refresh_token if request else None) or read_refresh_cookie(http_request)[0]
     # Both cookies can arrive (one from before the QEOS rename): end the legacy one's session too
     legacy = legacy_refresh_cookie(http_request)
+    current_user = deps.user_from_access_token(db, token)
+    if current_user is None:
+        for value in {presented, legacy} - {None, ""}:
+            AuthService.revoke_refresh_token(db, value, user_id=None)
+        return status.HTTP_401_UNAUTHORIZED, {"detail": "Could not validate credentials"}
     if legacy and legacy != presented:
         AuthService.revoke_refresh_token(db, legacy, user_id=current_user.id)
-    if not presented:
-        return {"message": "Successfully logged out"}
-    success = AuthService.revoke_refresh_token(db, presented, user_id=current_user.id)
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid refresh token"
-        )
-    return {"message": "Successfully logged out"}
+    revoked = AuthService.revoke_refresh_token(db, presented, user_id=current_user.id) if presented else True
+    if not current_user.is_active:
+        return status.HTTP_400_BAD_REQUEST, {"detail": "Inactive user"}
+    if not revoked:
+        return status.HTTP_400_BAD_REQUEST, {"detail": "Invalid refresh token"}
+    return status.HTTP_200_OK, {"message": "Successfully logged out"}
 
 
 @router.post("/grafana-session")
@@ -426,7 +454,7 @@ def grafana_session(response: Response, current_user: User = Depends(deps.get_cu
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Monitoring is available to superusers while it is turned on",
         )
-    set_grafana_cookie(response, create_grafana_token(current_user.id))
+    set_grafana_cookie(response, create_grafana_token(current_user.id, password_version(current_user)))
     return {"url": MONITORING_URL}
 
 
