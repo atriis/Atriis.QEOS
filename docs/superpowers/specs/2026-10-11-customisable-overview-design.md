@@ -243,4 +243,7 @@ rulings); they replace the text above where they differ:
   guard and its wording.
 - In project mode the reset button reads "Reset to built-in default".
 - Customise ships at the Phase 2 push, so Phase 2 documents what it ships; Phase 3 completes the docs (§6, §7).
-
+- The body limit is 64 KB (65536 bytes), not 16 KB: 24 widgets with 255-character branch and author
+  settings in multibyte UTF-8 reach about 49 KB, so 16 KB would refuse layouts every field rule allows (§3.2).
+- An absent `branch` setting means all branches; there is no `"all"` value, so a git branch named `all`
+  stays selectable (§2.4).
