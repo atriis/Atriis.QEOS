@@ -31,6 +31,11 @@ def _check_setting(where: str, name: str, value: Any) -> None:
     low, high = spec["min_length"], spec["max_length"]
     if not isinstance(value, str) or not low <= len(value) <= high or "\x00" in value:
         raise LayoutError(f"{where}: must be {low}-{high} characters with no NUL")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        # A lone surrogate: JSON allows it, PostgreSQL would reject it
+        raise LayoutError(f"{where}: must be valid text (a lone surrogate is not)")
 
 
 def validate_layout(layout: Any) -> dict:

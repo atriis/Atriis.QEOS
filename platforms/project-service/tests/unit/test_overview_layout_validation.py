@@ -86,6 +86,8 @@ def test_the_limits_themselves_pass():
     (layout(widget(type="recent_runs", branch=3)), "1-255 characters"),
     (layout(widget(type="my_failures", author="y" * 256)), "1-255 characters"),
     (layout(widget(type="my_failures", author="")), "1-255 characters"),
+    (layout(widget(type="recent_runs", branch="a" + chr(0xD800))), "lone surrogate"),
+    (layout(widget(type="my_failures", author=chr(0xDC00) + "b")), "lone surrogate"),
     (layout(widget(type="my_failures", author="a\x00b")), "no NUL"),
     ("not an object", "layout must be an object"),
     (layout("w1"), "widgets[0] must be an object"),
