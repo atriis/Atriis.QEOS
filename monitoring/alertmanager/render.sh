@@ -40,6 +40,27 @@ q() {
   esac
 }
 
+# A .env saved with CRLF leaves a trailing CR on every value, which amtool rejects in a URL (Alertmanager
+# would then not start): trailing CR and whitespace are dropped from each channel setting. SMTP_PASSWORD
+# loses a trailing CR only, since a password may end in a space.
+cr="$(printf '\r')"
+trim() {
+  v="$1"
+  while :; do
+    case "$v" in
+      *"$cr"|*" "|*"	") v="${v%?}" ;;
+      *) break ;;
+    esac
+  done
+  printf '%s' "$v"
+}
+for var in ALERT_EMAIL_TO ALERT_SLACK_WEBHOOK_URL ALERT_TEAMS_WEBHOOK_URL SMTP_HOST SMTP_PORT SMTP_TLS SMTP_USER EMAILS_FROM_EMAIL; do
+  eval "val=\${$var:-}"
+  eval "$var=\$(trim \"\$val\")"
+done
+SMTP_PASSWORD="${SMTP_PASSWORD:-}"
+SMTP_PASSWORD="${SMTP_PASSWORD%"$cr"}"
+
 email=""
 slack=""
 teams=""

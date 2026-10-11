@@ -84,6 +84,20 @@ skip_amtool=0
 expect newline_url 'webhook_url: "https://h.example/x\ny"' 2
 expect newline_url "send_resolved: true" 2
 
+# A .env saved with CRLF leaves a trailing CR on every value; amtool rejects such a URL, so Alertmanager
+# would not start. Trailing CR and whitespace are dropped from the channel settings (an inner one stays)
+cr="$(printf '\r')"
+render crlf "SMTP_HOST=smtp.example.com$cr" "SMTP_PORT=2525$cr" "SMTP_TLS=true$cr" "ALERT_EMAIL_TO=ops@example.com $cr" \
+  "ALERT_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T000/B000/XXXX$cr" \
+  "ALERT_TEAMS_WEBHOOK_URL=https://example.webhook.office.com/webhookb2/abc	$cr"
+expect crlf "api_url: 'https://hooks.slack.com/services/T000/B000/XXXX'" 2
+expect crlf "webhook_url: 'https://example.webhook.office.com/webhookb2/abc'" 2
+expect crlf "to: 'ops@example.com'" 1
+expect crlf "smtp_smarthost: 'smtp.example.com:2525'" 1
+expect crlf "smtp_require_tls: true" 1
+expect crlf '\r' 0
+if grep -q "$cr" "$out/crlf.yml"; then fail "crlf: a carriage return reached the file"; fi
+
 if [ "$failures" -eq 0 ]; then
   echo "render: all checks passed"
 else
