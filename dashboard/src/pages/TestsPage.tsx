@@ -83,7 +83,7 @@ export default function TestsPage() {
 
   return (
     <section>
-      <PageHeader title="Tests" />
+      <PageHeader title="Test results" />
       <form onSubmit={applyFilters}>
         <FilterBar>
           <label>
@@ -131,7 +131,7 @@ export default function TestsPage() {
       )}
 
       {rows.length > 0 && (
-        <div ref={card.ref} className={tableCardClass(card.wide)} tabIndex={0} role="region" aria-label="Tests">
+        <div ref={card.ref} className={tableCardClass(card.wide)} tabIndex={0} role="region" aria-label="Test results">
           <table className="data">
             <thead>
               <tr>

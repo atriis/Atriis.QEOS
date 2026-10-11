@@ -30,7 +30,7 @@ const ROUTES: [string, string][] = [
   ["/projects/42/runs/requested", "Requested runs"],
   ["/projects/42/runs/61", "Run #61"],
   ["/projects/42/runs/61/compare/60", "Run #61 compared with #60"],
-  ["/projects/42/tests", "Tests"],
+  ["/projects/42/tests", "Test results"],
   ["/projects/42/tests/tests%2Fa.py", "Test history"],
   ["/projects/42/flaky", "Flaky tests"],
   ["/projects/42/branches", "Branches"],

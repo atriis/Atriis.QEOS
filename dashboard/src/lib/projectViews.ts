@@ -7,7 +7,7 @@ import type { LucideIcon } from "lucide-react";
 export const PROJECT_VIEWS: { to: string; label: string; icon: LucideIcon }[] = [
   { to: "overview", label: "Overview", icon: LayoutDashboard },
   { to: "runs", label: "Runs", icon: ListChecks },
-  { to: "tests", label: "Tests", icon: FlaskConical },
+  { to: "tests", label: "Test results", icon: FlaskConical },
   { to: "flaky", label: "Flaky", icon: Shuffle },
   { to: "branches", label: "Branches", icon: GitBranch },
   { to: "trends", label: "Trends", icon: TrendingUp },

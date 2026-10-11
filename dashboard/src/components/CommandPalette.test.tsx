@@ -257,7 +257,7 @@ describe("sources", () => {
     const kaseOption = within(cases).getByRole("option", { name: /TC-1/ });
     expect(kaseOption).toHaveTextContent("Login works");
     expect(kaseOption.querySelector("mark")).toHaveTextContent("Lo");
-    expect(within(await screen.findByRole("group", { name: "Tests" })).getByRole("option", { name: /test_login_redirects/ })).toBeInTheDocument();
+    expect(within(await screen.findByRole("group", { name: "Test results" })).getByRole("option", { name: /test_login_redirects/ })).toBeInTheDocument();
     expect(within(group("Projects")).getByRole("option", { name: /Logistics API/ })).toBeInTheDocument();
     expect(await screen.findByRole("status")).toHaveTextContent(/^3 results$/);
     await user.click(kaseOption);
@@ -405,7 +405,7 @@ describe("sources", () => {
     renderAt("/projects/42/overview");
     await user.click(trigger());
     await user.keyboard("lo");
-    const tests = await screen.findByRole("group", { name: "Tests" });
+    const tests = await screen.findByRole("group", { name: "Test results" });
     expect(await within(tests).findByText("Couldn't search tests right now")).toBeInTheDocument();
     expect(within(group("Test cases")).getByRole("option", { name: /Login works/ })).toBeInTheDocument();
     // The notice is not a result: the arrows skip it
@@ -463,7 +463,7 @@ describe("recent", () => {
     const user = userEvent.setup();
     renderAt("/projects/42/overview");
     await screen.findByRole("button", { name: /Account menu for/ });
-    for (const page of ["Runs", "Tests", "Flaky", "Branches", "Trends", "Report", "Runs"]) {
+    for (const page of ["Runs", "Test results", "Flaky", "Branches", "Trends", "Report", "Runs"]) {
       await user.keyboard("{Control>}k{/Control}");
       await user.click(within(group("Pages")).getByRole("option", { name: new RegExp(`^${page}`) }));
     }

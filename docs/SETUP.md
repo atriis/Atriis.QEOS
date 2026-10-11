@@ -1096,7 +1096,7 @@ everything listed here.
 | **Runs** | Every run, newest first, with counts and duration. | Status (With failures / All green), Branch; **More filters**: Environment, CI, Commit (4+ hex), Pull request, Author, From, To; sort by Failed or Duration. Tab **Requested runs** ([4.3](#43-run-from-qeos-play-and-stop)). |
 | Run page | Results, failures grouped by cause (new, or failing for N runs in a row), owners from CODEOWNERS, changed files, components, a link to the CI job. | **Compare with previous run #N**. |
 | Compare (`runs/<id>/compare/<base>`) | New failures, fixed, still failing, slower (≥1 s and ≥50 %), added, removed. Up to 200 each. | Choose any other run of the project. |
-| **Tests** | Every test seen in the window: runs, pass rate, average duration, last status. Click a test for its history. | 7 / 30 / 90 days, sort, search, CSV. |
+| **Test results** | Every test seen in the window: runs, pass rate, average duration, last status. Click a test for its history. | 7 / 30 / 90 days, sort, search, CSV. |
 | **Flaky** | Tests that both pass and fail. **Confirmed**: passed and failed on the same commit in the same environment. **Suspected**: the result flips between consecutive runs on a branch. | Window 7/14/30/90 days, minimum runs, minimum flip rate, branch. **Quarantine** / **Release** (members and above). |
 | **Branches** | Per-branch runs, counts and pass rate. **Compare A / Compare B** charts two branches' daily pass rates. | 7 / 30 / 90 days. |
 | **Trends** | Runs, results, pass rate and duration over time. | 7 / 30 / 90 days, Daily / Weekly / Monthly, branch, environment. |
@@ -1118,7 +1118,7 @@ everything listed here.
 **Verify (4.4):** after two or more uploads, **Trends** shows points, and **Compare with previous
 run** appears on the newer run.
 
-**Limits (4.4):** the Tests view goes back at most 90 days, Trends up to 365 days through the
+**Limits (4.4):** the Test results view goes back at most 90 days, Trends up to 365 days through the
 API, Flaky up to 90 days and 100 tests. Flaky needs at least `min runs` executions (5 by default).
 
 ---
@@ -1219,7 +1219,7 @@ pass then deletes anything older than the period.
 
 **Export.** Settings → **Data** → **Download all results** (owners and admins). It downloads
 every run and result as NDJSON (`qeos-project-<id>-<date>.ndjson`), masked as stored. Do this
-before you delete a project or answer a data request. The Tests view and the Report also offer
+before you delete a project or answer a data request. The Test results view and the Report also offer
 CSV downloads.
 
 **Verify (4.7):** `docker compose logs ingestion-retention` shows one JSON line per pass (with
@@ -1239,7 +1239,7 @@ click the search box in the top bar. Nothing to configure. It finds:
 | Pages | The project views, All projects, each organization, Security. | Always. |
 | Projects | Project names in every organization you belong to. | When you type. |
 | Test cases | Title and Gherkin text; `TC-12`, `tc12` or `12` finds case 12. | Inside a project, from 2 characters. |
-| Tests | Test names seen in the last 30 days. | Inside a project, from 2 characters. |
+| Test results | Test names seen in the last 30 days. | Inside a project, from 2 characters. |
 | Suites | Suite names. | Inside a project, from 2 characters. |
 | Runs | Branch names that contain the text. `#433` or `433` opens run 433. | Inside a project, from 2 characters. |
 

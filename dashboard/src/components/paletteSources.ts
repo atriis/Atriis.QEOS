@@ -23,7 +23,7 @@ export interface PaletteGroup {
 export const MIN_REMOTE = 2;
 export const SOURCE_LIMIT = 5;
 export const DEBOUNCE_MS = 200;
-/** The Tests view's default window, so the palette finds what that list shows. */
+/** The Test results view's default window, so the palette finds what that list shows. */
 const TEST_DAYS = 30;
 const RUN_NUMBER = /^#?(\d+)$/;
 
@@ -133,7 +133,7 @@ export function usePaletteGroups(
           href: `/projects/${projectId}/cases/${c.number}`, projectId,
         })),
       });
-      source("tests", "Tests", "tests", {
+      source("tests", "Test results", "tests", {
         error: tests.error,
         data: tests.data?.map((t) => ({
           id: `test:${projectId}:${t.test_key}`, kind: "test" as const, label: t.name, detail: [t.suite, t.class_name].filter(Boolean).join(" · "),

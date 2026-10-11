@@ -1,6 +1,6 @@
 /** Names of a project's views, shared by the document title, the breadcrumb and the rail. */
 export const VIEW_TITLES: Record<string, string> = {
-  overview: "Overview", trends: "Trends", tests: "Tests", flaky: "Flaky", branches: "Branches",
+  overview: "Overview", trends: "Trends", tests: "Test results", flaky: "Flaky", branches: "Branches",
   runs: "Runs", report: "Report", settings: "Settings", cases: "Test cases", suites: "Suites",
 };
 

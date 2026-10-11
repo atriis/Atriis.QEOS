@@ -209,7 +209,7 @@ describe("icon rail", () => {
     const rail = screen.getByRole("navigation", { name: "Main" });
     await within(rail).findByRole("link", { name: "Organization" });
     const names = within(rail).getAllByRole("link").map((a) => a.textContent?.trim());
-    expect(names).toEqual(["Overview", "Runs", "Tests", "Flaky", "Branches", "Trends", "Report", "Test cases", "Settings", "All projects", "Organization"]);
+    expect(names).toEqual(["Overview", "Runs", "Test results", "Flaky", "Branches", "Trends", "Report", "Test cases", "Settings", "All projects", "Organization"]);
     expect(within(rail).getByRole("link", { name: "Runs" })).toHaveAttribute("aria-current", "page");
     expect(within(rail).getByRole("link", { name: "Overview" })).not.toHaveAttribute("aria-current");
   });
