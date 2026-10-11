@@ -100,7 +100,7 @@ pipeline already produces, and it starts runs only through workflows you own.
 
 ## Architecture
 
-The diagram follows the blueprint's container view ([§21, Level 2](ARCHITECTURE_BLUEPRINT_V1_0.md#21-c4-architecture-model)):
+The diagram follows the blueprint's container view ([§22, Level 2](ARCHITECTURE_BLUEPRINT_V1_0.md#22-c4-architecture-model)):
 the same domains, filled with what runs today. Dotted arrows are the role checks one service asks
 another for; the grey box is the blueprint's target infrastructure, none of it deployed.
 

@@ -9,7 +9,7 @@
 > | Services | CURRENT: auth, organization, project, ingestion, test-management (`platforms/`), NGINX gateway, React dashboard (`dashboard/`), collector agent (`collector/`, plus `collector-action/` and `collector-jenkins/`), retention + analytics-rollup + weekly-summary jobs |
 > | Data layer | CURRENT: PostgreSQL 15 only (one DB per service). Kafka, MongoDB, Neo4j, Qdrant, ClickHouse, Redis, MinIO, Elasticsearch: TARGET, none deployed |
 > | Events / CDC / QIP backbone (sect. 6, 8, 12) | TARGET. All cross-service communication today is synchronous HTTP via the gateway |
-> | Deployment (sect. 9, 18, 22) | CURRENT: docker-compose (maturity L0); production package for one VM behind a Caddy TLS edge (`deploy/`, ADR-019). Kubernetes/Istio/Vault/ArgoCD: TARGET |
+> | Deployment (sect. 9, 18, 23) | CURRENT: docker-compose (maturity L0); production package for one VM behind a Caddy TLS edge (`deploy/`, ADR-019). Kubernetes/Istio/Vault/ArgoCD: TARGET |
 > | Security (sect. 10) | CURRENT: JWT + rotation + replay detection, httpOnly refresh cookie, email verification, password reset/change, TOTP MFA, Google/Microsoft SSO (tenant allowlist), org roles, per-project API keys, gateway rate zones, built-in + per-project masking, retention, legal hold, export, GitHub tokens encrypted at rest. OPA/ABAC/SPIFFE/Vault/audit log: TARGET |
 > | Analytics | CURRENT: ingestion-service analytics API (trends incl. weekly/monthly, tests, history, flaky with daily rollups and quarantine, branches, run compare, failures by cause) and the Report (summary, failure causes, regressions, by area, coverage, duration; ADR-026) on PostgreSQL — fulfils the role sect. 8's "QIP Analytics Service" targets. No AI/ML |
 > | Test management / execution | CURRENT: test-management-service (ADR-022): cases, suites, Gherkin import and sync (ADR-023, ADR-024); runs started in the customer's GitHub Actions (ADR-025). Environment orchestration, artifacts: TARGET |
@@ -33,7 +33,6 @@
 > | Metrics downsampling / long retention | Metrics older than 15 days are needed, or Prometheus's disk passes its 5 GB cap |
 >
 > The live delivery record is TODO.md; the forward plan is IMPLEMENTATION_PLAN.md.
-> Known defect left in place this pass: appendix section numbers duplicate 22-24.
 
 
 ## Table of Contents
@@ -51,13 +50,30 @@
 12. [Quality Intelligence Platform (QIP) Deep Dive](#12-quality-intelligence-platform-qip-deep-dive)
 13. [Product Roadmap](#13-product-roadmap)
 14. [Repository Structure](#14-repository-structure)
-15. [Bounded Context Map and Context Mapping](#17-bounded-context-map-and-context-mapping)
-16. [Governance Models](#21-governance-models)
-17. [Success Metrics and Service Level Agreements](#22-success-metrics-and-service-level-agreements)
-18. [Appendix: Reference Architectures](#25-appendix-reference-architectures)
-19. [Architecture Decision Records (ADR)](#26-architecture-decision-records-adr)
-20. [Quality Attribute Scenarios (ATAM-Based)](#27-quality-attribute-scenarios-atam-based)
-21. [Conclusion](#28-conclusion)
+15. [Bounded Context Map and Context Mapping](#15-bounded-context-map-and-context-mapping)
+16. [Governance](#16-governance)
+17. [Success Metrics and Service Level Objectives](#17-success-metrics-and-service-level-objectives)
+18. [Reference Architectures](#18-reference-architectures)
+19. [Architecture Decision Records (ADR)](#19-architecture-decision-records-adr)
+20. [Quality Attribute Scenarios (ATAM)](#20-quality-attribute-scenarios-atam)
+21. [Architecture Principles](#21-architecture-principles)
+22. [C4 Architecture Model](#22-c4-architecture-model)
+23. [Deployment Architecture](#23-deployment-architecture)
+24. [Business Capability Map](#24-business-capability-map)
+25. [Reference Service Architecture](#25-reference-service-architecture)
+26. [Standard Request Flow](#26-standard-request-flow)
+27. [Architectural Constraints](#27-architectural-constraints)
+28. [Design Pattern Catalog](#28-design-pattern-catalog)
+29. [Risk Register Summary](#29-risk-register-summary)
+30. [Reference Sequence Diagrams](#30-reference-sequence-diagrams)
+31. [Enterprise Readiness Checklist](#31-enterprise-readiness-checklist)
+32. [Conclusion](#32-conclusion)
+33. [Document Status & Future Evolution](#33-document-status--future-evolution)
+34. [Risk Register](#34-risk-register)
+35. [Architecture Roadmap](#35-architecture-roadmap)
+36. [Compliance Matrix](#36-compliance-matrix)
+37. [Glossary](#37-glossary)
+38. [References](#38-references)
 
 ---
 
@@ -1139,7 +1155,9 @@ platforms/<name>-service/
 └── Dockerfile          # repo-root build context
 ```
 
-## 15.1 Context Overview
+## 15. Bounded Context Map and Context Mapping
+
+### 15.1 Context Overview
 
 QEOS is organized using Domain-Driven Design (DDD), where each bounded context represents an autonomous business capability with clearly defined responsibilities, ownership, APIs, events, and data models.
 
@@ -1157,7 +1175,7 @@ Each context owns its domain model and communicates through well-defined contrac
 
 ---
 
-## 15.2 Context Relationships
+### 15.2 Context Relationships
 
 | Provider | Consumer | Relationship | Communication |
 |-----------|----------|--------------|---------------|
@@ -1170,17 +1188,17 @@ Each context owns its domain model and communicates through well-defined contrac
 
 ---
 
-## 15.3 Context Mapping Patterns
+### 15.3 Context Mapping Patterns
 
 The architecture adopts standard DDD context mapping patterns.
 
-### Customer-Supplier
+#### Customer-Supplier
 
 - Platform → All Domains
 - Execution → Intelligence
 - Intelligence → Collaboration
 
-### Published Language
+#### Published Language
 
 Kafka Event Schemas
 
@@ -1188,7 +1206,7 @@ OpenAPI Specifications
 
 Shared DTO Contracts
 
-### Anti-Corruption Layer
+#### Anti-Corruption Layer
 
 External systems are isolated through dedicated adapters.
 
@@ -1204,7 +1222,7 @@ No external domain model may leak into internal bounded contexts.
 
 ---
 
-## 15.4 Shared Kernel
+### 15.4 Shared Kernel
 
 The Shared Kernel contains only cross-cutting concerns.
 
@@ -1223,7 +1241,7 @@ Business logic is never placed inside the Shared Kernel.
 
 ---
 
-## 15.5 Evolution Strategy
+### 15.5 Evolution Strategy
 
 Bounded contexts evolve independently.
 
@@ -1238,9 +1256,9 @@ Rules:
 
 ---
 
-# 16. Governance
+## 16. Governance
 
-## 16.1 Architecture Governance
+### 16.1 Architecture Governance
 
 Architecture governance ensures long-term consistency while allowing teams to evolve independently.
 
@@ -1254,7 +1272,7 @@ Governance principles:
 
 ---
 
-## 16.2 Architecture Review Board
+### 16.2 Architecture Review Board
 
 The Architecture Review Board (ARB) approves:
 
@@ -1266,7 +1284,7 @@ The Architecture Review Board (ARB) approves:
 
 ---
 
-## 16.3 API Governance
+### 16.3 API Governance
 
 All APIs shall:
 
@@ -1278,7 +1296,7 @@ All APIs shall:
 
 ---
 
-## 16.4 Data Governance
+### 16.4 Data Governance
 
 Data governance includes:
 
@@ -1295,7 +1313,7 @@ No shared database is permitted across bounded contexts.
 
 ---
 
-## 16.5 Security Governance
+### 16.5 Security Governance
 
 Security policies include:
 
@@ -1309,7 +1327,7 @@ Security policies include:
 
 ---
 
-## 16.6 Technology Governance
+### 16.6 Technology Governance
 
 Technology adoption follows a Technology Radar.
 
@@ -1324,9 +1342,9 @@ Technology decisions require documented ADRs.
 
 ---
 
-# 17. Success Metrics & Service Level Objectives
+## 17. Success Metrics and Service Level Objectives
 
-## 17.1 Business Metrics
+### 17.1 Business Metrics
 
 - Customer adoption
 - Active organizations
@@ -1338,7 +1356,7 @@ Technology decisions require documented ADRs.
 
 ---
 
-## 17.2 Platform Metrics
+### 17.2 Platform Metrics
 
 - Availability
 - Latency
@@ -1349,7 +1367,7 @@ Technology decisions require documented ADRs.
 
 ---
 
-## 17.3 Engineering Metrics
+### 17.3 Engineering Metrics
 
 - MTTR
 - Change Failure Rate
@@ -1361,7 +1379,7 @@ Technology decisions require documented ADRs.
 
 ---
 
-## 17.4 Intelligence Metrics
+### 17.4 Intelligence Metrics
 
 - Prediction Accuracy
 - Recommendation Precision
@@ -1372,7 +1390,7 @@ Technology decisions require documented ADRs.
 
 ---
 
-## 17.5 SLIs
+### 17.5 SLIs
 
 Examples:
 
@@ -1385,7 +1403,7 @@ Examples:
 
 ---
 
-## 17.6 SLOs
+### 17.6 SLOs
 
 | Objective | Target |
 |-----------|--------|
@@ -1398,7 +1416,7 @@ Examples:
 
 ---
 
-## 17.7 Error Budgets
+### 17.7 Error Budgets
 
 Error budgets define acceptable reliability thresholds.
 
@@ -1408,15 +1426,15 @@ Exceeding the budget temporarily pauses feature delivery until stability is rest
 
 ---
 
-# 18. Reference Architectures
+## 18. Reference Architectures
 
-## 18.1 Logical Architecture
+### 18.1 Logical Architecture
 
 The logical architecture organizes the platform into independent bounded contexts communicating through APIs and events.
 
 ---
 
-## 18.2 Physical Architecture
+### 18.2 Physical Architecture
 
 Deployment consists of:
 
@@ -1431,7 +1449,7 @@ Deployment consists of:
 
 ---
 
-## 18.3 Deployment Architecture
+### 18.3 Deployment Architecture
 
 Deployment supports:
 
@@ -1443,7 +1461,7 @@ Deployment supports:
 
 ---
 
-## 18.4 Multi-Tenant Architecture
+### 18.4 Multi-Tenant Architecture
 
 Isolation occurs through:
 
@@ -1454,7 +1472,7 @@ Isolation occurs through:
 
 ---
 
-## 18.5 Disaster Recovery
+### 18.5 Disaster Recovery
 
 Recovery strategy includes:
 
@@ -1466,7 +1484,7 @@ Recovery strategy includes:
 
 ---
 
-## 18.6 Scalability Model
+### 18.6 Scalability Model
 
 Horizontal scaling is preferred.
 
@@ -1474,9 +1492,9 @@ Stateful workloads scale independently from stateless services.
 
 ---
 
-# 19. Architecture Decision Records (ADR)
+## 19. Architecture Decision Records (ADR)
 
-## 19.1 Purpose
+### 19.1 Purpose
 
 Architecture Decision Records capture significant architectural decisions.
 
@@ -1490,7 +1508,7 @@ Each ADR includes:
 
 ---
 
-## 19.2 ADR Index
+### 19.2 ADR Index
 
 **Accepted** (real decisions with evidence — see docs/architecture/adr/, index in INDEX.md):
 
@@ -1524,7 +1542,7 @@ Core Services" while every service is Python/FastAPI):
 De facto accepted without ceremony: Python/FastAPI for services, PostgreSQL
 as primary database, React + TypeScript frontend.
 
-## 19.3 ADR Lifecycle
+### 19.3 ADR Lifecycle
 
 Proposed
 
@@ -1546,9 +1564,9 @@ Superseded
 
 ---
 
-# 20. Quality Attribute Scenarios (ATAM)
+## 20. Quality Attribute Scenarios (ATAM)
 
-## 20.1 Performance
+### 20.1 Performance
 
 Scenario:
 
@@ -1560,7 +1578,7 @@ P95 latency below target.
 
 ---
 
-## 20.2 Scalability
+### 20.2 Scalability
 
 Scenario:
 
@@ -1572,7 +1590,7 @@ Horizontal scaling without downtime.
 
 ---
 
-## 20.3 Availability
+### 20.3 Availability
 
 Scenario:
 
@@ -1584,7 +1602,7 @@ Automatic failover with no customer impact.
 
 ---
 
-## 20.4 Security
+### 20.4 Security
 
 Scenario:
 
@@ -1596,7 +1614,7 @@ Immediate token revocation and audit logging.
 
 ---
 
-## 20.5 Reliability
+### 20.5 Reliability
 
 Scenario:
 
@@ -1608,7 +1626,7 @@ Automatic leader election and message durability.
 
 ---
 
-## 20.6 Maintainability
+### 20.6 Maintainability
 
 Scenario:
 
@@ -1620,7 +1638,7 @@ Minimal impact on existing services.
 
 ---
 
-## 20.7 Modifiability
+### 20.7 Modifiability
 
 Scenario:
 
@@ -1632,7 +1650,7 @@ No API breaking changes.
 
 ---
 
-## 20.8 Observability
+### 20.8 Observability
 
 Scenario:
 
@@ -1644,7 +1662,7 @@ Logs, metrics, and traces identify the root cause within minutes.
 
 ---
 
-## 20.9 Disaster Recovery
+### 20.9 Disaster Recovery
 
 Scenario:
 
@@ -1656,7 +1674,7 @@ Recovery within defined RTO and RPO.
 
 ---
 
-## Architecture Principles
+## 21. Architecture Principles
 
 QEOS follows a set of architectural principles that govern every technical and business decision.
 
@@ -1691,7 +1709,7 @@ QEOS follows a set of architectural principles that govern every technical and b
 
 ---
 
-## 21. C4 Architecture Model
+## 22. C4 Architecture Model
 
 ### Level 1 — System Context
 
@@ -1787,7 +1805,7 @@ External Adapters
 
 ---
 
-## 22. Deployment Architecture
+## 23. Deployment Architecture
 
 ### Kubernetes Deployment Model
 
@@ -1853,7 +1871,7 @@ Jaeger
 
 ---
 
-## 23. Business Capability Map
+## 24. Business Capability Map
 
 ### Platform
 
@@ -1916,7 +1934,7 @@ Jaeger
 
 ---
 
-## 24. Reference Service Architecture
+## 25. Reference Service Architecture
 
 Every service follows the same standardized architecture.
 
@@ -1969,7 +1987,7 @@ service-name/
 
 ---
 
-## 25. Standard Request Flow
+## 26. Standard Request Flow
 
 ```
 User
@@ -2017,7 +2035,7 @@ Dashboard
 
 ---
 
-## 26. Architectural Constraints
+## 27. Architectural Constraints
 
 The following constraints are mandatory.
 
@@ -2052,7 +2070,7 @@ The following constraints are mandatory.
 
 ---
 
-## 27. Design Pattern Catalog
+## 28. Design Pattern Catalog
 
 ### Architectural Patterns
 
@@ -2083,7 +2101,7 @@ The following constraints are mandatory.
 
 ---
 
-## 28. Risk Register
+## 29. Risk Register Summary
 
 | Risk | Impact | Probability | Mitigation |
 |-------|--------|-------------|------------|
@@ -2098,7 +2116,7 @@ The following constraints are mandatory.
 
 ---
 
-## 29. Reference Sequence Diagrams
+## 30. Reference Sequence Diagrams
 
 ### Test Execution Flow
 
@@ -2172,7 +2190,7 @@ Dashboard
 
 ---
 
-## 30. Enterprise Readiness Checklist
+## 31. Enterprise Readiness Checklist
 
 ### Architecture
 
@@ -2210,7 +2228,7 @@ Dashboard
 
 ---
 
-# 21. Conclusion
+## 32. Conclusion
 
 QEOS is designed as an AI-Native Quality Engineering Operating System based on Domain-Driven Design, cloud-native architecture, event-driven communication, and enterprise engineering principles.
 
@@ -2228,9 +2246,9 @@ The architecture emphasizes:
 This blueprint establishes the long-term architectural foundation for QEOS and serves as the authoritative reference for architecture, governance, implementation, and future platform evolution.
 
 ---
-# 22. Document Status & Future Evolution
+## 33. Document Status & Future Evolution
 
-## Document Status
+### Document Status
 
 | Attribute | Value |
 |----------|-------|
@@ -2244,7 +2262,7 @@ This blueprint establishes the long-term architectural foundation for QEOS and s
 
 ---
 
-## Future Evolution
+### Future Evolution
 
 This blueprint establishes the architectural baseline for the QEOS platform.
 
@@ -2263,9 +2281,9 @@ This document represents the authoritative architectural reference for all futur
 
 ---
 
-# 22. Risk Register
+## 34. Risk Register
 
-## 22.1 Purpose
+### 34.1 Purpose
 
 The Risk Register identifies architectural, technical, operational, security, and business risks that may impact the successful implementation and operation of QEOS.
 
@@ -2273,7 +2291,7 @@ Each risk shall have an assigned owner, mitigation strategy, monitoring mechanis
 
 ---
 
-## 22.2 Risk Classification
+### 34.2 Risk Classification
 
 | Category | Description |
 |-----------|-------------|
@@ -2285,7 +2303,7 @@ Each risk shall have an assigned owner, mitigation strategy, monitoring mechanis
 
 ---
 
-## 22.3 Risk Matrix
+### 34.3 Risk Matrix
 
 | Impact | Probability | Priority |
 |----------|-------------|----------|
@@ -2295,7 +2313,7 @@ Each risk shall have an assigned owner, mitigation strategy, monitoring mechanis
 
 ---
 
-## 22.4 Initial Risk Register
+### 34.4 Initial Risk Register
 
 | ID | Risk | Impact | Mitigation |
 |----|------|---------|------------|
@@ -2309,7 +2327,7 @@ Each risk shall have an assigned owner, mitigation strategy, monitoring mechanis
 
 ---
 
-## 22.5 Risk Governance
+### 34.5 Risk Governance
 
 - Quarterly risk review
 - Continuous monitoring
@@ -2319,19 +2337,19 @@ Each risk shall have an assigned owner, mitigation strategy, monitoring mechanis
 
 ---
 
-# 23. Architecture Roadmap
+## 35. Architecture Roadmap
 
-## 23.1 Current State
+### 35.1 Current State
 
 What runs today is listed in the implementation status at the top of this document and drawn, on the
-domains of §21's Level 2 view, in the README's [Architecture](README.md#architecture) section: Platform
+domains of §22's Level 2 view, in the README's [Architecture](README.md#architecture) section: Platform
 (auth, organization, project), Execution (test-management, runs in the customer's CI), Intelligence
 (ingestion analytics and the Report, no AI), Collaboration (dashboard, notifications), Integrations
 (collector, GitHub Actions dispatch, email/Slack/Teams), all on PostgreSQL behind an NGINX gateway.
 
 ---
 
-## 23.2 Target State
+### 35.2 Target State
 
 QEOS evolves into a complete AI-Native Quality Engineering Operating System consisting of:
 
@@ -2345,9 +2363,9 @@ QEOS evolves into a complete AI-Native Quality Engineering Operating System cons
 
 ---
 
-## 23.3 Evolution Roadmap
+### 35.3 Evolution Roadmap
 
-### Phase 0
+#### Phase 0
 
 Platform Foundation
 
@@ -2358,7 +2376,7 @@ Platform Foundation
 
 ---
 
-### Phase 1
+#### Phase 1
 
 Core Platform
 
@@ -2370,7 +2388,7 @@ Core Platform
 
 ---
 
-### Phase 2
+#### Phase 2
 
 Execution Platform
 
@@ -2383,7 +2401,7 @@ Execution Platform
 
 ---
 
-### Phase 3
+#### Phase 3
 
 Intelligence Platform
 
@@ -2396,7 +2414,7 @@ Intelligence Platform
 
 ---
 
-### Phase 4
+#### Phase 4
 
 Collaboration Platform
 
@@ -2407,7 +2425,7 @@ Collaboration Platform
 
 ---
 
-### Phase 5
+#### Phase 5
 
 Marketplace
 
@@ -2418,21 +2436,21 @@ Marketplace
 
 ---
 
-## 23.4 Long-Term Vision
+### 35.4 Long-Term Vision
 
 QEOS becomes an AI-first engineering platform capable of autonomous quality engineering through continuous learning, prediction, optimization, and workflow orchestration.
 
 ---
 
-# 24. Compliance Matrix
+## 36. Compliance Matrix
 
-## 24.1 Compliance Objectives
+### 36.1 Compliance Objectives
 
 The platform shall comply with internationally recognized standards wherever applicable.
 
 ---
 
-## 24.2 Compliance Mapping
+### 36.2 Compliance Mapping
 
 | Standard | Scope |
 |-----------|-------|
@@ -2446,7 +2464,7 @@ The platform shall comply with internationally recognized standards wherever app
 
 ---
 
-## 24.3 Security Controls
+### 36.3 Security Controls
 
 - Encryption at Rest
 - Encryption in Transit
@@ -2459,7 +2477,7 @@ The platform shall comply with internationally recognized standards wherever app
 
 ---
 
-## 24.4 Privacy Controls
+### 36.4 Privacy Controls
 
 - Data minimization
 - Right to deletion
@@ -2470,7 +2488,7 @@ The platform shall comply with internationally recognized standards wherever app
 
 ---
 
-## 24.5 AI Governance
+### 36.5 AI Governance
 
 The Intelligence Platform shall provide:
 
@@ -2483,9 +2501,9 @@ The Intelligence Platform shall provide:
 
 ---
 
-# 25. Glossary
+## 37. Glossary
 
-## Domain Terms
+### Domain Terms
 
 | Term | Definition |
 |------|------------|
@@ -2500,7 +2518,7 @@ The Intelligence Platform shall provide:
 
 ---
 
-## Acronyms
+### Acronyms
 
 | Acronym | Meaning |
 |----------|---------|
@@ -2520,9 +2538,9 @@ The Intelligence Platform shall provide:
 
 ---
 
-# 26. References
+## 38. References
 
-## Architecture References
+### Architecture References
 
 - Domain-Driven Design — Eric Evans
 - Implementing Domain-Driven Design — Vaughn Vernon
@@ -2532,7 +2550,7 @@ The Intelligence Platform shall provide:
 
 ---
 
-## Cloud Native
+### Cloud Native
 
 - CNCF Landscape
 - Kubernetes Documentation
@@ -2542,7 +2560,7 @@ The Intelligence Platform shall provide:
 
 ---
 
-## Security
+### Security
 
 - OWASP ASVS
 - OWASP Top 10
@@ -2551,14 +2569,14 @@ The Intelligence Platform shall provide:
 
 ---
 
-## AI
+### AI
 
 - MLOps Principles
 - OpenAI API Best Practices
 - Model Cards
 - Responsible AI Guidelines
 
-## Expected Outcomes
+### Expected Outcomes
 
 The platform enables organizations to:
 
@@ -2571,7 +2589,7 @@ The platform enables organizations to:
 
 ---
 
-## Final Statement
+### Final Statement
 
 This Architecture Blueprint represents the strategic technical foundation for QEOS.
 
