@@ -5,11 +5,11 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.exc import IntegrityError
 
 from src.project.db.base import Base
-from src.project.models import Project, Repository  # noqa: F401  registers tables
+from src.project.models import OverviewLayout, Project, Repository  # noqa: F401  registers tables
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 
@@ -105,3 +105,47 @@ def test_repository_unique_per_project_provider_key(migrated_engine):
     with pytest.raises(IntegrityError):
         with migrated_engine.begin() as conn:
             conn.execute(insert, {"owner": "Acme"})
+
+
+EMPTY_LAYOUT = '{"schema": 1, "widgets": []}'
+
+
+def _insert_layout(conn, user_id, project_id=1):
+    conn.execute(
+        text(
+            "INSERT INTO overview_layouts (project_id, user_id, layout, version, updated_by)"
+            " VALUES (:project_id, :user_id, :layout, 1, 1)"
+        ),
+        {"project_id": project_id, "user_id": user_id, "layout": EMPTY_LAYOUT},
+    )
+
+
+def test_one_project_default_per_project(migrated_engine):
+    with migrated_engine.begin() as conn:
+        _insert_project(conn, "P", "p")
+        _insert_layout(conn, None)
+    with pytest.raises(IntegrityError):
+        with migrated_engine.begin() as conn:
+            _insert_layout(conn, None)
+
+
+def test_one_personal_layout_per_user_and_project(migrated_engine):
+    with migrated_engine.begin() as conn:
+        _insert_project(conn, "P", "p")
+        _insert_layout(conn, 7)
+        _insert_layout(conn, 8)  # another user's: fine
+    with pytest.raises(IntegrityError):
+        with migrated_engine.begin() as conn:
+            _insert_layout(conn, 7)
+
+
+def test_deleting_a_project_deletes_its_layouts(migrated_engine):
+    # SQLite enforces foreign keys only when asked, per connection
+    event.listen(migrated_engine, "connect", lambda dbapi_connection, _: dbapi_connection.execute("PRAGMA foreign_keys=ON"))
+    migrated_engine.dispose()
+    with migrated_engine.begin() as conn:
+        _insert_project(conn, "P", "p")
+        _insert_layout(conn, None)
+        _insert_layout(conn, 7)
+        conn.execute(text("DELETE FROM projects WHERE slug = 'p'"))
+        assert conn.execute(text("SELECT COUNT(*) FROM overview_layouts")).scalar() == 0
