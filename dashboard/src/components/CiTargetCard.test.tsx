@@ -16,6 +16,12 @@ const CONNECTED = { ...NONE, configured: true, provider: "github", repo: "acme/o
   last_change: { action: "created", user_id: 7, at: "2026-10-07T10:00:00Z" } };
 const TOKEN = "github_pat_xyz0000000000000000a1b2";
 
+function repository(owner: string, name: string) {
+  return { id: 3, project_id: 42, provider: "github", owner, name, url: `https://github.com/${owner}/${name}`,
+    default_branch: "main", default_branch_is_user_set: false, verification_status: "not_found",
+    verified_at: null, created_at: "2026-10-01T00:00:00Z", updated_at: null };
+}
+
 function renderCard() {
   setAccessToken("acc");
   server.use(
@@ -23,6 +29,8 @@ function renderCard() {
     http.get("/api/v1/organizations/1/members", () => HttpResponse.json([
       { id: 1, organization_id: 1, user_id: 7, email: "ana@example.com", role: "owner", status: "active",
         created_at: "2026-01-01T00:00:00Z", updated_at: null }])),
+    http.get(`${P}/repositories`, () => HttpResponse.json([])),
+    http.post(`${P}/repositories`, () => HttpResponse.json(repository("acme", "obt"), { status: 201 })),
   );
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={qc}><MemoryRouter><CiTargetCard projectId={42} /></MemoryRouter></QueryClientProvider>);
@@ -41,7 +49,7 @@ test("a first save sends repo, workflow, branch and token, then shows the connec
     }),
   );
   renderCard();
-  await userEvent.type(await screen.findByLabelText("Repository"), "acme/obt");
+  await userEvent.type(await screen.findByLabelText("Repository link"), "acme/obt");
   expect(screen.getByLabelText("Workflow file")).toHaveValue("qeos-run.yml");
   expect(screen.getByLabelText("Branch")).toHaveValue("main");
   await userEvent.type(screen.getByLabelText("Token"), TOKEN);
@@ -60,7 +68,7 @@ test("GitHub's specific refusal shows next to the form", async () => {
       HttpResponse.json({ detail: "token has no Actions access to this repository" }, { status: 422 })),
   );
   renderCard();
-  await userEvent.type(await screen.findByLabelText("Repository"), "acme/obt");
+  await userEvent.type(await screen.findByLabelText("Repository link"), "acme/obt");
   await userEvent.type(screen.getByLabelText("Token"), TOKEN);
   await userEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("token has no Actions access to this repository");
@@ -99,14 +107,14 @@ test("disconnect asks first, then removes the target", async () => {
   expect(screen.getByText(/Disconnect acme\/obt\?/)).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
   await waitFor(() => expect(deleted).toBe(true));
-  await waitFor(() => expect(screen.getByLabelText("Repository")).toHaveValue(""));
+  await waitFor(() => expect(screen.getByLabelText("Repository link")).toHaveValue(""));
 });
 
 test("a server without TM_SECRETS_KEY says so and shows no form", async () => {
   server.use(http.get(`${P}/ci-target`, () => HttpResponse.json({ ...NONE, available: false })));
   renderCard();
   expect(await screen.findByText(/not configured on this server/i)).toBeInTheDocument();
-  expect(screen.queryByLabelText("Repository")).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Repository link")).not.toBeInTheDocument();
 });
 
 test("within 14 days of expiry the card warns", async () => {
@@ -196,7 +204,7 @@ test("a failed save's error goes when the target is disconnected", async () => {
   await screen.findByRole("alert");
   await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
   await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
-  await waitFor(() => expect(screen.getByLabelText("Repository")).toHaveValue(""));
+  await waitFor(() => expect(screen.getByLabelText("Repository link")).toHaveValue(""));
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
 });
 
@@ -288,7 +296,7 @@ test("only the block copied last says Copied, and the copy is announced", async 
   expect(workflowButton).toHaveTextContent(/^Copy$/);
 });
 
-test("a pasted GitHub address is saved as owner/name and shown that way once the field is left", async () => {
+test("a pasted GitHub link stays as pasted, says which repository it runs in, and is saved as owner/name", async () => {
   let sent: { repo?: string } | null = null;
   server.use(
     http.get(`${P}/ci-target`, () => HttpResponse.json(NONE)),
@@ -298,21 +306,88 @@ test("a pasted GitHub address is saved as owner/name and shown that way once the
     }),
   );
   renderCard();
-  const repo = await screen.findByLabelText("Repository");
-  expect(repo).toHaveAccessibleDescription("owner/name, or paste the repository's GitHub address");
+  const repo = await screen.findByLabelText("Repository link");
+  expect(repo).toHaveAttribute("placeholder", "https://github.com/owner/name");
+  expect(repo).toHaveAccessibleDescription("Paste the repository's GitHub address. owner/name also works.");
   await userEvent.type(repo, "https://github.com/acme/obt.git");
   await userEvent.type(screen.getByLabelText("Token"), TOKEN);
-  expect(repo).toHaveValue("acme/obt");
+  expect(repo).toHaveValue("https://github.com/acme/obt.git");
+  expect(repo).toHaveAccessibleDescription(
+    "Paste the repository's GitHub address. owner/name also works. Runs in acme/obt");
   await userEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => expect(sent?.repo).toBe("acme/obt"));
+});
+
+test("a saved target shows its repository as a link", async () => {
+  server.use(http.get(`${P}/ci-target`, () => HttpResponse.json(CONNECTED)));
+  renderCard();
+  expect(await screen.findByLabelText("Repository link")).toHaveValue("https://github.com/acme/obt");
+});
+
+test("a saved repository missing from Repositories is added there, so its status shows", async () => {
+  let added: unknown = null;
+  server.use(
+    http.get(`${P}/ci-target`, () => HttpResponse.json(NONE)),
+    http.put(`${P}/ci-target`, () => HttpResponse.json(CONNECTED)),
+  );
+  const qc = renderCard();
+  server.use(
+    http.get(`${P}/repositories`, () => HttpResponse.json([repository("acme", "other")])),
+    http.post(`${P}/repositories`, async ({ request }) => {
+      added = await request.json();
+      return HttpResponse.json(repository("acme", "obt"), { status: 201 });
+    }),
+  );
+  qc.setQueryData(["repositories", 42], []);
+  await userEvent.type(await screen.findByLabelText("Repository link"), "https://github.com/acme/obt");
+  await userEvent.type(screen.getByLabelText("Token"), TOKEN);
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByText("Added acme/obt to Repositories.")).toBeInTheDocument();
+  expect(added).toEqual({ url: "https://github.com/acme/obt" });
+  await waitFor(() => expect(qc.getQueryState(["repositories", 42])?.isInvalidated).toBe(true));
+});
+
+test("a repository already in Repositories, in any letter case, is not added again", async () => {
+  let posts = 0;
+  server.use(
+    http.get(`${P}/ci-target`, () => HttpResponse.json(NONE)),
+    http.put(`${P}/ci-target`, () => HttpResponse.json(CONNECTED)),
+  );
+  renderCard();
+  server.use(
+    http.get(`${P}/repositories`, () => HttpResponse.json([repository("Acme", "OBT")])),
+    http.post(`${P}/repositories`, () => { posts += 1; return HttpResponse.json(repository("acme", "obt"), { status: 201 }); }),
+  );
+  await userEvent.type(await screen.findByLabelText("Repository link"), "acme/obt");
+  await userEvent.type(screen.getByLabelText("Token"), TOKEN);
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByText("Connected: acme/obt · token …a1b2 · expires 12 Mar 2027")).toBeInTheDocument();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(posts).toBe(0);
+  expect(screen.queryByText(/to Repositories/)).not.toBeInTheDocument();
+});
+
+test("when adding to Repositories fails, the connection is still saved and the note says so", async () => {
+  server.use(
+    http.get(`${P}/ci-target`, () => HttpResponse.json(NONE)),
+    http.put(`${P}/ci-target`, () => HttpResponse.json(CONNECTED)),
+  );
+  renderCard();
+  server.use(http.post(`${P}/repositories`, () => HttpResponse.json({ detail: "boom" }, { status: 500 })));
+  await userEvent.type(await screen.findByLabelText("Repository link"), "acme/obt");
+  await userEvent.type(screen.getByLabelText("Token"), TOKEN);
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(await screen.findByText("Saved. acme/obt could not be added to Repositories; add it there to see its status."))
+    .toBeInTheDocument();
+  expect(screen.getByText("Connected: acme/obt · token …a1b2 · expires 12 Mar 2027")).toBeInTheDocument();
 });
 
 test("an owner alone is refused with a message that names what is missing", async () => {
   server.use(http.get(`${P}/ci-target`, () => HttpResponse.json(NONE)));
   renderCard();
-  const repo = await screen.findByLabelText("Repository");
+  const repo = await screen.findByLabelText("Repository link");
   await userEvent.type(repo, "AtriisPedroCarneiro");
   await userEvent.click(screen.getByRole("button", { name: "Save" }));
   expect(repo).toHaveAccessibleDescription(
-    "owner/name, or paste the repository's GitHub address Add the repository name after the owner: owner/name");
+    "Paste the repository's GitHub address. owner/name also works. Add the repository name after the owner: owner/name");
 });

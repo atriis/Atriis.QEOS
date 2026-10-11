@@ -2,6 +2,8 @@ import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, CircleAlert } from "lucide-react";
 import { CiTarget, deleteCiTarget, formatDay, getCiTarget, saveCiTarget, tokenState } from "../api/runRequests";
+import { ApiError } from "../api/http";
+import { addRepository, listRepositories } from "../api/repositories";
 import { branchError, normalizeRepo, repoError, workflowError } from "../lib/ciTargetFields";
 import { useUserNames } from "../lib/useUserNames";
 import ConfirmButton from "./ConfirmButton";
@@ -83,6 +85,7 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
   const [token, setToken] = useState("");
   const [replacing, setReplacing] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [repoNote, setRepoNote] = useState<string | null>(null);
   const edited = useRef(false); // unsaved edits: a refetch must not overwrite them
   const ids = useId();
   const clip = useCopyState();
@@ -90,7 +93,7 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
   const data = target.data;
   useEffect(() => {
     if (!data || edited.current) return;
-    setRepo(data.repo ?? "");
+    setRepo(data.repo ? `https://github.com/${data.repo}` : "");
     setWorkflow(data.workflow ?? DEFAULT_WORKFLOW);
     setRef(data.ref ?? DEFAULT_BRANCH);
     setToken("");
@@ -106,6 +109,7 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
     onSuccess: (saved) => {
       edited.current = false;
       qc.setQueryData(queryKey, saved);
+      if (saved.repo) void addToRepositories(saved.repo);
     },
   });
   const disconnect = useMutation({
@@ -117,8 +121,28 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
     },
   });
 
+  /** The repository Play runs in also belongs in Settings › Repositories, where its status shows. Adding it is a
+   *  courtesy after the save: a failure here never undoes the connection, it only says so. */
+  async function addToRepositories(saved: string) {
+    setRepoNote(null);
+    const reposKey = ["repositories", projectId];
+    try {
+      const list = await qc.fetchQuery({ queryKey: reposKey, queryFn: () => listRepositories(projectId), staleTime: 0 });
+      const key = saved.toLowerCase();
+      if (list.some((r) => r.provider === "github" && `${r.owner}/${r.name}`.toLowerCase() === key)) return;
+      await addRepository(projectId, `https://github.com/${saved}`);
+      setRepoNote(`Added ${saved} to Repositories.`);
+    } catch (err) {
+      if (!(err instanceof ApiError && err.status === 409)) {  // 409: someone added it meanwhile, which is fine
+        setRepoNote(`Saved. ${saved} could not be added to Repositories; add it there to see its status.`);
+      }
+    }
+    await qc.invalidateQueries({ queryKey: reposKey });
+  }
+
+  const parsedRepo = normalizeRepo(repo);
   const errors = {
-    repo: repoError(normalizeRepo(repo)),
+    repo: repoError(parsedRepo),
     workflow: workflowError(workflow.trim()),
     ref: branchError(ref.trim()),
     token: !data?.configured && !token.trim() ? "Paste the GitHub token" : null,
@@ -180,12 +204,16 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
           )}
           <form className="form-stack" onSubmit={onSubmit} noValidate>
             <label>
-              <span id={`${ids}-repo-label`}>Repository</span>
-              <input required value={repo} aria-labelledby={`${ids}-repo-label`} onChange={(e) => edit(setRepo)(e.target.value)} placeholder="owner/name"
-                onBlur={() => { const clean = normalizeRepo(repo); if (clean !== repo) edit(setRepo)(clean); }}
-                {...field("repo")} aria-describedby={[`${ids}-repo-hint`, field("repo")["aria-describedby"]].filter(Boolean).join(" ")}
+              <span id={`${ids}-repo-label`}>Repository link</span>
+              <input required value={repo} aria-labelledby={`${ids}-repo-label`} onChange={(e) => edit(setRepo)(e.target.value)}
+                placeholder="https://github.com/owner/name" inputMode="url"
+                {...field("repo")} aria-describedby={[`${ids}-repo-hint`, !errors.repo ? `${ids}-repo-parsed` : null,
+                  field("repo")["aria-describedby"]].filter(Boolean).join(" ")}
                 autoComplete="off" spellCheck={false} />
-              <span id={`${ids}-repo-hint`} className="muted field-hint">owner/name, or paste the repository&apos;s GitHub address</span>
+              <span id={`${ids}-repo-hint`} className="muted field-hint">
+                Paste the repository&apos;s GitHub address. owner/name also works.
+              </span>
+              {!errors.repo && <span id={`${ids}-repo-parsed`} className="muted field-hint">Runs in <strong>{parsedRepo}</strong></span>}
               {fieldError("repo")}
             </label>
             <label>
@@ -219,6 +247,7 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
             </div>
           </form>
           {save.error != null && <ErrorBanner error={save.error} />}
+          {repoNote && <p className="muted" role="status">{repoNote}</p>}
           {data.configured && (
             <ConfirmButton
               label="Disconnect"

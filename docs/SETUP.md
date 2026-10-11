@@ -1018,12 +1018,16 @@ results come back through the normal upload ([4.1](#41-sending-test-results)).
    - Permissions → Repository: **Actions: Read and write**. Nothing else (Metadata: read is
      added automatically).
    - Expiration: your policy. QEOS warns owners and admins 14 days before it expires.
-6. **QEOS:** Settings → **Run from QEOS** (owners and admins only): **Repository** `owner/name`
-   (a pasted GitHub address such as `https://github.com/owner/name.git` is turned into `owner/name`),
-   **Workflow file** (`qeos-run.yml`), **Branch** (`main`), **Token** → **Save**. QEOS checks
-   the token with GitHub before it stores it, and tells you if the token is invalid or
-   expired, has no Actions access, or the workflow is not found on the default branch.
-   The card then shows `Connected: owner/name · token …abcd · expires …` and who changed it last.
+6. **QEOS:** Settings → **Run from QEOS** (owners and admins only): **Repository link** (paste
+   the repository's GitHub address, such as `https://github.com/owner/name`; `owner/name` also
+   works, and the line under the field shows `Runs in owner/name`), **Workflow file**
+   (`qeos-run.yml`), **Branch** (`main`), **Token** → **Save**. QEOS checks the token with GitHub
+   before it stores it, and tells you if the token is invalid or expired, has no Actions access,
+   or the repository or workflow is not found. The card then shows
+   `Connected: owner/name · token …abcd · expires …` and who changed it last.
+   After a save, the repository is also added to Settings → **Repositories** if it is not there
+   yet, with a note saying so. A private repository shows **Not found or private** there: that
+   check is anonymous, and Play does not depend on it.
 
 **Use**
 
@@ -1059,7 +1063,7 @@ selected scenarios, then a new run appears in QEOS.
 | Symptom | Fix |
 |---|---|
 | Play disabled, "not configured on this server" | Set `TM_SECRETS_KEY` and recreate (`docker compose up -d --wait gateway`). |
-| Save: "repository or workflow not found…" | The workflow file is not on the **default** branch, or the name or repository is wrong. |
+| Save: "repository or workflow not found…" | Either the **token cannot see the repository** (a fine-grained token whose resource owner is your account instead of the organization, a token the organization has not approved, or a classic token not authorized for the organization's SSO), or the workflow file is not on the **default** branch, or its name differs. To tell which, with the same token: `curl -H "Authorization: Bearer <token>" https://api.github.com/repos/<owner>/<name>` (404: the token) and `.../repos/<owner>/<name>/actions/workflows/qeos-run.yml` (404: the file). |
 | Save: "token has no Actions access…" | Give the fine-grained token **Actions: Read and write** on that repository (and have the organization approve it). |
 | 422 "re-import the .feature files first" | The case was imported before scenario names were stored. Run a full import once. |
 | Job fails with "path not allowed" | The case's path is not under `tests/features/`. Fix the import's **Path prefix**. |
