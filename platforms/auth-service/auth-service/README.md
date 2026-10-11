@@ -208,6 +208,10 @@ set it to any address). The address must be one the user model accepts; otherwis
 
 There is no endpoint that grants superuser through the API. It is either bootstrapped once at startup from `FIRST_SUPERUSER`/`FIRST_SUPERUSER_PASSWORD` (permanent no-op once any superuser exists) or set directly in the database.
 
+### Internal (for the gateway and other services)
+Mounted at `/internal/v1`, outside the public OpenAPI; the gateway never routes `/internal/`. `GET /internal/v1/users` and `GET /internal/v1/users/{user_id}` take HTTP Basic (`INTERNAL_API_USERNAME` / `INTERNAL_API_PASSWORD`).
+- `GET /internal/v1/grafana-check` - The check the gateway's `auth_request` will call for every `/grafana/` request (the gateway location is not wired yet). No HTTP Basic: the `qeos_grafana` cookie is the only credential, and the `Authorization` header is ignored. Answers `200` with `X-QEOS-User-Email: <email>` and an empty body when the cookie is valid, its user exists, is active and a superuser, its `pwv` matches `password_version(user)` (constant-time compare), and `MONITORING_ENABLED` is true; `401` with an empty body otherwise, with no `WWW-Authenticate` so a browser never shows a Basic dialog. Every answer is `Cache-Control: no-store`. The user is re-read on every call, so a demotion, deactivation or password change cuts access at once.
+
 ## Security Implementation Details
 
 ### Password Security

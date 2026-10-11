@@ -120,6 +120,16 @@ details.
   makes a password change or reset invalidate every Grafana cookie. Logging
   out on another device does not: a copied cookie keeps working until it
   expires, an accepted residual like the 60-minute access token.
+- **Grafana per-request re-check (monitoring).** auth-service's
+  `GET /internal/v1/grafana-check` re-verifies the `qeos_grafana` cookie for
+  every Grafana request: the user must still exist, be active and a superuser,
+  the cookie's `pwv` must match the current password (compared in constant
+  time), and `MONITORING_ENABLED` must be true. Anything else is a 401, so a
+  demotion, deactivation, password change or monitoring turned off cuts access
+  on the next request. It takes no HTTP Basic (the cookie is the credential;
+  the gateway never routes `/internal/`), ignores the `Authorization` header,
+  answers `Cache-Control: no-store` and never sends `WWW-Authenticate`. The
+  gateway location that calls it through `auth_request` is not wired yet.
 - **Grafana break-glass port (monitoring).** Grafana publishes `127.0.0.1:3000`
   for an admin login when auth-service is down. Because that port is published,
   Docker 28 and later makes Grafana's address on its `grafana-front` network
