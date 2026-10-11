@@ -264,6 +264,10 @@ input[aria-invalid="true"] { border-color: var(--danger-text); }
 .form-stack select { width: 100%; max-width: 360px; }
 input.mono { font-family: var(--font-mono); }
 .button-row { display: flex; gap: var(--space-2); flex-wrap: wrap; }
+/* Settings › Run from QEOS: Replace token, Save and Disconnect each get their own vertical room;
+   Disconnect, the destructive one, a little more */
+.ci-replace { margin-bottom: var(--space-3); }
+.ci-disconnect { margin-top: var(--space-5); }
 /* A sub-form under a list in the same card: a rule and a smaller heading set it apart */
 .masking-form { border-top: 1px solid var(--grid); margin-top: var(--space-4); padding-top: var(--space-4); }
 .masking-form h4 { font-size: 14px; font-weight: 600; margin: 0 0 var(--space-3); }

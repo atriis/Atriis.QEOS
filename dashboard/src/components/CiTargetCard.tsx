@@ -229,7 +229,7 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
               {fieldError("ref")}
             </label>
             {data.configured && !replacing ? (
-              <div>
+              <div className="ci-replace">
                 <button type="button" onClick={() => { save.reset(); setReplacing(true); }}>Replace token</button>
               </div>
             ) : (
@@ -249,13 +249,15 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
           {save.error != null && <ErrorBanner error={save.error} />}
           {repoNote && <p className="muted" role="status">{repoNote}</p>}
           {data.configured && (
-            <ConfirmButton
-              label="Disconnect"
-              question={`Disconnect ${data.repo}? Nobody can run tests from QEOS until a token is saved again.`}
-              confirmLabel="Disconnect"
-              onConfirm={() => { save.reset(); disconnect.mutate(); }}
-              disabled={disconnect.isPending}
-            />
+            <div className="ci-disconnect">
+              <ConfirmButton
+                label="Disconnect"
+                question={`Disconnect ${data.repo}? Nobody can run tests from QEOS until a token is saved again.`}
+                confirmLabel="Disconnect"
+                onConfirm={() => { save.reset(); disconnect.mutate(); }}
+                disabled={disconnect.isPending}
+              />
+            </div>
           )}
           {disconnect.error != null && <ErrorBanner error={disconnect.error} />}
           <details className="run-help">
