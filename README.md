@@ -1,98 +1,331 @@
-# QEOS
+# QEOS — Quality Engineering OS
 
-**Quality Engineering OS** — one place for a team's automated test results, test cases and test
-runs: CI uploads results, QEOS shows trends, flaky tests, failure causes and regressions, keeps the
-test-case catalogue in sync with your Gherkin features, and starts runs in your own CI.
+**One place for a team's test results, test cases and test runs.**
 
-The target architecture is [`ARCHITECTURE_BLUEPRINT_V1_0.md`](ARCHITECTURE_BLUEPRINT_V1_0.md) (its
-banner says what is built and what waits for an adoption trigger); the item-level record is
-[`TODO.md`](TODO.md).
+Your CI uploads its test reports to QEOS, and QEOS turns them into answers:
 
-## What it does today
+- what failed, and why;
+- what got worse since last week;
+- which tests are flaky;
+- which cases have never run.
 
-- **Accounts and access** — email/password with verification, password reset and change, MFA
-  (TOTP), Google and Microsoft (Entra ID, tenant allowlist) sign-in; organisations with
-  owner / admin / member / viewer roles and invitations; projects with repositories and settings.
-- **CI results** — the [`qeos-collector`](collector/README.md) uploads JUnit/Cucumber results from
-  any CI (GitHub Action in [`collector-action/`](collector-action/action.yml), Jenkins library in
-  [`collector-jenkins/`](collector-jenkins/README.md)) with a per-project API key; secrets and
-  personal data in failure messages are masked before storage.
-- **Analytics** — runs, tests and their history, trends (daily/weekly/monthly), branches, run
-  comparison, flaky tests (same-commit detection, quarantine) on daily rollups.
-- **Report** — a filterable, printable report per period: summary with deltas, failure causes
-  (new / recurring / resolved), regressions and instability (flips), results by feature, folder,
-  label or suite, coverage (never-run cases, tests without a case) and duration; CSV export.
-- **Test cases** — a case catalogue with suites, a Feature view grouped by `.feature` file, Gherkin
-  import from the browser and sync from the repository's default branch, links to automated tests.
-- **Run from QEOS** — start a selection, a case or a suite in your GitHub Actions workflow, with a
-  duration estimate before, during and after the run.
-- **Operations** — Slack, Teams and email notifications (failed runs, weekly summary), data
-  retention and legal hold, full export, `/metrics` in Prometheus format on every service, job heartbeats for the
-  background jobs, and an opt-in monitoring stack (Prometheus, Alertmanager with email/Slack/Teams,
-  Grafana with five dashboards) that superusers open from the account menu's **Monitoring** item
-  (ADR-027; [`docs/superpowers/specs/2026-10-10-monitoring-design.md`](docs/superpowers/specs/2026-10-10-monitoring-design.md)).
+The test-case catalogue stays in sync with your Gherkin features. You can start a run in your own GitHub
+Actions with one click.
 
-## What runs
+QEOS never runs your test code itself and never needs access to your servers. It reads the reports your
+pipeline already produces, and it starts runs only through workflows you own.
 
-| Component | Path | Role |
-|---|---|---|
-| Gateway | [`gateway/`](gateway/README.md) | NGINX: TLS, routing, rate limits, serves the dashboard |
-| Dashboard | `dashboard/` | React 19 + TypeScript single-page app |
-| auth-service | `platforms/auth-service/auth-service/` | Users, sign-in, tokens, SSO, MFA |
-| organization-service | `platforms/organization-service/` | Organisations, members, invitations |
-| project-service | `platforms/project-service/` | Projects, repositories, settings |
-| ingestion-service | [`platforms/ingestion-service/`](platforms/ingestion-service/README.md) | Uploads, runs, analytics, report; jobs: retention, rollup, weekly summary |
-| test-management-service | [`platforms/test-management-service/`](platforms/test-management-service/README.md) | Test cases, suites, Gherkin import/sync, run requests |
-| PostgreSQL 15 | — | One server, one database per service |
-| `shared/` | `shared/qeos_shared/` | Settings, DB session, mail and metrics helpers used by every service |
+---
 
-Services are Python 3.11 / FastAPI / SQLAlchemy / Alembic and never call each other for page data:
-the dashboard joins (ADR-022). Decisions are recorded in
-[`docs/architecture/adr/`](docs/architecture/adr/INDEX.md).
+## Contents
 
-`execution/`, `automation/`, `marketplace/`, `collaboration/`, `intelligence/` and
-`platforms/qip-service` are unwired prototypes: not in compose, CI or the gateway.
+- [Why QEOS](#why-qeos)
+- [Features](#features)
+- [Architecture](#architecture)
+- [Quick start](#quick-start)
+- [Send your first results](#send-your-first-results)
+- [Optional: monitoring](#optional-monitoring)
+- [Production](#production)
+- [Development and tests](#development-and-tests)
+- [Security](#security)
+- [Documentation map](#documentation-map)
+- [Project status](#project-status)
+- [License](#license)
 
-## Run it locally
+---
 
-```bash
-cp .env.example .env            # then set SECRET_KEY and INTERNAL_API_PASSWORD (long random values)
-docker compose up -d --build --wait gateway
-curl -k https://localhost:8443/health          # {"status":"healthy"}
+## Why QEOS
+
+| Without QEOS | With QEOS |
+|---|---|
+| Test results live in CI logs and expire with the build | Every run is stored, searchable and compared with the previous ones |
+| "Is this test flaky or broken?" is a guess | Same-commit flips are detected and flaky tests can be quarantined |
+| Test cases sit in a spreadsheet that drifts from the code | Cases are imported and kept in sync with the `.feature` files on your default branch |
+| Re-running a subset means editing CI config | Select scenarios, press **Play**, and QEOS dispatches your GitHub Actions workflow |
+| Weekly quality reporting is manual | A filterable, printable report and a weekly summary to Slack, Teams or email |
+
+---
+
+## Features
+
+### Results and analytics
+- **Any CI, many formats.** The [`qeos-collector`](collector/README.md) uploads results with a per-project API key. It reads:
+  - JUnit XML, including Surefire rerun attempts;
+  - Cucumber and Playwright JSON;
+  - TRX, NUnit, xUnit and TestNG.
+
+  Ready-made integrations: a [GitHub Action](collector-action/action.yml), a [Jenkins library](collector-jenkins/README.md), and GitLab and Azure DevOps templates.
+- **Runs and history:** every run with its commit, branch, pull request, author and changed files, plus the history of each test.
+- **Trends** by day, week or month, per branch, and run-to-run comparison.
+- **Flaky tests:** same-commit detection over up to 90 days, backed by daily rollups, with quarantine.
+- **Failure causes:** new, recurring and resolved failures, grouped by cause.
+
+### Report
+- **One report per period:**
+  - summary with deltas;
+  - regressions and instability (flips);
+  - results by feature, folder, label or suite;
+  - coverage: cases never run, and tests without a case;
+  - duration.
+- Printable, with CSV export.
+
+### Test management
+- A **case catalogue** with suites, priorities, statuses and links to the automated tests that cover each case.
+- A **Feature view** grouped by `.feature` file.
+- **Gherkin import:** from the browser, or synced from the repository's default branch.
+- **Run from QEOS:** run a selection, a case or a suite in your GitHub Actions workflow, with a duration estimate before, during and after the run.
+
+### Accounts and access
+- **Sign-in:**
+  - email and password, with verification, reset and change;
+  - TOTP two-factor authentication with recovery codes;
+  - Google and Microsoft (Entra ID) single sign-on, with a tenant allowlist.
+- **Organisations** with owner, admin, member and viewer roles, and invitations.
+- **Projects** with repositories and per-project settings.
+
+### Operations
+- **Notifications:** Slack, Microsoft Teams, webhook and email, for failed runs and a weekly summary.
+- **Data protection:**
+  - masking of secrets and personal data before results are stored;
+  - per-project retention;
+  - legal hold;
+  - full NDJSON export.
+- **Metrics:** `/metrics` in Prometheus format on every service, plus heartbeats for the background jobs.
+- **Optional monitoring stack:**
+  - Prometheus, Alertmanager and Grafana with five dashboards;
+  - alerts to email, Slack or Teams;
+  - superusers open it from the app ([below](#optional-monitoring)).
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    CI["CI pipeline<br/>qeos-collector"] -->|HTTPS + API key| GW
+    Browser["Browser<br/>React dashboard"] -->|HTTPS| GW
+    GW["NGINX gateway<br/>TLS · routing · rate limits"]
+    GW --> AUTH[auth-service]
+    GW --> ORG[organization-service]
+    GW --> PROJ[project-service]
+    GW --> ING[ingestion-service]
+    GW --> TM[test-management-service]
+    AUTH & ORG & PROJ & ING & TM --> PG[("PostgreSQL 15<br/>one database per service")]
+    TM -->|workflow_dispatch| GHA["Your GitHub Actions"]
 ```
 
-Open `https://localhost:8443` (self-signed certificate). Databases are created and migrated on
-every `up`. Stop with `docker compose down`; wipe data with `docker compose down --volumes`.
+| Component | Path | Responsibility |
+|---|---|---|
+| Gateway | [`gateway/`](gateway/README.md) | NGINX: TLS, routing, per-IP rate limits, JSON errors; serves the dashboard |
+| Dashboard | [`dashboard/`](dashboard/) | React 19 + TypeScript single-page app |
+| auth-service | [`platforms/auth-service/auth-service/`](platforms/auth-service/auth-service/) | Users, sign-in, tokens, SSO, MFA |
+| organization-service | [`platforms/organization-service/`](platforms/organization-service/) | Organisations, members, invitations |
+| project-service | [`platforms/project-service/`](platforms/project-service/) | Projects, repositories, settings, retention |
+| ingestion-service | [`platforms/ingestion-service/`](platforms/ingestion-service/README.md) | Uploads, runs, analytics, the report; jobs for retention, rollups and the weekly summary |
+| test-management-service | [`platforms/test-management-service/`](platforms/test-management-service/README.md) | Test cases, suites, Gherkin import and sync, run requests |
+| Shared library | [`shared/qeos_shared/`](shared/) | Settings, database session, mail and metrics helpers |
+| Collector | [`collector/`](collector/README.md) | The CI-side uploader (`pip`, single-file `.pyz` or container image) |
+| Monitoring | [`monitoring/`](monitoring/) | Prometheus, Alertmanager and Grafana configuration (opt-in profile) |
+| Production package | [`deploy/`](deploy/README.md) | Single-VM deployment behind a Caddy TLS edge |
 
-**Complete setup guide** — every `.env` variable, first account and roles, MFA, SSO, email, then
-each feature with what to configure (CI uploads, test cases and Gherkin sync, Run from QEOS,
-analytics, notifications, masking, retention), wiring a real repository, upgrades and
-troubleshooting: [`docs/SETUP.md`](docs/SETUP.md).
+**Stack:** Python 3.11 with FastAPI, SQLAlchemy and Alembic, PostgreSQL 15, React 19, NGINX and Docker Compose.
 
-**Production on one VM** — the same stack behind a Caddy TLS edge with Let's Encrypt, generated
-secrets and daily backups: [`deploy/README.md`](deploy/README.md).
+**Design principles:**
+- The services never call each other to build a page. The dashboard composes the data ([ADR-022](docs/architecture/adr/INDEX.md)).
+- Ingestion is push-based.
+- Every architectural decision is recorded as an [ADR](docs/architecture/adr/INDEX.md).
+- The target architecture, and what is built versus planned, is in [`ARCHITECTURE_BLUEPRINT_V1_0.md`](ARCHITECTURE_BLUEPRINT_V1_0.md).
 
-## Tests
+---
 
-| What | Command |
+## Quick start
+
+**Prerequisites:**
+- Docker with Compose 2.24 or newer, with at least 4 GB of RAM for Docker;
+- Git;
+- on Windows, Git Bash for the helper scripts.
+
+**1. Clone and configure**
+
+```bash
+git clone https://github.com/carneiru/QA-Vision-Platform.git
+cd QA-Vision-Platform
+cp .env.example .env
+```
+
+Edit `.env` and set `SECRET_KEY` and `INTERNAL_API_PASSWORD` to long random values, for example from
+`openssl rand -hex 32`. Every other variable has a working local default. All of them are explained in
+[`docs/SETUP.md` §2.3](docs/SETUP.md#23-every-variable-in-env).
+
+**2. Start the platform**
+
+```bash
+docker compose up -d --build --wait gateway
+curl -k https://localhost:8443/health        # {"status":"healthy"}
+```
+
+Naming only `gateway` starts everything it depends on: PostgreSQL, the database migrations, the five
+services, the dashboard and the background jobs. The first build takes a few minutes. Databases are
+created and migrated on every `up`.
+
+**3. Open the app**
+
+Go to **https://localhost:8443** and accept the self-signed certificate. To trust it permanently,
+see [SETUP §2.7](docs/SETUP.md#27-trust-the-local-https-certificate). Then:
+
+1. Create an account.
+2. Verify your email. Without SMTP configured, the verification link is written to the auth-service log:
+   `docker compose logs auth-service`.
+3. Create an organisation and a project.
+
+**Everyday commands**
+
+| Task | Command |
 |---|---|
-| A Python service | `cd platforms/<service> && SECRET_KEY=test .venv/Scripts/python -m pytest -q` (auth: `platforms/auth-service/auth-service`) |
-| Shared package | `cd shared && SECRET_KEY=test ../platforms/organization-service/.venv/Scripts/python -m pytest tests -q` |
+| Status | `docker compose ps -a` |
+| Logs of one service | `docker compose logs -f ingestion-service` |
+| Rebuild after `git pull` | `docker compose up -d --build --wait gateway` |
+| Stop (data kept) | `docker compose down` |
+| Wipe all data | `docker compose down --volumes` (irreversible) |
+
+---
+
+## Send your first results
+
+1. In the project, open **Settings** and create an **API key**.
+2. Run your tests, then upload the reports from the same folder:
+
+```bash
+pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.4.1#subdirectory=collector"
+export QEOS_URL=https://localhost:8443 QEOS_API_KEY=<your key>
+qeos-collector upload "reports/**/*.xml"
+```
+
+3. Open the project: the run, its tests and the trends appear right away.
+
+**Settings → Wire up your CI** gives a ready-to-paste snippet for GitHub Actions, GitLab CI, Azure Pipelines,
+Jenkins and the CLI. [SETUP §5](docs/SETUP.md#5-wiring-a-real-test-repository-end-to-end) walks through
+a real repository end to end:
+- uploads from CI;
+- Gherkin sync;
+- Run from QEOS.
+
+---
+
+## Optional: monitoring
+
+The `monitoring` compose profile adds:
+- Prometheus and Alertmanager;
+- Grafana with five dashboards: QEOS overview, service detail, jobs and uploads, PostgreSQL, and host and containers;
+- node-exporter, cAdvisor and postgres-exporter.
+
+It is off by default. When it is off, the platform runs exactly as without it.
+
+```bash
+# in .env
+COMPOSE_PROFILES=monitoring
+MONITORING_ENABLED=true
+GRAFANA_ADMIN_PASSWORD=<long random value>
+MONITORING_DB_PASSWORD=<long random value>
+```
+
+Superusers then open Grafana from the account menu's **Monitoring** item, at `https://localhost:8443/grafana/`.
+The gateway checks the QEOS session on every request, so there is no second password to manage.
+Alert channels, resources and break-glass access are in [SETUP §7.4](docs/SETUP.md#74-monitoring-optional)
+and [`deploy/README.md`](deploy/README.md). The design is in [ADR-027](docs/architecture/adr/INDEX.md).
+
+---
+
+## Production
+
+[`deploy/`](deploy/README.md) packages the same stack for a single VM:
+- a Caddy TLS edge with Let's Encrypt, as the only published service;
+- secrets generated by `init-env.sh`;
+- restart policies;
+- daily backups with a verified restore.
+
+The design is in ADR-019.
+
+---
+
+## Development and tests
+
+| Scope | Command |
+|---|---|
+| One Python service | `cd platforms/<service> && SECRET_KEY=test .venv/Scripts/python -m pytest -q` (auth-service lives in `platforms/auth-service/auth-service`) |
+| Shared library | `cd shared && SECRET_KEY=test ../platforms/organization-service/.venv/Scripts/python -m pytest tests -q` |
 | Dashboard | `cd dashboard && npm run lint && npm run typecheck && npx vitest run && npm run build` |
-| Whole stack (Docker) | `bash scripts/smoke_gateway.sh` after `docker compose up` |
+| Monitoring configuration | `bash monitoring/check.sh` (promtool rule tests, amtool, dashboard lint) |
+| Whole stack | `bash scripts/smoke_gateway.sh` against a running local stack |
 
-CI (`.github/workflows/ci.yml`) runs every service suite, the dashboard checks, container smoke
-tests and the full-stack gateway smoke on each push, once without and once with the monitoring
-profile (`/grafana/` gate, Prometheus targets, superuser cookie).
+**Continuous integration** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push:
+- every service suite;
+- the dashboard checks;
+- container smoke tests;
+- the full-stack gateway smoke, twice: without and with the monitoring profile.
 
-## Security notes
+**Conventions:**
+- Work lands directly on `master` with every suite green.
+- Behaviour changes are test-driven.
+- Every commit that changes behaviour updates the documentation it affects.
 
-Passwords hashed with bcrypt; short-lived JWT access tokens and rotating, revocable refresh tokens
-in an httpOnly cookie; MFA; SSO ID tokens verified against the providers' keys; rate limits at the
-gateway (sign-in endpoints stricter); per-project API keys for uploads; masking of secrets and
-personal data in stored results; `/metrics` and internal endpoints are never routed publicly.
-Access tokens are not revocable before they expire. See [`SECURITY.md`](SECURITY.md).
+---
+
+## Security
+
+- **Passwords and tokens:**
+  - passwords are hashed with bcrypt;
+  - JWT access tokens are short-lived;
+  - refresh tokens rotate, have replay detection and live in an httpOnly cookie.
+- **Sign-in protection:**
+  - TOTP MFA;
+  - SSO ID tokens are verified against the providers' keys;
+  - stricter rate limits on the sign-in endpoints.
+- **Uploads:**
+  - per-project API keys;
+  - masking of secrets and personal data before storage.
+- **Exposure:** `/metrics` and the internal endpoints are never routed publicly.
+
+Known limitation: an access token stays valid until it expires (minutes).
+
+The threat model and operational guidance are in [`SECURITY.md`](SECURITY.md).
+
+---
+
+## Documentation map
+
+| Document | What it holds |
+|---|---|
+| [`docs/SETUP.md`](docs/SETUP.md) | Complete setup and operations guide: every variable, accounts, each feature, troubleshooting |
+| [`PRODUCT.md`](PRODUCT.md) | Product rules and behaviour |
+| [`ARCHITECTURE_BLUEPRINT_V1_0.md`](ARCHITECTURE_BLUEPRINT_V1_0.md) | Target architecture; its banner shows what is built and each adoption trigger |
+| [`TECHNICAL_SPECIFICATION.md`](TECHNICAL_SPECIFICATION.md) | Current-state technical specification |
+| [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) · [`TODO.md`](TODO.md) · [`NEXT_STEPS.md`](NEXT_STEPS.md) | Forward plan, item-level record, next steps |
+| [`DESIGN.md`](DESIGN.md) | Dashboard UI rules |
+| [`SECURITY.md`](SECURITY.md) | Security model and operations |
+| [`docs/architecture/adr/`](docs/architecture/adr/INDEX.md) | Architecture decision records |
+
+---
+
+## Project status
+
+**Built and running:**
+- the platform foundation: accounts, organisations, projects and the gateway;
+- ingestion with the collector and its CI integrations;
+- analytics, the report and notifications;
+- test management with Gherkin sync and Run from QEOS;
+- the optional monitoring stack;
+- the single-VM production package.
+
+**Next**, in the agreed order: a customisable Overview, then test impact analysis. The full plan is in
+[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
+
+The directories `execution/`, `automation/`, `marketplace/`, `collaboration/`, `intelligence/` and
+`platforms/qip-service` are **unwired prototypes**. They are not in Compose, CI or the gateway, and they
+are not shipped functionality.
+
+---
 
 ## License
 
-MIT, as stated since the first commit; the LICENSE file itself is not in the repository yet.
+MIT, as stated since the first commit. The `LICENSE` file itself is not in the repository yet.
