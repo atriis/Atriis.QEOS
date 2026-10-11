@@ -168,11 +168,12 @@ details.
   header they send is refused (401 `auth-proxy.invalid-ip`) and they reach only Grafana's own login, which
   needs `GRAFANA_ADMIN_PASSWORD`. A container that is already compromised could
   try that password; keep it long and random (`init-env.sh` does).
-- **cAdvisor (monitoring).** It runs as root with `/:/rootfs:ro` and `/var/run` (the Docker
-  socket) mounted, so it can read the whole host filesystem, including `.env` and the PostgreSQL
-  data, and has root-equivalent Docker API access. It is opt-in and publishes no port. Dropping the
-  `/:/rootfs` mount and narrowing `/var/run` to the Docker socket is an open follow-up (TODO.md),
-  pending a check that container discovery still works without them.
+- **cAdvisor (monitoring).** It runs as root with only the Docker socket, the containerd socket,
+  `/sys` and `/var/lib/docker` mounted, all read-only; there is no `/:/rootfs` mount and no whole
+  `/var/run`, so it no longer sees the rest of the host filesystem (`.env` included). It still reads
+  `/var/lib/docker`, which holds the volumes and so the PostgreSQL data, and the Docker socket is
+  root-equivalent API access: treat it as trusted. It is opt-in and publishes no port. The containerd
+  socket is required: without it cAdvisor discovers no container.
 - **Data.** Per-project retention, legal hold and a full NDJSON export.
 - **Production package** (`deploy/`). A Caddy TLS edge with Let's Encrypt and
   HSTS is the only published service. Secrets are generated into a mode-600

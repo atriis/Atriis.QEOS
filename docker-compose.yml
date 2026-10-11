@@ -467,9 +467,11 @@ services:
       - --whitelisted_container_labels=com.docker.compose.service
       # Only CPU, memory and start times are used; the rest would cost memory and series
       - --disable_metrics=advtcp,cpu_topology,cpuset,hugetlb,memory_numa,percpu,process,referenced_memory,resctrl,sched,tcp,udp,disk,diskIO,network
+    # No /:/rootfs and no whole /var/run. Both sockets are needed: with the Docker socket alone the Docker
+    # factory fails to register (it talks to containerd too) and no container is found
     volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/run/containerd/containerd.sock:/run/containerd/containerd.sock:ro
       - /sys:/sys:ro
       - /var/lib/docker/:/var/lib/docker:ro
     networks: [monitoring]

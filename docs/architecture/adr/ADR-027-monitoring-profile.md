@@ -58,8 +58,11 @@ The blueprint (§11) is binding for names: `api_requests_total`, `http_requests_
 - **Warning alerts reach email only when it is the only channel**, to keep a mailbox for criticals.
 - **Per-endpoint latency shows p95 only.** The spec asks for p50/p95/p99 per route; the overview shows
   p50/p95/p99 for the whole service and p95 per endpoint, to keep the per-endpoint panel readable.
-- **cAdvisor still mounts `/:/rootfs` and `/var/run`.** Dropping them was planned for Phase 3 but needs a
-  live check that container discovery survives; it is a TODO follow-up.
+- **cAdvisor mounts two sockets, not one.** `/:/rootfs` is gone and `/var/run` is narrowed, as planned, but
+  to the Docker socket *and* the containerd socket (`/var/run/containerd/containerd.sock` at
+  `/run/containerd/containerd.sock`): with the Docker socket alone cAdvisor's Docker factory fails to
+  register and finds no container. Checked live (2026-10-11): 17 compose services before and after, the
+  three container panels and `container_start_time_seconds` all present. `/sys` and `/var/lib/docker` stay.
 
 ## Stays TARGET (blueprint §11), each behind its trigger
 | Piece | Trigger |

@@ -320,11 +320,12 @@ address reachable by IP from other containers on the host. Such requests arrive 
 bridge gateway (`172.30.1.128` with the default subnet), not from the whitelisted gateway, so the auth proxy ignores any user
 header they send, and they get nothing beyond Grafana's own login, which still needs the admin
 password. Keep `GRAFANA_ADMIN_PASSWORD` strong; `init-env.sh` generates 32 characters. The query text
-visible to `qeos_monitor` is described in `SECURITY.md`. cAdvisor runs as root with `/:/rootfs:ro` and the
-`/var/run` (the Docker socket) mounted, so it can read the whole VM filesystem, including `.env` and the
-PostgreSQL data, and has root-equivalent Docker API access; it is opt-in and publishes no port.
-Dropping the `/:/rootfs` mount (and narrowing `/var/run` to the Docker socket) is an open follow-up in
-`TODO.md`.
+visible to `qeos_monitor` is described in `SECURITY.md`. cAdvisor runs as root with the Docker socket, the
+containerd socket, `/sys` and `/var/lib/docker` mounted read-only (no `/:/rootfs`, no whole `/var/run`). It
+can no longer read the rest of the VM filesystem such as `.env`, but `/var/lib/docker` holds the volumes
+(the PostgreSQL data included) and the Docker socket is root-equivalent API access, so treat it as
+trusted; it is opt-in and publishes no port. Both sockets are needed: without the containerd socket the
+Docker factory does not register and no container is discovered.
 
 **Dead-man's switch (not built).** The `Watchdog` alert always fires and goes nowhere. To be told when the
 whole VM or Alertmanager is gone, route `Watchdog` to an external heartbeat service (any hosted "dead
