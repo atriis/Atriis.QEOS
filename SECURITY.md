@@ -102,6 +102,9 @@ details.
   (Fernet, `TM_SECRETS_KEY`) and never returned. Notification webhook URLs are
   never returned, and are checked against SSRF (vendor hosts, public addresses
   only, no redirects).
+- **Monitoring database role.** With monitoring on, PostgreSQL gets a login role
+  `qeos_monitor` that is a member of `pg_monitor` only: it reads statistics and
+  settings and cannot read table data.
 - **Data.** Per-project retention, legal hold and a full NDJSON export.
 - **Production package** (`deploy/`). A Caddy TLS edge with Let's Encrypt and
   HSTS is the only published service. Secrets are generated into a mode-600

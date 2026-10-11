@@ -96,6 +96,9 @@ x-dashboard-build: &dashboard-build
 services:
   postgres:
     image: postgres:15
+    # pg_stat_statements for the monitoring profile's slowest-statements panel (Ruling 10). Loading it
+    # costs a few MB of shared memory and changes nothing else
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
@@ -117,6 +120,8 @@ services:
       PGHOST: postgres
       PGUSER: postgres
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      # Empty unless monitoring is on: then postgres-init.sh creates role qeos_monitor (pg_monitor only)
+      MONITORING_DB_PASSWORD: ${MONITORING_DB_PASSWORD:-}
     volumes:
       - ./scripts/postgres-init.sh:/postgres-init.sh:ro
     entrypoint: ["sh", "/postgres-init.sh"]
