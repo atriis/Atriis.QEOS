@@ -1,6 +1,7 @@
 import { X } from "lucide-react";
 import { MAX_WIDGETS } from "./catalog";
-import { addableDefinitions } from "./widgets/registry";
+import { type LayoutTemplate, TEMPLATES } from "./templates";
+import { addableDefinitions, widgetTitle } from "./widgets/registry";
 import type { WidgetDefinition } from "./widgets/types";
 
 interface Props {
@@ -8,11 +9,13 @@ interface Props {
   /** The layout holds MAX_WIDGETS already. */
   full: boolean;
   onAdd: (def: WidgetDefinition) => void;
+  /** Replaces the draft with a template (spec §2.5). */
+  onTemplate: (template: LayoutTemplate) => void;
   onClose: () => void;
 }
 
-/** Every widget type with a one-line description (spec §2.2 Add widget). Escape closes it. */
-export default function AddWidgetPanel({ id, full, onAdd, onClose }: Props) {
+/** Templates first, then every widget type with a one-line description (spec §2.2, §2.5). Escape closes it. */
+export default function AddWidgetPanel({ id, full, onAdd, onTemplate, onClose }: Props) {
   return (
     <section
       id={id}
@@ -31,6 +34,20 @@ export default function AddWidgetPanel({ id, full, onAdd, onClose }: Props) {
           <X size={16} aria-hidden="true" />
         </button>
       </div>
+      <h3 className="add-widget-heading">Start from a template</h3>
+      <p className="muted">A template replaces the draft; Cancel still undoes it.</p>
+      <ul className="add-widget-list">
+        {TEMPLATES.map((template) => (
+          <li key={template.name}>
+            <div>
+              <strong>{template.label}</strong>
+              <p className="muted">{template.layout.widgets.map((w) => widgetTitle(w)).join(", ")}</p>
+            </div>
+            <button type="button" aria-label={`Use the ${template.label} layout`} onClick={() => onTemplate(template)}>Use</button>
+          </li>
+        ))}
+      </ul>
+      <h3 className="add-widget-heading">Widgets</h3>
       {full && <p className="muted">A layout holds at most {MAX_WIDGETS} widgets. Remove one to add another.</p>}
       <ul className="add-widget-list">
         {addableDefinitions().map((def) => (

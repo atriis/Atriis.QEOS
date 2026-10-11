@@ -10,6 +10,7 @@ import { MAX_WIDGETS, type StoredWidget, type WidgetSettings } from "./catalog";
 import { type Draft, draftReducer, isDirty, nextWidgetId } from "./draft";
 import { formatDay } from "./format";
 import type { EditSession } from "./session";
+import type { LayoutTemplate } from "./templates";
 import { useOverviewLayout } from "./useOverviewLayout";
 import WidgetCard from "./WidgetCard";
 import WidgetSettingsForm from "./WidgetSettingsForm";
@@ -117,6 +118,15 @@ export default function OverviewEditor({ projectId, session, onClose, onReload }
     setSettingsFor(null);
     focusAfter.current = { id: widget.id, tool: "settings" };
     announce(`${widgetTitle({ ...widget, settings })} settings applied`);
+  }
+
+  function applyTemplate(template: LayoutTemplate) {
+    dispatch({ kind: "replace", layout: template.layout });
+    setAdding(false);
+    setSettingsFor(null);
+    const first = template.layout.widgets[0];
+    focusAfter.current = first ? { id: first.id, tool: "card" } : { id: null, tool: "add" };
+    announce(`${template.label} layout applied: ${template.layout.widgets.length} widgets`);
   }
 
   function resetDraft() {
@@ -235,6 +245,7 @@ export default function OverviewEditor({ projectId, session, onClose, onReload }
           id="overview-add"
           full={widgets.length >= MAX_WIDGETS}
           onAdd={add}
+          onTemplate={applyTemplate}
           onClose={() => {
             setAdding(false);
             addRef.current?.focus();

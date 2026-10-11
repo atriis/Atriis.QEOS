@@ -1,14 +1,9 @@
 import { CATALOG, type SettingName, type WidgetType, isValidSetting } from "../catalog";
-import { BUILTIN_DEFAULT } from "../templates";
+import { BUILTIN_DEFAULT, TEMPLATES } from "../templates";
 import { REGISTRY, addableDefinitions, definitionOf, withDefaults, widgetTitle } from "./registry";
 
-// Catalogue types whose widgets arrive in Phase 3; each of Tasks 16-20 removes its own, Task 21 removes the set
-const PENDING = new Set<string>([
-]);
-
 test("the registry has a widget for every catalogue type, and no other", () => {
-  const expected = Object.keys(CATALOG.types).filter((type) => !PENDING.has(type)).sort();
-  expect(Object.keys(REGISTRY).sort()).toEqual(expected);
+  expect(Object.keys(REGISTRY).sort()).toEqual(Object.keys(CATALOG.types).sort());
 });
 
 test("each widget declares exactly its catalogue settings, with allowed defaults", () => {
@@ -48,4 +43,26 @@ test("titles follow the settings, and Add widget offers registered types in cata
   expect(widgetTitle({ id: "a", type: "flaky_count", size: "normal", settings: { period: 7 } })).toBe("Flaky tests, last 7 days");
   expect(widgetTitle({ id: "b", type: "failing_now", size: "normal" })).toBe("Failing in latest run");
   expect(addableDefinitions().map((def) => def.type)).toEqual(Object.keys(CATALOG.types).filter((type) => Object.hasOwn(REGISTRY, type)));
+});
+
+test("each template is a valid stored layout of registered widgets, with no branch (every branch)", () => {
+  expect(TEMPLATES.map((t) => t.label)).toEqual(["QA lead", "Developer", "Flaky hunt"]);
+  const idPattern = new RegExp(CATALOG.widget_id_pattern);
+  for (const template of TEMPLATES) {
+    const { widgets } = template.layout;
+    expect(template.layout.schema).toBe(CATALOG.schema);
+    expect(widgets.length).toBeLessThanOrEqual(CATALOG.max_widgets);
+    expect(new Set(widgets.map((w) => w.id)).size).toBe(widgets.length);
+    for (const widget of widgets) {
+      expect(widget.id).toMatch(idPattern);
+      expect(CATALOG.sizes).toContain(widget.size);
+      const def = REGISTRY[widget.type as WidgetType];
+      expect(def).toBeDefined();
+      for (const [name, value] of Object.entries(widget.settings ?? {})) {
+        expect(def!.settings).toContain(name);
+        expect(isValidSetting(name as SettingName, value)).toBe(true);
+      }
+      expect(widget.settings?.branch).toBeUndefined();
+    }
+  }
 });

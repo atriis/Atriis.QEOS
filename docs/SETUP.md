@@ -1122,7 +1122,11 @@ everything listed here.
 
 Every role can arrange their own Overview, per project: **Customise** in the Overview header opens
 edit mode. Move widgets up or down, make them wide or normal, open a widget's settings (rows, period,
-branch; **All branches** is the default), remove it, or **Add widget**. The page shows your draft;
+branch; **All branches** is the default), remove it, or **Add widget**, which also offers three
+templates that replace the draft: **QA lead** (Pass-rate trend, Failure causes, Regressions and flips,
+Coverage, Test cases), **Developer** (Latest run, Failing in latest run, Branch health, Recent runs, My
+recent failures) and **Flaky hunt** (Flaky tests over 30 days, Regressions and flips, Slowest tests,
+Pass-rate trend by day). The page shows your draft;
 nothing changes until **Save**. **Reset to project default** puts the default back in the draft, and
 Save then removes your own layout, so later changes to the default reach you again. **Cancel**
 discards the draft, asking first when you changed something. If the same layout was saved elsewhere
