@@ -9,6 +9,8 @@ export interface WidgetProps {
   size: WidgetSize;
   /** The card's h2, a link to the full view (spec §2.7): the widget places it, first or in a head row with a badge. */
   heading: ReactNode;
+  /** The id of that h2, for a figure or region the heading names. */
+  titleId: string;
   /** Opens this widget's settings (the empty-branch and no-name buttons); absent where that is not possible. */
   onOpenSettings?: () => void;
 }

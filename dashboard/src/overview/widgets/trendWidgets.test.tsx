@@ -27,6 +27,8 @@ test("Pass-rate trend asks the Trends view's query for weekly buckets over 90 da
   expect(within(heading).getByRole("link")).toHaveAttribute("href", "/projects/42/trends?days=90&bucket=week");
   expect(await screen.findByRole("link", { name: "Trends" })).toHaveAttribute("href", "/projects/42/trends?days=90&bucket=week");
   expect(await screen.findByText(/Pass rate per week, from 83\.3% to 95\.8%/)).toBeInTheDocument();
+  // The chart is named by the card's heading
+  expect(screen.getByRole("figure", { name: "Pass-rate trend" })).toBeInTheDocument();
   expect(screen.getByText(/Latest week: 95\.8%/)).toBeInTheDocument();
   await waitFor(() => expect(asked.length).toBeGreaterThan(0));
   expect(asked[0].get("days")).toBe("90");

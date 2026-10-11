@@ -11,7 +11,7 @@ import { TREND_DAYS, passRateTrend } from "./passRateTrend";
 import type { WidgetProps } from "./types";
 
 /** The pass rate per bucket, the Trends view's chart under its own query key (one branch when set, else every branch). */
-export default function PassRateTrendWidget({ projectId, settings, size, heading, onOpenSettings }: WidgetProps) {
+export default function PassRateTrendWidget({ projectId, settings, size, heading, titleId, onOpenSettings }: WidgetProps) {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const bucket = settings.granularity ?? "week";
   const days = TREND_DAYS[bucket];
@@ -29,7 +29,8 @@ export default function PassRateTrendWidget({ projectId, settings, size, heading
         : <EmptyBranch branch={settings.branch} days={days} onOpenSettings={onOpenSettings} />)}
       {query.data && !noRuns && (
         <>
-          <PassRateChart buckets={buckets} bucket={bucket} height={size === "wide" ? 220 : 160} />
+          {/* A normal card is narrow: fewer ticks and a slimmer axis */}
+          <PassRateChart buckets={buckets} bucket={bucket} height={size === "wide" ? 220 : 160} narrow={size === "normal"} labelledBy={titleId} />
           {last && <p className="muted">Latest {bucket}: {formatPassRate(last.pass_rate)}</p>}
         </>
       )}

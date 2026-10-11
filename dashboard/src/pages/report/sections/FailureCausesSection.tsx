@@ -1,3 +1,4 @@
+import { formatCount } from "../../../api/analytics";
 import { Fragment, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronRight, Download } from "lucide-react";
@@ -9,7 +10,6 @@ import { downloadCsv, toCsv } from "../../../lib/csv";
 import ReportSection, { type SectionQuery } from "../ReportSection";
 import type { Gate } from "../useReportRequest";
 
-const number = new Intl.NumberFormat();
 const TOP_IN_CHART = 10;
 const day = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" });
 
@@ -92,7 +92,7 @@ export default function FailureCausesSection({ projectId, gate, query, branch, o
               {c.resolved.map((x) => (
                 <li key={x.signature}>
                   <span className="wrap-anywhere">{headlineOf(x)}</span>
-                  <span className="muted"> · {number.format(x.previous_occurrences)} before, last seen {day.format(new Date(x.last_seen))}</span>
+                  <span className="muted"> · {formatCount(x.previous_occurrences)} before, last seen {day.format(new Date(x.last_seen))}</span>
                 </li>
               ))}
             </ul>
@@ -106,8 +106,8 @@ export default function FailureCausesSection({ projectId, gate, query, branch, o
           signature: g.signature, occurrences: g.occurrences, status: g.status,
         }));
         const largest = c.groups[0];
-        const caption = `${number.format(c.failures)} failures from ${number.format(c.groups_total)} causes; the largest is `
-          + `${truncate(headlineOf(largest), 80)} with ${number.format(largest.occurrences)}`
+        const caption = `${formatCount(c.failures)} failures from ${formatCount(c.groups_total)} causes; the largest is `
+          + `${truncate(headlineOf(largest), 80)} with ${formatCount(largest.occurrences)}`
           + `${largest.status === "new" ? ", new in this period" : ""}.`;
         return (
           <>
@@ -136,7 +136,7 @@ export default function FailureCausesSection({ projectId, gate, query, branch, o
               <table className="data">
                 <thead><tr><th scope="col">Cause</th><th scope="col" className="num">Occurrences</th><th scope="col">Status</th></tr></thead>
                 <tbody>{c.groups.slice(0, TOP_IN_CHART).map((g) => (
-                  <tr key={g.signature}><td className="wrap-anywhere">{headlineOf(g)}</td><td className="num">{number.format(g.occurrences)}</td><td>{g.status === "new" ? "New" : "Recurring"}</td></tr>
+                  <tr key={g.signature}><td className="wrap-anywhere">{headlineOf(g)}</td><td className="num">{formatCount(g.occurrences)}</td><td>{g.status === "new" ? "New" : "Recurring"}</td></tr>
                 ))}</tbody>
               </table>
             </DataTableDisclosure>
@@ -162,11 +162,11 @@ export default function FailureCausesSection({ projectId, gate, query, branch, o
                             <ChevronRight size={14} aria-hidden="true" className="chevron" />
                           </button>
                           {headlineOf(g)}
-                          {g.quarantined > 0 && <span className="muted"> · {number.format(g.quarantined)} quarantined</span>}
+                          {g.quarantined > 0 && <span className="muted"> · {formatCount(g.quarantined)} quarantined</span>}
                         </td>
-                        <td className="num">{number.format(g.occurrences)}</td>
-                        <td className="num hide-narrow">{number.format(g.tests)}</td>
-                        <td className="num hide-narrow">{number.format(g.runs)}</td>
+                        <td className="num">{formatCount(g.occurrences)}</td>
+                        <td className="num hide-narrow">{formatCount(g.tests)}</td>
+                        <td className="num hide-narrow">{formatCount(g.runs)}</td>
                         <td><StatusTag g={g} /></td>
                         <td className="hide-narrow">{before ? `seen since at least ${day.format(new Date(r.previous_period.start))}` : day.format(new Date(g.first_seen))}</td>
                         <td><Link to={`/projects/${projectId}/runs/${g.last_seen_run_id}`}>{day.format(new Date(g.last_seen))} (run #{g.last_seen_run_id})</Link></td>
@@ -179,7 +179,7 @@ export default function FailureCausesSection({ projectId, gate, query, branch, o
                               {g.top_tests.map((t) => (
                                 <li key={t.test_key}>
                                   <Link to={history(t.test_key)}>{testLabel(t)}</Link>
-                                  <span className="muted"> · {number.format(t.occurrences)} {t.occurrences === 1 ? "time" : "times"}</span>
+                                  <span className="muted"> · {formatCount(t.occurrences)} {t.occurrences === 1 ? "time" : "times"}</span>
                                 </li>
                               ))}
                             </ul>
@@ -192,7 +192,7 @@ export default function FailureCausesSection({ projectId, gate, query, branch, o
               </tbody>
             </table>
             {c.other.groups > 0 && (
-              <p className="muted report-note">And {number.format(c.other.groups)} more causes with {number.format(c.other.occurrences)} failures.</p>
+              <p className="muted report-note">And {formatCount(c.other.groups)} more causes with {formatCount(c.other.occurrences)} failures.</p>
             )}
             {resolved}
           </>

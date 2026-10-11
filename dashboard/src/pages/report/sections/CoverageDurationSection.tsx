@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Download } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { formatDuration } from "../../../api/analytics";
+import { formatCount, formatDuration } from "../../../api/analytics";
 import type { CaseArea, CaseAreas } from "../../../api/cases";
 import type { Report } from "../../../api/report";
 import { DataTableDisclosure, type LegendSeries, PATTERN, SeriesLegend } from "../../../components/ChartKit";
@@ -17,7 +17,6 @@ import { useGrouping } from "../useGrouping";
 import type { ReportFilters } from "../useReportFilters";
 import { type Gate, caseAreasMessage } from "../useReportRequest";
 
-const number = new Intl.NumberFormat();
 const NEVER_RUN_SHOWN = 200;
 const LARGEST_GROUPS = 15;
 const axisTick = { fill: "var(--text-secondary)", fontSize: 12 } as const;
@@ -124,16 +123,16 @@ export default function CoverageDurationSection({ projectId, gate, testsQuery, d
         return (
           <>
             <ul className="kpi-tiles" aria-label="Coverage figures">
-              <li><DeltaTile title="Active cases" value={number.format(areas.counts.cases)} delta={null} noPrevious={false} /></li>
-              <li><DeltaTile title="Linked (automated)" value={number.format(areas.counts.linked)} delta={null} noPrevious={false} /></li>
-              <li><DeltaTile title="Manual" value={number.format(areas.counts.manual)} delta={null} noPrevious={false} /></li>
-              {missing && <li><DeltaTile title="Automated, not run in this period" value={number.format(missing.length)} delta={null} noPrevious={false} /></li>}
+              <li><DeltaTile title="Active cases" value={formatCount(areas.counts.cases)} delta={null} noPrevious={false} /></li>
+              <li><DeltaTile title="Linked (automated)" value={formatCount(areas.counts.linked)} delta={null} noPrevious={false} /></li>
+              <li><DeltaTile title="Manual" value={formatCount(areas.counts.manual)} delta={null} noPrevious={false} /></li>
+              {missing && <li><DeltaTile title="Automated, not run in this period" value={formatCount(missing.length)} delta={null} noPrevious={false} /></li>}
             </ul>
 
             <h3 id="report-coverage-chart">Linked and manual cases by {grouping === "folder" ? "folder" : "feature"}</h3>
             <SeriesLegend series={COVERAGE_LEGEND} hidden={hidden} onToggle={toggle} label="Show or hide a series in the coverage chart" />
             <figure className="chart-figure" aria-labelledby="report-coverage-chart">
-              <figcaption className="sr-only">{`${number.format(areas.counts.linked)} linked and ${number.format(areas.counts.manual)} manual cases; the largest group is ${coverage[0]?.label ?? "none"}.`}</figcaption>
+              <figcaption className="sr-only">{`${formatCount(areas.counts.linked)} linked and ${formatCount(areas.counts.manual)} manual cases; the largest group is ${coverage[0]?.label ?? "none"}.`}</figcaption>
               <ResponsiveContainer width="100%" height={Math.max(160, coverage.length * 28)}>
                 <BarChart data={coverage} layout="vertical" margin={{ left: 8, right: 24 }} accessibilityLayer>
                   <CartesianGrid stroke="var(--grid)" horizontal={false} />
@@ -148,7 +147,7 @@ export default function CoverageDurationSection({ projectId, gate, testsQuery, d
             <DataTableDisclosure name="linked and manual cases by group">
               <table className="data">
                 <thead><tr><th scope="col">Group</th><th scope="col" className="num">Linked</th><th scope="col" className="num">Manual</th></tr></thead>
-                <tbody>{coverage.map((g) => <tr key={g.label}><td>{g.label}</td><td className="num">{number.format(g.linked)}</td><td className="num">{number.format(g.manual)}</td></tr>)}</tbody>
+                <tbody>{coverage.map((g) => <tr key={g.label}><td>{g.label}</td><td className="num">{formatCount(g.linked)}</td><td className="num">{formatCount(g.manual)}</td></tr>)}</tbody>
               </table>
             </DataTableDisclosure>
 
@@ -175,13 +174,13 @@ export default function CoverageDurationSection({ projectId, gate, testsQuery, d
                           </tr>
                         ))}</tbody>
                       </table>
-                      {missing.length > NEVER_RUN_SHOWN && <p className="muted report-note">And {number.format(missing.length - NEVER_RUN_SHOWN)} more (in the CSV).</p>}
+                      {missing.length > NEVER_RUN_SHOWN && <p className="muted report-note">And {formatCount(missing.length - NEVER_RUN_SHOWN)} more (in the CSV).</p>}
                       <div className="button-row no-print">
                         <button type="button" onClick={() => downloadCsv(file(r, "never-run"), neverRunCsv(missing))}><Download size={15} aria-hidden="true" /> Never-run CSV</button>
                       </div>
                     </>
                   )}
-                  <p><Link to={`/projects/${projectId}/tests`}>{number.format(unlinked)} {unlinked === 1 ? "test" : "tests"} without a case</Link> ran in this period.</p>
+                  <p><Link to={`/projects/${projectId}/tests`}>{formatCount(unlinked)} {unlinked === 1 ? "test" : "tests"} without a case</Link> ran in this period.</p>
                 </>
               )}
 
@@ -216,7 +215,7 @@ export default function CoverageDurationSection({ projectId, gate, testsQuery, d
                     <thead><tr><th scope="col">{unit === "day" ? "Date" : "Week of"}</th><th scope="col" className="num">Runs</th><th scope="col" className="num">Average</th>
                       <th scope="col" className="num">p50</th><th scope="col" className="num">p90</th><th scope="col" className="num">Max</th></tr></thead>
                     <tbody>{d.buckets.map((b) => (
-                      <tr key={b.date}><td>{formatPointLabel(b.date, unit)}</td><td className="num">{number.format(b.runs)}</td><td className="num">{formatDuration(b.avg_ms)}</td>
+                      <tr key={b.date}><td>{formatPointLabel(b.date, unit)}</td><td className="num">{formatCount(b.runs)}</td><td className="num">{formatDuration(b.avg_ms)}</td>
                         <td className="num">{formatDuration(b.p50_ms)}</td><td className="num">{formatDuration(b.p90_ms)}</td><td className="num">{formatDuration(b.max_ms)}</td></tr>
                     ))}</tbody>
                   </table>
@@ -240,10 +239,10 @@ export default function CoverageDurationSection({ projectId, gate, testsQuery, d
                       <tr key={g.key}>
                         <td className="wrap-anywhere">
                           {g.label}
-                          <NarrowMeta items={[{ label: "Executions", value: number.format(g.executions) }]} />
+                          <NarrowMeta items={[{ label: "Executions", value: formatCount(g.executions) }]} />
                         </td>
                         <td className="num">{formatDuration(g.durationMsSum)}</td>
-                        <td className="num hide-narrow">{number.format(g.executions)}</td>
+                        <td className="num hide-narrow">{formatCount(g.executions)}</td>
                         <td className="num">{formatDuration(Math.round(g.durationMsSum / g.executions))}</td>
                       </tr>
                     ))}</tbody>

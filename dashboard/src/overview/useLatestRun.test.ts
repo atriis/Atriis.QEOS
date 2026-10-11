@@ -59,3 +59,27 @@ test("the keys a new run makes stale name each query once: a key a broader one a
   // Today's page-level keys stay, in order
   expect(keys.slice(0, 5)).toEqual([["trends", 42], ["flaky", 42], ["report", 42], ["branches", 42], ["latest-keys", 42]]);
 });
+
+test("a widget key the page's keys do not cover is kept and invalidated by a new run", async () => {
+  setAccessToken("acc");
+  let runId = 1;
+  server.use(http.get("/api/v1/projects/42/runs", () =>
+    HttpResponse.json([{ id: runId, project_id: 42, passed: 3, failed: 0, errored: 0 }])));
+  const def = REGISTRY.latest_run!;
+  def.staleKeys = (projectId) => [["widget-only", projectId]];
+  try {
+    expect(newRunStaleKeys(42)).toContainEqual(["widget-only", 42]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["widget-only", 42, "filters"], { cached: true });
+    const wrapper = ({ children }: { children: ReactNode }) => createElement(QueryClientProvider, { client }, children);
+    const { result } = renderHook(() => useLatestRun(42), { wrapper });
+    await waitFor(() => expect(result.current.latest?.id).toBe(1));
+    expect(client.getQueryState(["widget-only", 42, "filters"])?.isInvalidated).toBe(false);
+    runId = 2;
+    await act(() => result.current.runs.refetch());
+    await waitFor(() => expect(result.current.latest?.id).toBe(2));
+    expect(client.getQueryState(["widget-only", 42, "filters"])?.isInvalidated).toBe(true);
+  } finally {
+    delete def.staleKeys;
+  }
+});

@@ -26,7 +26,9 @@ export const REGISTRY: Partial<Record<WidgetType, WidgetDefinition>> = {
 };
 
 /** What a new latest run makes stale: the page's keys, then each registered widget's own. A key that an earlier
- *  (broader) one already covers is left out, so no query is invalidated, and refetched, twice. */
+ *  (broader) one already covers is left out, so no query is invalidated, and refetched, twice. Today the page's
+ *  `["trends", id]` and `["report", id]` cover every widget's keys, so those are dropped on purpose; a widget key
+ *  outside them (useLatestRun.test.ts) is invalidated on its own. */
 export function newRunStaleKeys(projectId: number): QueryKey[] {
   const keys: QueryKey[] = [];
   const candidates = [...pageStaleKeys(projectId), ...Object.values(REGISTRY).flatMap((def) => def.staleKeys?.(projectId) ?? [])];

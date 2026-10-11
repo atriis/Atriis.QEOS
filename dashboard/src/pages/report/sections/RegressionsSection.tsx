@@ -1,3 +1,4 @@
+import { formatCount } from "../../../api/analytics";
 import { type ReactNode, useState } from "react";
 import { Link } from "react-router-dom";
 import { Download } from "lucide-react";
@@ -10,7 +11,6 @@ import DeltaTile from "../DeltaTile";
 import ReportSection, { type SectionQuery } from "../ReportSection";
 import type { Gate } from "../useReportRequest";
 
-const number = new Intl.NumberFormat();
 const when = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 const axisTick = { fill: "var(--text-secondary)", fontSize: 12 } as const;
 const LEGEND: LegendSeries[] = [
@@ -65,7 +65,7 @@ export default function RegressionsSection({ projectId, gate, query, branch, onR
     `/projects/${projectId}/tests/${encodeURIComponent(t.test_key)}${t.branch ? `?branch=${encodeURIComponent(t.branch)}` : ""}`;
   const run = (runId: number, label: ReactNode) => <Link to={`/projects/${projectId}/runs/${runId}`}>{label}</Link>;
   const since = (iso: string, bounded: boolean) => `${bounded ? "at least since " : ""}${when.format(new Date(iso))}`;
-  const more = (total: number, shown: number) => total > shown && <p className="muted report-note">And {number.format(total - shown)} more.</p>;
+  const more = (total: number, shown: number) => total > shown && <p className="muted report-note">And {formatCount(total - shown)} more.</p>;
   const csv = (r: Report, part: string, make: (r: Report) => string) => (
     <button type="button" onClick={() => downloadCsv(`report-${projectId}-${r.period.from}-${r.period.to}-${part}.csv`, make(r))}>
       <Download size={15} aria-hidden="true" /> {part.replace("-", " ")} CSV
@@ -98,14 +98,14 @@ export default function RegressionsSection({ projectId, gate, query, branch, onR
         const flaky = g.flakiness.reduce((n, b) => n + b.flaky_tests, 0);
         const busiest = [...g.flakiness].sort((a, b) => b.flaky_tests - a.flaky_tests)[0];
         const caption = busiest && busiest.flaky_tests > 0
-          ? `${number.format(flaky)} flaky test-${unit}s; most on ${formatPointLabel(busiest.date, unit)}: ${number.format(busiest.flaky_tests)} flaky tests of ${number.format(busiest.tests_executed)}.`
+          ? `${formatCount(flaky)} flaky test-${unit}s; most on ${formatPointLabel(busiest.date, unit)}: ${formatCount(busiest.flaky_tests)} flaky tests of ${formatCount(busiest.tests_executed)}.`
           : "No flips in this period.";
         return (
           <>
             <ul className="kpi-tiles" aria-label="Regression figures">
-              <li><DeltaTile title="Newly failing" value={number.format(g.newly_failing.total)} delta={null} noPrevious={false} /></li>
-              <li><DeltaTile title="Fixed" value={number.format(g.fixed.total)} delta={null} noPrevious={false} /></li>
-              <li><DeltaTile title="Still failing" value={number.format(g.longest_failing.total)} delta={null} noPrevious={false} /></li>
+              <li><DeltaTile title="Newly failing" value={formatCount(g.newly_failing.total)} delta={null} noPrevious={false} /></li>
+              <li><DeltaTile title="Fixed" value={formatCount(g.fixed.total)} delta={null} noPrevious={false} /></li>
+              <li><DeltaTile title="Still failing" value={formatCount(g.longest_failing.total)} delta={null} noPrevious={false} /></li>
               <li><DeltaTile title="Median time to fix" value={median} delta={null} noPrevious={false} /></li>
             </ul>
 
@@ -135,8 +135,8 @@ export default function RegressionsSection({ projectId, gate, query, branch, onR
                 <thead><tr><th scope="col">{unit === "day" ? "Date" : "Week of"}</th><th scope="col" className="num">Tests executed</th>
                   <th scope="col" className="num">Flaky tests</th><th scope="col" className="num">Flips</th></tr></thead>
                 <tbody>{g.flakiness.map((b) => (
-                  <tr key={b.date}><td>{formatPointLabel(b.date, unit)}</td><td className="num">{number.format(b.tests_executed)}</td>
-                    <td className="num">{number.format(b.flaky_tests)}</td><td className="num">{number.format(b.flips)}</td></tr>
+                  <tr key={b.date}><td>{formatPointLabel(b.date, unit)}</td><td className="num">{formatCount(b.tests_executed)}</td>
+                    <td className="num">{formatCount(b.flaky_tests)}</td><td className="num">{formatCount(b.flips)}</td></tr>
                 ))}</tbody>
               </table>
             </DataTableDisclosure>
@@ -153,7 +153,7 @@ export default function RegressionsSection({ projectId, gate, query, branch, onR
                   <td>{t.branch ?? <span className="muted">no branch</span>}</td>
                   <td>{run(t.failing_since_run_id, `${when.format(new Date(t.failing_since))} (run #${t.failing_since_run_id})`)}</td>
                   <td className="hide-narrow">{run(t.last_passed_run_id, when.format(new Date(t.last_passed_at)))}</td>
-                  <td className="num">{number.format(t.failures)}</td>
+                  <td className="num">{formatCount(t.failures)}</td>
                   <td className="wrap-anywhere hide-narrow">{t.headline ?? "(no message)"}</td>
                 </tr>
               ))}</tbody>
@@ -191,7 +191,7 @@ export default function RegressionsSection({ projectId, gate, query, branch, onR
                   <td className="wrap-anywhere"><Link to={history(t)}>{testLabel(t)}</Link></td>
                   <td>{t.branch ?? <span className="muted">no branch</span>}</td>
                   <td>{since(t.failing_since, t.failing_since_bounded)}</td>
-                  <td className="num">{run(t.last_run_id, number.format(t.consecutive_failures))}</td>
+                  <td className="num">{run(t.last_run_id, formatCount(t.consecutive_failures))}</td>
                   <td className="wrap-anywhere hide-narrow">{t.headline ?? "(no message)"}</td>
                 </tr>
               ))}</tbody>

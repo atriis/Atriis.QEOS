@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Download } from "lucide-react";
 import { Bar, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { formatDuration, formatPassRate } from "../../../api/analytics";
+import { formatCount, formatDuration, formatPassRate } from "../../../api/analytics";
 import { type Report, testLabel } from "../../../api/report";
 import { DataTableDisclosure, type LegendSeries, PATTERN, SeriesLegend } from "../../../components/ChartKit";
 import NarrowMeta from "../../../components/NarrowMeta";
@@ -14,7 +14,6 @@ import ReportSection, { type SectionQuery } from "../ReportSection";
 import type { FilterKey } from "../useReportFilters";
 import type { Gate } from "../useReportRequest";
 
-const number = new Intl.NumberFormat();
 const axisTick = { fill: "var(--text-secondary)", fontSize: 12 } as const;
 const tooltipStyles = {
   contentStyle: { background: "var(--surface-1)", border: "1px solid var(--border)", borderRadius: 6 },
@@ -145,22 +144,22 @@ export default function SummarySection({ projectId, gate, query, branch, environ
           rate: pct(b.pass_rate), previousRate: pct(s.previous_buckets[i]?.pass_rate ?? null),
         }));
         const worst = [...s.buckets].sort((a, b) => (b.failed + b.errored) - (a.failed + a.errored))[0];
-        const caption = `${number.format(cur.executions)} executions in ${number.format(cur.runs)} runs, pass rate ${formatPassRate(cur.pass_rate)}`
+        const caption = `${formatCount(cur.executions)} executions in ${formatCount(cur.runs)} runs, pass rate ${formatPassRate(cur.pass_rate)}`
           + (prev ? `, ${formatPassRate(prev.pass_rate)} in the previous period.` : ", no data in the previous period.")
           + (worst && worst.failed + worst.errored > 0
-            ? ` Most failures on ${formatPointLabel(worst.date, unit)}: ${number.format(worst.failed + worst.errored)}.` : "");
+            ? ` Most failures on ${formatPointLabel(worst.date, unit)}: ${formatCount(worst.failed + worst.errored)}.` : "");
         return (
           <>
             <ul className="kpi-tiles report-tiles" aria-label="Summary figures">
-              <li><DeltaTile title="Runs" value={number.format(cur.runs)} noPrevious={!prev}
+              <li><DeltaTile title="Runs" value={formatCount(cur.runs)} noPrevious={!prev}
                 delta={relativeDelta(cur.runs, prev?.runs ?? null, days, "neither")} /></li>
-              <li><DeltaTile title="Executions" value={number.format(cur.executions)} noPrevious={!prev}
+              <li><DeltaTile title="Executions" value={formatCount(cur.executions)} noPrevious={!prev}
                 delta={relativeDelta(cur.executions, prev?.executions ?? null, days, "neither")} /></li>
               <li><DeltaTile title="Pass rate" value={formatPassRate(cur.pass_rate)} noPrevious={!prev}
                 delta={pointsDelta(cur.pass_rate, prev?.pass_rate ?? null, days, "up")} /></li>
-              <li><DeltaTile title="Failures" value={number.format(failures)} noPrevious={!prev}
+              <li><DeltaTile title="Failures" value={formatCount(failures)} noPrevious={!prev}
                 delta={relativeDelta(failures, prevFailures, days, "down")} /></li>
-              <li><DeltaTile title="Failing tests" value={number.format(cur.failing_tests)} noPrevious={!prev}
+              <li><DeltaTile title="Failing tests" value={formatCount(cur.failing_tests)} noPrevious={!prev}
                 delta={relativeDelta(cur.failing_tests, prev?.failing_tests ?? null, days, "down")} /></li>
               <li><DeltaTile title="Average run time" value={formatDuration(cur.avg_run_duration_ms)} noPrevious={!prev}
                 delta={relativeDelta(cur.avg_run_duration_ms, prev?.avg_run_duration_ms ?? null, days, "down")} /></li>
@@ -206,10 +205,10 @@ export default function SummarySection({ projectId, gate, query, branch, environ
                 <tbody>
                   {s.buckets.map((b, i) => (
                     <tr key={b.date}>
-                      <td>{formatPointLabel(b.date, unit)}</td><td className="num">{number.format(b.runs)}</td>
-                      <td className="num">{number.format(b.executions)}</td><td className="num">{number.format(b.passed)}</td>
-                      <td className="num">{number.format(b.failed)}</td><td className="num">{number.format(b.errored)}</td>
-                      <td className="num">{number.format(b.skipped)}</td><td className="num">{formatPassRate(b.pass_rate)}</td>
+                      <td>{formatPointLabel(b.date, unit)}</td><td className="num">{formatCount(b.runs)}</td>
+                      <td className="num">{formatCount(b.executions)}</td><td className="num">{formatCount(b.passed)}</td>
+                      <td className="num">{formatCount(b.failed)}</td><td className="num">{formatCount(b.errored)}</td>
+                      <td className="num">{formatCount(b.skipped)}</td><td className="num">{formatPassRate(b.pass_rate)}</td>
                       <td className="num">{formatPassRate(s.previous_buckets[i]?.pass_rate ?? null)}</td>
                     </tr>
                   ))}
@@ -228,10 +227,10 @@ export default function SummarySection({ projectId, gate, query, branch, environ
                     <tr key={t.test_key}>
                       <td className="wrap-anywhere">
                         <Link to={history(t.test_key)}>{testLabel(t)}</Link>
-                        <NarrowMeta items={[{ label: "Executions", value: number.format(t.executions) }]} />
+                        <NarrowMeta items={[{ label: "Executions", value: formatCount(t.executions) }]} />
                       </td>
-                      <td className="num hide-narrow">{number.format(t.executions)}</td>
-                      <td className="num">{number.format(t.failures)}</td>
+                      <td className="num hide-narrow">{formatCount(t.executions)}</td>
+                      <td className="num">{formatCount(t.failures)}</td>
                       <td className="num">{formatPassRate(t.pass_rate)}</td>
                     </tr>
                   ))}
@@ -249,9 +248,9 @@ export default function SummarySection({ projectId, gate, query, branch, environ
                   <tr key={t.test_key}>
                     <td className="wrap-anywhere">
                       <Link to={history(t.test_key)}>{testLabel(t)}</Link>
-                      <NarrowMeta items={[{ label: "Executions", value: number.format(t.executions) }]} />
+                      <NarrowMeta items={[{ label: "Executions", value: formatCount(t.executions) }]} />
                     </td>
-                    <td className="num hide-narrow">{number.format(t.executions)}</td>
+                    <td className="num hide-narrow">{formatCount(t.executions)}</td>
                     <td className="num">{formatDuration(t.avg_duration_ms)}</td>
                   </tr>
                 ))}
@@ -269,11 +268,11 @@ export default function SummarySection({ projectId, gate, query, branch, environ
                   <tr key={b.branch ?? "(none)"}>
                     <td>
                       {b.branch ?? <span className="muted">no branch</span>}
-                      <NarrowMeta items={[{ label: "Executions", value: number.format(b.executions) }]} />
+                      <NarrowMeta items={[{ label: "Executions", value: formatCount(b.executions) }]} />
                     </td>
-                    <td className="num">{number.format(b.runs)}</td>
-                    <td className="num hide-narrow">{number.format(b.executions)}</td>
-                    <td className="num">{number.format(b.failures)}</td>
+                    <td className="num">{formatCount(b.runs)}</td>
+                    <td className="num hide-narrow">{formatCount(b.executions)}</td>
+                    <td className="num">{formatCount(b.failures)}</td>
                     <td className="num">{formatPassRate(b.pass_rate)}</td>
                   </tr>
                 ))}

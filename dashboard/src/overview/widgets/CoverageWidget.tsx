@@ -1,3 +1,4 @@
+import { formatCount } from "../../api/analytics";
 import { useQuery } from "@tanstack/react-query";
 import ErrorBanner from "../../components/ErrorBanner";
 import { SkeletonStat } from "../../components/Skeleton";
@@ -8,7 +9,6 @@ import ReportFoot from "./ReportFoot";
 import { coverage } from "./coverage";
 import type { WidgetProps } from "./types";
 
-const number = new Intl.NumberFormat();
 
 /** The Report's coverage join, unchanged (ADR-026): test management's case areas under the Report's key, and the tests
  *  section over the period, across every branch (plan Ruling 13). */
@@ -32,11 +32,11 @@ export default function CoverageWidget({ projectId, settings, heading }: WidgetP
       {areas.data && section && (
         <>
           <dl className="overview-figures">
-            <div><dt>Active cases</dt><dd>{number.format(areas.data.counts.cases)}</dd></div>
-            <div><dt>Linked (automated)</dt><dd>{number.format(areas.data.counts.linked)}</dd></div>
-            <div><dt>Manual</dt><dd>{number.format(areas.data.counts.manual)}</dd></div>
-            {!cut && <div><dt>Automated, not run in {period} days</dt><dd>{number.format(neverRun(areas.data, rows, { kind: "all" }).length)}</dd></div>}
-            {!cut && <div><dt>Tests without a case</dt><dd>{number.format(unlinkedTestCount(areas.data, rows))}</dd></div>}
+            <div><dt>Active cases</dt><dd>{formatCount(areas.data.counts.cases)}</dd></div>
+            <div><dt>Linked (automated)</dt><dd>{formatCount(areas.data.counts.linked)}</dd></div>
+            <div><dt>Manual</dt><dd>{formatCount(areas.data.counts.manual)}</dd></div>
+            {!cut && <div><dt>Automated, not run in {period} days</dt><dd>{formatCount(neverRun(areas.data, rows, { kind: "all" }).length)}</dd></div>}
+            {!cut && <div><dt>Tests without a case</dt><dd>{formatCount(unlinkedTestCount(areas.data, rows))}</dd></div>}
           </dl>
           {cut && <p className="muted">The test list was cut at 50,000 tests, so cases not run and tests without a case are not counted.</p>}
         </>

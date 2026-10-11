@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { Link } from "react-router-dom";
 import { Download } from "lucide-react";
 import { Bar, BarChart, CartesianGrid, LabelList, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { formatPassRate } from "../../../api/analytics";
+import { formatCount, formatPassRate } from "../../../api/analytics";
 import type { CaseAreas } from "../../../api/cases";
 import { DataTableDisclosure } from "../../../components/ChartKit";
 import SortableTh from "../../../components/SortableTh";
@@ -14,7 +14,6 @@ import ReportSection, { type SectionQuery } from "../ReportSection";
 import { useGrouping } from "../useGrouping";
 import { type Gate, caseAreasMessage } from "../useReportRequest";
 
-const number = new Intl.NumberFormat();
 const NAMES: Record<Grouping, string> = { feature: "Feature", folder: "Folder", label: "Label", suite: "Suite" };
 const WORST_IN_CHART = 15;
 type Col = "label" | "linkedTests" | "testsRun" | "executions" | "passRate" | "failures" | "failingTests" | "flakyTests";
@@ -99,7 +98,7 @@ export default function AreaSection({ projectId, gate, query, caseAreas, onReset
         const worst = groups.filter((g) => !g.fewRuns && g.passRate !== null).slice(0, WORST_IN_CHART);
         const chart = worst.map((g) => ({ label: g.label, rate: Math.round((g.passRate ?? 0) * 1000) / 10, failures: g.failures }));
         const caption = worst.length
-          ? `${worst.length} areas with at least 10 executions; the lowest pass rate is ${worst[0].label} at ${formatPassRate(worst[0].passRate)} with ${number.format(worst[0].failures)} failures.`
+          ? `${worst.length} areas with at least 10 executions; the lowest pass rate is ${worst[0].label} at ${formatPassRate(worst[0].passRate)} with ${formatCount(worst[0].failures)} failures.`
           : "No area has 10 or more executions in this period.";
         const onSort = (key: Col) => setSort(nextSort(sort ?? { key: "passRate", dir: "asc" }, key, TEXT_COLS.includes(key) ? "asc" : "desc"));
         return (
@@ -125,7 +124,7 @@ export default function AreaSection({ projectId, gate, query, caseAreas, onReset
                       <Tooltip contentStyle={{ background: "var(--surface-1)", border: "1px solid var(--border)", borderRadius: 6 }} />
                       <Bar dataKey="rate" name="Pass rate (%)" fill="var(--series-1)" radius={[0, 4, 4, 0]}>
                         <LabelList dataKey="failures" position="right" fill="var(--text-secondary)" fontSize={12}
-                          formatter={(v: number) => `${number.format(v)} failures`} />
+                          formatter={(v: number) => `${formatCount(v)} failures`} />
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
@@ -133,7 +132,7 @@ export default function AreaSection({ projectId, gate, query, caseAreas, onReset
                 <DataTableDisclosure name="pass rate of the worst areas">
                   <table className="data">
                     <thead><tr><th scope="col">Area</th><th scope="col" className="num">Pass rate</th><th scope="col" className="num">Failures</th></tr></thead>
-                    <tbody>{worst.map((g) => <tr key={g.key}><td>{g.label}</td><td className="num">{formatPassRate(g.passRate)}</td><td className="num">{number.format(g.failures)}</td></tr>)}</tbody>
+                    <tbody>{worst.map((g) => <tr key={g.key}><td>{g.label}</td><td className="num">{formatPassRate(g.passRate)}</td><td className="num">{formatCount(g.failures)}</td></tr>)}</tbody>
                   </table>
                 </DataTableDisclosure>
               </>
@@ -162,18 +161,18 @@ export default function AreaSection({ projectId, gate, query, caseAreas, onReset
                       <Link to={casesLink(projectId, g)}>{g.label}</Link>
                       {g.fewRuns && <span className="muted"> · few runs</span>}
                       <NarrowMeta items={[
-                        { label: "Tests run", value: number.format(g.testsRun) },
-                        { label: "Failing tests", value: number.format(g.failingTests) },
-                        { label: "Flaky tests", value: number.format(g.flakyTests) },
+                        { label: "Tests run", value: formatCount(g.testsRun) },
+                        { label: "Failing tests", value: formatCount(g.failingTests) },
+                        { label: "Flaky tests", value: formatCount(g.flakyTests) },
                       ]} />
                     </td>
-                    <td className="num hide-narrow">{number.format(g.linkedTests)}</td>
-                    <td className="num hide-narrow">{number.format(g.testsRun)}</td>
-                    <td className="num">{number.format(g.executions)}</td>
+                    <td className="num hide-narrow">{formatCount(g.linkedTests)}</td>
+                    <td className="num hide-narrow">{formatCount(g.testsRun)}</td>
+                    <td className="num">{formatCount(g.executions)}</td>
                     <td className="num">{formatPassRate(g.passRate)}</td>
-                    <td className="num">{number.format(g.failures)}</td>
-                    <td className="num hide-narrow">{number.format(g.failingTests)}</td>
-                    <td className="num hide-narrow">{number.format(g.flakyTests)}</td>
+                    <td className="num">{formatCount(g.failures)}</td>
+                    <td className="num hide-narrow">{formatCount(g.failingTests)}</td>
+                    <td className="num hide-narrow">{formatCount(g.flakyTests)}</td>
                   </tr>
                 ))}
                 {noCase && (
@@ -181,18 +180,18 @@ export default function AreaSection({ projectId, gate, query, caseAreas, onReset
                     <td>
                       <span className="muted">Tests without a case</span>
                       <NarrowMeta items={[
-                        { label: "Tests run", value: number.format(noCase.testsRun) },
-                        { label: "Failing tests", value: number.format(noCase.failingTests) },
-                        { label: "Flaky tests", value: number.format(noCase.flakyTests) },
+                        { label: "Tests run", value: formatCount(noCase.testsRun) },
+                        { label: "Failing tests", value: formatCount(noCase.failingTests) },
+                        { label: "Flaky tests", value: formatCount(noCase.flakyTests) },
                       ]} />
                     </td>
                     <td className="num hide-narrow">—</td>
-                    <td className="num hide-narrow">{number.format(noCase.testsRun)}</td>
-                    <td className="num">{number.format(noCase.executions)}</td>
+                    <td className="num hide-narrow">{formatCount(noCase.testsRun)}</td>
+                    <td className="num">{formatCount(noCase.executions)}</td>
                     <td className="num">{formatPassRate(noCase.passRate)}</td>
-                    <td className="num">{number.format(noCase.failures)}</td>
-                    <td className="num hide-narrow">{number.format(noCase.failingTests)}</td>
-                    <td className="num hide-narrow">{number.format(noCase.flakyTests)}</td>
+                    <td className="num">{formatCount(noCase.failures)}</td>
+                    <td className="num hide-narrow">{formatCount(noCase.failingTests)}</td>
+                    <td className="num hide-narrow">{formatCount(noCase.flakyTests)}</td>
                   </tr>
                 )}
               </tbody>

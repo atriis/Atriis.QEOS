@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { formatCount } from "../../api/analytics";
 import ErrorBanner from "../../components/ErrorBanner";
 import { SkeletonStat } from "../../components/Skeleton";
 import EmptyBranch from "../EmptyBranch";
@@ -25,7 +26,7 @@ export default function RegressionsWidget({ projectId, settings, heading, onOpen
       {emptyBranch && <EmptyBranch branch={settings.branch!} days={period} onOpenSettings={onOpenSettings} />}
       {section && !emptyBranch && (
         <>
-          <p className="muted">{section.newly_failing.total} newly failing · {section.fixed.total} fixed · {flips} flips</p>
+          <p className="muted">{formatCount(section.newly_failing.total)} newly failing · {formatCount(section.fixed.total)} fixed · {formatCount(flips)} flips</p>
           {items.length === 0 ? (
             <p className="muted">Nothing started failing in the last {period} days.</p>
           ) : (

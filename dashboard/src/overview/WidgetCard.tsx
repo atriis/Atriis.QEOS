@@ -35,7 +35,7 @@ export default function WidgetCard({ projectId, widget, tools, onOpenSettings }:
       {/* New settings render a failed widget again */}
       <WidgetBoundary heading={heading} title={title} resetKey={JSON.stringify(settings)}>
         <Suspense fallback={loading}>
-          <Body projectId={projectId} settings={settings} size={widget.size} heading={heading} onOpenSettings={onOpenSettings} />
+          <Body projectId={projectId} settings={settings} size={widget.size} heading={heading} titleId={titleId} onOpenSettings={onOpenSettings} />
         </Suspense>
       </WidgetBoundary>
     </section>

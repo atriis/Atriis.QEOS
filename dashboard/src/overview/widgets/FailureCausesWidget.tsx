@@ -1,3 +1,4 @@
+import { formatCount } from "../../api/analytics";
 import ErrorBanner from "../../components/ErrorBanner";
 import { SkeletonStat } from "../../components/Skeleton";
 import EmptyBranch from "../EmptyBranch";
@@ -25,8 +26,8 @@ export default function FailureCausesWidget({ projectId, settings, heading, onOp
       {section && !emptyBranch && section.failures === 0 && <p className="muted">No failures in the last {period} days.</p>}
       {section && !emptyBranch && section.failures > 0 && (
         <>
-          <p className="muted">{section.failures} failures from {section.groups_total} causes</p>
-          <p className="muted">{fresh} new · {groups.length - fresh} recurring among the top {groups.length} · {section.resolved.length} resolved</p>
+          <p className="muted">{formatCount(section.failures)} failures from {formatCount(section.groups_total)} causes</p>
+          <p className="muted">{fresh} new · {groups.length - fresh} recurring among the top {groups.length} · {formatCount(section.resolved.length)} resolved</p>
           <ul className="fail-list">
             {groups.slice(0, SHOWN).map((g) => (
               <li key={g.signature}>
@@ -34,7 +35,7 @@ export default function FailureCausesWidget({ projectId, settings, heading, onOp
                   {g.status === "new" && <span className="badge badge-new">New</span>}
                   {g.headline ? <span className="msg">{g.headline}</span> : <span className="where">No error message</span>}
                 </span>
-                <span className="where">{g.occurrences} {g.occurrences === 1 ? "failure" : "failures"} in {g.runs} {g.runs === 1 ? "run" : "runs"}</span>
+                <span className="where">{formatCount(g.occurrences)} {g.occurrences === 1 ? "failure" : "failures"} in {formatCount(g.runs)} {g.runs === 1 ? "run" : "runs"}</span>
               </li>
             ))}
           </ul>

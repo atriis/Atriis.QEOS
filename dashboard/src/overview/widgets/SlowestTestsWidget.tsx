@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { formatDuration } from "../../api/analytics";
+import { formatCount, formatDuration } from "../../api/analytics";
 import ErrorBanner from "../../components/ErrorBanner";
 import { SkeletonStat } from "../../components/Skeleton";
 import EmptyBranch from "../EmptyBranch";
@@ -28,7 +28,7 @@ export default function SlowestTestsWidget({ projectId, settings, heading, onOpe
           {slowest.slice(0, rows).map((t) => (
             <li key={t.test_key}>
               <span><Link to={`/projects/${projectId}/tests/${encodeURIComponent(t.test_key)}`}>{t.name}</Link></span>
-              <span className="where">{formatDuration(t.avg_duration_ms)} on average · {t.executions} {t.executions === 1 ? "run" : "runs"}</span>
+              <span className="where">{formatDuration(t.avg_duration_ms)} on average · {formatCount(t.executions)} {t.executions === 1 ? "run" : "runs"}</span>
             </li>
           ))}
         </ol>

@@ -23,7 +23,7 @@ test("Failure causes asks only for its section over the last 30 days on every br
   mockOverviewData({ layout: personalState({ id: "c", type: "failure_causes", size: "normal" }) });
   const bodies = reportAsked(() => CAUSES_REPORT);
   const { qc } = renderOverview();
-  expect(await screen.findByText(/2124 failures from 37 causes/)).toBeInTheDocument();
+  expect(await screen.findByText(/2,124 failures from 37 causes/)).toBeInTheDocument();
   expect(screen.getByText(/1 new · 2 recurring among the top 3 · 1 resolved/)).toBeInTheDocument();
   expect(screen.getByText("TimeoutError: locator('#pay-button') after 30000 ms")).toBeInTheDocument();
   expect(screen.getByText("New")).toBeInTheDocument();
@@ -32,6 +32,8 @@ test("Failure causes asks only for its section over the last 30 days on every br
   expect(bodies[0].branch).toBeNull();
   expect(bodies[0].from).toBe(addDays(bodies[0].to, -29));
   expect(await headingLink("Failure causes")).toHaveAttribute("href", "/projects/42/report?period=30&branch=*#report-causes");
+  // The card foot opens the same section
+  expect(screen.getByRole("link", { name: "Report" })).toHaveAttribute("href", "/projects/42/report?period=30&branch=*#report-causes");
   // The Report page's own key for the same period on every branch, so either one reuses the other's answer
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const filters = { from: bodies[0].from, to: bodies[0].to, tz, branch: null, environment: "", ci: "", origin: "any", area: null, suite: null };
@@ -49,6 +51,7 @@ test("Regressions and flips counts what started failing, what was fixed and the 
   expect(bodies[0].branch).toBe("main");
   expect(bodies[0].from).toBe(addDays(bodies[0].to, -6));
   expect(await headingLink("Regressions and flips")).toHaveAttribute("href", "/projects/42/report?period=7&branch=main#report-regressions");
+  expect(screen.getByRole("link", { name: "Report" })).toHaveAttribute("href", "/projects/42/report?period=7&branch=main#report-regressions");
 });
 
 test("a 14-day report widget links to the Report with that range, as the Report has no 14-day preset", async () => {
@@ -67,7 +70,7 @@ test("two identical report widgets cost one request", async () => {
   ) });
   const bodies = reportAsked(() => CAUSES_REPORT);
   renderOverview();
-  expect(await screen.findAllByText(/2124 failures from 37 causes/)).toHaveLength(2);
+  expect(await screen.findAllByText(/2,124 failures from 37 causes/)).toHaveLength(2);
   expect(bodies).toHaveLength(1);
 });
 
@@ -113,6 +116,7 @@ test("Slowest tests reads the summary's slowest tests and links to the report", 
   expect(bodies[0].sections).toEqual(["summary"]);
   expect(bodies[0].branch).toBeNull();
   expect(await headingLink("Slowest tests")).toHaveAttribute("href", "/projects/42/report?period=30&branch=*#report-summary");
+  expect(screen.getByRole("link", { name: "Report" })).toHaveAttribute("href", "/projects/42/report?period=30&branch=*#report-summary");
 });
 
 test("Slowest tests on a branch without runs says so", async () => {
@@ -137,6 +141,7 @@ test("Coverage joins the cases with the tests section like the Report does, acro
   expect(bodies[0].sections).toEqual(["tests"]);
   expect(bodies[0].branch).toBeNull();
   expect(await headingLink("Coverage")).toHaveAttribute("href", "/projects/42/report?period=30&branch=*#report-coverage");
+  expect(screen.getByRole("link", { name: "Report" })).toHaveAttribute("href", "/projects/42/report?period=30&branch=*#report-coverage");
   // The Report's case-areas query, shared with it
   expect(qc.getQueryData(["case-areas", 42])).toBeDefined();
 });
@@ -149,4 +154,33 @@ test("Coverage says when the cases cannot be loaded, with Retry", async () => {
   const card = await screen.findByRole("region", { name: "Coverage" });
   expect(await within(card).findByRole("alert")).toHaveTextContent("Cases could not be loaded");
   expect(within(card).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+});
+
+test("Slowest tests with no tests in the period says so", async () => {
+  mockOverviewData({ layout: personalState({ id: "s", type: "slowest_tests", size: "normal" }) });
+  reportAsked(() => ({ ...SUMMARY_REPORT, summary: { ...SUMMARY_REPORT.summary!, slowest: [] } }));
+  renderOverview();
+  expect(await screen.findByText("No tests ran in the last 30 days.")).toBeInTheDocument();
+  expect(screen.queryByRole("list")).not.toBeInTheDocument();
+});
+
+test("Coverage with no tests in the period counts every linked case as not run and no test without a case", async () => {
+  mockOverviewData({ layout: personalState({ id: "v", type: "coverage", size: "normal", settings: { period: 7 } }) });
+  reportAsked(() => ({ ...TESTS_REPORT, tests: { ...TESTS_REPORT.tests!, rows: [] } }));
+  server.use(http.get("/api/v1/projects/42/case-areas", () => HttpResponse.json(AREAS_WIRE)));
+  renderOverview();
+  expect(await screen.findByText("Automated, not run in 7 days")).toBeInTheDocument();
+  expect(screen.getByText("Automated, not run in 7 days").nextElementSibling).toHaveTextContent("3");
+  expect(screen.getByText("Tests without a case").nextElementSibling).toHaveTextContent("0");
+});
+
+test("Coverage cut at 50,000 tests hides the counts that would read as fact and says why", async () => {
+  mockOverviewData({ layout: personalState({ id: "v", type: "coverage", size: "normal" }) });
+  reportAsked(() => ({ ...TESTS_REPORT, tests: { ...TESTS_REPORT.tests!, truncated: true } }));
+  server.use(http.get("/api/v1/projects/42/case-areas", () => HttpResponse.json(AREAS_WIRE)));
+  renderOverview();
+  expect(await screen.findByText(/The test list was cut at 50,000 tests/)).toBeInTheDocument();
+  expect(screen.getByText("Active cases").nextElementSibling).toHaveTextContent("4");
+  expect(screen.queryByText(/Automated, not run/)).not.toBeInTheDocument();
+  expect(screen.queryByText("Tests without a case")).not.toBeInTheDocument();
 });

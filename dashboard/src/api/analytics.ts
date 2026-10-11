@@ -208,6 +208,13 @@ export function getFlaky(
   return apiFetch(`/api/v1/projects/${projectId}/analytics/flaky${q}`, { signal: init.signal });
 }
 
+const COUNT = new Intl.NumberFormat();
+
+/** A count in the reader's locale ("2,124"): the Report and the Overview widgets print counts the same way. */
+export function formatCount(n: number): string {
+  return COUNT.format(n);
+}
+
 export function formatPassRate(rate: number | null): string {
   if (rate === null) return "—";
   return `${(rate * 100).toFixed(1)}%`;
