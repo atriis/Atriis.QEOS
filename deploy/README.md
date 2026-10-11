@@ -192,8 +192,11 @@ before. Design: `docs/superpowers/specs/2026-10-10-monitoring-design.md`.
 > `https://<domain>/grafana/` to active superusers only (auth-service checks the `qeos_grafana` cookie
 > on every request and Grafana signs the user in by the header the gateway sets). A superuser opens it
 > from **Monitoring** in the account menu, or by any Grafana link: without the cookie the gateway sends
-> the browser to the dashboard's `/monitoring` page, which hands the cookie over and comes back. The
-> CI smoke checks are still to come. Prometheus is not published; it works and fires alerts regardless.
+> the browser to the dashboard's `/monitoring` page, which hands the cookie over and comes back. CI
+> smoke-tests the gateway both ways (`scripts/smoke_gateway.sh`): with the profile off `/grafana/` is a
+> JSON 404; with it on every Prometheus target is up, `/grafana/` without the cookie redirects to
+> `/monitoring`, a client's own `X-QEOS-User-Email` is ignored, a non-superuser gets 403 and a
+> superuser's cookie gets Grafana, and `qeos_monitor` is refused table data. Prometheus is not published; it works and fires alerts regardless.
 
 **Turn it on.** A new install's `.env` already holds the four lines below, commented out, with
 generated passwords: uncomment them. (An install from before monitoring: add them by hand, passwords of

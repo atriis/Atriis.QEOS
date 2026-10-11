@@ -20,10 +20,23 @@ fi
 
 HTTPS_PORT="${GATEWAY_HTTPS_PORT:-8443}"
 HTTP_PORT="${GATEWAY_HTTP_PORT:-8080}"
+# It creates users and drains rate limits: never point it at a real deployment
+case "${GATEWAY_HOST:-localhost}" in
+  localhost|127.0.0.1) ;;
+  *) echo "FAIL  GATEWAY_HOST=${GATEWAY_HOST}: local and CI only"; exit 1 ;;
+esac
 BASE="https://localhost:${HTTPS_PORT}"
 
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+SUPER_ID=""
+cleanup() {
+  rm -rf "$TMP"
+  # the throwaway monitoring superuser must not stay able to sign in
+  if [ -n "$SUPER_ID" ]; then
+    docker compose exec -T postgres psql -U postgres -d auth_db -tAc       "UPDATE users SET is_active=false, is_superuser=false WHERE id=$SUPER_ID" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
 failures=0
 
 pass() { printf 'ok    %s\n' "$1"; }
@@ -481,9 +494,9 @@ body_has "unknown API path answers JSON" '{"detail":"Not Found"}'
 check "dashboard index" 200 GET "$BASE/"
 body_has "dashboard index is the SPA" '<div id="root">'
 check "SPA deep link falls back to index" 200 GET "$BASE/projects/1/trends"
+body_has "deep link serves the SPA" '<div id="root">'
 check "the /monitoring hand-off page is the SPA" 200 GET "$BASE/monitoring?next=/grafana/"
 body_has "... index.html" '<div id="root">'
-body_has "deep link serves the SPA" '<div id="root">'
 
 # The index references hashed assets; one must load and carry the immutable cache policy.
 ASSET="$(grep -oE '/assets/[A-Za-z0-9._-]+\.js' "$TMP/body" | head -1)"
@@ -525,16 +538,18 @@ fi
 # ---- monitoring (spec 2026-10-10 §8, ADR-027) ----
 if [ "${MONITORING_ENABLED:-false}" = "true" ]; then
   # Every Prometheus target up; they start as "unknown", so give them up to 90 s
+  # one target per scrape job in prometheus.yml
+  expected_targets="$(grep -cE '^[[:space:]]*- job_name:' monitoring/prometheus/prometheus.yml)"
   targets_up=0
   targets_other=1
   for _ in $(seq 1 18); do
     docker compose exec -T prometheus wget -qO- 'http://localhost:9090/api/v1/targets?state=active' > "$TMP/targets" 2>/dev/null || true
     targets_up="$(grep -o '"health":"up"' "$TMP/targets" | wc -l | tr -d ' ')"
     targets_other="$(grep -o '"health":"[a-z]*"' "$TMP/targets" | grep -vc '"up"' || true)"
-    if [ "$targets_up" -ge 10 ] && [ "$targets_other" = "0" ]; then break; fi
+    if [ "$targets_up" -ge "$expected_targets" ] && [ "$targets_other" = "0" ]; then break; fi
     sleep 5
   done
-  if [ "$targets_up" -ge 10 ] && [ "$targets_other" = "0" ]; then
+  if [ "$targets_up" -ge "$expected_targets" ] && [ "$targets_other" = "0" ]; then
     pass "every Prometheus target is up ($targets_up)"
   else
     fail "Prometheus targets: $targets_up up, $targets_other not: $(grep -o '"scrapeUrl":"[^"]*","globalUrl":"[^"]*","lastError":"[^"]*"' "$TMP/targets" | head -c 400)"
@@ -569,12 +584,19 @@ print(jwt.encode({"sub": sys.argv[1], "exp": exp}, os.environ["SECRET_KEY"], alg
   body_has "... the superuser" "\"email\":\"$SUPER_EMAIL\""
   body_lacks "... never the client's header" "attacker@example.com"
 
-  # qeos_monitor reads statistics, never table data
-  if docker compose exec -T -e PGPASSWORD="$MONITORING_DB_PASSWORD" postgres psql -U qeos_monitor -h 127.0.0.1 \
-      -d ingestion_db -tAc "SELECT 1 FROM test_runs LIMIT 1" >/dev/null 2>&1; then
-    fail "qeos_monitor can read test_runs"
+  # qeos_monitor reads statistics, never table data. First prove it can connect at all, so a wrong
+  # password or a missing role is not mistaken for "no access"
+  mon_psql() { docker compose exec -T -e PGPASSWORD="$MONITORING_DB_PASSWORD" postgres psql -U qeos_monitor -h 127.0.0.1 -d ingestion_db -tAc "$1" 2>&1; }
+  if mon_psql "SELECT 1 FROM pg_stat_database LIMIT 1" >/dev/null; then
+    pass "qeos_monitor connects and reads statistics"
   else
-    pass "qeos_monitor cannot read table data"
+    fail "qeos_monitor cannot connect or read pg_stat_database"
+  fi
+  mon_out="$(mon_psql "SELECT 1 FROM test_runs LIMIT 1")" && mon_rc=0 || mon_rc=$?
+  if [ "$mon_rc" != 0 ] && printf '%s' "$mon_out" | grep -qi 'permission denied'; then
+    pass "qeos_monitor is refused table data (permission denied)"
+  else
+    fail "qeos_monitor reading test_runs: expected permission denied, got: $(printf '%s' "$mon_out" | head -c 200)"
   fi
 else
   check "/grafana/ is a 404 while monitoring is off" 404 GET "$BASE/grafana/"
