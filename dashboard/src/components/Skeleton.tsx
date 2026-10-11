@@ -17,3 +17,12 @@ export function SkeletonStatus({ label, className, children }: { label: string; 
     </div>
   );
 }
+
+/** One figure loading inside a card (an Overview widget's number, or a widget's code arriving). */
+export function SkeletonStat({ label }: { label: string }) {
+  return (
+    <SkeletonStatus label={label}>
+      <span className="skeleton stat-skeleton" aria-hidden="true" />
+    </SkeletonStatus>
+  );
+}

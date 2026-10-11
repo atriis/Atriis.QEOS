@@ -14,9 +14,20 @@ export const flakyHealthQuery = (projectId: number) => ({
   staleTime: HEALTH_STALE_MS,
 });
 
-/** This week's and last week's pass rate (two weekly buckets). Overview and the Cases tile share it. */
-export const passRateWeeksQuery = (projectId: number, tz: string) => ({
-  queryKey: ["trends", projectId, "overview-weeks", tz] as const,
-  queryFn: () => getTrends(projectId, { days: 14, tz, bucket: "week" }),
+/** The Flaky view's own query at its default thresholds for another window, quarantined tests left out (its "Show
+ *  quarantined" off): the Overview's Flaky tests widget set to 7 or 30 days shares the view's answer. */
+export const flakyWindowQuery = (projectId: number, windowDays: number) => ({
+  queryKey: ["flaky", projectId, windowDays, FLAKY_DEFAULTS.minRuns, FLAKY_DEFAULTS.minFlipRate, "", false] as const,
+  queryFn: () => getFlaky(projectId, { windowDays, minRuns: FLAKY_DEFAULTS.minRuns, minFlipRate: FLAKY_DEFAULTS.minFlipRate }),
+  staleTime: HEALTH_STALE_MS,
+});
+
+/** This week's and last week's pass rate (two weekly buckets). Overview and the Cases tile share it; a branch (the
+ *  Overview widget's setting) joins the key only when one is chosen, and no branch means every branch. */
+export const passRateWeeksQuery = (projectId: number, tz: string, branch?: string) => ({
+  queryKey: (branch
+    ? ["trends", projectId, "overview-weeks", tz, branch]
+    : ["trends", projectId, "overview-weeks", tz]) as readonly unknown[],
+  queryFn: () => getTrends(projectId, { days: 14, tz, bucket: "week", branch }),
   staleTime: HEALTH_STALE_MS,
 });

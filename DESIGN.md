@@ -275,7 +275,7 @@ An app shell runs the full height of the viewport: a 48px sticky top bar across 
 Spacing follows a 4px-based scale (4, 8, 12, 16, 24, 32, 48). Cards own their vertical rhythm through 16px block margins, which collapse between siblings so conditional stacks stay evenly spaced. Inside a grid, the grid gap owns the spacing and card margins are zeroed.
 
 Grids are auto-fitting rather than column-counted:
-- **Overview grid:** `auto-fit, minmax(260px, 1fr)` with a 16px gap. A *wide* card spans the full row; the latest run gets this.
+- **Overview grid:** `auto-fit, minmax(260px, 1fr)` with a 16px gap. A *wide* card spans the full row; the latest run gets this. The cards are widgets placed by a layout (the built-in one is Latest run, Failing in latest run, Pass rate this week and Flaky tests): each card's h2 is its title as a link to the full view with the same filters (Ink, underlined on hover), each widget loads, fails and retries on its own, and a card that takes focus does so without a ring.
 - **Tiles:** `auto-fit, minmax(170px, 1fr)` with a 12px gap.
 - **Project grid:** `auto-fill, minmax(220px, 1fr)` with a 12px gap.
 
