@@ -59,7 +59,7 @@ pipeline already produces, and it starts runs only through workflows you own.
 - **Trends** by day, week or month, per branch, and run-to-run comparison.
 - **Flaky tests:** same-commit detection over up to 90 days, backed by daily rollups, with quarantine.
 - **Failure causes:** new, recurring and resolved failures, grouped by cause.
-- **Customisable Overview:** each person arranges their own Overview per project: move, resize, remove and add widgets and change their settings, then save. Owners and admins also set the project's default layout, which everyone without a personal layout sees. Today's four widgets, the Pass-rate trend, Failure causes, Regressions and flips, Slowest tests, Coverage, Recent runs and Branch health are available now; more widgets come in the next release.
+- **Customisable Overview:** each person arranges their own Overview per project: move, resize, remove and add widgets and change their settings, then save. Owners and admins also set the project's default layout, which everyone without a personal layout sees. Fourteen widgets: today's four, plus Pass-rate trend, Failure causes, Regressions and flips, Slowest tests, Coverage, Recent runs, Branch health, Test cases, My suites and My recent failures.
 
 ### Report
 - **One report per period:**

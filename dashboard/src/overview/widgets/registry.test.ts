@@ -4,7 +4,6 @@ import { REGISTRY, addableDefinitions, definitionOf, withDefaults, widgetTitle }
 
 // Catalogue types whose widgets arrive in Phase 3; each of Tasks 16-20 removes its own, Task 21 removes the set
 const PENDING = new Set<string>([
-  "case_tiles", "my_failures", "my_suites",
 ]);
 
 test("the registry has a widget for every catalogue type, and no other", () => {

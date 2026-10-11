@@ -2,14 +2,17 @@ import { type QueryKey, partialMatchKey } from "@tanstack/react-query";
 import { pageStaleKeys } from "../queries";
 import { CATALOG, type StoredLayout, type StoredWidget, type WidgetSettings, type WidgetType, isValidSetting } from "../catalog";
 import { branchHealth } from "./branchHealth";
+import { caseTiles } from "./caseTiles";
 import { coverage } from "./coverage";
 import { failingNow } from "./failingNow";
 import { failureCauses } from "./failureCauses";
 import { flakyCount } from "./flakyCount";
 import { latestRun } from "./latestRun";
+import { myFailures } from "./myFailures";
+import { mySuites } from "./mySuites";
 import { passRateTrend } from "./passRateTrend";
-import { recentRuns } from "./recentRuns";
 import { passRateWeek } from "./passRateWeek";
+import { recentRuns } from "./recentRuns";
 import { regressions } from "./regressions";
 import { slowestTests } from "./slowestTests";
 import type { WidgetDefinition } from "./types";
@@ -27,6 +30,9 @@ export const REGISTRY: Partial<Record<WidgetType, WidgetDefinition>> = {
   coverage,
   recent_runs: recentRuns,
   branch_health: branchHealth,
+  case_tiles: caseTiles,
+  my_failures: myFailures,
+  my_suites: mySuites,
 };
 
 /** What a new latest run makes stale: the page's keys, then each registered widget's own. A key that an earlier

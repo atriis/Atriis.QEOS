@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Activity, Building2, LogOut, ShieldCheck } from "lucide-react";
-import { getMe, logout, startGrafanaSession } from "../api/auth";
+import { logout, meQuery, startGrafanaSession } from "../api/auth";
 import { ApiError } from "../api/http";
 import { goTo } from "../lib/browser";
 import { grafanaPath, markHandoff } from "../lib/grafanaHandoff";
@@ -31,7 +31,7 @@ export default function UserMenu({ orgId }: Props) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { pathname } = useLocation();
-  const me = useQuery({ queryKey: ["me"], queryFn: getMe, staleTime: 5 * 60_000 });
+  const me = useQuery(meQuery);
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const box = useRef<HTMLDivElement>(null);

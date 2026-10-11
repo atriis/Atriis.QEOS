@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
 import { getTests } from "../api/analytics";
 import { listCases, listSuites } from "../api/cases";
-import { getMe } from "../api/auth";
+import { meQuery } from "../api/auth";
 import { ApiError } from "../api/http";
 import { listMyOrganizations, listProjects } from "../api/orgs";
 import { getRunSummary, listRuns } from "../api/runs";
@@ -52,7 +52,7 @@ export function usePaletteGroups(
 
   const orgs = useQuery({ queryKey: ["orgs"], queryFn: listMyOrganizations });
   // The user menu's query: recent items are kept per user
-  const userId = useQuery({ queryKey: ["me"], queryFn: getMe, staleTime: 5 * 60_000 }).data?.id;
+  const userId = useQuery(meQuery).data?.id;
   const projectLists = useQueries({
     queries: (orgs.data ?? []).map((org) => ({ queryKey: ["projects", org.id], queryFn: () => listProjects(org.id) })),
   });

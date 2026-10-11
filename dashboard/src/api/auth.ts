@@ -73,9 +73,12 @@ export async function mfaVerify(mfaToken: string, code: string): Promise<void> {
 
 /** The signed-in account; `mfa_enabled` says whether two-factor sign-in is on, and `monitoring_url` is set
  *  only for a superuser while monitoring is on (ADR-027). */
-export function getMe(): Promise<{ id: number; email: string; mfa_enabled: boolean; monitoring_url?: string | null }> {
+export function getMe(): Promise<{ id: number; email: string; mfa_enabled: boolean; full_name?: string | null; monitoring_url?: string | null }> {
   return apiFetch("/api/v1/users/me");
 }
+
+/** The signed-in person, under one key for every reader (the user menu, the palette, My recent failures). */
+export const meQuery = { queryKey: ["me"] as const, queryFn: getMe, staleTime: 5 * 60_000 };
 
 /** Hands over the qeos_grafana cookie (8 hours, /grafana only); resolves to where Grafana lives. */
 export async function startGrafanaSession(): Promise<string> {
