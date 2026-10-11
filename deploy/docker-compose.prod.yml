@@ -36,6 +36,10 @@ services:
       DASHBOARD_URL: https://${QEOS_DOMAIN:?set QEOS_DOMAIN (see deploy/README.md)}
   dashboard:
     restart: unless-stopped
+  grafana:
+    environment:
+      # Grafana's links and redirects must use the public address
+      GF_SERVER_ROOT_URL: https://${QEOS_DOMAIN:?set QEOS_DOMAIN (see deploy/README.md)}/grafana/
 
   gateway:
     restart: unless-stopped

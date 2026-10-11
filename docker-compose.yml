@@ -24,8 +24,14 @@ x-smtp-env: &smtp-env
   EMAILS_FROM_EMAIL: ${EMAILS_FROM_EMAIL:-}
   EMAILS_FROM_NAME: ${EMAILS_FROM_NAME:-QEOS}
 
+# build_info{version, commit} on every service's /metrics (Ruling 14). Set QEOS_COMMIT on update:
+#   QEOS_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build --wait gateway
+x-build-env: &build-env
+  QEOS_VERSION: ${QEOS_VERSION:-dev}
+  QEOS_COMMIT: ${QEOS_COMMIT:-unknown}
+
 x-auth-env: &auth-env
-  <<: *smtp-env
+  <<: [*smtp-env, *build-env]
   DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/auth_db
   SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY (shared by every service)}
   # Links in verification emails must point at the gateway, the only published entry point
@@ -34,6 +40,7 @@ x-auth-env: &auth-env
   INTERNAL_API_PASSWORD: ${INTERNAL_API_PASSWORD:?set INTERNAL_API_PASSWORD (service-to-service internal APIs; URL-safe characters)}
 
 x-organization-env: &organization-env
+  <<: *build-env
   DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/organization_db
   SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY (shared by every service)}
   AUTH_SERVICE_URL: http://auth-service:8000
@@ -41,6 +48,7 @@ x-organization-env: &organization-env
   INTERNAL_API_PASSWORD: ${INTERNAL_API_PASSWORD:?set INTERNAL_API_PASSWORD (service-to-service internal APIs; URL-safe characters)}
 
 x-project-env: &project-env
+  <<: *build-env
   DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/project_db
   SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY (shared by every service)}
   ORGANIZATION_SERVICE_URL: http://organization-service:8000
@@ -48,7 +56,7 @@ x-project-env: &project-env
   INTERNAL_API_PASSWORD: ${INTERNAL_API_PASSWORD:?set INTERNAL_API_PASSWORD (project-service's internal API; URL-safe characters)}
 
 x-ingestion-env: &ingestion-env
-  <<: *smtp-env
+  <<: [*smtp-env, *build-env]
   DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ingestion_db
   SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY (shared by every service)}
   PROJECT_SERVICE_URL: http://project-service:8000
@@ -56,6 +64,7 @@ x-ingestion-env: &ingestion-env
   DASHBOARD_URL: https://localhost:${GATEWAY_HTTPS_PORT:-8443}
 
 x-testmgmt-env: &testmgmt-env
+  <<: *build-env
   DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/testmgmt_db
   SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY (shared by every service)}
   PROJECT_SERVICE_URL: http://project-service:8000
@@ -287,6 +296,11 @@ services:
       GATEWAY_IMPORT_MAX_BODY: ${GATEWAY_IMPORT_MAX_BODY:-25m}
     volumes:
       - qeos_gateway_certs:/etc/nginx/certs
+    networks:
+      default:
+      # The one address Grafana's auth proxy trusts (monitoring profile); the network exists either way
+      grafana-front:
+        ipv4_address: 172.30.1.10
     healthcheck:
       test: ["CMD", "curl", "-fsk", "https://localhost/health"]
       interval: 5s
@@ -313,6 +327,174 @@ services:
       weekly-summary:
         condition: service_started
 
+  # ---- monitoring profile (spec 2026-10-10, ADR-027): COMPOSE_PROFILES=monitoring in .env turns it on ----
+  # Nothing here publishes a port to the internet; Grafana is reached through the gateway at /grafana/
+  # and, for break-glass, on 127.0.0.1:3000 of the host only. Networks: Prometheus and postgres-exporter
+  # also join the platform's network (to scrape the services, to reach PostgreSQL); Grafana does not, so
+  # no service container can resolve or route to it, only the gateway over grafana-front. Docker still
+  # opens a published port on the container's address to every container on the host, so the
+  # break-glass port is reachable by IP; that is why the auth proxy trusts the gateway's address only.
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: [monitoring]
+    restart: unless-stopped
+    mem_limit: 512m
+    # Renders /tmp/thresholds.yml from POSTGRES_DB_SIZE_ALERT_GB, then runs Prometheus with `command`
+    entrypoint: ["/bin/sh", "/etc/qeos/prometheus/entrypoint.sh"]
+    command:
+      - --config.file=/etc/qeos/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}
+      - --storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-5GB}
+    environment:
+      POSTGRES_DB_SIZE_ALERT_GB: ${POSTGRES_DB_SIZE_ALERT_GB:-20}
+    volumes:
+      # The layout monitoring/check.sh validates: prometheus.yml names its rule files under /etc/qeos
+      - ./monitoring:/etc/qeos:ro
+      - qeos_prometheus_data:/prometheus
+    networks: [default, monitoring]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    profiles: [monitoring]
+    restart: unless-stopped
+    mem_limit: 64m
+    # The config is rendered from the environment at every start (unset channels are left out)
+    entrypoint: ["/bin/sh", "-c", "sh /etc/qeos/alertmanager/render.sh /tmp/alertmanager.yml && exec /bin/alertmanager --config.file=/tmp/alertmanager.yml --storage.path=/alertmanager"]
+    environment:
+      <<: *smtp-env
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO:-}
+      ALERT_SLACK_WEBHOOK_URL: ${ALERT_SLACK_WEBHOOK_URL:-}
+      ALERT_TEAMS_WEBHOOK_URL: ${ALERT_TEAMS_WEBHOOK_URL:-}
+    volumes:
+      - ./monitoring/alertmanager:/etc/qeos/alertmanager:ro
+    networks: [monitoring]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9093/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  grafana:
+    image: grafana/grafana:12.0.2
+    profiles: [monitoring]
+    restart: unless-stopped
+    mem_limit: 256m
+    # Refuses to start without an admin password (Ruling 17): an empty one would mean admin/admin
+    entrypoint: ["/bin/sh", "-c", "if [ -z \"$$GF_SECURITY_ADMIN_PASSWORD\" ]; then echo 'grafana: set GRAFANA_ADMIN_PASSWORD in .env' >&2; exit 1; fi; exec /run.sh"]
+    environment:
+      GF_SERVER_ROOT_URL: https://localhost:${GATEWAY_HTTPS_PORT:-8443}/grafana/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+      # The gateway location carries no WebSockets (Ruling 13)
+      GF_LIVE_MAX_CONNECTIONS: "0"
+      # The auth proxy (Task 17 adds the rest of its settings) believes its user header from the
+      # gateway's fixed grafana-front address only
+      GF_AUTH_PROXY_WHITELIST: 172.30.1.10
+    ports:
+      # Break-glass admin login when auth-service is down: ssh -L 3000:127.0.0.1:3000 <vm>
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - qeos_grafana_data:/var/lib/grafana
+    # Not on the platform's network: the gateway is the only container in front of it
+    networks: [grafana-front, monitoring]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:3000/grafana/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  node-exporter:
+    image: prom/node-exporter:v1.9.1
+    profiles: [monitoring]
+    restart: unless-stopped
+    mem_limit: 64m
+    command: ["--path.rootfs=/host"]
+    pid: host
+    volumes:
+      # Without rslave, which Docker Desktop rejects (Ruling 18)
+      - /:/host:ro
+    networks: [monitoring]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9100/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  cadvisor:
+    # v0.54.1, not v0.52.1: v0.52.1 finds no container under Docker's containerd image store (Docker
+    # Desktop's default; "failed to identify the read-write layer ID")
+    image: gcr.io/cadvisor/cadvisor:v0.54.1
+    profiles: [monitoring]
+    restart: unless-stopped
+    mem_limit: 128m
+    command:
+      - --housekeeping_interval=30s
+      - --docker_only=true
+      - --store_container_labels=false
+      - --whitelisted_container_labels=com.docker.compose.service
+      # Only CPU, memory and start times are used; the rest would cost memory and series
+      - --disable_metrics=advtcp,cpu_topology,cpuset,hugetlb,memory_numa,percpu,process,referenced_memory,resctrl,sched,tcp,udp,disk,diskIO,network
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    networks: [monitoring]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  postgres-exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter:v0.17.1
+    profiles: [monitoring]
+    restart: unless-stopped
+    mem_limit: 64m
+    # Refuses to start without its password (Ruling 17). v0.17.1 has no --collector.stat_statements.include_query
+    # (it came in v0.18): the statement series carry queryid, not the query text
+    entrypoint: ["/bin/sh", "-c", "if [ -z \"$$DATA_SOURCE_PASS\" ]; then echo 'postgres-exporter: set MONITORING_DB_PASSWORD in .env' >&2; exit 1; fi; exec /bin/postgres_exporter --collector.stat_statements"]
+    environment:
+      # Over the network as qeos_monitor (pg_monitor only; db-init creates it)
+      DATA_SOURCE_URI: postgres:5432/postgres?sslmode=disable
+      DATA_SOURCE_USER: qeos_monitor
+      DATA_SOURCE_PASS: ${MONITORING_DB_PASSWORD:-}
+    networks: [default, monitoring]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:9187/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    depends_on:
+      db-init:
+        condition: service_completed_successfully
+
+networks:
+  # The gateway and Grafana only: Grafana's auth proxy trusts a user header, so no other container joins
+  # it. A fixed subnet gives the gateway the fixed address Grafana trusts (GF_AUTH_PROXY_WHITELIST);
+  # dynamic addresses come from the upper half, so Grafana can never take .10.
+  grafana-front:
+    ipam:
+      config:
+        - subnet: 172.30.1.0/24
+          ip_range: 172.30.1.128/25
+  # Prometheus, Alertmanager, Grafana and the exporters
+  monitoring:
+
 volumes:
   # Explicit names: the physical volumes keep the names they had before the QEOS rename
   # (compose project "qa-vision", keys "qav_*"), so no data moves and nothing is recreated.
@@ -320,3 +502,6 @@ volumes:
     name: qa-vision_qav_postgres_data
   qeos_gateway_certs:
     name: qa-vision_qav_gateway_certs
+  # Monitoring profile (Ruling 16). Grafana needs no backup: everything in it is provisioned from the repo
+  qeos_prometheus_data:
+  qeos_grafana_data:
