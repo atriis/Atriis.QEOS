@@ -1,0 +1,36 @@
+# Rendered at start by render.sh (monitoring spec §5): each @@...@@ line is replaced from the environment.
+# Edit this template, never the rendered /tmp/alertmanager.yml.
+global:
+  resolve_timeout: 5m
+@@GLOBAL@@
+
+route:
+  receiver: "null"
+  group_by: ["alertname", "service"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # Watchdog always fires to prove the pipeline; route it to an external dead-man's switch here if you add one
+    - matchers: ['alertname="Watchdog"']
+      receiver: "null"
+    - matchers: ['severity="critical"']
+      receiver: critical
+    - matchers: ['severity="warning"']
+      receiver: warning
+
+inhibit_rules:
+  # A service that is down also fails and is slow: only say that it is down
+  - source_matchers: ['alertname="ServiceDown"']
+    target_matchers: ['alertname=~"High5xxRate|SlowRequests"']
+    equal: ["service"]
+  # PostgreSQL unreachable: its other alerts add nothing
+  - source_matchers: ['alertname="PostgresDown"']
+    target_matchers: ['alertname=~"PostgresTooManyConnections|PostgresDatabaseGrowing"']
+
+receivers:
+  - name: "null"
+  - name: critical
+@@CRITICAL@@
+  - name: warning
+@@WARNING@@

@@ -17,4 +17,7 @@ echo "== promtool: rule unit tests"
 run --entrypoint promtool "$PROMETHEUS" test rules prometheus/tests/alerts.test.yml
 echo "== promtool: configuration (with the thresholds entrypoint.sh renders)"
 run --entrypoint /bin/sh "$PROMETHEUS" -c 'sh prometheus/entrypoint.sh --version >/dev/null && promtool check config prometheus/prometheus.yml'
+ALERTMANAGER=prom/alertmanager:v0.28.1
+echo "== alertmanager: render and amtool check-config"
+run --entrypoint /bin/sh "$ALERTMANAGER" alertmanager/test_render.sh
 echo "monitoring: all checks passed"
