@@ -58,9 +58,11 @@ export default function OverviewEditor({ projectId, session, onClose, onReload }
     titleRef.current?.focus();
   }, []);
 
+  // A conflict takes focus on Reload, and gets it back when a request ends (its buttons were disabled meanwhile, which
+  // drops focus to the page)
   useEffect(() => {
-    if (conflict !== undefined) reloadRef.current?.focus();
-  }, [conflict]);
+    if (conflict !== undefined && !busy) reloadRef.current?.focus();
+  }, [conflict, busy]);
 
   // Focus follows the widget that moved, the neighbour of one removed, or the one added
   useEffect(() => {
@@ -205,7 +207,8 @@ export default function OverviewEditor({ projectId, session, onClose, onReload }
             aria-label="The layout changed while you were editing"
             aria-describedby="overview-conflict-message"
             onKeyDown={(e) => {
-              if (e.key === "Escape") {
+              // Not while a request runs: its answer may bring a newer conflict
+              if (e.key === "Escape" && !busy) {
                 e.preventDefault();
                 dismissConflict();
               }

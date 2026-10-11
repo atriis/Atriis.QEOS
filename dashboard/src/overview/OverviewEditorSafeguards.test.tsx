@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { server } from "../test/server";
@@ -97,8 +97,13 @@ test("Overwrite and Reload are disabled while an Overwrite is in flight; Escape 
   await waitFor(() => expect(calls).toBe(2));
   expect(within(dialog).getByRole("button", { name: "Overwrite" })).toBeDisabled();
   expect(within(dialog).getByRole("button", { name: "Reload" })).toBeDisabled();
+  // Escape does nothing while the request runs
+  fireEvent.keyDown(dialog, { key: "Escape" });
+  expect(screen.getByRole("alertdialog", { name: DIALOG })).toBeInTheDocument();
   release();
   await waitFor(() => expect(within(screen.getByRole("alertdialog", { name: DIALOG })).getByRole("button", { name: "Overwrite" })).toBeEnabled());
+  // Focus came back to Reload rather than dropping to the page
+  expect(screen.getByRole("button", { name: "Reload" })).toHaveFocus();
   await userEvent.keyboard("{Escape}");
   expect(screen.queryByRole("alertdialog", { name: DIALOG })).not.toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Save" })).toHaveFocus();
@@ -176,4 +181,64 @@ test("a card that takes focus from the keyboard shows the focus ring; only point
   const css = readFileSync(resolve(__dirname, "../index.css"), "utf8");
   expect(css).toMatch(/\.overview-grid > \.card:focus-visible \{ outline: 2px solid var\(--accent\); outline-offset: 2px; \}/);
   expect(css).not.toMatch(/\.overview-grid > \.card:focus \{ outline: none; \}/);
+});
+
+test("Reload is disabled while its own request runs; Escape waits; a failed Reload hands focus back to Reload", async () => {
+  mockOverviewData({ layout: personalState(...BUILTIN_DEFAULT.widgets) });
+  server.use(http.put(PUT_PERSONAL, () => stale({ version: 2, updated_by: 7, updated_at: "2026-10-11T09:00:00Z" })));
+  renderOverview();
+  await startEditing();
+  await userEvent.click(screen.getByRole("button", { name: "Remove Latest run" }));
+  let release: () => void = () => {};
+  let gets = 0;
+  server.use(http.get("/api/v1/projects/42/overview-layout", async () => {
+    gets += 1;
+    if (gets === 1) return HttpResponse.json(personalState(...BUILTIN_DEFAULT.widgets));
+    await new Promise<void>((resolve) => { release = resolve; });
+    return HttpResponse.json({ detail: "Layouts are down" }, { status: 500 });
+  }));
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  // The 409 refetches the layout once; Reload asks again
+  const dialog = await screen.findByRole("alertdialog", { name: DIALOG });
+  await waitFor(() => expect(gets).toBe(1));
+  await userEvent.click(within(dialog).getByRole("button", { name: "Reload" }));
+  await waitFor(() => expect(gets).toBe(2));
+  expect(within(dialog).getByRole("button", { name: "Reload" })).toBeDisabled();
+  expect(within(dialog).getByRole("button", { name: "Overwrite" })).toBeDisabled();
+  fireEvent.keyDown(dialog, { key: "Escape" });
+  expect(screen.getByRole("alertdialog", { name: DIALOG })).toBeInTheDocument();
+  release();
+  expect(await screen.findByText("Layouts are down")).toBeInTheDocument();
+  await waitFor(() => expect(screen.getByRole("button", { name: "Reload" })).toHaveFocus());
+  expect(titles()).toEqual(WITHOUT_LATEST);
+});
+
+test("switching project with a dirty draft: Stay and Escape keep it here, Leave opens the other project's own layout", async () => {
+  mockOverviewData();
+  server.use(
+    http.get("/api/v1/projects/43", () => HttpResponse.json({ id: 43, organization_id: 1, name: "App", my_role: "member" })),
+    http.get("/api/v1/projects/43/runs", () => HttpResponse.json([{ ...RUN, id: 90, project_id: 43 }])),
+    http.get("/api/v1/projects/43/overview-layout", () => HttpResponse.json(personalState({ id: "b1", type: "flaky_count", size: "wide" }))),
+  );
+  renderOverview();
+  await startEditing();
+  await userEvent.click(screen.getByRole("button", { name: "Remove Latest run" }));
+  const tryLeaving = async () => {
+    await userEvent.click(screen.getByRole("link", { name: "Other project" }));
+    return screen.findByRole("alertdialog", { name: "Unsaved changes" });
+  };
+  await tryLeaving();
+  await userEvent.click(screen.getByRole("button", { name: "Stay" }));
+  expect(screen.getByText("Editing your Overview")).toBeInTheDocument();
+  expect(titles()).toEqual(WITHOUT_LATEST);
+  await tryLeaving();
+  await userEvent.keyboard("{Escape}");
+  expect(screen.queryByRole("alertdialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
+  expect(screen.getByText("Editing your Overview")).toBeInTheDocument();
+  expect(titles()).toEqual(WITHOUT_LATEST);
+  await tryLeaving();
+  await userEvent.click(screen.getByRole("button", { name: "Leave without saving" }));
+  expect(await screen.findByRole("region", { name: "Flaky tests, last 14 days" })).toBeInTheDocument();
+  expect(screen.queryByText("Editing your Overview")).not.toBeInTheDocument();
+  expect(titles()).toEqual(["Flaky tests, last 14 days"]);
 });
