@@ -188,9 +188,13 @@ VM), cAdvisor (containers) and postgres-exporter. Off by default; an install wit
 before. Design: `docs/superpowers/specs/2026-10-10-monitoring-design.md`.
 
 > **Status.** The stack, the metrics, the alert rules, the alert channels and the five dashboards are
-> built. The QEOS sign-in to Grafana (the account-menu **Monitoring** item and `https://<domain>/grafana/`
-> through the gateway) is the next phase and is **not built yet**. Today the way into Grafana is the
-> break-glass login below. Prometheus is not published; it works and fires alerts regardless.
+> built. The QEOS sign-in to Grafana is half built: with `MONITORING_ENABLED=true` the gateway serves
+> `https://<domain>/grafana/` to active superusers only (auth-service checks the `qeos_grafana` cookie
+> on every request and Grafana signs the user in by the header the gateway sets), but the account-menu
+> **Monitoring** item and the dashboard's `/monitoring` page that hand the cookie over are **not built
+> yet**, so a browser visit to `/grafana/` is sent to `/monitoring` and stops there. Today the way into
+> Grafana is still the break-glass login below. Prometheus is not published; it works and fires alerts
+> regardless.
 
 **Turn it on.** A new install's `.env` already holds the four lines below, commented out, with
 generated passwords: uncomment them. (An install from before monitoring: add them by hand, passwords of
@@ -203,7 +207,8 @@ GRAFANA_ADMIN_PASSWORD=...
 MONITORING_DB_PASSWORD=...
 ```
 
-`MONITORING_ENABLED` belongs to the sign-in phase; nothing reads it yet.
+`MONITORING_ENABLED` is read by auth-service and the gateway: true opens `/grafana/` to superusers through
+the gateway; unset or false, `/grafana/` is a 404 for everyone (Grafana itself still runs with the profile).
 Then `qeos up -d --build --wait edge prometheus alertmanager grafana node-exporter cadvisor postgres-exporter` (naming the services starts the profile's containers
 and waits for them, not for the one-shot jobs). `db-init` creates the PostgreSQL role `qeos_monitor` on that `up`: it is a
 member of `pg_monitor` only, so it reads statistics and settings and no table data, but it can see query
@@ -229,8 +234,9 @@ within a minute. The first is Grafana's home page.
 | Host and containers | VM CPU, memory and disk with a 24 hour disk prediction; per container CPU, memory and restarts |
 
 How to open them today: the break-glass login, `ssh -L 3000:127.0.0.1:3000 <vm>` (or on the VM itself)
-and then `http://127.0.0.1:3000/grafana/`, user `admin` and `GRAFANA_ADMIN_PASSWORD`. After the sign-in phase, a
-superuser opens `https://<domain>/grafana/` (or **Monitoring** in the account menu) with the usual QEOS login. The
+and then `http://127.0.0.1:3000/grafana/`, user `admin` and `GRAFANA_ADMIN_PASSWORD` (the login form and
+basic auth stay on for this; through the gateway nobody reaches them without passing auth-service's check).
+Once the dashboard's **Monitoring** item is built, a superuser opens `https://<domain>/grafana/` (or **Monitoring** in the account menu) with the usual QEOS login. The
 "Slowest statements" table lists `queryid`, database, user, calls and mean time only: statement text is not
 collected on purpose (it could carry secrets or personal data); look a `queryid` up in `pg_stat_statements`.
 

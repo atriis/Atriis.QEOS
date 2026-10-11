@@ -128,15 +128,28 @@ details.
   demotion, deactivation, password change or monitoring turned off cuts access
   on the next request. It takes no HTTP Basic (the cookie is the credential;
   the gateway never routes `/internal/`), ignores the `Authorization` header,
-  answers `Cache-Control: no-store` and never sends `WWW-Authenticate`. The
-  gateway location that calls it through `auth_request` is not wired yet.
+  answers `Cache-Control: no-store` and never sends `WWW-Authenticate`.
+- **Grafana behind the gateway (monitoring).** With `MONITORING_ENABLED` true,
+  every `/grafana/` request goes through NGINX `auth_request` to that check
+  (an `internal` location carrying only the browser's cookies: no body, no
+  `Authorization`, no other client header). Only a 2xx reaches Grafana: a 401
+  redirects to the dashboard's `/monitoring?next=<path>`, a 403 is refused, and
+  an unreachable auth-service or any other answer is a 502. The gateway
+  **always overwrites** `X-QEOS-User-Email` toward Grafana with the email from
+  the check's answer, so a client sending its own header, with a valid cookie
+  or without one, never chooses who Grafana signs in (verified live: a forged
+  header for another address still shows the cookie owner). Grafana's auth
+  proxy believes that header only from the gateway's fixed `grafana-front`
+  address. The gateway also removes `Authorization` toward Grafana, so the
+  QEOS access token never reaches it. With `MONITORING_ENABLED` unset or false,
+  `/grafana/` is a JSON 404 for everyone.
 - **Grafana break-glass port (monitoring).** Grafana publishes `127.0.0.1:3000`
   for an admin login when auth-service is down. Because that port is published,
   Docker 28 and later makes Grafana's address on its `grafana-front` network
   reachable by IP from other containers on the host. Their requests arrive from
   the network's bridge gateway (`172.30.1.128` with the default subnet), not from the gateway's fixed
   address that Grafana's auth proxy trusts (`GF_AUTH_PROXY_WHITELIST`), so a user
-  header they send is ignored and they reach only Grafana's own login, which
+  header they send is refused (401 `auth-proxy.invalid-ip`) and they reach only Grafana's own login, which
   needs `GRAFANA_ADMIN_PASSWORD`. A container that is already compromised could
   try that password; keep it long and random (`init-env.sh` does).
 - **cAdvisor (monitoring).** It runs as root with `/:/rootfs:ro` and `/var/run` (the Docker

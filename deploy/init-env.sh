@@ -30,8 +30,8 @@ INTERNAL_API_PASSWORD=$(secret 40)
 POSTGRES_PASSWORD=$(secret 40)
 TM_SECRETS_KEY=$tm_key
 # Monitoring (Prometheus, Alertmanager, Grafana): uncomment the four lines below to turn it on. Left
-# commented, no monitoring database role is created. MONITORING_ENABLED is for the QEOS sign-in to
-# Grafana (not built yet). 8 GB RAM recommended. See deploy/README.md section 10.
+# commented, no monitoring database role is created. MONITORING_ENABLED opens /grafana/ at the gateway
+# to QEOS superusers. 8 GB RAM recommended. See deploy/README.md section 10.
 #COMPOSE_PROFILES=monitoring
 #MONITORING_ENABLED=true
 #GRAFANA_ADMIN_PASSWORD=$(secret 32)

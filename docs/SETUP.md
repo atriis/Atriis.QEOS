@@ -178,7 +178,7 @@ bash deploy/init-env.sh localhost you@example.com
 | `VITE_MSAL_CLIENT_ID` | empty | Shows the Microsoft button. Baked in at build time. |
 | `VITE_MSAL_AUTHORITY` | `https://login.microsoftonline.com/organizations` | MSAL authority. |
 | `COMPOSE_PROFILES` | empty | `monitoring` starts Prometheus, Alertmanager, Grafana and the exporters ([7.4](#74-monitoring-optional)). |
-| `MONITORING_ENABLED` | `false` | For the QEOS sign-in to Grafana, which is not built yet; nothing reads it today. |
+| `MONITORING_ENABLED` | `false` | The QEOS sign-in to Grafana: when true, the gateway opens `/grafana/` to active superusers (checked by auth-service on every request); otherwise `/grafana/` is a 404. The dashboard's **Monitoring** item that hands over the sign-in is not built yet. |
 | `GRAFANA_ADMIN_PASSWORD`, `MONITORING_DB_PASSWORD` | empty | Required with monitoring: Grafana's admin login (read on its first start only), and the password of PostgreSQL role `qeos_monitor`. |
 | `ALERT_EMAIL_TO`, `ALERT_SLACK_WEBHOOK_URL`, `ALERT_TEAMS_WEBHOOK_URL` | empty | Alert channels; each turns on when set. Email also needs `SMTP_HOST`. |
 | `PROMETHEUS_RETENTION`, `PROMETHEUS_RETENTION_SIZE`, `POSTGRES_DB_SIZE_ALERT_GB` | `15d`, `5GB`, `20` | Metrics kept, their disk cap, and the database size alert. |
@@ -1481,9 +1481,11 @@ MONITORING_DB_PASSWORD=<letters and digits>
 ```
 
 then `docker compose up -d --build --wait gateway prometheus alertmanager grafana node-exporter cadvisor postgres-exporter`. Prometheus then scrapes every service, and Alertmanager sends alerts to the channels you
-set. The QEOS sign-in to Grafana (the **Monitoring** menu item and `https://localhost:8443/grafana/`)
-and the starter dashboards are not built yet; for now open Grafana's own admin login on the machine
-that runs the stack: `http://localhost:3000/grafana/login`, user `admin`. Alert channels, resources,
+set. Five dashboards are provisioned. With `MONITORING_ENABLED=true` the gateway serves Grafana at
+`https://localhost:8443/grafana/` to superusers only, but the dashboard's **Monitoring** menu item and
+`/monitoring` page, which hand the sign-in over, are not built yet (a visit is sent to `/monitoring`); for
+now open Grafana's own admin login on the machine that runs the stack:
+`http://localhost:3000/grafana/login`, user `admin`. Alert channels, resources,
 break-glass access from a VM, the security notes and turning it off: `deploy/README.md` section 10.
 Every service also serves `/metrics` inside the compose network whether or not the profile is on; the
 gateway never routes it.

@@ -16,6 +16,7 @@ Design: `docs/superpowers/specs/2026-09-28-api-gateway-design.md`.
 | `/api/v1/auth…`, `/api/v1/users…`, `/api/v1/sso…` | auth-service |
 | `/health` | the gateway itself |
 | `/health/auth`, `/health/organizations`, `/health/projects`, `/health/ingestion`, `/health/test-management` | that service's `/health` |
+| `/grafana/…` | Grafana, behind auth-service's check (monitoring on); `404 {"detail":"Not Found"}` when off — see below |
 | any other `/api/…` path | `404 {"detail":"Not Found"}` |
 | anything else | the dashboard (its own NGINX falls back to `index.html`; ADR-017) |
 
@@ -23,6 +24,31 @@ The first three rows are regex locations: NGINX checks regex locations before pr
 is what takes `/organizations/{id}/projects` away from organization-service and the
 `/projects/{id}/…` paths away from project-service. `/metrics` and `/internal` are never routed:
 they fall through to the dashboard.
+
+## Grafana (`/grafana/`, ADR-027)
+
+`entrypoint.sh` picks the location from `MONITORING_ENABLED`, the same `.env` value auth-service reads
+(`true`, `1`, `yes`, `on`, any case, as auth-service accepts them):
+
+- **Off** (unset or false, the default): `grafana-off.conf`. `/grafana` and `/grafana/…` answer the JSON
+  404 for everyone, signed in or not.
+- **On**: `grafana-on.conf`. `/grafana` redirects to `/grafana/`. Every `/grafana/…` request first goes
+  through `auth_request` to auth-service's `GET /internal/v1/grafana-check` (an `internal` location, so no
+  client can call it; `/internal/` itself stays unrouted). The subrequest carries only the browser's
+  `Cookie` header (the `qeos_grafana` cookie is the credential), plus the request id and forwarding
+  headers: no body, no `Authorization`, no other client header.
+  - 200: the request goes to `grafana:3000` with `X-QEOS-User-Email` set from the check's answer.
+    The gateway **always overwrites** that header, so a client sending its own never chooses who Grafana
+    signs in; Grafana trusts it only from the gateway's fixed `grafana-front` address
+    (`GATEWAY_GRAFANA_FRONT_IP`). `Authorization` is removed toward Grafana.
+  - 401: `302 /monitoring?next=<path>`. The dashboard's `/monitoring` page signs in if needed, mints the
+    cookie and comes back. `next` is NGINX's `$uri`, the path only: NGINX cannot URL-encode, so a deep
+    link's query string is dropped (Ruling 4).
+  - 403: `403 {"detail":"Forbidden"}`. auth-service down, or any other answer: `502 {"detail":"Bad Gateway"}`.
+    Nothing but a 2xx reaches Grafana.
+- Grafana is resolved when a request comes, so the gateway starts while Grafana is down and answers 502
+  until it is up. No WebSockets: Grafana Live is off. The limit is the API zone with a burst of 100
+  (a dashboard loads many assets).
 
 ## Limits
 
@@ -67,6 +93,7 @@ request.
 
 ```bash
 docker build -t qa-vision/gateway:local gateway && docker run --rm qa-vision/gateway:local nginx -t
+docker run --rm -e MONITORING_ENABLED=true qa-vision/gateway:local nginx -t   # the gated /grafana/
 export SECRET_KEY=dev        # every docker compose command needs it, not just `up`
 docker compose up -d --build --wait gateway
 bash scripts/smoke_gateway.sh
