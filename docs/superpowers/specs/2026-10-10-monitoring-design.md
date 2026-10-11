@@ -137,7 +137,7 @@ Rules in `monitoring/prometheus/alerts.yml`:
 | `ServiceDown` | `up == 0` for a target for 2 min | critical |
 | `High5xxRate` | a service's 5xx share > 5 % for 5 min, with ≥ 20 requests in the window | critical |
 | `SlowRequests` | a service's p95 > 2 s for 10 min; routes under `/analytics/report` use 10 s | warning |
-| `JobStale` | last success older than 2× the job's interval (retention 2 d, rollup 12 h, weekly summary 8 d) | warning |
+| `JobStale` | last success older than 2× the job's interval (retention 2 d, rollup 12 h, weekly summary 1 h: plan Ruling 6, the job passes every 30 min) | warning |
 | `JobFailing` | last error newer than last success, for 30 min | warning |
 | `UploadsRejected` | rejected uploads > 25 % of uploads for 15 min (with ≥ 10 uploads) | warning |
 | `DiskFillingUp` | VM disk > 85 % used, or predicted full within 24 h | critical |

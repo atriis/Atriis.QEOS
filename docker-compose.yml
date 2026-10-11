@@ -129,7 +129,8 @@ services:
       PGHOST: postgres
       PGUSER: postgres
       PGPASSWORD: ${POSTGRES_PASSWORD:-postgres}
-      # Empty unless monitoring is on: then postgres-init.sh creates role qeos_monitor (pg_monitor only)
+      # Empty unless you set it in .env (init-env.sh writes it commented out, so a new install has no such
+      # role until monitoring is turned on): then postgres-init.sh creates role qeos_monitor (pg_monitor only)
       MONITORING_DB_PASSWORD: ${MONITORING_DB_PASSWORD:-}
     volumes:
       - ./scripts/postgres-init.sh:/postgres-init.sh:ro

@@ -29,12 +29,12 @@ SECRET_KEY=$(secret 64)
 INTERNAL_API_PASSWORD=$(secret 40)
 POSTGRES_PASSWORD=$(secret 40)
 TM_SECRETS_KEY=$tm_key
-GRAFANA_ADMIN_PASSWORD=$(secret 32)
-MONITORING_DB_PASSWORD=$(secret 40)
-# Monitoring (Prometheus, Alertmanager, Grafana): uncomment COMPOSE_PROFILES to turn it on.
-# MONITORING_ENABLED is for the QEOS sign-in to Grafana (not built yet). 8 GB RAM recommended.
-# See deploy/README.md section 10.
+# Monitoring (Prometheus, Alertmanager, Grafana): uncomment the four lines below to turn it on. Left
+# commented, no monitoring database role is created. MONITORING_ENABLED is for the QEOS sign-in to
+# Grafana (not built yet). 8 GB RAM recommended. See deploy/README.md section 10.
 #COMPOSE_PROFILES=monitoring
 #MONITORING_ENABLED=true
+#GRAFANA_ADMIN_PASSWORD=$(secret 32)
+#MONITORING_DB_PASSWORD=$(secret 40)
 EOF
 echo "wrote .env for https://$domain (mode 600)"

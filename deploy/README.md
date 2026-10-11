@@ -49,7 +49,8 @@ bash deploy/init-env.sh qeos.example.com ops@example.com
 ```
 
 `init-env.sh` writes `.env` (mode 600, git-ignored) with the domain and freshly generated
-secrets: `SECRET_KEY`, `INTERNAL_API_PASSWORD`, `POSTGRES_PASSWORD`, `TM_SECRETS_KEY`, `GRAFANA_ADMIN_PASSWORD`, `MONITORING_DB_PASSWORD`. It refuses to overwrite
+secrets: `SECRET_KEY`, `INTERNAL_API_PASSWORD`, `POSTGRES_PASSWORD`, `TM_SECRETS_KEY`. It also writes `GRAFANA_ADMIN_PASSWORD` and `MONITORING_DB_PASSWORD`
+commented out (section 10). It refuses to overwrite
 an existing `.env`. **Back this file up somewhere safe**: losing it means losing access to
 the database. Include it in every `.env` backup: `TM_SECRETS_KEY` encrypts the GitHub tokens used to
 run tests from QEOS, and losing it means re-entering each project's GitHub token.
@@ -128,6 +129,12 @@ git pull
 qeos up -d --build --wait edge
 ```
 
+With monitoring on (section 10), name its six containers too, so they are rebuilt and waited for:
+`qeos up -d --build --wait edge prometheus alertmanager grafana node-exporter cadvisor postgres-exporter`.
+
+This release (the monitoring work) restarts PostgreSQL once, to preload `pg_stat_statements`, and recreates
+the gateway, which joins a new network, even with monitoring off. Expect a short interruption.
+
 Database migrations run automatically on every start.
 
 **Existing installs and `TM_SECRETS_KEY`.** `init-env.sh` never overwrites an existing `.env`, so an install
@@ -186,18 +193,20 @@ before. Design: `docs/superpowers/specs/2026-10-10-monitoring-design.md`.
 > the break-glass login below, and it shows no dashboards yet. Prometheus is not published; it works
 > and fires alerts regardless.
 
-**Turn it on.** In `.env` (an install from before monitoring: add the two passwords by hand, letters and
-digits, 32+ characters):
+**Turn it on.** A new install's `.env` already holds the four lines below, commented out, with
+generated passwords: uncomment them. (An install from before monitoring: add them by hand, passwords of
+letters and digits, 32+ characters.) Until then no monitoring database role exists.
 
 ```bash
 COMPOSE_PROFILES=monitoring
+MONITORING_ENABLED=true
 GRAFANA_ADMIN_PASSWORD=...
 MONITORING_DB_PASSWORD=...
 ```
 
-`MONITORING_ENABLED=true` belongs to the sign-in phase; nothing reads it yet, so leaving it out is fine.
-Then `qeos up -d --build --wait` (no service name: naming `edge` or `gateway` starts only the platform,
-not the profile's containers). `db-init` creates the PostgreSQL role `qeos_monitor` on that `up`: it is a
+`MONITORING_ENABLED` belongs to the sign-in phase; nothing reads it yet.
+Then `qeos up -d --build --wait edge prometheus alertmanager grafana node-exporter cadvisor postgres-exporter` (naming the services starts the profile's containers
+and waits for them, not for the one-shot jobs). `db-init` creates the PostgreSQL role `qeos_monitor` on that `up`: it is a
 member of `pg_monitor` only, so it reads statistics and settings and no table data, but it can see query
 text in `pg_stat_activity`. The first `up` after this release also restarts PostgreSQL once, to load
 `pg_stat_statements`. Grafana and postgres-exporter refuse to start while their password is empty.
@@ -243,7 +252,7 @@ Alertmanager. The channel settings are read when Alertmanager starts: after chan
 | `PROMETHEUS_RETENTION_SIZE` | `5GB` | Cap on Prometheus's disk use |
 | `POSTGRES_DB_SIZE_ALERT_GB` | `20` | `PostgresDatabaseGrowing` fires above this |
 
-**Version.** `QEOS_COMMIT=$(git rev-parse --short HEAD) qeos up -d --build --wait` makes every service
+**Version.** `QEOS_COMMIT=$(git rev-parse --short HEAD) qeos up -d --build --wait edge` (plus the six containers when monitoring is on) makes every service
 report the deployed commit in its `build_info` metric (`unknown` otherwise; `QEOS_VERSION` defaults to
 `dev`).
 
@@ -271,10 +280,13 @@ on the platform's network, so no service container can resolve it by name. Its a
 (`GF_AUTH_PROXY_WHITELIST`) believes a user header only from the gateway's fixed address. One residual
 remains: because the break-glass port is published, Docker 28 and later makes Grafana's `grafana-front`
 address reachable by IP from other containers on the host. Such requests arrive from the network's
-bridge gateway (`172.30.1.128`), not from the whitelisted gateway, so the auth proxy ignores any user
+bridge gateway (`172.30.1.128` with the default subnet), not from the whitelisted gateway, so the auth proxy ignores any user
 header they send, and they get nothing beyond Grafana's own login, which still needs the admin
 password. Keep `GRAFANA_ADMIN_PASSWORD` strong; `init-env.sh` generates 32 characters. The query text
-visible to `qeos_monitor` is described in `SECURITY.md`.
+visible to `qeos_monitor` is described in `SECURITY.md`. cAdvisor runs as root with `/:/rootfs:ro` and the
+`/var/run` (the Docker socket) mounted, so it can read the whole VM filesystem, including `.env` and the
+PostgreSQL data, and has root-equivalent Docker API access; it is opt-in and publishes no port, and
+dropping the `/:/rootfs` mount is planned (Phase 3).
 
 **Dead-man's switch (not built).** The `Watchdog` alert always fires and goes nowhere. To be told when the
 whole VM or Alertmanager is gone, route `Watchdog` to an external heartbeat service (any hosted "dead

@@ -102,7 +102,8 @@ details.
   (Fernet, `TM_SECRETS_KEY`) and never returned. Notification webhook URLs are
   never returned, and are checked against SSRF (vendor hosts, public addresses
   only, no redirects).
-- **Monitoring database role.** With monitoring on, PostgreSQL gets a login role
+- **Monitoring database role.** Only when `MONITORING_DB_PASSWORD` is set (monitoring on; `init-env.sh`
+  writes it commented out), PostgreSQL gets a login role
   `qeos_monitor` that is a member of `pg_monitor` only: it reads statistics and
   settings and cannot read table data. It can still see query text in
   `pg_stat_activity` and `pg_stat_statements`, which may contain literals. The
@@ -112,11 +113,15 @@ details.
   for an admin login when auth-service is down. Because that port is published,
   Docker 28 and later makes Grafana's address on its `grafana-front` network
   reachable by IP from other containers on the host. Their requests arrive from
-  the network's bridge gateway (`172.30.1.128`), not from the gateway's fixed
+  the network's bridge gateway (`172.30.1.128` with the default subnet), not from the gateway's fixed
   address that Grafana's auth proxy trusts (`GF_AUTH_PROXY_WHITELIST`), so a user
   header they send is ignored and they reach only Grafana's own login, which
   needs `GRAFANA_ADMIN_PASSWORD`. A container that is already compromised could
   try that password; keep it long and random (`init-env.sh` does).
+- **cAdvisor (monitoring).** It runs as root with `/:/rootfs:ro` and `/var/run` (the Docker
+  socket) mounted, so it can read the whole host filesystem, including `.env` and the PostgreSQL
+  data, and has root-equivalent Docker API access. It is opt-in and publishes no port; dropping the
+  `/:/rootfs` mount is planned (Phase 3).
 - **Data.** Per-project retention, legal hold and a full NDJSON export.
 - **Production package** (`deploy/`). A Caddy TLS edge with Let's Encrypt and
   HSTS is the only published service. Secrets are generated into a mode-600

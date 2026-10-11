@@ -236,7 +236,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # promtool check/test rules and check config, amtool on rendered Alertmanager files, dashboard lint
+      # promtool check/test rules and check config, amtool on rendered Alertmanager files, the Alertmanager render test
       - name: Static checks
         run: bash monitoring/check.sh
 

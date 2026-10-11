@@ -1,7 +1,7 @@
 #!/bin/sh
 # Renders alertmanager.yml from alertmanager.yml.template and the environment (monitoring spec §5).
 # A channel whose settings are missing is left out, so a missing value never stops start-up; with no
-# channel at all every alert goes to the "null" receiver and is visible in Grafana only. Secrets go
+# channel at all every alert goes to the "null" receiver and is visible in Prometheus/Alertmanager until Grafana dashboards land. Secrets go
 # into the output file only, never to the log.
 #   usage: render.sh OUTPUT
 set -eu

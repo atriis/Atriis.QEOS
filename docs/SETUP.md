@@ -1480,8 +1480,7 @@ GRAFANA_ADMIN_PASSWORD=<letters and digits>
 MONITORING_DB_PASSWORD=<letters and digits>
 ```
 
-then `docker compose up -d --build --wait` (without a service name, which would start only the
-platform). Prometheus then scrapes every service, and Alertmanager sends alerts to the channels you
+then `docker compose up -d --build --wait gateway prometheus alertmanager grafana node-exporter cadvisor postgres-exporter`. Prometheus then scrapes every service, and Alertmanager sends alerts to the channels you
 set. The QEOS sign-in to Grafana (the **Monitoring** menu item and `https://localhost:8443/grafana/`)
 and the starter dashboards are not built yet; for now open Grafana's own admin login on the machine
 that runs the stack: `http://localhost:3000/grafana/login`, user `admin`. Alert channels, resources,
