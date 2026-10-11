@@ -85,7 +85,11 @@ Projects under organizations (access follows org roles), settings
 (GitHub, GitLab, Azure DevOps; checked against the provider's public API),
 legal hold (owner/admin, with a required reason; retention deletes nothing of a
 held project), internal retention endpoint (HTTP Basic, INTERNAL_API_PASSWORD)
-consumed by the retention job.
+consumed by the retention job. Overview layouts (`/projects/{id}/overview-layout`):
+GET resolves personal → project default → built-in; `PUT`/`DELETE /personal` for
+every role, `/project` for owner/admin; a save names its `version` (0 creates) and
+a stale one is a 409 carrying the stored row; layouts are validated against
+`shared/qeos_shared/overview_widgets.json` (24 widgets, 64 KB).
 
 ### 2.4 ingestion-service
 - **Collect**: `POST /collect/runs` with project API key (`qeos_` bearer; keys issued
@@ -165,7 +169,8 @@ run_changed_files, run_components, muted_tests (quarantine), flaky_daily /
 flaky_rollup_days (daily flip aggregates + computed-day markers), api_keys
 (SHA-256 of the key), masking_patterns, notification_channels. Test-management:
 cases, case_labels, suites, suite_cases, feature_files, ci_targets,
-run_requests.
+run_requests. Project: projects, repositories, overview_layouts (a JSONB layout
+per project default or user, with a version for conflict checks).
 
 ## 4. Flaky Detection Semantics (rulings)
 

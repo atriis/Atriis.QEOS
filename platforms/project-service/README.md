@@ -48,6 +48,37 @@ are editable by members, and a hold must record who placed it, when and why.
 an unknown key is a 422. Keys: `result_retention_days` (1–365, default 90), `default_environment`,
 `notify_on_failure`.
 
+## Overview layouts
+
+The project Overview is a grid of widgets (spec `docs/superpowers/specs/2026-10-11-customisable-overview-design.md`).
+Table `overview_layouts` (migration 004): one optional project default (`user_id` NULL) and one optional
+personal layout per user, each a JSONB `layout` with a `version`.
+
+| Method, path (`/api/v1/projects/{id}/overview-layout`) | Roles | Behaviour |
+|---|---|---|
+| `GET` | every project role | `{effective, source, personal, project}`: the caller's personal layout, else the project default, else `source: "builtin"` with `effective: null` (the dashboard holds the built-in default). `personal` is `{version, updated_at}`, `project` is `{version, updated_by, updated_at, layout}`, each `null` when absent |
+| `PUT /personal` | every project role | `{"layout": ..., "version": n}`; `0` creates. Returns `{layout, version, updated_by, updated_at}` |
+| `DELETE /personal` | every project role | back to the project default; 204 |
+| `PUT /project` | owner, admin | as `PUT /personal`, for the project default |
+| `DELETE /project` | owner, admin | back to the built-in default; 204 |
+
+```json
+{"schema": 1, "widgets": [{"id": "w1", "type": "pass_rate_trend", "size": "wide", "settings": {"granularity": "week", "branch": "main"}}]}
+```
+
+- **Validation** follows `shared/qeos_shared/overview_widgets.json`, the same file the dashboard registry
+  imports: `schema` 1, at most 24 widgets, unique ids of 1–32 characters `[A-Za-z0-9_-]`, a known `type`,
+  `size` `normal` or `wide`, only the settings the type declares with allowed values (branch and author
+  name: 1–255 characters, no NUL; a widget without a `branch` setting shows all branches), a body of at
+  most 64 KB (65536 bytes, judged after the role check). Anything else is a 422.
+- **Versions:** a save names the version it started from. If the stored version differs (someone saved in
+  between), or a row already exists for `version: 0`, the answer is 409 with
+  `{"detail": {"code": "stale_version", "message": ..., "current": {version, updated_by, updated_at} | null}}`.
+  DELETE takes no version.
+- **Lifecycle:** the role check runs first, so the personal layout of someone who left the organization is
+  never served (the row stays; it is a few KB). Deleting a project row deletes its layouts (`ON DELETE
+  CASCADE`); a soft-deleted project's layouts answer 404 like the project.
+
 ## Internal API
 
 `GET /internal/v1/projects/retention` lists every project — deleted ones too — with its effective
