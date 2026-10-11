@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, CircleAlert } from "lucide-react";
 import { CiTarget, deleteCiTarget, formatDay, getCiTarget, saveCiTarget, tokenState } from "../api/runRequests";
-import { branchError, repoError, workflowError } from "../lib/ciTargetFields";
+import { branchError, normalizeRepo, repoError, workflowError } from "../lib/ciTargetFields";
 import { useUserNames } from "../lib/useUserNames";
 import ConfirmButton from "./ConfirmButton";
 import ErrorBanner from "./ErrorBanner";
@@ -101,7 +101,7 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
 
   const save = useMutation({
     mutationFn: () => saveCiTarget(projectId, {
-      repo: repo.trim(), workflow: workflow.trim(), ref: ref.trim(), ...(token.trim() ? { token: token.trim() } : {}),
+      repo: normalizeRepo(repo), workflow: workflow.trim(), ref: ref.trim(), ...(token.trim() ? { token: token.trim() } : {}),
     }),
     onSuccess: (saved) => {
       edited.current = false;
@@ -118,7 +118,7 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
   });
 
   const errors = {
-    repo: repoError(repo.trim()),
+    repo: repoError(normalizeRepo(repo)),
     workflow: workflowError(workflow.trim()),
     ref: branchError(ref.trim()),
     token: !data?.configured && !token.trim() ? "Paste the GitHub token" : null,
@@ -180,9 +180,12 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
           )}
           <form className="form-stack" onSubmit={onSubmit} noValidate>
             <label>
-              Repository
-              <input required value={repo} onChange={(e) => edit(setRepo)(e.target.value)} placeholder="owner/name"
-                {...field("repo")} autoComplete="off" spellCheck={false} />
+              <span id={`${ids}-repo-label`}>Repository</span>
+              <input required value={repo} aria-labelledby={`${ids}-repo-label`} onChange={(e) => edit(setRepo)(e.target.value)} placeholder="owner/name"
+                onBlur={() => { const clean = normalizeRepo(repo); if (clean !== repo) edit(setRepo)(clean); }}
+                {...field("repo")} aria-describedby={[`${ids}-repo-hint`, field("repo")["aria-describedby"]].filter(Boolean).join(" ")}
+                autoComplete="off" spellCheck={false} />
+              <span id={`${ids}-repo-hint`} className="muted field-hint">owner/name, or paste the repository&apos;s GitHub address</span>
               {fieldError("repo")}
             </label>
             <label>

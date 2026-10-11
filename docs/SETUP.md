@@ -1018,7 +1018,8 @@ results come back through the normal upload ([4.1](#41-sending-test-results)).
    - Permissions → Repository: **Actions: Read and write**. Nothing else (Metadata: read is
      added automatically).
    - Expiration: your policy. QEOS warns owners and admins 14 days before it expires.
-6. **QEOS:** Settings → **Run from QEOS** (owners and admins only): **Repository** `owner/name`,
+6. **QEOS:** Settings → **Run from QEOS** (owners and admins only): **Repository** `owner/name`
+   (a pasted GitHub address such as `https://github.com/owner/name.git` is turned into `owner/name`),
    **Workflow file** (`qeos-run.yml`), **Branch** (`main`), **Token** → **Save**. QEOS checks
    the token with GitHub before it stores it, and tells you if the token is invalid or
    expired, has no Actions access, or the workflow is not found on the default branch.

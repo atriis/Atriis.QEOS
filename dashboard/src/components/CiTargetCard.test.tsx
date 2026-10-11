@@ -287,3 +287,32 @@ test("only the block copied last says Copied, and the copy is announced", async 
   await waitFor(() => expect(scriptButton).toHaveTextContent("Copied"));
   expect(workflowButton).toHaveTextContent(/^Copy$/);
 });
+
+test("a pasted GitHub address is saved as owner/name and shown that way once the field is left", async () => {
+  let sent: { repo?: string } | null = null;
+  server.use(
+    http.get(`${P}/ci-target`, () => HttpResponse.json(NONE)),
+    http.put(`${P}/ci-target`, async ({ request }) => {
+      sent = (await request.json()) as { repo?: string };
+      return HttpResponse.json(CONNECTED);
+    }),
+  );
+  renderCard();
+  const repo = await screen.findByLabelText("Repository");
+  expect(repo).toHaveAccessibleDescription("owner/name, or paste the repository's GitHub address");
+  await userEvent.type(repo, "https://github.com/acme/obt.git");
+  await userEvent.type(screen.getByLabelText("Token"), TOKEN);
+  expect(repo).toHaveValue("acme/obt");
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(sent?.repo).toBe("acme/obt"));
+});
+
+test("an owner alone is refused with a message that names what is missing", async () => {
+  server.use(http.get(`${P}/ci-target`, () => HttpResponse.json(NONE)));
+  renderCard();
+  const repo = await screen.findByLabelText("Repository");
+  await userEvent.type(repo, "AtriisPedroCarneiro");
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(repo).toHaveAccessibleDescription(
+    "owner/name, or paste the repository's GitHub address Add the repository name after the owner: owner/name");
+});
