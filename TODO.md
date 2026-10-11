@@ -92,6 +92,7 @@
 - [x] NGINX gateway: routing, per-IP rate limits, self-signed TLS, JSON errors, request ids, JSON access log
 - [x] Repository-root docker-compose: one Postgres, db-init, per-service migration jobs, shared SECRET_KEY
 - [x] CI: full-stack smoke test through the gateway
+- [ ] Rename the compose project `qa-vision` to `qeos` (containers `qeos-*`, local images `qeos/*`) — agreed 2026-10-11, after the monitoring push. The data volumes keep their pinned names (`qa-vision_qav_postgres_data`, `qa-vision_qav_gateway_certs`), so no data moves; one `docker compose -p qa-vision down` (no `-v`) per host, then update scripts/CI/docs that name `qa-vision-*` containers and check `deploy/`
 
 ### Gateway follow-ups
 - [x] Monitoring dashboards (Prometheus/Grafana) — *Phase 1, "Basic monitoring stack"*. Done 2026-10 (ADR-027): see "Execution intelligence and operations" item 2
