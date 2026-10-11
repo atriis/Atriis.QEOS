@@ -241,7 +241,7 @@ within a minute. The first is Grafana's home page.
 |---|---|
 | QEOS overview | per service: up, requests per second, 5xx share, 95th percentile, deployed version, firing alerts |
 | Service detail | one service (pick it at the top): per endpoint rate and latency, status codes, requests in flight, process memory and CPU |
-| Jobs and uploads | time since each background job's last success and error, uploads accepted and rejected, results per hour, upload time, test executions and cases created |
+| Jobs and uploads | time since each background job's last success and error ("never" when there is none since the service started), uploads accepted and rejected, results per hour, upload time, test executions and cases created |
 | PostgreSQL | connections, database sizes, transactions, cache hit rate, locks, slowest statements |
 | Host and containers | VM CPU, memory and disk with a 24 hour disk prediction; per container CPU, memory and restarts |
 
