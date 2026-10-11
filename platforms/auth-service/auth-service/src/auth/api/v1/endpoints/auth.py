@@ -25,6 +25,7 @@ from src.auth.utils.refresh_cookie import (
     read_refresh_cookie,
     set_refresh_cookie,
 )
+from src.auth.utils.grafana_session import MONITORING_URL, clear_grafana_cookie, create_grafana_token, set_grafana_cookie
 from src.auth.config import settings
 
 logger = logging.getLogger(__name__)
@@ -396,6 +397,7 @@ def logout_user(
     """
     presented = request.refresh_token or read_refresh_cookie(http_request)[0]
     clear_refresh_cookie(response)
+    clear_grafana_cookie(response)  # the Grafana hand-off ends with the session (ADR-027)
     # Both cookies can arrive (one from before the QEOS rename): end the legacy one's session too
     legacy = legacy_refresh_cookie(http_request)
     if legacy and legacy != presented:
@@ -409,6 +411,23 @@ def logout_user(
             detail="Invalid refresh token"
         )
     return {"message": "Successfully logged out"}
+
+
+@router.post("/grafana-session")
+def grafana_session(response: Response, current_user: User = Depends(deps.get_current_user)):
+    """Hands a QEOS superuser the qeos_grafana cookie for /grafana/ (monitoring spec §4, ADR-027).
+    403 unless monitoring is on and the user is an active superuser (checked here, not by
+    get_current_active_user, which answers an inactive user with 400).
+
+    Bearer access token only: no cookie authenticates this request, so a cross-site page cannot make
+    a browser mint the cookie (no CSRF exposure)."""
+    if not (settings.MONITORING_ENABLED and current_user.is_active and current_user.is_superuser):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Monitoring is available to superusers while it is turned on",
+        )
+    set_grafana_cookie(response, create_grafana_token(current_user.id))
+    return {"url": MONITORING_URL}
 
 
 # Password reset: /forgot-password always answers the same thing, so it cannot be used to

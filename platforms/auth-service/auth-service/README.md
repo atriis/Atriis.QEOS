@@ -112,6 +112,7 @@ Copy `.env.example` to `.env` and configure as needed:
 - `ACCESS_TOKEN_EXPIRE_MINUTES`: Access token lifetime in minutes (default: 60). Nothing can revoke an access token, so this value is the revocation delay — logout, a password change and deactivation all leave an already-issued token working until it expires. It previously defaulted to 8 days.
 - `REFRESH_TOKEN_EXPIRE_DAYS`: Refresh token lifetime in days (default: 30)
 - `ALGORITHM`: JWT signing algorithm (default: "HS256")
+- `MONITORING_ENABLED`: Offer Grafana at `/grafana/` to superusers (default: false). The same `.env` value the gateway reads; the compose profile `monitoring` must be on too. While false, `monitoring_url` is null and `POST /auth/grafana-session` answers 403.
 
 ### Database Connection
 - `POSTGRES_SERVER`: Database host (default: "localhost")
@@ -186,7 +187,8 @@ set it to any address). The address must be one the user model accepts; otherwis
 - `POST /api/v1/auth/resend-verification` - Resend the verification link. Always answers identically regardless of whether the address has a pending registration, a completed account, or neither. Declines to act (same response, nothing sent) when more than one unexpired registration attempt exists for the address -- which of them is legitimate isn't knowable from this endpoint alone.
 - `POST /api/v1/auth/login` - Login with email/password (returns access & refresh tokens)
 - `POST /api/v1/auth/refresh-token` - Refresh access token using refresh token
-- `POST /api/v1/auth/logout` - Logout by revoking refresh token
+- `POST /api/v1/auth/logout` - Logout by revoking refresh token. Also clears the refresh cookies and the `qeos_grafana` cookie (`Path=/grafana`).
+- `POST /api/v1/auth/grafana-session` - Bearer access token only. For an active superuser while `MONITORING_ENABLED` is true, answers `200 {"url": "/grafana/"}` and sets the `qeos_grafana` cookie (see Token Management); `403` for anyone else or while monitoring is off; `401` without a valid access token. The dashboard's `/monitoring` page calls it, then opens Grafana (ADR-027).
 - `POST /api/v1/auth/forgot-password` - `{email}`. Always `202` with the same body, so it reveals no accounts. For an account with a password, cancels earlier unused links and emails a new one (`/reset-password?token=…`). SSO-only accounts get nothing.
 - `POST /api/v1/auth/reset-password` - `{token, password}` (min 8). Sets the password and revokes every refresh session. `400 "Invalid or expired reset token"` when used, expired, superseded or unknown.
 - `POST /api/v1/auth/change-password` - Signed in; `{current_password, new_password}`. Revokes every refresh session, then returns a fresh `Token` for this client. `400` on a wrong current password or an SSO-only account.
@@ -198,7 +200,7 @@ set it to any address). The address must be one the user model accepts; otherwis
 - `POST /api/v1/users/me/link/microsoft` - Link a Microsoft identity to the signed-in account (requires `current_password` when the account has one)
 
 ### User Management
-- `GET /api/v1/users/me` - Get current user's profile
+- `GET /api/v1/users/me` - Get current user's profile. `monitoring_url` is `"/grafana/"` for a superuser while `MONITORING_ENABLED` is true, otherwise `null`; the dashboard shows its Monitoring item only when it is set.
 - `PUT /api/v1/users/me` - Update current user's profile. Accepts `UserSelfUpdate` only: password (with `current_password`), full_name, avatar_url, department, job_title. Unknown fields are rejected with 422 rather than silently ignored, so `email`, `is_active` and `is_superuser` all fail loudly. Changing a password revokes every session; an SSO account cannot gain a password here.
 - `POST /api/v1/users/me/link/google` - Link a Google identity to the current authenticated account. Requires `current_password` unless the account is passwordless. Refuses if that identity is linked elsewhere, or if the caller already has a Google link.
 - `GET /api/v1/users/` - List all users (SUPERUSER ONLY)
@@ -214,11 +216,12 @@ There is no endpoint that grants superuser through the API. It is either bootstr
 - Secure comparison using constant-time algorithms
 
 ### Token Management
-- Access tokens: JWT signed with HMAC-SHA256, configurable expiration (default 8h)
+- Access tokens: JWT signed with HMAC-SHA256, configurable expiration (default 60 minutes)
 - Refresh tokens: opaque 32-byte random strings (`secrets.token_urlsafe`) stored in `refresh_tokens`, default 30d. They are not JWTs — being database rows is what makes revocation immediate and rotation meaningful.
 - Refresh token rotation: on each use the presented token is revoked and a new one issued
 - Expiry is enforced on verification, not only at issuance
 - Logout revokes only a token belonging to the caller, so knowing someone else's token value does not let you end their session
+- Grafana cookie `qeos_grafana` (`src/auth/utils/grafana_session.py`): a JWT signed with the same `SECRET_KEY` and algorithm, carrying the user id, `aud: "grafana"` and `token_type: "grafana"`, valid 8 hours. Set httpOnly, Secure, SameSite=Strict, `Path=/grafana`, `Max-Age=28800`, so it reaches only `/grafana/` and never the API. Its own audience keeps it apart from access tokens both ways: every `decode_token` refuses a token carrying `aud`, and `token_type` fails `is_access_token`, so it is never a session; an access token has no `aud`, so `grafana_user_id` refuses it. Issued only to active superusers while monitoring is on; logout clears it.
 
 ### Request Validation
 - All input validated using Pydantic models

@@ -49,6 +49,10 @@ class Settings(BaseServiceSettings):
     INTERNAL_API_USERNAME: str = "organization-service"
     INTERNAL_API_PASSWORD: str = ""
 
+    # Monitoring (spec 2026-10-10, ADR-027): offer Grafana at /grafana/ to superusers. Same .env value
+    # the gateway reads; the compose profile `monitoring` must be on too
+    MONITORING_ENABLED: bool = False
+
     # Email: SMTP_* and EMAILS_FROM_* come from qeos_shared's BaseServiceSettings
 
     # Email verification (registration). BASE_URL has no other purpose in this service --

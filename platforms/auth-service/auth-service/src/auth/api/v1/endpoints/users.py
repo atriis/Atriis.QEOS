@@ -5,11 +5,13 @@ from src.auth.api import deps
 from src.auth.service.user_service import UserService
 # UserInDB carries hashed_password; aliasing it as the response model leaked every user's
 # bcrypt hash through /users/me, /users/ and /users/{id}. User is the public shape.
-from src.auth.schemas.user import UserSelfUpdate, UserUpdate, User
+from src.auth.schemas.user import UserSelfUpdate, UserUpdate, User, UserMe
 from src.auth.schemas.auth import LinkGoogleRequest, LinkMicrosoftRequest
 from src.auth.models.user import User as UserModel
 from src.auth.models.oauth import OAuthAccount
 from src.auth.service.auth_service import AuthService
+from src.auth.config import settings
+from src.auth.utils.grafana_session import MONITORING_URL
 from src.auth.utils.password import verify_password
 from sqlalchemy.exc import IntegrityError
 # Reused rather than duplicated so this endpoint and /sso/google fail identically on a bad
@@ -33,14 +35,17 @@ def read_users(
     return users
 
 
-@router.get("/me", response_model=User)
+@router.get("/me", response_model=UserMe)
 def read_user_me(
     current_user: UserModel = Depends(deps.get_current_active_user),
 ):
     """
-    Get current user.
+    Get current user. `monitoring_url` is set only for a superuser while monitoring is on (ADR-027);
+    get_current_active_user has already refused an inactive user.
     """
-    return current_user
+    me = User.model_validate(current_user, from_attributes=True)
+    offered = settings.MONITORING_ENABLED and current_user.is_superuser
+    return UserMe(**me.model_dump(), monitoring_url=MONITORING_URL if offered else None)
 
 
 @router.put("/me", response_model=User)

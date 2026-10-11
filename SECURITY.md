@@ -109,6 +109,12 @@ details.
   `pg_stat_activity` and `pg_stat_statements`, which may contain literals. The
   exporter that feeds Prometheus runs without statement text, so query literals
   are not copied into the metrics.
+- **Grafana sign-in cookie (monitoring).** `POST /api/v1/auth/grafana-session`
+  (bearer access token only, so it has no CSRF exposure) gives an active
+  superuser, and only while `MONITORING_ENABLED` is true, the `qeos_grafana`
+  cookie: httpOnly, Secure, SameSite=Strict, `Path=/grafana`, 8 hours. It is a
+  JWT with its own audience (`grafana`), so it is refused as an API bearer
+  token, and an access token is refused in its place. Logout clears it.
 - **Grafana break-glass port (monitoring).** Grafana publishes `127.0.0.1:3000`
   for an admin login when auth-service is down. Because that port is published,
   Docker 28 and later makes Grafana's address on its `grafana-front` network

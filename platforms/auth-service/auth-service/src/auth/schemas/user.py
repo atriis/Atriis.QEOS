@@ -95,3 +95,8 @@ class User(UserBase):
 
     class Config:
         orm_mode = True
+
+class UserMe(User):
+    # GET /users/me only: "/grafana/" for a superuser while MONITORING_ENABLED, else null (ADR-027).
+    # The dashboard shows its Monitoring item only when this is set.
+    monitoring_url: Optional[str] = None
