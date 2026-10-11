@@ -12,21 +12,9 @@ import { SkeletonCard, SkeletonStatus } from "../components/Skeleton";
 import StatusDot from "../components/StatusDot";
 import PageHeader from "../components/PageHeader";
 import { flakyHealthQuery, passRateWeeksQuery } from "../lib/healthQueries";
+import { ago } from "../overview/format";
 
 const MAX_CAUSES = 5;
-
-const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
-function ago(iso: string): string {
-  const seconds = (new Date(iso).getTime() - Date.now()) / 1000;
-  const steps: [number, Intl.RelativeTimeFormatUnit][] = [[60, "second"], [60, "minute"], [24, "hour"], [30, "day"], [12, "month"]];
-  let value = seconds;
-  for (const [size, unit] of steps) {
-    if (Math.abs(value) < size) return relative.format(Math.round(value), unit);
-    value /= size;
-  }
-  return relative.format(Math.round(value), "year");
-}
-
 
 /** "What is broken now" in one screen: the latest run's verdict and failures,
  *  then the week's pass rate and the flaky count, each one click from depth. */

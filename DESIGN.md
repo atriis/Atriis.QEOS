@@ -480,7 +480,7 @@ Every signed-in page starts with `PageHeader`: the page name as the one `h1` (22
 A Paper tile with a 10px radius, Hairline border and resting lift, holding a folder icon and the project name at 600. On hover the border turns Signal Cyan, with no lift and no underline.
 
 ### Error Banner
-A 6px-radius box with a Danger Text border and text over a 6% failed-red tint, with an optional Retry button. It uses `role="alert"`. Loading and empty states are plain Graphite sentences that say what is absent and how data arrives. They never show a zero in place of missing data.
+A 6px-radius box with a Danger Text border and text over a 6% failed-red tint, with an optional Retry button. It uses `role="alert"`. An Overview widget that throws while rendering keeps the failure inside its own card: its heading, then this banner saying "This widget failed to load" with Retry, while the other widgets keep working. Loading and empty states are plain Graphite sentences that say what is absent and how data arrives. They never show a zero in place of missing data.
 
 ### Code Block
 Mist Page fill, Hairline border, 6px radius, 12px padding, 13px mono, and horizontal scroll. It is used for copyable CI snippets. An expanded failure message inside a table cell is mono 12.5px with preserved line breaks and no box. A read-only Gherkin block colours keywords, tags, tables, doc strings and comments, plus step values: quoted "values" use `--gk-string` and `<placeholders>` use `--gk-param` on a light tint of `--gk-param-bg`; each meets 4.5:1 on Sidebar Mist in both themes. A numbered block (a whole `.feature` file) wraps long lines instead of scrolling, with the line number in a 4ch gutter and any line annotation (a case chip) at the end of its line.
