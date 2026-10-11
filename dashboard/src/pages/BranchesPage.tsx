@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import {
   CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { formatPassRate, getBranches, getTrends } from "../api/analytics";
+import { formatPassRate, getTrends } from "../api/analytics";
+import { branchesViewQuery } from "../lib/healthQueries";
 import ErrorBanner from "../components/ErrorBanner";
 import NarrowMeta from "../components/NarrowMeta";
 import FilterBar from "../components/FilterBar";
@@ -66,10 +67,7 @@ export function BranchesView() {
     update(sortPatch(next, DEFAULT_SORT));
   };
 
-  const branchesQuery = useQuery({
-    queryKey: ["branches", id, days],
-    queryFn: () => getBranches(id, { days }),
-  });
+  const branchesQuery = useQuery(branchesViewQuery(id, days));
 
   const [hidden, setHidden] = useState<ReadonlySet<string>>(new Set());
   const narrow = useMediaQuery("(max-width: 640px)");

@@ -10,11 +10,19 @@ interface Props {
   confirmLabel: string;
   onConfirm: () => void;
   disabled?: boolean;
+  /** The trigger's class, e.g. "primary" for a Save that confirms first. */
+  triggerClassName?: string;
+  /** "danger" (the default) for destructive actions; "primary" for a consequential save that destroys nothing. */
+  confirmClassName?: string;
+  /** The back-out button's text ("Cancel" by default). */
+  cancelLabel?: string;
 }
 
 /** A destructive action that asks in place before acting. The confirm button
  *  takes focus; Cancel and Escape back out and return focus to the trigger. */
-export default function ConfirmButton({ label, ariaLabel, question, confirmLabel, onConfirm, disabled }: Props) {
+export default function ConfirmButton({
+  label, ariaLabel, question, confirmLabel, onConfirm, disabled, triggerClassName, confirmClassName = "danger", cancelLabel = "Cancel",
+}: Props) {
   const [asking, setAsking] = useState(false);
   const confirmRef = useRef<HTMLButtonElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -35,7 +43,7 @@ export default function ConfirmButton({ label, ariaLabel, question, confirmLabel
 
   if (!asking) {
     return (
-      <button type="button" ref={triggerRef} aria-label={ariaLabel} onClick={() => setAsking(true)} disabled={disabled}>
+      <button type="button" ref={triggerRef} className={triggerClassName} aria-label={ariaLabel} onClick={() => setAsking(true)} disabled={disabled}>
         {label}
       </button>
     );
@@ -53,7 +61,7 @@ export default function ConfirmButton({ label, ariaLabel, question, confirmLabel
       <button
         ref={confirmRef}
         type="button"
-        className="danger"
+        className={confirmClassName}
         onClick={() => {
           returnFocus.current = true;
           setAsking(false);
@@ -62,7 +70,7 @@ export default function ConfirmButton({ label, ariaLabel, question, confirmLabel
       >
         {confirmLabel}
       </button>
-      <button type="button" onClick={cancel}>Cancel</button>
+      <button type="button" onClick={cancel}>{cancelLabel}</button>
     </span>
   );
 }

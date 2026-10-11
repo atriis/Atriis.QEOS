@@ -664,6 +664,22 @@ button.kpi-retry { align-self: flex-start; margin-top: var(--space-1); min-heigh
 /* Each widget's h2 is its title link to the full view */
 .overview-grid h2 a { color: inherit; text-decoration: none; }
 .overview-grid h2 a:hover { text-decoration: underline; }
+/* Overview edit mode (DESIGN.md "Overview Widgets and Edit Mode") */
+.overview-edit-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-3) var(--space-4); margin-bottom: var(--space-4); background: var(--accent-soft); border: 1px solid var(--border-strong); border-radius: var(--radius); }
+.overview-edit-bar .error-banner { flex-basis: 100%; }
+.overview-edit-title { margin: 0; font-weight: 600; }
+.overview-edit-title:focus { outline: none; }
+.overview-note { margin: 0; font-size: 13px; color: var(--text-secondary); }
+.widget-toolbar { display: flex; justify-content: flex-end; gap: var(--space-1); margin-bottom: var(--space-2); }
+button.widget-tool { min-width: 28px; min-height: 28px; padding: 4px; justify-content: center; }
+@media (pointer: coarse) { button.widget-tool { min-width: 44px; min-height: 44px; } }
+.widget-settings { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-3); padding: var(--space-3); margin-bottom: var(--space-3); background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.widget-setting { display: flex; flex-direction: column; gap: var(--space-1); font-size: 13px; }
+.add-widget-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-3); }
+.add-widget-list li { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.add-widget-list p { margin: var(--space-1) 0 0; font-size: 13px; }
+.customise-menu { position: relative; }
+.customise-popup { position: absolute; inset-inline-end: 0; top: calc(100% + 6px); z-index: 50; min-width: 240px; list-style: none; margin: 0; padding: var(--space-1); background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-2); }
 .stat-line { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; }
 .stat-big { font-size: 28px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .card-foot { margin-top: auto; padding-top: var(--space-3); }

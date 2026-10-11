@@ -57,3 +57,15 @@ test("inside a form, no button of the confirm flow submits it", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Yes, delete" }));
   expect(onSubmit).not.toHaveBeenCalled();
 });
+
+test("a consequential save can confirm in primary, with its own back-out word", async () => {
+  render(
+    <ConfirmButton label="Save" triggerClassName="primary" question="Everyone sees this." confirmLabel="Save for everyone"
+      confirmClassName="primary" cancelLabel="Back" onConfirm={() => {}} />,
+  );
+  expect(screen.getByRole("button", { name: "Save" })).toHaveClass("primary");
+  await userEvent.click(screen.getByRole("button", { name: "Save" }));
+  expect(screen.getByRole("button", { name: "Save for everyone" })).toHaveClass("primary");
+  expect(screen.getByRole("button", { name: "Save for everyone" })).not.toHaveClass("danger");
+  expect(screen.getByRole("button", { name: "Back" })).toBeInTheDocument();
+});

@@ -1,4 +1,10 @@
-import { getFlaky, getTrends } from "../api/analytics";
+import { getBranches, getFlaky, getTrends } from "../api/analytics";
+
+/** The Branches view's own query (30 days by default): the branch setting and Branch health share its answer. */
+export const branchesViewQuery = (projectId: number, days = 30) => ({
+  queryKey: ["branches", projectId, days] as const,
+  queryFn: () => getBranches(projectId, { days }),
+});
 
 /** The Flaky view's default thresholds: the Overview card and the Cases tile count the same tests it lists. */
 export const FLAKY_DEFAULTS = { windowDays: 14, minRuns: 5, minFlipRate: 0.3 } as const;

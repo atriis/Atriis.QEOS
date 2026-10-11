@@ -59,6 +59,7 @@ pipeline already produces, and it starts runs only through workflows you own.
 - **Trends** by day, week or month, per branch, and run-to-run comparison.
 - **Flaky tests:** same-commit detection over up to 90 days, backed by daily rollups, with quarantine.
 - **Failure causes:** new, recurring and resolved failures, grouped by cause.
+- **Customisable Overview:** each person arranges their own Overview per project: move, resize, remove and add widgets and change their settings, then save. Today's four widgets are available now; more widgets come in the next release.
 
 ### Report
 - **One report per period:**
@@ -381,7 +382,7 @@ The threat model and operational guidance are in [`SECURITY.md`](SECURITY.md).
 - the optional monitoring stack;
 - the single-VM production package.
 
-**Next**, in the agreed order: a customisable Overview, then test impact analysis. The full plan is in
+**Next**, in the agreed order: the rest of the customisable Overview (more widgets; its first part, Customise with today's four widgets, is built), then test impact analysis. The full plan is in
 [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
 
 The directories `execution/`, `automation/`, `marketplace/`, `collaboration/`, `intelligence/` and
