@@ -218,3 +218,29 @@ Builds the blueprint's "interactive dashboards with customizable widgets" for th
 the current stack (project-service, PostgreSQL JSONB, React). Stays out: a widget marketplace or
 third-party widgets, cross-project dashboards, free-form drag-and-drop placement, and new analytics.
 No TARGET technology is introduced.
+
+## 9. Amendments from the implementation plan (2026-10-11)
+
+Checked against the code while planning (`docs/superpowers/plans/2026-10-11-customisable-overview.md`, its
+rulings); they replace the text above where they differ:
+
+- GET also returns the project default's `layout` (§3.3), needed for Reset and for an owner who has a
+  personal layout to edit the default.
+- Projects are soft-deleted: a soft-deleted project's layouts answer 404; the cascade applies to a hard
+  delete (§3.4).
+- The project export lives in ingestion-service and holds ingestion data only; adding the project default
+  to it needs a cross-service export and is a TODO follow-up, not part of this work (§3.4).
+- *My recent failures* uses the runs API's `status=failing` (§2.4); with no author setting and no full name
+  it explains and sends no request.
+- *Slowest tests* reads the Report's `summary` section (`summary.slowest`); the `duration` section has no
+  per-test rows (§4). *Coverage* uses the `tests` section plus case areas, across all branches.
+- *Branch health* shows each branch's pass rate, runs and last run over 30 days, newest first: the Branches
+  API has aggregates and last-seen times, not a latest verdict (§2.4).
+- Today's Overview has no "N new runs" announcement (that lives on Runs); the 30 s refresh is kept and no
+  announcement is added (§2.7).
+- In view mode a widget with no data shows "Change settings", which opens Customise on that widget (§2.8).
+- Cancel asks "Discard your changes?"; navigation and closing the tab reuse the existing unsaved-changes
+  guard and its wording.
+- In project mode the reset button reads "Reset to built-in default".
+- Customise ships at the Phase 2 push, so Phase 2 documents what it ships; Phase 3 completes the docs (§6, §7).
+
