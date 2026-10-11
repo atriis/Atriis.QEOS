@@ -276,7 +276,9 @@ bash:
 set -a; . ./.env; set +a
 bash scripts/smoke_gateway.sh
 ```
-It ends with `all gateway checks passed`. Run it on a **local** stack only. It talks to
+It ends with `all gateway checks passed`. Run it on a **local** stack only: it refuses to start
+when `DOCKER_HOST`, or else the current docker context, points anywhere but a local socket
+(`unix://` or `npipe://`). It talks to
 `https://localhost:${GATEWAY_HTTPS_PORT:-8443}` and leaves its own "Smoke …" organizations,
 projects, runs and a test account (`smoke-invitee-…@example.com`) in the database. These
 belong to no real user, so they do not appear in your dashboard. It also triggers the login
@@ -287,8 +289,9 @@ after it runs.
 `MONITORING_DB_PASSWORD`, the value the stack was started with. The smoke then checks that every
 Prometheus target is up, that `/grafana/` without the cookie redirects to `/monitoring`, that a
 client-sent `X-QEOS-User-Email` header opens nothing, that a non-superuser gets 403 from
-`/api/v1/auth/grafana-session`, that a superuser's cookie gets Grafana, and that `qeos_monitor`
-cannot read table data. It creates its own superuser (`smoke-super-…@example.com`) directly in the
+`/api/v1/auth/grafana-session`, that a superuser's cookie gets Grafana, that a forged user header
+on the break-glass port `127.0.0.1:3000` is refused (401 `auth-proxy.invalid-ip`; skipped, and
+said so, when that port is not reachable), and that `qeos_monitor` cannot read table data. It creates its own superuser (`smoke-super-…@example.com`) directly in the
 database, like the invitee. With monitoring off it checks that `/grafana/` is a JSON 404. CI runs
 the smoke both ways.
 

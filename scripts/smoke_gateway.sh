@@ -20,11 +20,22 @@ fi
 
 HTTPS_PORT="${GATEWAY_HTTPS_PORT:-8443}"
 HTTP_PORT="${GATEWAY_HTTP_PORT:-8080}"
-# It creates users and drains rate limits: never point it at a real deployment
-case "${GATEWAY_HOST:-localhost}" in
-  localhost|127.0.0.1) ;;
-  *) echo "FAIL  GATEWAY_HOST=${GATEWAY_HOST}: local and CI only"; exit 1 ;;
-esac
+# It creates users, drains rate limits and runs psql in the stack's containers: never against a real
+# deployment. The URLs below are always localhost, so the guard is on the Docker daemon the compose
+# commands reach: DOCKER_HOST, else the current context's endpoint, must be a local socket
+local_endpoint() { case "$1" in unix://*|npipe://*) return 0 ;; *) return 1 ;; esac; }
+if [ -n "${DOCKER_HOST:-}" ]; then
+  if ! local_endpoint "$DOCKER_HOST"; then
+    echo "FAIL  DOCKER_HOST=$DOCKER_HOST is not a local socket: local and CI only"; exit 1
+  fi
+else
+  docker_context="$(docker context show 2>/dev/null)"
+  docker_endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null)"
+  if ! local_endpoint "$docker_endpoint"; then
+    echo "FAIL  docker context '${docker_context:-?}' (${docker_endpoint:-endpoint unknown}) is not a local socket: local and CI only"
+    exit 1
+  fi
+fi
 BASE="https://localhost:${HTTPS_PORT}"
 
 TMP="$(mktemp -d)"
@@ -583,6 +594,17 @@ print(jwt.encode({"sub": sys.argv[1], "exp": exp}, os.environ["SECRET_KEY"], alg
     -b "$TMP/grafana_jar" -H "X-QEOS-User-Email: attacker@example.com"
   body_has "... the superuser" "\"email\":\"$SUPER_EMAIL\""
   body_lacks "... never the client's header" "attacker@example.com"
+
+  # The break-glass port bypasses the gateway: a forged user header there, even claiming to come from
+  # the gateway's grafana-front address, must not sign anyone in (Grafana checks the socket address)
+  bg_status="$(curl -s -o "$TMP/body" -w '%{http_code}' --max-time 10     -H 'X-QEOS-User-Email: admin@example.com' -H "X-Forwarded-For: ${GATEWAY_GRAFANA_FRONT_IP:-172.30.1.10}"     -H "X-Real-IP: ${GATEWAY_GRAFANA_FRONT_IP:-172.30.1.10}" http://127.0.0.1:3000/grafana/api/user)"
+  if [ "$bg_status" = "000" ]; then
+    pass "a forged user header on the break-glass port: skipped, 127.0.0.1:3000 not reachable"
+  elif [ "$bg_status" = "401" ] && grep -qF 'auth-proxy.invalid-ip' "$TMP/body"; then
+    pass "a forged user header on the break-glass port is refused (401 auth-proxy.invalid-ip)"
+  else
+    fail "a forged user header on the break-glass port: expected 401 auth-proxy.invalid-ip, got $bg_status: $(head -c 300 "$TMP/body")"
+  fi
 
   # qeos_monitor reads statistics, never table data. First prove it can connect at all, so a wrong
   # password or a missing role is not mistaken for "no access"
