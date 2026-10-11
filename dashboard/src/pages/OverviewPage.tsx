@@ -18,7 +18,12 @@ import WidgetGrid from "../overview/WidgetGrid";
  *  (OverviewEditor). */
 export default function OverviewPage() {
   const { projectId } = useParams();
-  const id = Number(projectId);
+  // One page per project: switching project (the breadcrumb reuses this route) starts afresh, so an edit session,
+  // its snapshot and its version never cross projects. A dirty draft is asked about first by the unsaved-changes guard
+  return <ProjectOverview key={projectId} id={Number(projectId)} />;
+}
+
+function ProjectOverview({ id }: { id: number }) {
   // The latest run decides between the widgets and "No runs yet"; a new one refreshes the figures that are not polled
   const { runs, latest } = useLatestRun(id);
   const { query: layout } = useOverviewLayout(id);
@@ -40,20 +45,33 @@ export default function OverviewPage() {
     setSessionKey((k) => k + 1);
   }
 
+  /** After a conflict: a fresh read of the stored layout, or a rejection (the editor keeps its draft and says why). */
   async function reload() {
     if (session === null) return;
     const fresh = await layout.refetch();
-    if (fresh.data) {
-      setSession(startSession(fresh.data, session.mode));
-      setSessionKey((k) => k + 1);
-    }
+    // A failed refetch keeps the old cached data: never restart from it
+    if (fresh.isError || !fresh.data) throw fresh.error ?? new Error("The layout could not be loaded");
+    setSession(startSession(fresh.data, session.mode));
+    setSessionKey((k) => k + 1);
   }
 
   // Customise needs the stored layout (plan Ruling 30) and a project with runs
   const canCustomise = session === null && layout.data !== undefined && latest !== undefined;
 
+  // A failed poll keeps the runs it had: the page says so above what it shows rather than replacing it
+  const runsError = runs.error != null && <ErrorBanner error={runs.error} onRetry={() => runs.refetch()} />;
+
   function body() {
-    if (runs.error != null) return <ErrorBanner error={runs.error} onRetry={() => runs.refetch()} />;
+    // The editor stays mounted whatever the polls do, so a draft is never lost
+    if (session !== null) {
+      return (
+        <>
+          {runsError}
+          <OverviewEditor key={sessionKey} projectId={id} session={session} onClose={() => setSession(null)} onReload={reload} />
+        </>
+      );
+    }
+    if (runs.error != null && runs.data === undefined) return runsError;
     if (runs.isPending || layout.isPending) {
       return (
         <SkeletonStatus label="Loading overview…" className="overview-grid">
@@ -65,13 +83,9 @@ export default function OverviewPage() {
       );
     }
     if (!latest) return <NoRunsYet projectId={id} />;
-    if (session !== null) {
-      return (
-        <OverviewEditor key={sessionKey} projectId={id} session={session} onClose={() => setSession(null)} onReload={() => void reload()} />
-      );
-    }
     return (
       <>
+        {runsError}
         {/* The layout could not be read: the built-in default is shown under this banner (plan Ruling 30) */}
         {layout.error != null && (
           <ErrorBanner

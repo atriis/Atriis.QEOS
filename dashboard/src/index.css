@@ -659,8 +659,10 @@ button.kpi-retry { align-self: flex-start; margin-top: var(--space-1); min-heigh
 .overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-4); }
 .overview-grid > .card { margin: 0; display: flex; flex-direction: column; }
 .overview-grid > .card.wide { grid-column: 1 / -1; }
-/* A card takes focus after a move or a removal; regions take focus without a ring (DESIGN.md Accessibility Plumbing) */
-.overview-grid > .card:focus { outline: none; }
+/* A card takes focus after a move or a removal: no ring for a pointer, the focus ring for the keyboard */
+.overview-grid > .card:focus:not(:focus-visible) { outline: none; }
+/* After a keyboard move or removal the card that takes focus shows the focus ring (DESIGN.md Shapes) */
+.overview-grid > .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Each widget's h2 is its title link to the full view */
 .overview-grid h2 a { color: inherit; text-decoration: none; }
 .overview-grid h2 a:hover { text-decoration: underline; }

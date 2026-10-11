@@ -48,13 +48,17 @@ export function mockOverviewData({ role = "member", layout = BUILTIN_STATE, runs
   );
 }
 
-/** The Overview in a data router (so the unsaved-changes guard is active), beside a link away from it. */
+/** The Overview in a data router (so the unsaved-changes guard is active), beside a link away from it and one to
+ *  project 43's Overview (the same route, as the breadcrumb's project switcher uses it). */
 export function renderOverview() {
   setAccessToken("acc");
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createMemoryRouter(
     [
-      { path: "/projects/:projectId/overview", element: <><OverviewPage /><Link to="/elsewhere">Elsewhere</Link></> },
+      {
+        path: "/projects/:projectId/overview",
+        element: <><OverviewPage /><Link to="/elsewhere">Elsewhere</Link><Link to="/projects/43/overview">Other project</Link></>,
+      },
       { path: "/elsewhere", element: <p>Elsewhere page</p> },
     ],
     { initialEntries: ["/projects/42/overview"] },

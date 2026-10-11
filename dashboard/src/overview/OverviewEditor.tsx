@@ -22,8 +22,9 @@ interface Props {
   session: EditSession;
   /** Leave edit mode: after Save, or a Cancel that discards. */
   onClose: () => void;
-  /** After a 409: start again from the stored layout. */
-  onReload: () => void;
+  /** After a 409: start again from the stored layout. Rejects when the stored layout cannot be read, and the editor
+   *  then stays as it is (never restarted from stale cached data). */
+  onReload: () => Promise<void>;
 }
 
 type FocusTarget = { id: string; tool: "up" | "down" | "settings" | "card" } | { id: null; tool: "add" };
@@ -36,17 +37,21 @@ export default function OverviewEditor({ projectId, session, onClose, onReload }
   const [draft, dispatch] = useReducer(draftReducer, session.start, (layout): Draft => ({ layout, reset: false }));
   const [settingsFor, setSettingsFor] = useState<string | null>(session.openSettingsFor);
   const [adding, setAdding] = useState(false);
-  const [announcement, setAnnouncement] = useState("");
+  // `n` alternates a trailing no-break space, so the same words said twice still change the live region and re-announce
+  const [announcement, setAnnouncement] = useState({ text: "", n: 0 });
+  const announce = (text: string) => setAnnouncement((a) => ({ text, n: a.n + 1 }));
   const [conflict, setConflict] = useState<StoredVersion | null | undefined>(undefined);
   const [failure, setFailure] = useState<unknown>(null);
+  const [reloading, setReloading] = useState(false);
   const titleRef = useRef<HTMLParagraphElement>(null);
   const addRef = useRef<HTMLButtonElement>(null);
   const reloadRef = useRef<HTMLButtonElement>(null);
+  const barRef = useRef<HTMLDivElement>(null);
   const gridRef = useRef<HTMLDivElement>(null);
   const focusAfter = useRef<FocusTarget | null>(null);
   const widgets = draft.layout.widgets;
   const dirty = isDirty(draft, session.start);
-  const busy = save.isPending || reset.isPending;
+  const busy = save.isPending || reset.isPending || reloading;
   const project = session.mode === "project";
 
   useEffect(() => {
@@ -75,12 +80,12 @@ export default function OverviewEditor({ projectId, session, onClose, onReload }
   function move(widget: StoredWidget, index: number, by: -1 | 1) {
     dispatch({ kind: "move", id: widget.id, by });
     focusAfter.current = { id: widget.id, tool: by < 0 ? "up" : "down" };
-    setAnnouncement(`${widgetTitle(widget)} moved to position ${index + by + 1} of ${widgets.length}`);
+    announce(`${widgetTitle(widget)} moved to position ${index + by + 1} of ${widgets.length}`);
   }
 
   function toggleSize(widget: StoredWidget) {
     dispatch({ kind: "size", id: widget.id });
-    setAnnouncement(`${widgetTitle(widget)} is now ${widget.size === "wide" ? "normal width" : "wide"}`);
+    announce(`${widgetTitle(widget)} is now ${widget.size === "wide" ? "normal width" : "wide"}`);
   }
 
   function remove(widget: StoredWidget, index: number) {
@@ -88,7 +93,7 @@ export default function OverviewEditor({ projectId, session, onClose, onReload }
     dispatch({ kind: "remove", id: widget.id });
     if (settingsFor === widget.id) setSettingsFor(null);
     focusAfter.current = neighbour ? { id: neighbour.id, tool: "card" } : { id: null, tool: "add" };
-    setAnnouncement(`${widgetTitle(widget)} removed`);
+    announce(`${widgetTitle(widget)} removed`);
   }
 
   function add(def: WidgetDefinition) {
@@ -96,29 +101,30 @@ export default function OverviewEditor({ projectId, session, onClose, onReload }
     dispatch({ kind: "add", id, type: def.type, size: def.defaultSize, settings: { ...def.defaults } });
     setAdding(false);
     focusAfter.current = { id, tool: "card" };
-    setAnnouncement(`${def.title} added at position ${widgets.length + 1} of ${widgets.length + 1}`);
+    announce(`${def.title} added at position ${widgets.length + 1} of ${widgets.length + 1}`);
   }
 
   function applySettings(widget: StoredWidget, settings: WidgetSettings) {
     dispatch({ kind: "settings", id: widget.id, settings });
     setSettingsFor(null);
     focusAfter.current = { id: widget.id, tool: "settings" };
-    setAnnouncement(`${widgetTitle({ ...widget, settings })} settings applied`);
+    announce(`${widgetTitle({ ...widget, settings })} settings applied`);
   }
 
   function resetDraft() {
     dispatch({ kind: "reset", layout: session.fallback });
     setSettingsFor(null);
-    setAnnouncement(project ? "The built-in default is in the draft" : "The project default is in the draft");
+    announce(project ? "The built-in default is in the draft" : "The project default is in the draft");
   }
 
+  // A conflict stays on screen (its buttons disabled) while an Overwrite is in flight
   async function commit(version: number = session.version) {
     setFailure(null);
-    setConflict(undefined);
     try {
       if (draft.reset) {
-        // Delete rather than save a copy, so later changes to the default still arrive (plan Ruling 20)
-        if (session.version > 0) await reset.mutateAsync(session.mode);
+        // Delete rather than save a copy, so later changes to the default still arrive (plan Ruling 20). Always sent,
+        // even from version 0: a layout saved elsewhere meanwhile is removed too, and a DELETE of nothing is harmless
+        await reset.mutateAsync(session.mode);
       } else {
         await save.mutateAsync({ mode: session.mode, layout: draft.layout, version });
       }
@@ -126,14 +132,35 @@ export default function OverviewEditor({ projectId, session, onClose, onReload }
     } catch (error) {
       const stored = conflictOf(error);
       if (stored !== undefined) setConflict(stored);
-      else setFailure(error);
+      else {
+        setConflict(undefined);
+        setFailure(error);
+      }
     }
+  }
+
+  async function reloadStored() {
+    setFailure(null);
+    setReloading(true);
+    try {
+      await onReload();
+    } catch (error) {
+      // The conflict stays, so Reload or Overwrite can be tried again
+      setFailure(error);
+    } finally {
+      setReloading(false);
+    }
+  }
+
+  function dismissConflict() {
+    setConflict(undefined);
+    barRef.current?.querySelector<HTMLButtonElement>("button.primary")?.focus();
   }
 
   return (
     <>
       <UnsavedGuard dirty={dirty} />
-      <div className="overview-edit-bar" role="region" aria-label="Overview editor">
+      <div className="overview-edit-bar" role="region" aria-label="Overview editor" ref={barRef}>
         <div>
           <p className="overview-edit-title" ref={titleRef} tabIndex={-1}>
             {project ? "Editing the project default · everyone without a personal layout sees this" : "Editing your Overview"}
@@ -172,14 +199,25 @@ export default function OverviewEditor({ projectId, session, onClose, onReload }
         </div>
         {failure != null && <ErrorBanner error={failure} />}
         {conflict !== undefined && (
-          <div className="error-banner" role="alertdialog" aria-label="The layout changed while you were editing">
-            <span>
+          <div
+            className="error-banner"
+            role="alertdialog"
+            aria-label="The layout changed while you were editing"
+            aria-describedby="overview-conflict-message"
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault();
+                dismissConflict();
+              }
+            }}
+          >
+            <span id="overview-conflict-message">
               {conflict
                 ? `Changed by ${nameOf(conflict.updated_by)} on ${formatDay(conflict.updated_at)} since you started`
                 : "This layout was removed since you started"}
             </span>
-            <button type="button" ref={reloadRef} onClick={onReload}>Reload</button>
-            <button type="button" onClick={() => void commit(conflict?.version ?? 0)}>Overwrite</button>
+            <button type="button" ref={reloadRef} disabled={busy} onClick={() => void reloadStored()}>Reload</button>
+            <button type="button" disabled={busy} onClick={() => void commit(conflict?.version ?? 0)}>Overwrite</button>
           </div>
         )}
       </div>
@@ -194,7 +232,7 @@ export default function OverviewEditor({ projectId, session, onClose, onReload }
           }}
         />
       )}
-      <p className="sr-only" role="status" aria-live="polite">{announcement}</p>
+      <p className="sr-only" role="status" aria-live="polite">{announcement.text}{announcement.n % 2 === 1 ? " " : ""}</p>
       <div className="overview-grid" ref={gridRef}>
         {widgets.map((widget, index) => {
           const title = widgetTitle(widget);
