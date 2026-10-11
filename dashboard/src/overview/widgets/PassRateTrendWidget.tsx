@@ -26,7 +26,7 @@ export default function PassRateTrendWidget({ projectId, settings, size, heading
       {query.error != null && <ErrorBanner error={query.error} onRetry={() => query.refetch()} />}
       {noRuns && (settings.branch === undefined
         ? <p className="muted">No runs in the last {days} days.</p>
-        : <EmptyBranch branch={settings.branch} days={days} onOpenSettings={onOpenSettings} />)}
+        : <EmptyBranch branch={settings.branch} days={days} onOpenSettings={onOpenSettings} titleId={titleId} />)}
       {query.data && !noRuns && (
         <>
           {/* A normal card is narrow: fewer ticks and a slimmer axis */}

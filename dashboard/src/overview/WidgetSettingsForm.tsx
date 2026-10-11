@@ -63,10 +63,19 @@ export default function WidgetSettingsForm({ projectId, widget, onApply, onClose
           return (
             <div className="widget-setting" key={name}>
               <label htmlFor={fieldId(name)}>{LABELS[name]}</label>
-              <select id={fieldId(name)} value={values.branch ?? ""} onChange={(e) => setBranch(e.target.value)}>
-                <option value="">All branches</option>
+              <select
+                id={fieldId(name)} value={values.branch ?? ""} onChange={(e) => setBranch(e.target.value)}
+                disabled={branches.isPending} aria-busy={branches.isPending}
+                aria-describedby={branches.isError ? `${fieldId(name)}-hint` : undefined}
+              >
+                <option value="">{branches.isPending ? "Loading branches…" : "All branches"}</option>
                 {branchNames.map((b) => <option key={b} value={b}>{b}</option>)}
               </select>
+              {branches.isError && (
+                <span className="muted" id={`${fieldId(name)}-hint`} role="alert">
+                  Could not load the branch list. All branches still works.
+                </span>
+              )}
             </div>
           );
         }

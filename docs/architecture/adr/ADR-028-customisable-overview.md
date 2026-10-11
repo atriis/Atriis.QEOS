@@ -83,5 +83,5 @@ Nothing new is measured, and no widget uses AI.
 - **Project export:** ingestion's NDJSON export does not include the project default yet. That needs project-service data in the export (TODO.md follow-up).
 - **Name matching:**
   - A name shared by two committers, or a changed git name, can mislead My recent failures. The setting is the remedy until email matching exists (TODO.md).
-  - Recent runs and My recent failures read the newest page of runs (50). Older failures beyond that page do not appear.
+  - Recent runs reads the newest page of runs (50); older runs beyond it do not appear. My recent failures reads the newest 50 *failing* runs whose author contains the name, then keeps the exact name. A name that is a common substring of other authors' names can therefore push the person's own runs off that page.
 - **New widget types:** each needs an entry in the catalogue file and in the dashboard registry, plus its `staleKeys`. The shared test and the registry test fail until both agree.

@@ -13,7 +13,7 @@ import { recentRuns } from "./recentRuns";
 import type { WidgetProps } from "./types";
 
 /** The newest runs with their verdicts in words, from the Runs view's first page (polled every 30 s). */
-export default function RecentRunsWidget({ projectId, settings, heading, onOpenSettings }: WidgetProps) {
+export default function RecentRunsWidget({ projectId, settings, heading, titleId, onOpenSettings }: WidgetProps) {
   const rows = settings.rows ?? 5;
   const runs = useQuery(runsFirstPageQuery(projectId, settings.branch === undefined ? {} : { branch: settings.branch }));
   const list = runs.data ?? [];
@@ -24,7 +24,7 @@ export default function RecentRunsWidget({ projectId, settings, heading, onOpenS
       {runs.error != null && <ErrorBanner error={runs.error} onRetry={() => runs.refetch()} />}
       {runs.data && list.length === 0 && (settings.branch === undefined
         ? <p className="muted">No runs yet.</p>
-        : <EmptyBranch branch={settings.branch} onOpenSettings={onOpenSettings} />)}
+        : <EmptyBranch branch={settings.branch} onOpenSettings={onOpenSettings} titleId={titleId} />)}
       {list.length > 0 && (
         <ul className="fail-list">
           {list.slice(0, rows).map((run) => (

@@ -13,7 +13,7 @@ import type { WidgetProps } from "./types";
 
 /** Failed runs whose commit author is the signed-in person, matched by name: the collector stores `git log --format=%an`
  *  (spec §2.4). The default name is the QEOS full name; the setting holds the name as git records it. */
-export default function MyFailuresWidget({ projectId, settings, heading, onOpenSettings }: WidgetProps) {
+export default function MyFailuresWidget({ projectId, settings, heading, titleId, onOpenSettings }: WidgetProps) {
   const rows = settings.rows ?? 5;
   // A stored name that is only spaces counts as none: the QEOS full name applies
   const stored = settings.author?.trim() || undefined;
@@ -31,14 +31,14 @@ export default function MyFailuresWidget({ projectId, settings, heading, onOpenS
       {(waitingForName || (author !== "" && runs.isPending)) && <SkeletonStat label="Loading your failures…" />}
       {!named && me.error != null && <ErrorBanner error={me.error} onRetry={() => me.refetch()} />}
       {!waitingForName && me.error == null && author === "" && (
-        <WidgetEmpty onOpenSettings={onOpenSettings}>
+        <WidgetEmpty onOpenSettings={onOpenSettings} titleId={titleId}>
           Your QEOS profile has no full name, so this widget cannot tell which runs are yours. Set "Your name in git" in
           its settings.
         </WidgetEmpty>
       )}
       {runs.error != null && <ErrorBanner error={runs.error} onRetry={() => runs.refetch()} />}
       {runs.data !== undefined && list.length === 0 && (
-        <WidgetEmpty onOpenSettings={onOpenSettings}>
+        <WidgetEmpty onOpenSettings={onOpenSettings} titleId={titleId}>
           No failed runs by “{author}”. If git records your name differently, set "Your name in git" in this widget's settings.
         </WidgetEmpty>
       )}

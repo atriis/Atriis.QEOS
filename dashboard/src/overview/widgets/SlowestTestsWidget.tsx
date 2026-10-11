@@ -10,7 +10,7 @@ import type { WidgetProps } from "./types";
 
 /** The tests with the longest average duration in the period: the summary's `slowest`, the per-test numbers the
  *  report computes (the duration section has no per-test rows; plan Ruling 12). */
-export default function SlowestTestsWidget({ projectId, settings, heading, onOpenSettings }: WidgetProps) {
+export default function SlowestTestsWidget({ projectId, settings, heading, titleId, onOpenSettings }: WidgetProps) {
   const period = settings.period ?? 30;
   const rows = settings.rows ?? 5;
   const query = useWidgetReport(projectId, "summary", period, settings.branch);
@@ -21,7 +21,7 @@ export default function SlowestTestsWidget({ projectId, settings, heading, onOpe
       {heading}
       {query.isPending && <SkeletonStat label="Loading slowest tests…" />}
       {query.error != null && <ErrorBanner error={query.error} onRetry={() => query.refetch()} />}
-      {emptyBranch && <EmptyBranch branch={settings.branch!} days={period} onOpenSettings={onOpenSettings} />}
+      {emptyBranch && <EmptyBranch branch={settings.branch!} days={period} onOpenSettings={onOpenSettings} titleId={titleId} />}
       {query.data && !emptyBranch && slowest.length === 0 && <p className="muted">No tests ran in the last {period} days.</p>}
       {query.data && !emptyBranch && slowest.length > 0 && (
         <ol className="fail-list">

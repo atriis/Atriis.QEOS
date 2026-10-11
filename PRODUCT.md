@@ -100,7 +100,9 @@ yet.
   templates: QA lead, Developer, Flaky hunt. At most 24 widgets per layout.
 - "My" widgets match by name: My recent failures shows failed runs whose commit author, as git records
   it, is exactly the person's name (ignoring case): their QEOS full name by default, or how git spells
-  it, set in the widget. It reads the newest 50 runs. Matching by email is a later improvement
+  it, set in the widget. It reads the newest 50 failing runs whose author contains the name, then keeps
+  the exact name, so a name that is a common substring of others' names can push the person's own runs
+  off that page. Matching by email is a later improvement
   (TODO.md). My suites lists the suites the person created.
 - Honest states per widget (Principle 1): a branch with no runs in the period says "No runs on
   <branch> in the last N days"; a failure stays in its own card with Retry; missing data is never

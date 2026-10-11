@@ -305,3 +305,49 @@ test("By area and Coverage load with the page, and a failed Duration section is 
   await delay(ANNOUNCE_DELAY_MS + 300);
   expect(liveRegion().textContent).toBe("");
 });
+
+describe("the section named by the link's anchor", () => {
+  const scrollIntoView = vi.fn();
+  beforeEach(() => {
+    scrollIntoView.mockReset();
+    Element.prototype.scrollIntoView = scrollIntoView;
+  });
+  afterEach(() => {
+    // @ts-expect-error restore jsdom default (no scrollIntoView, no matchMedia)
+    delete Element.prototype.scrollIntoView;
+    // @ts-expect-error restore jsdom default
+    delete window.matchMedia;
+  });
+  const reduced = (matches: boolean) => {
+    window.matchMedia = ((query: string) => ({ matches: matches && query.includes("reduced-motion"), media: query,
+      addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+  };
+
+  test("scrolls to it smoothly and focuses its heading once the page has loaded", async () => {
+    serve();
+    reduced(false);
+    renderPage("#report-causes");
+    await screen.findByRole("group", { name: /^Pass rate/ });
+    const heading = screen.getByRole("heading", { level: 2, name: "Failure causes" });
+    await waitFor(() => expect(heading).toHaveFocus());
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView.mock.instances[0]).toBe(heading);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+  });
+
+  test("does not scroll smoothly when the reader prefers reduced motion", async () => {
+    serve();
+    reduced(true);
+    renderPage("#report-regressions");
+    await screen.findByRole("group", { name: /^Pass rate/ });
+    await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: /^Regressions/ })).toHaveFocus());
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "auto", block: "start" });
+  });
+
+  test("an anchor that names no section moves nothing", async () => {
+    serve();
+    renderPage("#nowhere");
+    await screen.findByRole("group", { name: /^Pass rate/ });
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+});

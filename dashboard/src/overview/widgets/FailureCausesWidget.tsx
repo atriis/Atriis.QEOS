@@ -10,7 +10,7 @@ import type { WidgetProps } from "./types";
 const SHOWN = 5;
 
 /** The Report's failure causes for the period: how many, new against recurring, resolved, and the top causes. */
-export default function FailureCausesWidget({ projectId, settings, heading, onOpenSettings }: WidgetProps) {
+export default function FailureCausesWidget({ projectId, settings, heading, titleId, onOpenSettings }: WidgetProps) {
   const period = settings.period ?? 30;
   const query = useWidgetReport(projectId, "failure_causes", period, settings.branch);
   const section = query.data?.failure_causes;
@@ -22,7 +22,7 @@ export default function FailureCausesWidget({ projectId, settings, heading, onOp
       {heading}
       {query.isPending && <SkeletonStat label="Loading failure causes…" />}
       {query.error != null && <ErrorBanner error={query.error} onRetry={() => query.refetch()} />}
-      {emptyBranch && <EmptyBranch branch={settings.branch!} days={period} onOpenSettings={onOpenSettings} />}
+      {emptyBranch && <EmptyBranch branch={settings.branch!} days={period} onOpenSettings={onOpenSettings} titleId={titleId} />}
       {section && !emptyBranch && section.failures === 0 && <p className="muted">No failures in the last {period} days.</p>}
       {section && !emptyBranch && section.failures > 0 && (
         <>

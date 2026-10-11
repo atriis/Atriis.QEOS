@@ -47,8 +47,25 @@ test("Recent runs on a branch without runs says so with its settings button", as
   runsAsked((p) => (p.get("branch") === "gone" ? [] : [RUN]));
   renderOverview();
   expect(await screen.findByText("No runs on gone")).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Change settings" }));
+  expect(screen.getByRole("button", { name: "Change settings Recent runs" })).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: /^Change settings/ }));
   expect(await screen.findByRole("form", { name: "Recent runs settings" })).toBeInTheDocument();
+});
+
+test("Recent runs shows its error with Retry, and Retry asks again", async () => {
+  mockOverviewData({ layout: personalState({ id: "r", type: "recent_runs", size: "normal" }) });
+  let calls = 0;
+  server.use(http.get("/api/v1/projects/42/runs", ({ request }) => {
+    // Only the widget's own page (limit 50) fails; the page's latest-run lookup answers
+    if (new URL(request.url).searchParams.get("limit") !== "50") return HttpResponse.json([RUN]);
+    calls += 1;
+    return calls === 1 ? HttpResponse.json({ detail: "Runs are down" }, { status: 500 }) : HttpResponse.json([RUN]);
+  }));
+  renderOverview();
+  const card = await screen.findByRole("region", { name: "Recent runs" });
+  expect(await within(card).findByRole("alert")).toHaveTextContent("Runs are down");
+  await userEvent.click(within(card).getByRole("button", { name: "Retry" }));
+  expect(await within(card).findByRole("link", { name: "Run #61" })).toBeInTheDocument();
 });
 
 test("Branch health lists branches newest first with pass rate, runs and last run, and links to Branches", async () => {

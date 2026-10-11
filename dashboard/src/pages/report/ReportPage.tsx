@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useLocation, useParams } from "react-router-dom";
 import { useIsFetching, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Printer, RefreshCw, X } from "lucide-react";
 import { ApiError } from "../../api/http";
@@ -67,6 +67,25 @@ function usePrintOpensDataTables() {
   }, []);
 }
 
+/** Brings the section named by the URL's `#report-…` anchor into view once the page has settled (the Overview's widget
+ *  links land here): scrolled to, smoothly unless the reader prefers reduced motion, and its heading focused so keyboard
+ *  and screen-reader users start there. Once per anchor; a section that is absent is left alone. */
+export function useScrollToSection(hash: string, ready: boolean) {
+  const done = useRef<string | null>(null);
+  useEffect(() => {
+    if (!ready || !hash || done.current === hash) return;
+    let name: string;
+    try { name = decodeURIComponent(hash.slice(1)); } catch { return; }
+    const target = document.getElementById(name);
+    if (!target) return;
+    done.current = hash;
+    const reduced = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    target.scrollIntoView?.({ behavior: reduced ? "auto" : "smooth", block: "start" });
+    if (!target.hasAttribute("tabindex")) target.setAttribute("tabindex", "-1");
+    target.focus({ preventScroll: true });
+  }, [hash, ready]);
+}
+
 /** The server's tz 422s: "Unknown time zone: 'X'" from _zone(), or a field error on tz (e.g. longer than 64). */
 export function isZoneError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 422 && /^(unknown time zone|tz:)/i.test(error.detail);
@@ -101,6 +120,7 @@ export default function ReportPage() {
   const fetchingSections = useIsFetching({ queryKey: ["report", id] });
   const busy = sections.some((q) => q.fetchStatus === "fetching") || fetchingSections > 0;
   const announcement = useAnnouncement(gate.state === "ready" ? JSON.stringify(gate.key) : null, busy, sections.some((q) => q.isError));
+  useScrollToSection(useLocation().hash, gate.state !== "wait" && !busy);
   const applied = describeFilters(filters, defaultBranch, caseAreas.data);
   const generated = summary.data?.generated_at ?? null;
   const subtitle = `${project.data?.name ?? "Project"}: quality report. ${formatPeriod(filters.from, filters.to)} (${filters.days} days), ${tz}.`

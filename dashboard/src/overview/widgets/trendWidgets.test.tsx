@@ -63,7 +63,7 @@ test("Pass-rate trend on every branch without runs says so plainly, with no sett
   trendsAsked(NO_RUNS);
   renderOverview();
   expect(await screen.findByText("No runs in the last 90 days.")).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Change settings" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^Change settings/ })).not.toBeInTheDocument();
 });
 
 test("a branch without runs says so with its settings button, which opens that widget's settings", async () => {
@@ -73,7 +73,7 @@ test("a branch without runs says so with its settings button, which opens that w
   expect(await screen.findByText("No runs on release in the last 30 days")).toBeInTheDocument();
   expect(asked[0].get("branch")).toBe("release");
   expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Change settings" }));
+  await userEvent.click(screen.getByRole("button", { name: /^Change settings/ }));
   expect(await screen.findByText("Editing your Overview")).toBeInTheDocument();
   expect(screen.getByRole("form", { name: "Pass-rate trend settings" })).toBeInTheDocument();
 });
@@ -83,5 +83,5 @@ test("Pass rate this week on a branch without runs says so instead of showing no
   trendsAsked({ tz: "UTC", bucket: "week", days: [] });
   renderOverview();
   expect(await screen.findByText("No runs on release in the last 14 days")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Change settings" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^Change settings/ })).toBeInTheDocument();
 });

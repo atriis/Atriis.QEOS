@@ -10,7 +10,7 @@ import { regressions } from "./regressions";
 import type { WidgetProps } from "./types";
 
 /** The Report's regressions for the period: newly failing, fixed, flips, and the newly failing tests. */
-export default function RegressionsWidget({ projectId, settings, heading, onOpenSettings }: WidgetProps) {
+export default function RegressionsWidget({ projectId, settings, heading, titleId, onOpenSettings }: WidgetProps) {
   const period = settings.period ?? 30;
   const rows = settings.rows ?? 5;
   const query = useWidgetReport(projectId, "regressions", period, settings.branch);
@@ -23,7 +23,7 @@ export default function RegressionsWidget({ projectId, settings, heading, onOpen
       {heading}
       {query.isPending && <SkeletonStat label="Loading regressions…" />}
       {query.error != null && <ErrorBanner error={query.error} onRetry={() => query.refetch()} />}
-      {emptyBranch && <EmptyBranch branch={settings.branch!} days={period} onOpenSettings={onOpenSettings} />}
+      {emptyBranch && <EmptyBranch branch={settings.branch!} days={period} onOpenSettings={onOpenSettings} titleId={titleId} />}
       {section && !emptyBranch && (
         <>
           <p className="muted">{formatCount(section.newly_failing.total)} newly failing · {formatCount(section.fixed.total)} fixed · {formatCount(flips)} flips</p>

@@ -42,9 +42,32 @@ test("with no full name and no setting, My recent failures asks for a name and s
   const asked = failingRunsAsked([FAILING_RUN]);
   renderOverview();
   expect(await screen.findByText(/Your QEOS profile has no full name/)).toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Change settings" }));
+  await userEvent.click(screen.getByRole("button", { name: /^Change settings/ }));
   expect(await screen.findByRole("form", { name: "My recent failures settings" })).toBeInTheDocument();
   expect(asked).toHaveLength(0);
+});
+
+test("the settings button names its widget", async () => {
+  mockOverviewData({ layout: personalState({ id: "f", type: "my_failures", size: "normal", settings: { author: "A. Lovelace", rows: 5 } }) });
+  me("Ada Lovelace");
+  failingRunsAsked([]);
+  renderOverview();
+  expect(await screen.findByRole("button", { name: "Change settings My recent failures" })).toBeInTheDocument();
+});
+
+test("My recent failures shows its error with Retry, and Retry asks again", async () => {
+  mockOverviewData({ layout: personalState({ id: "f", type: "my_failures", size: "normal", settings: { author: "Ada Lovelace", rows: 5 } }) });
+  let calls = 0;
+  server.use(http.get("/api/v1/projects/42/runs", ({ request }) => {
+    if (new URL(request.url).searchParams.get("status") !== "failing") return HttpResponse.json([RUN]);
+    calls += 1;
+    return calls === 1 ? HttpResponse.json({ detail: "Runs are down" }, { status: 500 }) : HttpResponse.json([FAILING_RUN]);
+  }));
+  renderOverview();
+  const card = await screen.findByRole("region", { name: "My recent failures" });
+  expect(await within(card).findByRole("alert")).toHaveTextContent("Runs are down");
+  await userEvent.click(within(card).getByRole("button", { name: "Retry" }));
+  expect(await within(card).findByRole("link", { name: "Run #61" })).toBeInTheDocument();
 });
 
 test("when nothing matches, My recent failures says so and names the setting", async () => {
@@ -56,7 +79,7 @@ test("when nothing matches, My recent failures says so and names the setting", a
   expect(screen.getByText(/Your name in git/)).toBeInTheDocument();
   expect(asked[0].get("author")).toBe("A. Lovelace");
   expect(await headingLink("My recent failures")).toHaveAttribute("href", "/projects/42/runs?status=failing&author=A.%20Lovelace");
-  await userEvent.click(screen.getByRole("button", { name: "Change settings" }));
+  await userEvent.click(screen.getByRole("button", { name: /^Change settings/ }));
   expect(await screen.findByRole("form", { name: "My recent failures settings" })).toBeInTheDocument();
 });
 

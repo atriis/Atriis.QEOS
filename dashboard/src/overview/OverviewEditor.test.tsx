@@ -247,3 +247,39 @@ test("All branches removes the branch setting: no branch is every branch", async
   await waitFor(() => expect(puts).toHaveLength(1));
   expect(puts[0].layout.widgets[0]).toEqual({ id: "p1", type: "pass_rate_week", size: "normal", settings: {} });
 });
+
+test("the Branch select says it is loading until the branch list arrives, and keeps the saved branch", async () => {
+  mockOverviewData({ layout: personalState({ id: "p1", type: "pass_rate_week", size: "normal", settings: { branch: "release" } }) });
+  let answer!: () => void;
+  server.use(http.get("/api/v1/projects/42/analytics/branches", async () => {
+    await new Promise<void>((resolve) => { answer = resolve; });
+    return HttpResponse.json([{ branch: "main", runs: 3, total: 9, passed: 9, failed: 0, errored: 0 }]);
+  }));
+  renderOverview();
+  await startEditing();
+  await userEvent.click(screen.getByRole("button", { name: "Pass rate this week settings" }));
+  const branch = within(screen.getByRole("form", { name: "Pass rate this week settings" })).getByLabelText("Branch");
+  expect(branch).toBeDisabled();
+  expect(within(branch).getByRole("option", { name: "Loading branches…" })).toBeInTheDocument();
+  await waitFor(() => expect(answer).toBeDefined());
+  answer();
+  await waitFor(() => expect(branch).toBeEnabled());
+  expect(within(branch).getByRole("option", { name: "All branches" })).toBeInTheDocument();
+  expect(within(branch).getByRole("option", { name: "main" })).toBeInTheDocument();
+  expect(branch).toHaveValue("release");
+});
+
+test("when the branch list fails, All branches stays usable with a short error and the saved branch stays", async () => {
+  mockOverviewData({ layout: personalState({ id: "p1", type: "pass_rate_week", size: "normal", settings: { branch: "release" } }) });
+  server.use(http.get("/api/v1/projects/42/analytics/branches", () => HttpResponse.json({ detail: "down" }, { status: 500 })));
+  renderOverview();
+  await startEditing();
+  await userEvent.click(screen.getByRole("button", { name: "Pass rate this week settings" }));
+  const form = screen.getByRole("form", { name: "Pass rate this week settings" });
+  expect(await within(form).findByText(/Could not load the branch list/)).toBeInTheDocument();
+  const branch = within(form).getByLabelText("Branch");
+  expect(branch).toBeEnabled();
+  expect(within(branch).getByRole("option", { name: "release" })).toBeInTheDocument();
+  await userEvent.selectOptions(branch, "All branches");
+  expect(branch).toHaveValue("");
+});

@@ -11,7 +11,7 @@ import type { WidgetProps } from "./types";
 
 /** This week's pass rate against last week's, as the API computed them (today's card; one branch when set, else every
  *  branch). */
-export default function PassRateWeekWidget({ projectId, settings, heading, onOpenSettings }: WidgetProps) {
+export default function PassRateWeekWidget({ projectId, settings, heading, titleId, onOpenSettings }: WidgetProps) {
   const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const weeks = useQuery(passRateWeeksQuery(projectId, tz, settings.branch));
   const buckets = weeks.data?.days ?? [];
@@ -24,7 +24,7 @@ export default function PassRateWeekWidget({ projectId, settings, heading, onOpe
       {heading}
       {weeks.isPending && <SkeletonStat label="Loading pass rate…" />}
       {weeks.error != null && <ErrorBanner error={weeks.error} onRetry={() => weeks.refetch()} />}
-      {emptyBranch && <EmptyBranch branch={settings.branch!} days={14} onOpenSettings={onOpenSettings} />}
+      {emptyBranch && <EmptyBranch branch={settings.branch!} days={14} onOpenSettings={onOpenSettings} titleId={titleId} />}
       {!emptyBranch && thisWeek && (
         <>
           <div className="stat-big">{formatPassRate(thisWeek.pass_rate)}</div>

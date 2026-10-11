@@ -87,7 +87,7 @@ test("a report widget on a branch without runs says so; a failing one shows its 
   }));
   renderOverview();
   expect(await screen.findByText("No runs on release in the last 14 days")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Change settings" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /^Change settings/ })).toBeInTheDocument();
   const regressions = screen.getByRole("region", { name: "Regressions and flips" });
   expect(await within(regressions).findByRole("alert")).toHaveTextContent("Report is down");
   expect(within(regressions).getByRole("button", { name: "Retry" })).toBeInTheDocument();
