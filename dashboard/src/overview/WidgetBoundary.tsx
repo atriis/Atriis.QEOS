@@ -4,6 +4,8 @@ import ErrorBanner from "../components/ErrorBanner";
 interface Props {
   heading: ReactNode;
   title: string;
+  /** A change (the widget's settings, e.g. a stable JSON.stringify of them) renders a failed widget again. */
+  resetKey?: string;
   children: ReactNode;
 }
 
@@ -12,12 +14,16 @@ interface State {
 }
 
 /** One widget's render failure stays in its card (spec §2.8): "This widget failed to load · Retry", and the rest of
- *  the page keeps working. Retry renders the widget again. */
+ *  the page keeps working. Retry, or a change of `resetKey`, renders the widget again. */
 export default class WidgetBoundary extends Component<Props, State> {
   state: State = { error: null };
 
   static getDerivedStateFromError(error: Error): State {
     return { error };
+  }
+
+  componentDidUpdate(previous: Props) {
+    if (this.state.error !== null && previous.resetKey !== this.props.resetKey) this.setState({ error: null });
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  type LayoutMode, type LayoutRow, type OverviewLayoutState, deleteLayout, getOverviewLayout, saveLayout,
+  type LayoutMode, type LayoutRow, type OverviewLayoutState, conflictOf, deleteLayout, getOverviewLayout, saveLayout,
 } from "../api/overviewLayout";
 import type { StoredLayout } from "./catalog";
 
@@ -35,6 +35,10 @@ export function useOverviewLayout(projectId: number) {
     mutationFn: (args: { mode: LayoutMode; layout: StoredLayout; version: number }) =>
       saveLayout(projectId, args.mode, args.layout, args.version),
     onSuccess: (row, args) => apply((old) => afterSave(old, args.mode, row)),
+    // A stale save: the cached versions are behind the server, so Reload or Overwrite must start from fresh ones
+    onError: (error) => {
+      if (conflictOf(error) !== undefined) void queryClient.invalidateQueries({ queryKey: key });
+    },
   });
   const reset = useMutation({
     mutationFn: (mode: LayoutMode) => deleteLayout(projectId, mode),
