@@ -57,6 +57,6 @@ def test_every_setting_a_type_names_is_declared():
         assert set(spec["settings"]) <= set(catalog["settings"])
 
 
-def test_a_wheel_carries_the_file():
+def test_pyproject_declares_the_file_as_package_data():
     pyproject = tomllib.loads((Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
     assert FILE_NAME in pyproject["tool"]["setuptools"]["package-data"]["qeos_shared"]

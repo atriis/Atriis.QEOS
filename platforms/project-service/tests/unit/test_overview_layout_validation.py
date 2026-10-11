@@ -59,6 +59,7 @@ def test_the_limits_themselves_pass():
     (layout(schema=2), "schema must be 1"),
     ({"widgets": []}, "schema must be 1"),
     (layout(schema=True), "schema must be 1"),
+    (layout(schema=1.0), "schema must be 1"),
     ({"schema": 1, "widgets": [], "theme": "dark"}, "unknown key 'theme'"),
     ({"schema": 1, "widgets": {}}, "widgets must be a list"),
     (layout(*[widget(f"w{i}") for i in range(25)]), "at most 24 widgets"),
@@ -84,6 +85,8 @@ def test_the_limits_themselves_pass():
     (layout(widget(type="recent_runs", branch="a\x00b")), "no NUL"),
     (layout(widget(type="recent_runs", branch=3)), "1-255 characters"),
     (layout(widget(type="my_failures", author="y" * 256)), "1-255 characters"),
+    (layout(widget(type="my_failures", author="")), "1-255 characters"),
+    (layout(widget(type="my_failures", author="a\x00b")), "no NUL"),
     ("not an object", "layout must be an object"),
     (layout("w1"), "widgets[0] must be an object"),
 ])
@@ -101,3 +104,9 @@ def test_the_request_body_validates_the_layout_and_the_version():
         LayoutIn(layout=layout(widget(type="marketplace")), version=0)
     with pytest.raises(ValidationError):
         LayoutIn(layout=layout(widget()), version=0, extra=True)
+
+
+@pytest.mark.parametrize("version", [True, 1.0, "1"])
+def test_the_version_must_be_a_real_integer(version):
+    with pytest.raises(ValidationError):
+        LayoutIn(layout=layout(widget()), version=version)

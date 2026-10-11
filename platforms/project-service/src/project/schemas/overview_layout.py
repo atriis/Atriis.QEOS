@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 from qeos_shared.overview_widgets import load_catalog
 
 CATALOG = load_catalog()
@@ -41,7 +41,7 @@ def validate_layout(layout: Any) -> dict:
     if extra:
         raise LayoutError(f"layout: unknown key {sorted(extra)[0]!r}")
     schema = layout.get("schema")
-    if isinstance(schema, bool) or schema != CATALOG["schema"]:
+    if type(schema) is not int or schema != CATALOG["schema"]:
         raise LayoutError(f"schema must be {CATALOG['schema']}")
     widgets = layout.get("widgets")
     if not isinstance(widgets, list):
@@ -87,7 +87,7 @@ class LayoutIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     layout: dict
-    version: int = Field(ge=0)
+    version: StrictInt = Field(ge=0)
 
     @field_validator("layout")
     @classmethod

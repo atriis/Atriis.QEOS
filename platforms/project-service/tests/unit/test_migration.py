@@ -149,3 +149,20 @@ def test_deleting_a_project_deletes_its_layouts(migrated_engine):
         _insert_layout(conn, 7)
         conn.execute(text("DELETE FROM projects WHERE slug = 'p'"))
         assert conn.execute(text("SELECT COUNT(*) FROM overview_layouts")).scalar() == 0
+
+
+def test_downgrading_004_drops_the_table_and_its_indexes(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'downgrade_test.db').as_posix()}"
+    cfg = Config(str(SERVICE_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(SERVICE_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "003")
+    engine = create_engine(url)
+    try:
+        assert "overview_layouts" not in inspect(engine).get_table_names()
+        with engine.connect() as conn:
+            leftovers = conn.execute(text("SELECT name FROM sqlite_master WHERE name LIKE '%overview_layouts%'")).all()
+        assert leftovers == []
+    finally:
+        engine.dispose()
