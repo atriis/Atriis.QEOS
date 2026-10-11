@@ -266,10 +266,32 @@ jobs:
       - name: Smoke-test through the gateway
         run: bash scripts/smoke_gateway.sh
 
+      # The same stack with the monitoring profile: gateway and auth-service are recreated with
+      # MONITORING_ENABLED, db-init re-runs and creates qeos_monitor (spec section 8)
+      - name: Start the monitoring profile
+        env:
+          COMPOSE_PROFILES: monitoring
+          MONITORING_ENABLED: "true"
+          GRAFANA_ADMIN_PASSWORD: ci-grafana-admin
+          MONITORING_DB_PASSWORD: ci-monitor
+        run: docker compose up -d --build --wait --wait-timeout 300 gateway prometheus alertmanager grafana node-exporter cadvisor postgres-exporter
+
+      - name: Smoke-test with monitoring
+        env:
+          COMPOSE_PROFILES: monitoring
+          MONITORING_ENABLED: "true"
+          GRAFANA_ADMIN_PASSWORD: ci-grafana-admin
+          MONITORING_DB_PASSWORD: ci-monitor
+        run: bash scripts/smoke_gateway.sh
+
       - name: Show logs on failure
         if: failure()
+        env:
+          COMPOSE_PROFILES: monitoring
         run: docker compose logs
 
       - name: Tear down
         if: always()
+        env:
+          COMPOSE_PROFILES: monitoring
         run: docker compose down --volumes

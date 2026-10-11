@@ -282,6 +282,15 @@ belong to no real user, so they do not appear in your dashboard. It also trigger
 rate limit on purpose, so sign-ins from your machine may be refused for a few seconds right
 after it runs.
 
+**With the monitoring profile on** (`MONITORING_ENABLED=true`), also export
+`MONITORING_DB_PASSWORD`, the value the stack was started with. The smoke then checks that every
+Prometheus target is up, that `/grafana/` without the cookie redirects to `/monitoring`, that a
+client-sent `X-QEOS-User-Email` header opens nothing, that a non-superuser gets 403 from
+`/api/v1/auth/grafana-session`, that a superuser's cookie gets Grafana, and that `qeos_monitor`
+cannot read table data. It creates its own superuser (`smoke-super-…@example.com`) directly in the
+database, like the invitee. With monitoring off it checks that `/grafana/` is a JSON 404. CI runs
+the smoke both ways.
+
 ### 2.7 Trust the local HTTPS certificate
 
 On its first start, the gateway generates a self-signed certificate for `localhost`,

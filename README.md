@@ -82,7 +82,8 @@ secrets and daily backups: [`deploy/README.md`](deploy/README.md).
 | Whole stack (Docker) | `bash scripts/smoke_gateway.sh` after `docker compose up` |
 
 CI (`.github/workflows/ci.yml`) runs every service suite, the dashboard checks, container smoke
-tests and the full-stack gateway smoke on each push.
+tests and the full-stack gateway smoke on each push, once without and once with the monitoring
+profile (`/grafana/` gate, Prometheus targets, superuser cookie).
 
 ## Security notes
 

@@ -13,6 +13,11 @@ for var in SECRET_KEY INTERNAL_API_PASSWORD; do
   fi
 done
 
+if [ "${MONITORING_ENABLED:-false}" = "true" ] && [ -z "${MONITORING_DB_PASSWORD:-}" ]; then
+  echo "FAIL  MONITORING_ENABLED=true needs MONITORING_DB_PASSWORD: export the value the stack was started with"
+  exit 1
+fi
+
 HTTPS_PORT="${GATEWAY_HTTPS_PORT:-8443}"
 HTTP_PORT="${GATEWAY_HTTP_PORT:-8080}"
 BASE="https://localhost:${HTTPS_PORT}"
@@ -476,6 +481,8 @@ body_has "unknown API path answers JSON" '{"detail":"Not Found"}'
 check "dashboard index" 200 GET "$BASE/"
 body_has "dashboard index is the SPA" '<div id="root">'
 check "SPA deep link falls back to index" 200 GET "$BASE/projects/1/trends"
+check "the /monitoring hand-off page is the SPA" 200 GET "$BASE/monitoring?next=/grafana/"
+body_has "... index.html" '<div id="root">'
 body_has "deep link serves the SPA" '<div id="root">'
 
 # The index references hashed assets; one must load and carry the immutable cache policy.
@@ -513,6 +520,65 @@ if [ "$redirect_status" = 301 ] && grep -qi "^location: https://localhost:${HTTP
   pass "HTTP redirects to HTTPS on port ${HTTPS_PORT}"
 else
   fail "HTTP redirect: got $redirect_status, $(grep -i '^location' "$TMP/redirect" 2>/dev/null)"
+fi
+
+# ---- monitoring (spec 2026-10-10 §8, ADR-027) ----
+if [ "${MONITORING_ENABLED:-false}" = "true" ]; then
+  # Every Prometheus target up; they start as "unknown", so give them up to 90 s
+  targets_up=0
+  targets_other=1
+  for _ in $(seq 1 18); do
+    docker compose exec -T prometheus wget -qO- 'http://localhost:9090/api/v1/targets?state=active' > "$TMP/targets" 2>/dev/null || true
+    targets_up="$(grep -o '"health":"up"' "$TMP/targets" | wc -l | tr -d ' ')"
+    targets_other="$(grep -o '"health":"[a-z]*"' "$TMP/targets" | grep -vc '"up"' || true)"
+    if [ "$targets_up" -ge 10 ] && [ "$targets_other" = "0" ]; then break; fi
+    sleep 5
+  done
+  if [ "$targets_up" -ge 10 ] && [ "$targets_other" = "0" ]; then
+    pass "every Prometheus target is up ($targets_up)"
+  else
+    fail "Prometheus targets: $targets_up up, $targets_other not: $(grep -o '"scrapeUrl":"[^"]*","globalUrl":"[^"]*","lastError":"[^"]*"' "$TMP/targets" | head -c 400)"
+  fi
+
+  check "/grafana/ without the cookie -> the sign-in hand-off" 302 GET "$BASE/grafana/d/qeos-overview"
+  if grep -qi '^location: /monitoring?next=/grafana/d/qeos-overview' "$TMP/headers"; then
+    pass "... redirects to /monitoring?next=/grafana/d/qeos-overview"
+  else
+    fail "... Location was: $(grep -i '^location:' "$TMP/headers")"
+  fi
+  check "a client's own X-QEOS-User-Email opens nothing" 302 GET "$BASE/grafana/api/user" \
+    -H "X-QEOS-User-Email: attacker@example.com"
+  check "a user who is not a superuser gets no Grafana cookie" 403 POST "$BASE/api/v1/auth/grafana-session" \
+    "${INVITEE_AUTH[@]}" -H "Content-Type: application/json" -d '{}'
+
+  # A superuser: inserted directly (no API promotes a user), then the normal hand-off
+  SUPER_EMAIL="smoke-super-$SUFFIX@example.com"
+  SUPER_ID="$(docker compose exec -T postgres psql -U postgres -d auth_db -tAc \
+    "INSERT INTO users (email, is_active, is_superuser, mfa_enabled) VALUES ('$SUPER_EMAIL', true, true, false) RETURNING id" \
+    | head -1 | tr -d ' \r\n')"
+  SUPER_TOKEN="$(docker compose exec -T auth-service python -c '
+import datetime, os, sys, jwt
+exp = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(minutes=5)
+print(jwt.encode({"sub": sys.argv[1], "exp": exp}, os.environ["SECRET_KEY"], algorithm="HS256"))
+' "$SUPER_ID" | tr -d '\r\n')"
+  check "a superuser gets the Grafana cookie" 200 POST "$BASE/api/v1/auth/grafana-session" \
+    -H "Authorization: Bearer $SUPER_TOKEN" -H "Content-Type: application/json" -d '{}' -c "$TMP/grafana_jar"
+  check "/grafana/ with the superuser's cookie" 200 GET "$BASE/grafana/" -b "$TMP/grafana_jar"
+  check "Grafana signs in the cookie's user, whatever header the client sends" 200 GET "$BASE/grafana/api/user" \
+    -b "$TMP/grafana_jar" -H "X-QEOS-User-Email: attacker@example.com"
+  body_has "... the superuser" "\"email\":\"$SUPER_EMAIL\""
+  body_lacks "... never the client's header" "attacker@example.com"
+
+  # qeos_monitor reads statistics, never table data
+  if docker compose exec -T -e PGPASSWORD="$MONITORING_DB_PASSWORD" postgres psql -U qeos_monitor -h 127.0.0.1 \
+      -d ingestion_db -tAc "SELECT 1 FROM test_runs LIMIT 1" >/dev/null 2>&1; then
+    fail "qeos_monitor can read test_runs"
+  else
+    pass "qeos_monitor cannot read table data"
+  fi
+else
+  check "/grafana/ is a 404 while monitoring is off" 404 GET "$BASE/grafana/"
+  body_has "... the JSON 404" '{"detail":"Not Found"}'
 fi
 
 # ---- rate limiting last: it leaves this client's auth bucket drained for a few seconds ----
