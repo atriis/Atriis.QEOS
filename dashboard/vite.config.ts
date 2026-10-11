@@ -7,6 +7,8 @@ export default defineConfig({
   server: {
     // Local dev against a running stack: the gateway serves the API on 8443.
     proxy: { "/api": { target: "https://localhost:8443", secure: false } },
+    // The Overview widget catalogue lives in shared/ (one file for project-service and the dashboard)
+    fs: { allow: [".", "../shared/qeos_shared/overview_widgets.json"] },
   },
   test: {
     environment: "jsdom",

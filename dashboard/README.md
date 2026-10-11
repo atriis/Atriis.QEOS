@@ -20,6 +20,16 @@ API answers.
     npm run lint       # eslint
     npm run build      # production build to dist/
 
+## Shared files
+
+The Overview widget catalogue (`shared/qeos_shared/overview_widgets.json`:
+widget types, their settings and the layout limits) is one file for
+project-service and the dashboard. `src/overview/catalog.ts` imports it from
+outside `dashboard/`, so the image builds with the repository root as context
+and the Dockerfile copies the file to `/shared/`. project-service validates
+saved layouts against it; the dashboard only skips widget types it does not
+know.
+
 ## SSO buttons
 
 Google and Microsoft sign-in render only when their client ids are baked at
