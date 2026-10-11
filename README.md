@@ -125,7 +125,7 @@ flowchart TB
         end
         subgraph QIP["Intelligence (QIP)"]
             ING["ingestion-service<br/>runs · analytics · Report"]
-            JOBS["jobs: retention · rollup<br/>· weekly summary"]
+            JOBS["jobs: ingestion-retention<br/>analytics-rollup · weekly-summary"]
         end
         subgraph COLLAB["Collaboration"]
             DASH["dashboard<br/>React SPA"]
@@ -158,6 +158,7 @@ flowchart TB
     subgraph MON["Monitoring: opt-in profile"]
         PROM[Prometheus] --> AM[Alertmanager]
         GRAF[Grafana]
+        EXP["node-exporter · cadvisor<br/>postgres-exporter"] --> PROM
     end
     GW -->|/grafana/ behind the QEOS sign-in| GRAF
     AM --> NOTIFY
@@ -179,15 +180,19 @@ files into test-management-service ([SETUP §4.2.3](docs/SETUP.md)).
 | project-service | [`platforms/project-service/`](platforms/project-service/) | Platform | Projects, repositories, settings, retention |
 | test-management-service | [`platforms/test-management-service/`](platforms/test-management-service/README.md) | Execution | Test cases, suites, Gherkin import and sync, run requests |
 | ingestion-service | [`platforms/ingestion-service/`](platforms/ingestion-service/README.md) | Intelligence (QIP), Collaboration | Uploads, runs, analytics, the Report, notification channels |
-| Jobs | [`platforms/ingestion-service/src/ingestion/jobs/`](platforms/ingestion-service/src/ingestion/jobs/) | Intelligence (QIP) | Retention, flaky rollups and the weekly summary; containers of the ingestion image |
+| Jobs | [`platforms/ingestion-service/src/ingestion/jobs/`](platforms/ingestion-service/src/ingestion/jobs/) | Intelligence (QIP) | `ingestion-retention`, `analytics-rollup` (flaky rollups) and `weekly-summary`: containers of the ingestion image |
 | Collector | [`collector/`](collector/README.md) | Integrations | The CI-side uploader and feature sync (`pip`, single-file `.pyz` or container image) |
+| PostgreSQL | [`scripts/postgres-init.sh`](scripts/postgres-init.sh) | Infrastructure | `postgres`: PostgreSQL 15, one database per service, created on every start if missing |
 | Shared library | [`shared/qeos_shared/`](shared/) | Shared kernel | Settings, database session, mail and metrics helpers |
-| Monitoring | [`monitoring/`](monitoring/) | Observability (§11) | Prometheus, Alertmanager and Grafana configuration (opt-in profile) |
-| Production package | [`deploy/`](deploy/README.md) | Deployment (§9, L0) | Single-VM deployment behind a Caddy TLS edge |
+| Monitoring | [`monitoring/`](monitoring/) | Observability (§11) | Prometheus, Alertmanager, Grafana and the `node-exporter`, `cadvisor` and `postgres-exporter` exporters (opt-in profile) |
+| Production package | [`deploy/`](deploy/README.md) | Deployment (§9, L0) | Single-VM deployment: the same services behind `edge`, a Caddy TLS proxy |
 
 Blueprint domains not started: Automation, Marketplace, AI runtime. Administration lives in the Platform services for now.
 
 **Stack:** Python 3.11 with FastAPI, SQLAlchemy and Alembic, PostgreSQL 15, React 19, NGINX and Docker Compose.
+
+**Kept in step:** CI runs [`scripts/check_architecture_docs.py`](scripts/check_architecture_docs.py), which fails when the diagram,
+this table or the blueprint's status banner names a service the compose files don't run, or misses one they do.
 
 **Design principles:**
 - The services never call each other to build a page. The dashboard composes the data ([ADR-022](docs/architecture/adr/INDEX.md)).

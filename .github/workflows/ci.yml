@@ -240,6 +240,25 @@ jobs:
       - name: Static checks
         run: bash monitoring/check.sh
 
+  architecture-docs:
+    name: Architecture docs match the stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      # README's diagram and component table and the blueprint's status banner against the compose files and the gateway
+      - name: Check
+        run: python scripts/check_architecture_docs.py
+
+      - name: Tests of the check
+        run: |
+          python -m pip install --quiet pytest
+          python -m pytest scripts/tests -q
+
   gateway:
     name: Gateway and full stack
     runs-on: ubuntu-latest
