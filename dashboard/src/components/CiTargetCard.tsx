@@ -20,19 +20,30 @@ function workflowFor(ref: string | null): string {
   return workflowYaml.replace("refs/heads/main", () => `refs/heads/${branch}`);
 }
 
-function CopyBlock({ name, code }: { name: string; code: string }) {
-  const [copied, setCopied] = useState(false);
+/** The help block's copy state: only the block copied last says Copied, for 2 s, and the result is announced. */
+function useCopyState() {
+  const [state, setState] = useState<{ name: string; ok: boolean } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  async function copy(name: string, code: string) {
+    clearTimeout(timer.current);
+    try {
+      await navigator.clipboard.writeText(code);
+      setState({ name, ok: true });
+      timer.current = setTimeout(() => setState(null), 2000);
+    } catch {
+      setState({ name, ok: false }); // clipboard blocked: the text stays selectable
+    }
+  }
+  const message = state == null ? "" : state.ok ? `${state.name} copied` : `Could not copy ${state.name}. Select the text and copy it by hand.`;
+  return { copied: state?.ok ? state.name : null, copy, message };
+}
+
+function CopyBlock({ name, code, copied, onCopy }: { name: string; code: string; copied: boolean; onCopy: () => void }) {
   return (
     <>
       <pre className="code-block" tabIndex={0} aria-label={name}><code>{code}</code></pre>
-      <button type="button" aria-label={`Copy ${name}`} onClick={async () => {
-        try {
-          await navigator.clipboard.writeText(code);
-          setCopied(true);
-        } catch {
-          setCopied(false); // clipboard blocked: the text stays selectable
-        }
-      }}>
+      <button type="button" aria-label={`Copy ${name}`} onClick={onCopy}>
         {copied ? "Copied" : "Copy"}
       </button>
     </>
@@ -74,6 +85,7 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
   const [submitted, setSubmitted] = useState(false);
   const edited = useRef(false); // unsaved edits: a refetch must not overwrite them
   const ids = useId();
+  const clip = useCopyState();
 
   const data = target.data;
   useEffect(() => {
@@ -229,11 +241,13 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
               <li>
                 Add this workflow as <code>{`.github/workflows/${workflowFile}`}</code> on the repository's{" "}
                 <strong>default branch</strong> (GitHub only dispatches workflows found there):
-                <CopyBlock name={workflowFile} code={workflowFor(data.ref)} />
+                <CopyBlock name={workflowFile} code={workflowFor(data.ref)} copied={clip.copied === workflowFile}
+                  onCopy={() => void clip.copy(workflowFile, workflowFor(data.ref))} />
               </li>
               <li>
                 Add the script it runs as <code>.github/scripts/qeos-run.mjs</code>:
-                <CopyBlock name="qeos-run.mjs" code={runnerScript} />
+                <CopyBlock name="qeos-run.mjs" code={runnerScript} copied={clip.copied === "qeos-run.mjs"}
+                  onCopy={() => void clip.copy("qeos-run.mjs", runnerScript)} />
               </li>
               <li>
                 In the repository's Settings › Secrets and variables › Actions, add the secret <code>QEOS_API_KEY</code>{" "}
@@ -241,6 +255,7 @@ export default function CiTargetCard({ projectId }: { projectId: number }) {
                 <code>{window.location.origin}</code>.
               </li>
             </ol>
+            <span role="status" aria-live="polite" className="sr-only">{clip.message}</span>
           </details>
         </>
       )}

@@ -270,3 +270,20 @@ test("the expiry warning sits in a live region that exists before the warning do
   expect(container.querySelector('[role="status"]')).toBe(region);
   expect(region).toHaveTextContent("The GitHub token expired on 1 Jan 2020");
 });
+
+test("only the block copied last says Copied, and the copy is announced", async () => {
+  server.use(http.get(`${P}/ci-target`, () => HttpResponse.json(CONNECTED)));
+  const user = userEvent.setup();
+  renderCard();
+  await user.click(await screen.findByText("How to set it up"));
+  const workflowButton = screen.getByRole("button", { name: "Copy qeos-run.yml" });
+  const scriptButton = screen.getByRole("button", { name: "Copy qeos-run.mjs" });
+  await user.click(workflowButton);
+  await waitFor(() => expect(workflowButton).toHaveTextContent("Copied"));
+  expect(scriptButton).toHaveTextContent(/^Copy$/);
+  expect(await navigator.clipboard.readText()).toContain("name: QEOS run");
+  expect(screen.getByText("qeos-run.yml copied", { selector: "[role=status]" })).toBeInTheDocument();
+  await user.click(scriptButton);
+  await waitFor(() => expect(scriptButton).toHaveTextContent("Copied"));
+  expect(workflowButton).toHaveTextContent(/^Copy$/);
+});
