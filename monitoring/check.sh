@@ -20,4 +20,6 @@ run --entrypoint /bin/sh "$PROMETHEUS" -c 'sh prometheus/entrypoint.sh --version
 ALERTMANAGER=prom/alertmanager:v0.28.1
 echo "== alertmanager: render and amtool check-config"
 run --entrypoint /bin/sh "$ALERTMANAGER" alertmanager/test_render.sh
+echo "== grafana: dashboard lint"
+run python:3.11-slim python grafana/check_dashboards.py
 echo "monitoring: all checks passed"

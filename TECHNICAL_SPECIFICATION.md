@@ -31,7 +31,7 @@ service serves Prometheus `/metrics` (never routed by the gateway); ingestion al
 exposes job heartbeats (`job_last_success_timestamp_seconds{job}`, from the
 `job_heartbeats` table, migration 017). The opt-in `monitoring` compose profile (Prometheus, Alertmanager,
 node-exporter, cAdvisor, postgres-exporter, alert rules) scrapes them; Grafana
-sign-in and dashboards are next
+ships five provisioned dashboards, and its sign-in gate is next
 (`docs/superpowers/specs/2026-10-10-monitoring-design.md`).
 
 ## 2. Services

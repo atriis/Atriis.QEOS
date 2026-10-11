@@ -1,0 +1,11 @@
+# Dashboards come from the repository, read-only: Grafana needs no backup (spec §7)
+apiVersion: 1
+providers:
+  - name: qeos
+    folder: QEOS
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/qeos/grafana/dashboards

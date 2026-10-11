@@ -187,11 +187,10 @@ Prometheus, Alertmanager and Grafana run as the compose profile `monitoring`, wi
 VM), cAdvisor (containers) and postgres-exporter. Off by default; an install without it runs exactly as
 before. Design: `docs/superpowers/specs/2026-10-10-monitoring-design.md`.
 
-> **Status.** The stack, the metrics, the alert rules and the alert channels are built. The QEOS sign-in
-> to Grafana (the account-menu **Monitoring** item and `https://<domain>/grafana/` through the gateway)
-> and the starter dashboards are the next phase and are **not built yet**. Today the way into Grafana is
-> the break-glass login below, and it shows no dashboards yet. Prometheus is not published; it works
-> and fires alerts regardless.
+> **Status.** The stack, the metrics, the alert rules, the alert channels and the five dashboards are
+> built. The QEOS sign-in to Grafana (the account-menu **Monitoring** item and `https://<domain>/grafana/`
+> through the gateway) is the next phase and is **not built yet**. Today the way into Grafana is the
+> break-glass login below. Prometheus is not published; it works and fires alerts regardless.
 
 **Turn it on.** A new install's `.env` already holds the four lines below, commented out, with
 generated passwords: uncomment them. (An install from before monitoring: add them by hand, passwords of
@@ -214,8 +213,26 @@ text in `pg_stat_activity`. The first `up` after this release also restarts Post
 **Grafana's admin password is read on its first start only.** Changing `GRAFANA_ADMIN_PASSWORD`
 afterwards does not change the login. Either reset it in place:
 `qeos exec grafana grafana cli admin reset-admin-password '<new password>'`, or, since Grafana keeps nothing
-you would miss (its dashboards will be provisioned from the repository), delete its volume (`qeos rm -sf grafana`, then
+you would miss (its dashboards are provisioned from the repository), delete its volume (`qeos rm -sf grafana`, then
 `docker volume rm qa-vision_qeos_grafana_data`) and start again.
+
+**Dashboards.** Five dashboards are provisioned read-only from the repository (`monitoring/grafana/dashboards`)
+into the folder **QEOS**; edits made in the Grafana UI cannot be saved, change the JSON and the dashboards reload
+within a minute. The first is Grafana's home page.
+
+| Dashboard | Shows |
+|---|---|
+| QEOS overview | per service: up, requests per second, 5xx share, 95th percentile, deployed version, firing alerts |
+| Service detail | one service (pick it at the top): per endpoint rate and latency, status codes, requests in flight, process memory and CPU |
+| Jobs and uploads | time since each background job's last success and error, uploads accepted and rejected, results per hour, upload time, test executions and cases created |
+| PostgreSQL | connections, database sizes, transactions, cache hit rate, locks, slowest statements |
+| Host and containers | VM CPU, memory and disk with a 24 hour disk prediction; per container CPU, memory and restarts |
+
+How to open them today: the break-glass login, `ssh -L 3000:127.0.0.1:3000 <vm>` (or on the VM itself)
+and then `http://127.0.0.1:3000/grafana/`, user `admin` and `GRAFANA_ADMIN_PASSWORD`. After the sign-in phase, a
+superuser opens `https://<domain>/grafana/` (or **Monitoring** in the account menu) with the usual QEOS login. The
+"Slowest statements" table lists `queryid`, database, user, calls and mean time only: statement text is not
+collected on purpose (it could carry secrets or personal data); look a `queryid` up in `pg_stat_statements`.
 
 **Resources.** Six containers with these memory limits: Prometheus 512 MB, Grafana 256 MB, cAdvisor
 128 MB, Alertmanager, node-exporter and postgres-exporter 64 MB each, about 1.1 GB in all. Use a VM with
@@ -293,7 +310,7 @@ whole VM or Alertmanager is gone, route `Watchdog` to an external heartbeat serv
 man's snitch") by editing `monitoring/alertmanager/alertmanager.yml.template`.
 
 **Data.** Volumes `qa-vision_qeos_prometheus_data` and `qa-vision_qeos_grafana_data`. Grafana needs no
-backup (its dashboards will be provisioned from the repository); `deploy/backup.sh` is unchanged.
+backup (its dashboards are provisioned from the repository); `deploy/backup.sh` is unchanged.
 
 **Turn it off.** Remove `COMPOSE_PROFILES=monitoring`, then stop and remove the six containers (Compose
 does not do this for a profile that was switched off):
