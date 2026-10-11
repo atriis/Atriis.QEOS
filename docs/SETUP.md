@@ -1129,7 +1129,9 @@ discards the draft, asking first when you changed something. If the same layout 
 meanwhile, Save offers **Reload** (start again from the stored layout) or **Overwrite**. A layout
 holds at most 24 widgets. This release offers today's four widgets (Latest run, Failing in latest
 run, Pass rate this week, Flaky tests) and **Pass-rate trend** (the pass rate per day over 30 days, or
-per week or month over 90 days, the Trends view's chart); more widgets come in the next release. A
+per week or month over 90 days, the Trends view's chart), **Failure causes** and **Regressions and
+flips** (the Report's sections over 7, 14 or 30 days, 30 by default, on all branches or one; the title
+opens the Report at that section); more widgets come in the next release. A
 widget set to a branch with no runs in its period says so ("No runs on release in the last 30 days")
 with **Change settings**, which opens edit mode on that widget's settings.
 
