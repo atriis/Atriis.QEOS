@@ -3,23 +3,19 @@ import { useParams } from "react-router-dom";
 import { oneOf, useDraft, useUrlState } from "../lib/useUrlState";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Bar, BarChart, CartesianGrid, Line, LineChart,
+  Bar, BarChart, CartesianGrid,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
-import { TrendBucket, formatDuration, formatPassRate, getTrends } from "../api/analytics";
+import { TrendBucket, formatDuration, formatPassRate } from "../api/analytics";
+import { trendsViewQuery } from "../lib/healthQueries";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonCard, SkeletonStatus } from "../components/Skeleton";
 import FilterBar from "../components/FilterBar";
 import { ChartPatternDefs, DataTableDisclosure, LegendSeries, PATTERN, SeriesLegend } from "../components/ChartKit";
-import { formatPointLabel, formatTick } from "../lib/chartFormat";
+import { AXIS_TICK, TOOLTIP_STYLES, formatPointLabel, formatTick } from "../lib/chartFormat";
+import PassRateChart from "../components/PassRateChart";
 import { useMediaQuery } from "../lib/useMediaQuery";
 import PageHeader from "../components/PageHeader";
-
-const tooltipStyles = {
-  contentStyle: { background: "var(--surface-1)", border: "1px solid var(--border)", borderRadius: 6 },
-  itemStyle: { color: "var(--text-primary)" },
-  labelStyle: { color: "var(--text-secondary)" },
-} as const;
 
 // Colour plus texture (solid, stripes, dots, lines): the bars stay readable without telling hues apart.
 const STATUS = [
@@ -29,7 +25,6 @@ const STATUS = [
   { key: "skipped", label: "Skipped", paint: `url(#${PATTERN.skipped})` },
 ] as const;
 const LEGEND: LegendSeries[] = STATUS.map((s) => ({ key: s.key, label: s.label, paint: s.paint }));
-const axisTick = { fill: "var(--text-secondary)", fontSize: 12 } as const;
 const NOUN = { day: "day", week: "week", month: "month" } as const;
 
 const DEFAULTS = { days: "30", bucket: "day", branch: "", environment: "" } as const;
@@ -74,11 +69,7 @@ export function TrendsView() {
     update({ branch: commitBranch((raw) => raw.trim()), environment: commitEnvironment((raw) => raw.trim()) });
   }
 
-  const query = useQuery({
-    queryKey: ["trends", id, days, bucket, branch, environment],
-    queryFn: () =>
-      getTrends(id, { days, tz, bucket, branch: branch || undefined, environment: environment || undefined }),
-  });
+  const query = useQuery(trendsViewQuery(id, tz, days, bucket, branch, environment));
 
   const trendDays = query.data?.days ?? [];
   const totals = trendDays.reduce(
@@ -102,15 +93,6 @@ export function TrendsView() {
     `Stacked bars of results per ${unit}, ${formatPointLabel(trendDays[0]?.date ?? "", bucket)} to ${formatPointLabel(trendDays[trendDays.length - 1]?.date ?? "", bucket)}: ` +
     `${sums.passed} passed, ${sums.failed} failed, ${sums.errored} errored, ${sums.skipped} skipped.` +
     (worst ? ` Most failing or errored: ${formatPointLabel(worst.date, bucket)}, ${worst.failed + worst.errored}.` : " No failures.");
-  const rated = trendDays.filter((d) => d.pass_rate !== null);
-  const lowest = rated.reduce<(typeof trendDays)[number] | null>((w, d) => (!w || (d.pass_rate as number) < (w.pass_rate as number) ? d : w), null);
-  const rateSummary = rated.length === 0
-    ? `Pass rate per ${unit}: no ${unit} had counted results.`
-    : `Pass rate per ${unit}, from ${formatPassRate(rated[0].pass_rate)} to ${formatPassRate(rated[rated.length - 1].pass_rate)}; lowest ${formatPassRate(lowest?.pass_rate ?? null)} on ${formatPointLabel(lowest?.date ?? "", bucket)}.`;
-  const rateData = trendDays.map((d) => ({
-    date: d.date,
-    ratePct: d.pass_rate === null ? null : d.pass_rate * 100,
-  }));
 
   return (
     <section>
@@ -194,9 +176,9 @@ export function TrendsView() {
               <ResponsiveContainer width="100%" height={280}>
                 <BarChart data={trendDays} barCategoryGap="20%" accessibilityLayer>
                   <CartesianGrid stroke="var(--grid)" vertical={false} />
-                  <XAxis dataKey="date" stroke="var(--text-muted)" tick={axisTick} tickLine={false} tickFormatter={tick} minTickGap={narrow ? 36 : 16} interval="preserveStartEnd" />
-                  <YAxis allowDecimals={false} stroke="var(--text-muted)" tick={axisTick} tickLine={false} width={narrow ? 32 : 48} />
-                  <Tooltip {...tooltipStyles} labelFormatter={label} cursor={{ fill: "var(--grid)", fillOpacity: 0.5 }} />
+                  <XAxis dataKey="date" stroke="var(--text-muted)" tick={AXIS_TICK} tickLine={false} tickFormatter={tick} minTickGap={narrow ? 36 : 16} interval="preserveStartEnd" />
+                  <YAxis allowDecimals={false} stroke="var(--text-muted)" tick={AXIS_TICK} tickLine={false} width={narrow ? 32 : 48} />
+                  <Tooltip {...TOOLTIP_STYLES} labelFormatter={label} cursor={{ fill: "var(--grid)", fillOpacity: 0.5 }} />
                   {STATUS.map((s, i) => (
                     <Bar
                       key={s.key}
@@ -231,23 +213,7 @@ export function TrendsView() {
 
           <div className="card">
             <h2 id="trend-rate">Pass rate per {unit}</h2>
-            <figure className="chart-figure" aria-labelledby="trend-rate">
-              <figcaption className="sr-only">{rateSummary}</figcaption>
-              <ResponsiveContainer width="100%" height={180}>
-                <LineChart data={rateData} accessibilityLayer>
-                  <CartesianGrid stroke="var(--grid)" vertical={false} />
-                  <XAxis dataKey="date" stroke="var(--text-muted)" tick={axisTick} tickLine={false} tickFormatter={tick} minTickGap={narrow ? 36 : 16} interval="preserveStartEnd" />
-                  <YAxis domain={[0, 100]} tickFormatter={(v) => `${v}%`} stroke="var(--text-muted)" tick={axisTick} tickLine={false} width={narrow ? 40 : 48} />
-                  <Tooltip
-                    {...tooltipStyles}
-                    labelFormatter={label}
-                    cursor={{ stroke: "var(--grid)" }}
-                    formatter={(v) => [`${Number(v).toFixed(1)}%`, "Pass rate"]}
-                  />
-                  <Line dataKey="ratePct" stroke="var(--accent)" strokeWidth={2} dot={{ r: 2.5, fill: "var(--accent)", stroke: "var(--surface-1)" }} connectNulls={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </figure>
+            <PassRateChart buckets={trendDays} bucket={bucket} height={180} narrow={narrow} labelledBy="trend-rate" />
             <DataTableDisclosure name={`pass rate per ${unit}`}>
               <table className="data">
                 <thead>

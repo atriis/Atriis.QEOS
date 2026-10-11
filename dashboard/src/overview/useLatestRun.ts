@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { latestRunQuery, newRunStaleKeys } from "./queries";
+import { latestRunQuery } from "./queries";
+import { newRunStaleKeys } from "./widgets/registry";
 
 /** The latest run, and a refresh of the non-polled figures when a new one arrives (spec §2.7). */
 export function useLatestRun(projectId: number) {

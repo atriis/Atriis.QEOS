@@ -24,3 +24,13 @@ export function formatPointLabel(date: string, bucket: TrendBucket = "day"): str
   const day = new Intl.DateTimeFormat(undefined, { weekday: bucket === "day" ? "short" : undefined, year: "numeric", month: "short", day: "numeric" }).format(d);
   return bucket === "week" ? `Week of ${day}` : day;
 }
+
+/** Axis tick text: Graphite at 12px (DESIGN.md Chart Textures). */
+export const AXIS_TICK = { fill: "var(--text-secondary)", fontSize: 12 } as const;
+
+/** The Recharts tooltip on the card surface. */
+export const TOOLTIP_STYLES = {
+  contentStyle: { background: "var(--surface-1)", border: "1px solid var(--border)", borderRadius: 6 },
+  itemStyle: { color: "var(--text-primary)" },
+  labelStyle: { color: "var(--text-secondary)" },
+} as const;

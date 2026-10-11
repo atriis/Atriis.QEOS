@@ -4,7 +4,7 @@ import { REGISTRY, addableDefinitions, definitionOf, withDefaults, widgetTitle }
 
 // Catalogue types whose widgets arrive in Phase 3; each of Tasks 16-20 removes its own, Task 21 removes the set
 const PENDING = new Set<string>([
-  "pass_rate_trend", "failure_causes", "regressions", "recent_runs", "branch_health", "slowest_tests", "coverage",
+  "failure_causes", "regressions", "recent_runs", "branch_health", "slowest_tests", "coverage",
   "case_tiles", "my_failures", "my_suites",
 ]);
 
@@ -49,5 +49,5 @@ test("stored settings overlay the defaults only where still allowed; an absent b
 test("titles follow the settings, and Add widget offers registered types in catalogue order", () => {
   expect(widgetTitle({ id: "a", type: "flaky_count", size: "normal", settings: { period: 7 } })).toBe("Flaky tests, last 7 days");
   expect(widgetTitle({ id: "b", type: "failing_now", size: "normal" })).toBe("Failing in latest run");
-  expect(addableDefinitions().map((def) => def.type)).toEqual(["latest_run", "failing_now", "pass_rate_week", "flaky_count"]);
+  expect(addableDefinitions().map((def) => def.type)).toEqual(["latest_run", "failing_now", "pass_rate_week", "flaky_count", "pass_rate_trend"]);
 });

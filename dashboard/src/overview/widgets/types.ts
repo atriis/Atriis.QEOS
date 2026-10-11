@@ -1,3 +1,4 @@
+import type { QueryKey } from "@tanstack/react-query";
 import type { ComponentType, LazyExoticComponent, ReactNode } from "react";
 import type { SettingName, WidgetSettings, WidgetSize, WidgetType } from "../catalog";
 
@@ -27,4 +28,6 @@ export interface WidgetDefinition {
   Component: LazyExoticComponent<ComponentType<WidgetProps>>;
   /** The full view with the same filters (spec §2.7). */
   link: (projectId: number, settings: WidgetSettings) => string;
+  /** The query keys (prefixes) of figures that are not polled, which a new latest run makes stale (plan Ruling 27). */
+  staleKeys?: (projectId: number) => QueryKey[];
 }

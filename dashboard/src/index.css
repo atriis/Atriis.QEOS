@@ -681,6 +681,10 @@ button.widget-tool { min-width: 28px; min-height: 28px; padding: 4px; justify-co
 .add-widget-list li { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--space-3); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 .add-widget-list p { margin: var(--space-1) 0 0; font-size: 13px; }
 .customise-menu { position: relative; }
+/* Widget figures (rates, counts, durations) never shift as they change */
+.overview-grid .card { font-variant-numeric: tabular-nums; }
+.overview-empty { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+.overview-empty p { margin: 0; }
 .customise-popup { position: absolute; inset-inline-end: 0; top: calc(100% + 6px); z-index: 50; min-width: 240px; list-style: none; margin: 0; padding: var(--space-1); background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-2); }
 .stat-line { display: flex; align-items: baseline; gap: var(--space-2); flex-wrap: wrap; }
 .stat-big { font-size: 28px; font-weight: 650; letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }

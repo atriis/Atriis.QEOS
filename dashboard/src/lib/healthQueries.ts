@@ -1,4 +1,11 @@
-import { getBranches, getFlaky, getTrends } from "../api/analytics";
+import { type TrendBucket, getBranches, getFlaky, getTrends } from "../api/analytics";
+
+/** The Trends view's own query (its key holds no time zone: the browser's zone is the same for both). The Overview's
+ *  Pass-rate trend asks it with the view's day choices, so the two share one answer. "" for no branch (every branch). */
+export const trendsViewQuery = (projectId: number, tz: string, days: number, bucket: TrendBucket, branch: string, environment = "") => ({
+  queryKey: ["trends", projectId, days, bucket, branch, environment] as const,
+  queryFn: () => getTrends(projectId, { days, tz, bucket, branch: branch || undefined, environment: environment || undefined }),
+});
 
 /** The Branches view's own query (30 days by default): the branch setting and Branch health share its answer. */
 export const branchesViewQuery = (projectId: number, days = 30) => ({

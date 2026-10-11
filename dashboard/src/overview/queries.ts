@@ -1,3 +1,4 @@
+import type { QueryKey } from "@tanstack/react-query";
 import { getFailureGroups, listRuns, type Run } from "../api/runs";
 import { LIVE_REFRESH_MS } from "../lib/live";
 
@@ -16,7 +17,9 @@ export const failureGroupsQuery = (run: Run | undefined) => ({
   enabled: run !== undefined && run.failed + run.errored > 0,
 });
 
-/** What a new latest run makes stale (plan Ruling 27): figures that are not polled refetch once, not on every tick. */
-export const newRunStaleKeys = (projectId: number): (readonly unknown[])[] => [
+/** What a new latest run makes stale for the page as a whole (plan Ruling 27): figures that are not polled refetch once,
+ *  not on every tick. Each widget adds its own keys (`WidgetDefinition.staleKeys`); `newRunStaleKeys` in the registry
+ *  joins the two. */
+export const pageStaleKeys = (projectId: number): QueryKey[] => [
   ["trends", projectId], ["flaky", projectId], ["report", projectId], ["branches", projectId], ["latest-keys", projectId],
 ];

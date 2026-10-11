@@ -1,7 +1,10 @@
+import { type QueryKey, partialMatchKey } from "@tanstack/react-query";
+import { pageStaleKeys } from "../queries";
 import { CATALOG, type StoredLayout, type StoredWidget, type WidgetSettings, type WidgetType, isValidSetting } from "../catalog";
 import { failingNow } from "./failingNow";
 import { flakyCount } from "./flakyCount";
 import { latestRun } from "./latestRun";
+import { passRateTrend } from "./passRateTrend";
 import { passRateWeek } from "./passRateWeek";
 import type { WidgetDefinition } from "./types";
 
@@ -11,7 +14,19 @@ export const REGISTRY: Partial<Record<WidgetType, WidgetDefinition>> = {
   failing_now: failingNow,
   pass_rate_week: passRateWeek,
   flaky_count: flakyCount,
+  pass_rate_trend: passRateTrend,
 };
+
+/** What a new latest run makes stale: the page's keys, then each registered widget's own. A key that an earlier
+ *  (broader) one already covers is left out, so no query is invalidated, and refetched, twice. */
+export function newRunStaleKeys(projectId: number): QueryKey[] {
+  const keys: QueryKey[] = [];
+  const candidates = [...pageStaleKeys(projectId), ...Object.values(REGISTRY).flatMap((def) => def.staleKeys?.(projectId) ?? [])];
+  for (const key of candidates) {
+    if (!keys.some((broader) => partialMatchKey(key, broader))) keys.push(key);
+  }
+  return keys;
+}
 
 const warned = new Set<string>();
 
