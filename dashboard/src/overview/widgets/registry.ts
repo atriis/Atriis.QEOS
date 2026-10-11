@@ -1,6 +1,7 @@
 import { type QueryKey, partialMatchKey } from "@tanstack/react-query";
 import { pageStaleKeys } from "../queries";
 import { CATALOG, type StoredLayout, type StoredWidget, type WidgetSettings, type WidgetType, isValidSetting } from "../catalog";
+import { coverage } from "./coverage";
 import { failingNow } from "./failingNow";
 import { failureCauses } from "./failureCauses";
 import { flakyCount } from "./flakyCount";
@@ -8,6 +9,7 @@ import { latestRun } from "./latestRun";
 import { passRateTrend } from "./passRateTrend";
 import { passRateWeek } from "./passRateWeek";
 import { regressions } from "./regressions";
+import { slowestTests } from "./slowestTests";
 import type { WidgetDefinition } from "./types";
 
 /** Widget type → definition. registry.test.ts fails when this and overview_widgets.json disagree. */
@@ -19,6 +21,8 @@ export const REGISTRY: Partial<Record<WidgetType, WidgetDefinition>> = {
   pass_rate_trend: passRateTrend,
   failure_causes: failureCauses,
   regressions,
+  slowest_tests: slowestTests,
+  coverage,
 };
 
 /** What a new latest run makes stale: the page's keys, then each registered widget's own. A key that an earlier

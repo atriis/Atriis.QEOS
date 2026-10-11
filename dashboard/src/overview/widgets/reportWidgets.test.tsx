@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { server } from "../../test/server";
 import { addDays, todayIn } from "../../pages/report/useReportFilters";
-import { CAUSES_REPORT, REGRESSIONS_REPORT, emptyReport } from "../../pages/report/testFixtures";
+import { CAUSES_REPORT, REGRESSIONS_REPORT, SUMMARY_REPORT, TESTS_REPORT, emptyReport } from "../../pages/report/testFixtures";
 import { mockOverviewData, personalState, renderOverview } from "../testing";
 
 type ReportBody = { from: string; to: string; branch: string | null; sections: string[] };
@@ -88,4 +88,65 @@ test("a report widget on a branch without runs says so; a failing one shows its 
   const regressions = screen.getByRole("region", { name: "Regressions and flips" });
   expect(await within(regressions).findByRole("alert")).toHaveTextContent("Report is down");
   expect(within(regressions).getByRole("button", { name: "Retry" })).toBeInTheDocument();
+});
+
+const key = (n: number) => n.toString(16).padStart(64, "0");
+const AREAS_WIRE = {
+  generated_at: "v1", counts: { cases: 4, linked: 3, manual: 1 },
+  folders: ["features/booking", "features/payments"], features: ["Booking", "Payments"], labels: ["smoke"],
+  suites: [{ id: 12, name: "Regression" }],
+  cases: [
+    { n: 1, t: "Book one-way", k: key(1), fo: 0, fe: 0, l: [0], s: [0] },
+    { n: 2, t: "Pay by card", k: key(2), fo: 1, fe: 1, l: [], s: [0] },
+    { n: 3, t: "Refund", k: key(3), fo: 1, fe: 1, l: [], s: [] },
+    { n: 4, t: "Manual check", k: null, fo: null, fe: null, l: [], s: [] },
+  ],
+};
+
+test("Slowest tests reads the summary's slowest tests and links to the report", async () => {
+  mockOverviewData({ layout: personalState({ id: "s", type: "slowest_tests", size: "normal" }) });
+  const bodies = reportAsked(() => SUMMARY_REPORT);
+  renderOverview();
+  expect(await screen.findByRole("link", { name: "slow one" })).toHaveAttribute("href", `/projects/42/tests/${"b".repeat(64)}`);
+  expect(screen.getByText("1m 21s on average · 30 runs")).toBeInTheDocument();
+  await waitFor(() => expect(bodies).toHaveLength(1));
+  expect(bodies[0].sections).toEqual(["summary"]);
+  expect(bodies[0].branch).toBeNull();
+  expect(await headingLink("Slowest tests")).toHaveAttribute("href", "/projects/42/report?period=30&branch=*#report-summary");
+});
+
+test("Slowest tests on a branch without runs says so", async () => {
+  mockOverviewData({ layout: personalState({ id: "s", type: "slowest_tests", size: "normal", settings: { period: 7, branch: "release" } }) });
+  reportAsked(() => emptyReport());
+  renderOverview();
+  expect(await screen.findByText("No runs on release in the last 7 days")).toBeInTheDocument();
+});
+
+test("Coverage joins the cases with the tests section like the Report does, across every branch", async () => {
+  mockOverviewData({ layout: personalState({ id: "v", type: "coverage", size: "normal" }) });
+  const bodies = reportAsked(() => TESTS_REPORT);
+  server.use(http.get("/api/v1/projects/42/case-areas", () => HttpResponse.json(AREAS_WIRE)));
+  const { qc } = renderOverview();
+  expect(await screen.findByText("Automated, not run in 30 days")).toBeInTheDocument();
+  expect(screen.getByText("Active cases").nextElementSibling).toHaveTextContent("4");
+  expect(screen.getByText("Linked (automated)").nextElementSibling).toHaveTextContent("3");
+  expect(screen.getByText("Manual").nextElementSibling).toHaveTextContent("1");
+  expect(screen.getByText("Automated, not run in 30 days").nextElementSibling).toHaveTextContent("1");
+  expect(screen.getByText("Tests without a case").nextElementSibling).toHaveTextContent("1");
+  await waitFor(() => expect(bodies).toHaveLength(1));
+  expect(bodies[0].sections).toEqual(["tests"]);
+  expect(bodies[0].branch).toBeNull();
+  expect(await headingLink("Coverage")).toHaveAttribute("href", "/projects/42/report?period=30&branch=*#report-coverage");
+  // The Report's case-areas query, shared with it
+  expect(qc.getQueryData(["case-areas", 42])).toBeDefined();
+});
+
+test("Coverage says when the cases cannot be loaded, with Retry", async () => {
+  mockOverviewData({ layout: personalState({ id: "v", type: "coverage", size: "normal" }) });
+  reportAsked(() => TESTS_REPORT);
+  server.use(http.get("/api/v1/projects/42/case-areas", () => HttpResponse.json({ detail: "down" }, { status: 500 })));
+  renderOverview();
+  const card = await screen.findByRole("region", { name: "Coverage" });
+  expect(await within(card).findByRole("alert")).toHaveTextContent("Cases could not be loaded");
+  expect(within(card).getByRole("button", { name: "Retry" })).toBeInTheDocument();
 });

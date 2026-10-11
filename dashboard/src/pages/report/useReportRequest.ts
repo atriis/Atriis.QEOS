@@ -94,13 +94,18 @@ export function useDefaultBranch(projectId: number): string | null {
   return repos.data?.[0]?.default_branch || "main";
 }
 
+/** Test management's case areas for the coverage join (ADR-026). The Report and the Overview's Coverage share it. */
+export const caseAreasQuery = (projectId: number) => ({
+  queryKey: ["case-areas", projectId] as const,
+  queryFn: ({ signal }: { signal: AbortSignal }) => getCaseAreas(projectId, { signal }),
+  staleTime: REPORT_STALE_MS,
+  retry: false,
+});
+
 export function useReportRequest(projectId: number, filters: ReportFilters, tz: string, opts: { loadCaseAreas: boolean }) {
   const defaultBranch = useDefaultBranch(projectId);
   const needAreas = opts.loadCaseAreas || filters.area !== null || filters.suite !== null;
-  const caseAreas = useQuery({
-    queryKey: ["case-areas", projectId], queryFn: ({ signal }) => getCaseAreas(projectId, { signal }),
-    enabled: needAreas, staleTime: REPORT_STALE_MS, retry: false,
-  });
+  const caseAreas = useQuery({ ...caseAreasQuery(projectId), enabled: needAreas });
   const since = runUrlsSince(filters);
   const runUrls = useQuery({
     queryKey: ["run-urls", projectId, since], queryFn: ({ signal }) => getRunUrls(projectId, since, { signal }),
