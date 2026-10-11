@@ -42,8 +42,11 @@ they fall through to the dashboard.
     signs in; Grafana trusts it only from the gateway's fixed `grafana-front` address
     (`GATEWAY_GRAFANA_FRONT_IP`). `Authorization` is removed toward Grafana.
   - 401: `302 /monitoring?next=<path>`. The dashboard's `/monitoring` page signs in if needed, mints the
-    cookie and comes back. `next` is NGINX's `$uri`, the path only: NGINX cannot URL-encode, so a deep
-    link's query string is dropped (Ruling 4).
+    cookie and comes back. `next` is the path of the raw request line, still percent-encoded as the
+    client sent it (`$grafana_next`, a map on `$request_uri`), never NGINX's decoded `$uri`: a decoded
+    `%0d%0a` would split the `Location` header and inject response headers. A deep link's query string is
+    dropped (Ruling 4); a path that does not start with `/grafana/` falls back to `/grafana/`.
+  - `location ^~ /grafana/`, so no regex location can take a `/grafana/` path past the check.
   - 403: `403 {"detail":"Forbidden"}`. auth-service down, or any other answer: `502 {"detail":"Bad Gateway"}`.
     Nothing but a 2xx reaches Grafana.
 - Grafana is resolved when a request comes, so the gateway starts while Grafana is down and answers 502

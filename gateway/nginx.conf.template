@@ -19,6 +19,14 @@ http {
         ""      $request_id;
     }
 
+    # The sign-in redirect's `next` for /grafana/ (grafana-on.conf): the path of the RAW request line, so
+    # it stays percent-encoded. $uri is decoded: an encoded CR LF in it would split the Location header
+    # and let a link set any response header. Anything but a /grafana/ path falls back to /grafana/
+    map $request_uri $grafana_next {
+        "~^(?<grafana_path>/grafana/[^?#]*)" $grafana_path;
+        default "/grafana/";
+    }
+
     log_format json escape=json '{'
         '"time":"$time_iso8601",'
         '"request_id":"$req_id",'

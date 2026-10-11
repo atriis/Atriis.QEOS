@@ -416,6 +416,19 @@ body_lacks "/metrics leaks no Prometheus text" '# HELP'
 check "/internal is not proxied (SPA fallback)" 200 GET "$BASE/internal/v1/projects/retention"
 body_has "/internal serves the SPA" '<div id="root">'
 
+# /grafana/ never puts a decoded path into a header (response splitting): an encoded CR LF stays
+# encoded. A JSON 404 with monitoring off, a 302 to /monitoring (no cookie) with it on
+status="$(curl -ks -o "$TMP/body" -D "$TMP/headers" -w '%{http_code}' "$BASE/grafana/x%0d%0aSet-Cookie:%20pwn=1")"
+case "$status" in
+  302|404) pass "/grafana/ with an encoded CR LF answers $status" ;;
+  *) fail "/grafana/ with an encoded CR LF: expected 302 or 404, got $status" ;;
+esac
+if grep -qiE '^set-cookie:[[:space:]]*pwn' "$TMP/headers"; then
+  fail "/grafana/ with an encoded CR LF injected a response header"
+else
+  pass "... and injects no response header"
+fi
+
 # ---- retention: the job runs, and really reaches project-service inside the stack ----
 if docker compose ps --status running --services 2>/dev/null | grep -qx ingestion-retention; then
   pass "ingestion-retention is running"
