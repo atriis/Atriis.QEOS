@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "max_widgets": 24,
+  "max_body_bytes": 65536,
+  "widget_id_pattern": "^[A-Za-z0-9_-]{1,32}$",
+  "sizes": ["normal", "wide"],
+  "settings": {
+    "rows": {"kind": "choice", "values": [5, 10]},
+    "period": {"kind": "choice", "values": [7, 14, 30]},
+    "granularity": {"kind": "choice", "values": ["day", "week", "month"]},
+    "branch": {"kind": "text", "min_length": 1, "max_length": 255},
+    "author": {"kind": "text", "min_length": 1, "max_length": 255}
+  },
+  "types": {
+    "latest_run": {"settings": []},
+    "failing_now": {"settings": ["rows"]},
+    "pass_rate_week": {"settings": ["branch"]},
+    "flaky_count": {"settings": ["period"]},
+    "pass_rate_trend": {"settings": ["granularity", "branch"]},
+    "failure_causes": {"settings": ["period", "branch"]},
+    "regressions": {"settings": ["period", "branch", "rows"]},
+    "recent_runs": {"settings": ["branch", "rows"]},
+    "branch_health": {"settings": ["rows"]},
+    "slowest_tests": {"settings": ["period", "branch", "rows"]},
+    "coverage": {"settings": ["period"]},
+    "case_tiles": {"settings": []},
+    "my_failures": {"settings": ["author", "rows"]},
+    "my_suites": {"settings": ["rows"]}
+  }
+}

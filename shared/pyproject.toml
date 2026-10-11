@@ -19,3 +19,7 @@ dependencies = [
 # qeos_shared/, setuptools' flat-layout discovery errors out rather than guessing.
 [tool.setuptools]
 packages = ["qeos_shared"]
+
+# The Overview widget catalogue is data, not code: listed so a wheel carries it (qeos_shared.overview_widgets)
+[tool.setuptools.package-data]
+qeos_shared = ["overview_widgets.json"]
