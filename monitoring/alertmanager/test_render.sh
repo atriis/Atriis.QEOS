@@ -76,14 +76,12 @@ expect tricky_urls "webhook_url: 'https://h.example/t:u#v'" 2
 if grep -qF "h.example" "$out/tricky_urls.err"; then fail "tricky_urls: a webhook reached the log"; fi
 
 # A newline in a URL: amtool rightly rejects such a URL, so only the YAML is checked; the value stays
-# verbatim as a 
- escape and the file parses (the awk-free check: one line per receiver entry)
+# verbatim as a backslash-n escape and the entry stays on one line
 skip_amtool=1
 render newline_url "ALERT_TEAMS_WEBHOOK_URL=https://h.example/x
 y"
 skip_amtool=0
-expect newline_url 'webhook_url: "https://h.example/x
-y"' 2
+expect newline_url 'webhook_url: "https://h.example/x\ny"' 2
 expect newline_url "send_resolved: true" 2
 
 if [ "$failures" -eq 0 ]; then
