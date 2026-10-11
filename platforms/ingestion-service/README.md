@@ -314,4 +314,4 @@ cp .env.example .env                                         # set SECRET_KEY = 
 .venv/Scripts/python.exe -m uvicorn src.ingestion.api.main:app --reload --port 8003
 ```
 
-Tests: `rm -f test.db && SECRET_KEY=test-secret .venv/Scripts/python.exe -m pytest tests/ -q`
+Tests: `SECRET_KEY=test-secret .venv/Scripts/python.exe -m pytest tests/ -q`

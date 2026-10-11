@@ -97,7 +97,7 @@ docker compose exec project-service alembic upgrade head  # first run, and after
 ## Tests
 
 ```bash
-rm -f test.db && SECRET_KEY=test-secret .venv/Scripts/python.exe -m pytest tests/ -q
+SECRET_KEY=test-secret .venv/Scripts/python.exe -m pytest tests/ -q
 ```
 
 Every outgoing HTTP call in the suite is mocked with `respx`; an unmocked request fails the test.

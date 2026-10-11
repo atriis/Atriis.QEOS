@@ -1,3 +1,8 @@
+import atexit
+import shutil
+import tempfile
+from pathlib import Path
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -8,7 +13,11 @@ from fastapi.testclient import TestClient
 import os
 
 # Use test database
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
+# A database file of this run's own: two runs of the suite at once (two terminals, two agents) used to share
+# ./test.db and drop each other's tables mid-test
+_DB_DIR = tempfile.mkdtemp(prefix="qeos-tests-")
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{Path(_DB_DIR, 'test.db').as_posix()}"
+atexit.register(lambda: (engine.dispose(), shutil.rmtree(_DB_DIR, ignore_errors=True)))
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
