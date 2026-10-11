@@ -457,12 +457,20 @@ check "remove the invitee's member role" 204 DELETE \
   "$BASE/api/v1/organizations/$ORG_ID/members/${INVITEE_MEMBER_ID:-0}" "${AUTH[@]}"
 check "add the invitee back as a viewer" 201 POST "$BASE/api/v1/organizations/$ORG_ID/members" "${AUTH[@]}" \
   -H "Content-Type: application/json" -d "{\"user_id\":${INVITEE_USER_ID:-0},\"role\":\"viewer\"}"
+check "the invitee's role is now viewer" 200 GET "$BASE/api/v1/organizations/$ORG_ID/members/me" "${INVITEE_AUTH[@]}"
+body_has "... is viewer" '"role":"viewer"'
+check "a viewer saves a personal layout (version 1 -> 2)" 200 PUT "$LAYOUT_URL/personal" "${INVITEE_AUTH[@]}" \
+  -H "Content-Type: application/json" -d "${LAYOUT_BODY/\"version\":0/\"version\":1}"
+body_has "... version 2" '"version":2'
 check "a viewer's PUT of the project default is refused" 403 PUT "$LAYOUT_URL/project" "${INVITEE_AUTH[@]}" \
   -H "Content-Type: application/json" -d "$LAYOUT_BODY"
 check "the viewer's personal layout survived the role change" 200 GET "$LAYOUT_URL" "${INVITEE_AUTH[@]}"
 body_has "... still personal" '"source":"personal"'
 check "the owner sets the project default" 200 PUT "$LAYOUT_URL/project" "${AUTH[@]}" \
   -H "Content-Type: application/json" -d "$LAYOUT_BODY"
+# The owner has no personal layout, so the stored default is what they are served
+check "the owner reads the project default back" 200 GET "$LAYOUT_URL" "${AUTH[@]}"
+body_has "... served as the project default" '"source":"project"'
 
 # The catch-all now serves the dashboard SPA, so these paths answer its HTML,
 # never a proxied service: the security intent is "not reachable", not "404".
