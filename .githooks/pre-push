@@ -1,0 +1,8 @@
+#!/bin/sh
+# Runs before every `git push` once enabled with `git config core.hooksPath .githooks`.
+# Fast static checks only (under a second); the test suites stay with the pusher and CI.
+# Skip once with `git push --no-verify`.
+root="$(git rev-parse --show-toplevel)"
+python=python3
+command -v python3 >/dev/null 2>&1 && python3 -c "" 2>/dev/null || python=python
+exec "$python" "$root/scripts/check_architecture_docs.py"

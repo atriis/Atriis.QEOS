@@ -132,5 +132,135 @@ def test_a_missing_section_is_reported_not_crashed_on(repo):
                                 "README.md: no component table"]
 
 
+ROUTE_COMPOSE = """services:
+  auth-service:
+    image: x
+  project-service:
+    image: x
+  runs-service:
+    image: x
+"""
+ROUTE_NGINX = """server {
+    listen 80;
+    location / { return 301 https://$host$request_uri; }
+}
+server {
+    listen 443 ssl;
+    location ~ ^/api/v1/projects/[0-9]+/(runs|analytics)(/|$) {
+        set $upstream http://runs-service:8000;
+        proxy_pass $upstream;
+    }
+    location /api/v1/projects {
+        set $upstream http://project-service:8000;
+        proxy_pass $upstream;
+    }
+    location = /api/v1/auth/login {
+        limit_req zone=auth;
+        set $upstream http://auth-service:8000;
+        proxy_pass $upstream;
+    }
+    location /api/v1/auth {
+        set $upstream http://auth-service:8000;
+        proxy_pass $upstream;
+    }
+    location /api/ { return 404; }
+    location / {
+        set $upstream http://dashboard:80;
+        proxy_pass $upstream;
+    }
+}
+"""
+ROUTE_README = """# Gateway
+
+## Routes
+
+| Path | Service |
+|---|---|
+| `/api/v1/projects/{id}/runs…`, `…/analytics…` | runs-service |
+| `/api/v1/projects…` | project-service |
+| `/api/v1/auth…` | auth-service |
+| `/health` | the gateway itself |
+
+## Next
+"""
+APIS = {
+    "auth-service/auth-service/src/auth": 'api_router.include_router(auth.router, prefix="/auth", tags=["auth"])\n',
+    "project-service/src/project": 'api_router.include_router(projects.router, prefix="/projects")\n'
+                                   'api_router.include_router(\n    repos.router, prefix="/projects/{project_id}/repositories"\n)\n',
+    "runs-service/src/runs": 'api_router.include_router(runs.router, prefix="/projects/{project_id}/runs")\n'
+                             'api_router.include_router(analytics.router, prefix="/projects/{project_id}/analytics")\n'
+                             'api_router.include_router(report.router, prefix="/projects/{project_id}/analytics")\n',
+}
+
+
+@pytest.fixture
+def routes(tmp_path):
+    files = {"docker-compose.yml": ROUTE_COMPOSE, "gateway/nginx.conf.template": ROUTE_NGINX,
+             "gateway/README.md": ROUTE_README,
+             **{f"platforms/{d}/api/v1/api.py": text for d, text in APIS.items()},
+             "platforms/runs-service/.venv/lib/x/api/v1/api.py": 'include_router(x, prefix="/nowhere")\n'}
+    for rel, text in files.items():
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text(text, encoding="utf-8")
+
+    def edit(rel, old, new):
+        path = tmp_path / rel
+        text = path.read_text(encoding="utf-8")
+        assert old in text
+        path.write_text(text.replace(old, new), encoding="utf-8")
+    return tmp_path, edit
+
+
+def test_matching_routes_have_no_problems(routes):
+    root, _ = routes
+    assert docs.check_routes(root) == []
+
+
+def test_nginx_picks_exact_then_regex_then_longest_prefix():
+    locations = docs.https_locations(ROUTE_NGINX)
+    assert docs.route(locations, "/api/v1/auth/login")[0] == "="
+    assert docs.route(locations, "/api/v1/projects/1/runs")[2] == "runs-service"
+    assert docs.route(locations, "/api/v1/projects/1/repositories")[2] == "project-service"
+    assert docs.route(locations, "/api/v1/nothing")[2] is None
+    assert docs.route(locations, "/login")[2] == "dashboard"
+
+
+def test_continued_paths_in_the_routes_table_take_the_first_path_s_base():
+    assert docs.documented_routes(ROUTE_README)[:2] == [
+        ("/api/v1/projects/{id}/runs", "runs-service"), ("/api/v1/projects/{id}/analytics", "runs-service")]
+
+
+def test_a_new_api_prefix_the_gateway_sends_elsewhere_is_reported(routes):
+    root, edit = routes
+    edit("platforms/runs-service/src/runs/api/v1/api.py", "\n",
+         '\napi_router.include_router(x.router, prefix="/projects/{project_id}/flaky")\n')
+    assert docs.check_routes(root) == [
+        "gateway: /api/v1/projects/1/flaky (runs-service's /projects/{id}/flaky) goes to project-service",
+        "gateway/README.md Routes: /api/v1/projects/{id}/flaky belongs to runs-service, the table says project-service"]
+
+
+def test_a_gateway_route_without_a_service_route_is_reported(routes):
+    root, edit = routes
+    edit("gateway/nginx.conf.template", "(runs|analytics)", "(runs|analytics|trends)")
+    assert docs.check_routes(root) == [
+        "gateway: location ^/api/v1/projects/[0-9]+/(runs|analytics|trends)(/|$) sends "
+        "/api/v1/projects/1/trends to runs-service, which has no such route"]
+
+
+def test_a_routes_table_row_naming_the_wrong_service_is_reported(routes):
+    root, edit = routes
+    edit("gateway/README.md", "`/api/v1/auth…` | auth-service", "`/api/v1/auth…` | project-service")
+    assert docs.check_routes(root) == [
+        "gateway/README.md Routes: /api/v1/auth belongs to auth-service, the table says project-service",
+        "gateway/README.md Routes: /api/v1/auth is listed for project-service, the gateway sends it to auth-service"]
+
+
+def test_a_missing_routes_table_is_reported(routes):
+    root, edit = routes
+    edit("gateway/README.md", "## Routes", "## Paths")
+    assert docs.check_routes(root) == ["gateway/README.md: no Routes table"]
+
+
 def test_the_real_repository_matches():
     assert docs.check() == []
+    assert docs.check_routes() == []

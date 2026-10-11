@@ -5,13 +5,17 @@
 Implementation, read from the repository:
   - the long-running services of docker-compose.yml and deploy/docker-compose.prod.yml (a service another
     one waits on with `service_completed_successfully` is a one-shot job, db-init or a migration, and skipped);
-  - the hosts the gateway proxies to (gateway/*.conf*).
+  - the hosts the gateway proxies to (gateway/*.conf*);
+  - each service's public API: the router prefixes in platforms/**/api/v1/api.py, mounted at /api/v1.
 Documentation:
   - the Mermaid diagram and the component table in README.md's Architecture section;
-  - the Services row of the implementation status banner in ARCHITECTURE_BLUEPRINT_V1_0.md.
+  - the Services row of the implementation status banner in ARCHITECTURE_BLUEPRINT_V1_0.md;
+  - the Routes table in gateway/README.md.
 
 Both directions are checked: every running service is drawn and listed, and every service the documents
-name exists. Exits 1 with one line per finding. Standard library only.
+name exists; every API prefix reaches its own service through the gateway, every proxied route has a
+service behind it, and the Routes table says where each path goes. Exits 1 with one line per finding.
+Standard library only.
 """
 from __future__ import annotations
 
@@ -119,14 +123,144 @@ def check(root: Path = ROOT) -> list[str]:
     return problems
 
 
+# ---- Routes -----------------------------------------------------------------------------------------------
+
+API = "/api/v1"
+Location = tuple[str, str, "str | None"]  # (modifier, pattern, upstream host)
+
+
+def service_prefixes(root: Path, services: set[str]) -> dict[str, list[str]]:
+    """{service: ["/projects/{id}/cases", ...]} from each running service's api.py, path parameters as {id}."""
+    found: dict[str, list[str]] = {}
+    for api in sorted(root.glob("platforms/**/api/v1/api.py")):
+        if ".venv" in api.parts:
+            continue
+        name = api.relative_to(root / "platforms").parts[0]
+        if name in services:
+            text = api.read_text(encoding="utf-8")
+            prefixes = re.findall(r'include_router\(\s*[\w.]+,\s*prefix="([^"]+)"', text)
+            found[name] = sorted({re.sub(r"\{\w+\}", "{id}", p) for p in prefixes})
+    return found
+
+
+def https_locations(conf: str) -> list[Location]:
+    """Each location of the HTTPS server block, in order; the HTTP block only redirects."""
+    start = conf.index("listen 443")
+    locations = []
+    for m in re.finditer(r"location\s+(=|~\*?|\^~)?\s*(\S+)\s*\{", conf[start:]):
+        body_start = start + m.end()
+        depth, i = 1, body_start
+        while depth:
+            depth += {"{": 1, "}": -1}.get(conf[i], 0)
+            i += 1
+        host = re.search(r"set \$\w*upstream http://([a-z0-9-]+):\d+", conf[body_start:i])
+        locations.append((m.group(1) or "", m.group(2), host.group(1) if host else None))
+    return locations
+
+
+def route(locations: list[Location], uri: str) -> Location | None:
+    """The location NGINX picks: an exact match, else the longest prefix when it is ^~, else the first
+    matching regex in file order, else the longest prefix."""
+    for loc in locations:
+        if loc[0] == "=" and loc[1] == uri:
+            return loc
+    prefixes = [loc for loc in locations if loc[0] in ("", "^~") and uri.startswith(loc[1])]
+    longest = max(prefixes, key=lambda loc: len(loc[1]), default=None)
+    if longest and longest[0] == "^~":
+        return longest
+    for loc in locations:
+        if loc[0].startswith("~") and re.search(loc[1], uri, re.IGNORECASE if loc[0] == "~*" else 0):
+            return loc
+    return longest
+
+
+def concrete(path: str) -> str:
+    return path.replace("{id}", "1")
+
+
+def regex_examples(pattern: str) -> list[str]:
+    """The paths a location regex such as ^/api/v1/projects/[0-9]+/(a|b)(/|$) stands for."""
+    body = pattern.strip("^$").replace("[0-9]+", "1").replace("(/|$)", "")
+    group = re.search(r"\(([^()]+)\)", body)
+    if not group:
+        return [body]
+    return [body[:group.start()] + alt + body[group.end():] for alt in group.group(1).split("|")]
+
+
+def under(path: str, prefix: str) -> bool:
+    return path == prefix or path.startswith(prefix.rstrip("/") + "/")
+
+
+def documented_routes(readme: str) -> list[tuple[str, str]]:
+    """(path prefix, service) from gateway/README.md's Routes table; "…/x" continues the cell's first path."""
+    section = re.search(r"^## Routes\n(.*?)(?=^## |\Z)", readme, re.MULTILINE | re.DOTALL)
+    routes = []
+    for line in (section.group(1) if section else "").splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 2 or not re.fullmatch(r"[a-z0-9-]+-service", cells[1]):
+            continue  # the header, /health, /grafana/ and the catch-all rows
+        base = None
+        for path in re.findall(r"`([^`]+)`", cells[0]):
+            continues = path.startswith("…")
+            path = path.replace("…", "")
+            if not continues:
+                base = path.rsplit("/", 1)[0]
+            elif base is not None:
+                path = base + path
+            routes.append((path.rstrip("/"), cells[1]))
+    return routes
+
+
+def check_routes(root: Path = ROOT) -> list[str]:
+    problems: list[str] = []
+    read = lambda rel: (root / rel).read_text(encoding="utf-8")
+    prefixes = service_prefixes(root, set(compose_services(read("docker-compose.yml"))))
+    locations = https_locations(read("gateway/nginx.conf.template"))
+    documented = documented_routes(read("gateway/README.md"))
+    if not documented:
+        return ["gateway/README.md: no Routes table"]
+
+    # Implementation: every API prefix reaches its own service. Documentation: the Routes table says so
+    for service, paths in sorted(prefixes.items()):
+        for prefix in paths:
+            path = concrete(API + prefix)
+            for uri in (path, path + "/1"):
+                loc = route(locations, uri)
+                if not loc or loc[2] != service:
+                    problems.append(f"gateway: {uri} ({service}'s {prefix}) goes to {loc[2] if loc else 'nowhere'}")
+                    break
+            covering = [d for d in documented if under(path, concrete(d[0]))]
+            best = max(covering, key=lambda d: len(d[0]), default=None)
+            if not best or best[1] != service:
+                problems.append(f"gateway/README.md Routes: {API + prefix} belongs to {service}, "
+                                f"the table says {best[1] if best else 'nothing'}")
+
+    # Every proxied API location has that service's API behind it
+    for modifier, pattern, host in locations:
+        if host not in prefixes or "/api/" not in pattern:
+            continue
+        for uri in (regex_examples(pattern) if modifier.startswith("~") else [pattern]):
+            ours = [concrete(API + p) for p in prefixes[host]]
+            if not any(under(uri, p) or under(p, uri) for p in ours):
+                problems.append(f"gateway: location {pattern} sends {uri} to {host}, which has no such route")
+
+    # Every documented path goes where the table says
+    for path, service in documented:
+        loc = route(locations, concrete(path))
+        if not loc or loc[2] != service:
+            problems.append(f"gateway/README.md Routes: {path} is listed for {service}, "
+                            f"the gateway sends it to {loc[2] if loc else 'nowhere'}")
+    return problems
+
+
 def main() -> int:
-    problems = check()
+    problems = check() + check_routes()
     for p in problems:
         print(f"architecture docs: {p}")
     if problems:
-        print("Update README.md's Architecture section and the blueprint's status banner to match.", file=sys.stderr)
+        print("Update the documents named above, or the gateway, to match.", file=sys.stderr)
         return 1
-    print("architecture docs: README diagram, component table and blueprint banner match the stack")
+    print("architecture docs: README diagram, component table, blueprint banner and gateway routes match the stack")
     return 0
 
 

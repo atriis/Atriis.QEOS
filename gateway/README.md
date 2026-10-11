@@ -25,6 +25,10 @@ is what takes `/organizations/{id}/projects` away from organization-service and 
 `/projects/{id}/…` paths away from project-service. `/metrics` and `/internal` are never routed:
 they fall through to the dashboard.
 
+CI keeps this table honest: `scripts/check_architecture_docs.py` replays NGINX's location choice for every
+router prefix in each service's `api/v1/api.py` and fails when a prefix reaches another service, a location
+proxies to a service with no such route, or a row here names the wrong service.
+
 ## Grafana (`/grafana/`, ADR-027)
 
 `entrypoint.sh` picks the location from `MONITORING_ENABLED`, the same `.env` value auth-service reads

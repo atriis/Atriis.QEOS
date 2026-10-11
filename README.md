@@ -193,7 +193,8 @@ Blueprint domains not started: Automation, Marketplace, AI runtime. Administrati
 **Stack:** Python 3.11 with FastAPI, SQLAlchemy and Alembic, PostgreSQL 15, React 19, NGINX and Docker Compose.
 
 **Kept in step:** CI runs [`scripts/check_architecture_docs.py`](scripts/check_architecture_docs.py), which fails when the diagram,
-this table or the blueprint's status banner names a service the compose files don't run, or misses one they do.
+this table or the blueprint's status banner names a service the compose files don't run, or misses one they do. It also
+checks each service's API prefixes against the gateway's routing and the [gateway's Routes table](gateway/README.md#routes).
 
 **Design principles:**
 - The services never call each other to build a page. The dashboard composes the data ([ADR-022](docs/architecture/adr/INDEX.md)).
@@ -322,12 +323,17 @@ The design is in ADR-019.
 | Dashboard | `cd dashboard && npm run lint && npm run typecheck && npx vitest run && npm run build` |
 | Monitoring configuration | `bash monitoring/check.sh` (promtool rule tests, amtool, dashboard lint) |
 | Whole stack | `bash scripts/smoke_gateway.sh` against a running local stack |
+| Architecture docs | `python scripts/check_architecture_docs.py` (README diagram and table, blueprint banner, gateway routes) |
 
 **Continuous integration** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push:
 - every service suite;
 - the dashboard checks;
 - container smoke tests;
-- the full-stack gateway smoke, twice: without and with the monitoring profile.
+- the full-stack gateway smoke, twice: without and with the monitoring profile;
+- the architecture docs check.
+
+**Before pushing:** `git config core.hooksPath .githooks` once per clone runs the architecture docs check
+on every `git push` ([`.githooks/pre-push`](.githooks/pre-push), under a second). The suites stay with you and CI.
 
 **Conventions:**
 - Work lands directly on `master` with every suite green.
