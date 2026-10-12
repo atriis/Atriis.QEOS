@@ -298,3 +298,10 @@ def test_client_key_without_cert_is_a_config_error(tmp_path):
     with pytest.raises(ConfigError) as err:
         make_context(None, client_key=str(tmp_path / "k.pem"))
     assert "--client-cert" in str(err.value)
+
+
+def test_a_202_is_returned_not_raised(platform):
+    platform.reply(202, {"discarded": True, "reason": "r"})
+
+    status, body = send(collect(platform))
+    assert (status, body["discarded"]) == (202, True)

@@ -18,7 +18,9 @@ from qeos_collector.codeowners import load_codeowners
 from qeos_collector.config_file import FILE_NAME, LEGACY_FILE_NAME, load_config, uses_legacy_file
 from qeos_collector.formats import parse_file
 from qeos_collector.gitdiff import collect_changes, collect_commit_info
-from qeos_collector.payload import build_parts, build_run, parse_components, run_times, summarize
+from qeos_collector.payload import (
+    TRIGGERS, build_parts, build_run, parse_components, run_times, summarize,
+)
 from qeos_collector.spool import spool_part, spooled_parts
 from qeos_collector.upload import (
     ConfigError, UploadError, check_key, endpoint_for, make_context, upload_part,
@@ -35,7 +37,7 @@ _PREFIX, _LEGACY_PREFIX = "QEOS_", "QAV_"
 ENV_NAMES = (
     "URL", "API_KEY", "BRANCH", "COMMIT", "CI_PROVIDER", "CI_RUN_URL", "ENVIRONMENT", "IDEMPOTENCY_KEY",
     "CA_FILE", "CLIENT_CERT", "CLIENT_KEY", "COMPONENTS", "FAIL_ON_ERROR", "GATE", "NO_CHANGES", "SPOOL",
-    "IMPORT_BRANCH",
+    "IMPORT_BRANCH", "TRIGGER",
 )
 
 
@@ -88,6 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="default: the patterns list in .qeos.yml")
     upload.add_argument("--url", help="platform URL (default: $QEOS_URL)")
     upload.add_argument("--ci-provider", choices=CI_PROVIDERS, help="default: $QEOS_CI_PROVIDER, else detected")
+    upload.add_argument("--trigger", help="manual, automatic or qeos (default: $QEOS_TRIGGER, else detected; ADR-030)")
     upload.add_argument("--branch", help="default: $QEOS_BRANCH, else detected")
     upload.add_argument("--commit", help="full or short SHA (default: $QEOS_COMMIT, else detected)")
     upload.add_argument("--ci-run-url", help="default: $QEOS_CI_RUN_URL, else detected")
@@ -297,6 +300,10 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
     if provider not in CI_PROVIDERS:
         raise ConfigError(f"QEOS_CI_PROVIDER must be one of {', '.join(CI_PROVIDERS)}, got {provider!r}")
 
+    trigger = pick(args.trigger, "QEOS_TRIGGER", ci.trigger)
+    if trigger is not None and trigger not in TRIGGERS:
+        raise ConfigError(f"--trigger must be one of {', '.join(TRIGGERS)}, got {trigger!r}")
+
     patterns = args.patterns or list(file_config.get("patterns") or [])
     if not patterns:
         raise ConfigError("no report patterns given (arguments, or patterns: in .qeos.yml)")
@@ -348,6 +355,7 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
         commit_message=subject,
         pr_number=ci.pr_number,
         base_branch=ci.base_branch,
+        trigger=trigger,
     )
     changes = None
     skip_changes = (args.no_changes or env.get("QEOS_NO_CHANGES", "").strip().lower() in _TRUE
@@ -404,6 +412,9 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
                 spooled = sum(1 for p in parts[number - 1:] if spool_part(spool_dir, p) is not None)
                 say(f"spooled {spooled} part(s) for the next run")
             raise _UploadFailed() from None
+        if status == 202 and receipt.get("discarded"):
+            say(f"run not collected: {receipt.get('reason', 'the platform discarded it')}")
+            return 0  # every part shares the trigger: the rest would be discarded too
         run_id = receipt.get("id", "?")
         say(f"uploaded run {run_id} ({status})" + (f", {of}" if len(parts) > 1 else ""))
         stored.append(f"run {run_id} ({of})")

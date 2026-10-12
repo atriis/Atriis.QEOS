@@ -515,3 +515,49 @@ def test_gate_fails_closed_when_the_upload_fails(platform, report, capsys):
     platform.reply(401, {"detail": "Invalid API key"})
     assert run(["upload", str(report), "--gate"], env_for(platform)) == 1
     assert "gate cannot pass without an upload" in capsys.readouterr().err
+
+
+DISCARDED = {"discarded": True, "reason": "manual runs are not collected for this project"}
+NOTICE = "qeos: run not collected: manual runs are not collected for this project"
+
+
+def test_a_discarded_run_prints_the_notice_and_exits_zero(platform, report, capsys):
+    platform.reply(202, DISCARDED)
+
+    assert run(["upload", str(report)], env_for(platform)) == 0
+    assert NOTICE in capsys.readouterr().err
+
+
+def test_a_discarded_first_part_stops_the_upload(platform, report, monkeypatch):
+    monkeypatch.setattr(payload, "MAX_RESULTS_PER_PART", 1)  # two results, two parts
+    platform.reply(202, DISCARDED)
+
+    assert run(["upload", str(report)], env_for(platform)) == 0
+    assert len(platform.requests) == 1
+
+
+def test_gate_on_a_discarded_run_exits_zero(platform, report):
+    # REPORT has a failing test: a gate that ran on the 202 would exit 1
+    platform.reply(202, DISCARDED)
+
+    assert run(["upload", "--gate", "--fail-on-error", str(report)], env_for(platform)) == 0
+
+
+def test_trigger_flag_overrides_detection(platform, report):
+    platform.reply(201, RECEIPT)
+    env = env_for(platform, GITHUB_ACTIONS="true", GITHUB_EVENT_NAME="workflow_dispatch",
+                  GITHUB_TRIGGERING_ACTOR="octocat")
+
+    run(["upload", "--trigger", "automatic", str(report)], env)
+    assert sent(platform)["run"]["trigger"] == "automatic"
+
+
+def test_trigger_variable_is_sent(platform, report):
+    platform.reply(201, RECEIPT)
+
+    run(["upload", str(report)], env_for(platform, QEOS_TRIGGER="qeos"))
+    assert sent(platform)["run"]["trigger"] == "qeos"
+
+
+def test_an_invalid_trigger_is_a_config_error(platform, report):
+    assert run(["upload", "--trigger", "cron", str(report)], env_for(platform)) == 2

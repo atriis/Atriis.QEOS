@@ -153,3 +153,10 @@ def test_build_run_carries_git_metadata_when_valid():
 
     bare = build_run(ci_provider="local", started_at=now, finished_at=now, pr_number=0)
     assert "pr_number" not in bare and "commit_author" not in bare
+
+
+@pytest.mark.parametrize("trigger, sent", [("manual", "manual"), ("qeos", "qeos"), (None, None), ("cron", None)])
+def test_trigger_is_sent_only_when_known(trigger, sent):
+    now = datetime.now(timezone.utc)
+    run = build_run(ci_provider="github_actions", started_at=now, finished_at=now, trigger=trigger)
+    assert run.get("trigger") == sent

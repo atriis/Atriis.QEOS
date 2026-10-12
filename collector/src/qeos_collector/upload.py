@@ -114,7 +114,7 @@ def upload_part(
                 ) from None
             problem, wait = f"cannot reach the platform ({_reason(exc)})", _backoff(attempt, rand)
         else:
-            if status in (200, 201):
+            if status in (200, 201, 202):
                 return status, _json(body)
             if status == 429:
                 problem, wait = "the platform answered 429", _retry_after(response_headers)

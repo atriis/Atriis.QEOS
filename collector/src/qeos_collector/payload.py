@@ -12,6 +12,7 @@ from qeos_collector import __version__
 MAX_RESULTS_PER_PART = 20000
 # The gateway accepts bodies up to 10 MB
 MAX_PART_BYTES = 9 * 1024 * 1024
+TRIGGERS = ("manual", "automatic", "qeos")
 MAX_RUN_SPAN = timedelta(days=7)
 BRANCH_LENGTH = 255
 ENVIRONMENT_LENGTH = 100
@@ -56,6 +57,7 @@ def build_run(
     commit_message: Optional[str] = None,
     pr_number: Optional[int] = None,
     base_branch: Optional[str] = None,
+    trigger: Optional[str] = None,
 ) -> Dict[str, str]:
     """Metadata the server would reject is left out or cut, so it never costs the whole run."""
     run = {
@@ -84,6 +86,8 @@ def build_run(
         run["pr_number"] = pr_number
     if base_branch:
         run["base_branch"] = base_branch[:BRANCH_LENGTH]
+    if trigger in TRIGGERS:
+        run["trigger"] = trigger
     return run
 
 
