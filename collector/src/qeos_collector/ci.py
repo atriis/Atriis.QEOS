@@ -1,8 +1,9 @@
 """Run metadata from the CI system's environment variables."""
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
-from typing import Mapping, Optional
+from typing import Callable, Mapping, Optional
 from urllib.parse import quote
 
 # The server takes Idempotency-Keys up to 255 characters; this leaves room for "-part-N"
@@ -18,9 +19,12 @@ class CIInfo:
     idempotency_key: Optional[str] = None
     pr_number: Optional[int] = None
     base_branch: Optional[str] = None
+    trigger: Optional[str] = None
 
 
 def detect(env: Mapping[str, str]) -> CIInfo:
+    trigger = detect_trigger(env)
+
     def get(name: str) -> Optional[str]:
         return env.get(name, "").strip() or None
 
@@ -37,6 +41,7 @@ def detect(env: Mapping[str, str]) -> CIInfo:
             run_url=f"{server}/{repo}/actions/runs/{run_id}" if server and repo and run_id else None,
             # A re-run attempt is a new execution, so it gets a new key on purpose
             idempotency_key=_key("gh", run_id, get("GITHUB_RUN_ATTEMPT") or "1", get("GITHUB_JOB")) if run_id else None,
+            trigger=trigger,
         )
     if get("GITLAB_CI") == "true":
         job_id = get("CI_JOB_ID")
@@ -46,6 +51,7 @@ def detect(env: Mapping[str, str]) -> CIInfo:
             branch=get("CI_COMMIT_REF_NAME"),
             run_url=get("CI_JOB_URL"),
             idempotency_key=_key("gl", job_id) if job_id else None,
+            trigger=trigger,
             pr_number=_int_or_none(get("CI_MERGE_REQUEST_IID")),
             base_branch=get("CI_MERGE_REQUEST_TARGET_BRANCH_NAME"),
         )
@@ -67,6 +73,7 @@ def detect(env: Mapping[str, str]) -> CIInfo:
             base_branch=_azure_branch(get("SYSTEM_PULLREQUEST_TARGETBRANCH")) if pull_request else None,
             # A retried job is a new execution, so it gets a new key on purpose
             idempotency_key=_key("az", build_id, get("SYSTEM_JOBATTEMPT") or "1", get("SYSTEM_JOBID")) if build_id else None,
+            trigger=trigger,
         )
     if get("JENKINS_URL"):
         branch, tag = get("GIT_BRANCH"), get("BUILD_TAG")
@@ -78,6 +85,7 @@ def detect(env: Mapping[str, str]) -> CIInfo:
             branch=branch,
             run_url=get("BUILD_URL"),
             idempotency_key=_key("jk", tag) if tag else None,
+            trigger=trigger,
         )
     return CIInfo(provider="local")
 
@@ -113,4 +121,51 @@ def _azure_branch(ref: Optional[str]) -> Optional[str]:
 def _pr_from_ref(ref_name: Optional[str]) -> Optional[int]:
     if ref_name and ref_name.endswith("/merge"):
         return _int_or_none(ref_name.split("/", 1)[0])
+    return None
+
+
+def _read_event(path: str) -> dict:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            value = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _person(actor: Optional[str]) -> bool:
+    return bool(actor) and not actor.endswith("[bot]")
+
+
+def detect_trigger(env: Mapping[str, str], read_event: Callable[[str], dict] = _read_event) -> Optional[str]:
+    """manual, automatic or qeos (ADR-030); None when the environment does not say."""
+    def get(name: str) -> Optional[str]:
+        return env.get(name, "").strip() or None
+
+    if get("GITHUB_ACTIONS") == "true":
+        event = get("GITHUB_EVENT_NAME")
+        if event is None:
+            return None
+        actor = get("GITHUB_TRIGGERING_ACTOR") or get("GITHUB_ACTOR")
+        if event == "workflow_dispatch":
+            payload = read_event(get("GITHUB_EVENT_PATH") or "")
+            inputs = payload.get("inputs")
+            if isinstance(inputs, dict) and inputs.get("request_id"):
+                return "qeos"
+            return "manual" if _person(actor) else "automatic"
+        attempt = _int_or_none(get("GITHUB_RUN_ATTEMPT")) or 1
+        return "manual" if attempt > 1 and _person(actor) else "automatic"
+    if get("GITLAB_CI") == "true":
+        source = get("CI_PIPELINE_SOURCE")
+        if source == "web" or get("CI_JOB_MANUAL") == "true":
+            return "manual"
+        return "automatic" if source else None
+    if (get("TF_BUILD") or "").lower() == "true":
+        reason = get("BUILD_REASON")
+        return None if reason is None else ("manual" if reason == "Manual" else "automatic")
+    if get("JENKINS_URL"):
+        cause = (get("BUILD_CAUSE") or "").upper()
+        if not cause:
+            return None
+        return "manual" if "MANUALTRIGGER" in cause or "USERIDCAUSE" in cause else "automatic"
     return None

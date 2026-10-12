@@ -1,4 +1,8 @@
-from qeos_collector.ci import CIInfo, detect, sanitize_key
+import json
+
+import pytest
+
+from qeos_collector.ci import CIInfo, detect, detect_trigger, sanitize_key
 
 GITHUB = {
     "GITHUB_ACTIONS": "true",
@@ -176,3 +180,57 @@ def test_azure_job_retry_gets_a_new_key():
 def test_azure_without_a_build_id_has_no_key_and_no_url():
     info = detect({k: v for k, v in AZURE.items() if k != "BUILD_BUILDID"})
     assert info.run_url is None and info.idempotency_key is None
+
+
+GH = {"GITHUB_ACTIONS": "true", "GITHUB_RUN_ID": "1", "GITHUB_REPOSITORY": "acme/obt",
+      "GITHUB_SERVER_URL": "https://github.com"}
+
+
+def gh(**extra):
+    return {**GH, **extra}
+
+
+@pytest.mark.parametrize("env, event, expected", [
+    (gh(GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_TRIGGERING_ACTOR="octocat"), {}, "manual"),
+    (gh(GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_TRIGGERING_ACTOR="github-actions[bot]"), {}, "automatic"),
+    (gh(GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_TRIGGERING_ACTOR="octocat"),
+     {"inputs": {"request_id": "42"}}, "qeos"),
+    (gh(GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_ACTOR="octocat"), {}, "manual"),  # no TRIGGERING_ACTOR
+    (gh(GITHUB_EVENT_NAME="schedule", GITHUB_RUN_ATTEMPT="2", GITHUB_TRIGGERING_ACTOR="octocat"), {}, "manual"),
+    (gh(GITHUB_EVENT_NAME="schedule", GITHUB_RUN_ATTEMPT="2", GITHUB_TRIGGERING_ACTOR="renovate[bot]"), {}, "automatic"),
+    (gh(GITHUB_EVENT_NAME="push", GITHUB_RUN_ATTEMPT="1", GITHUB_TRIGGERING_ACTOR="octocat"), {}, "automatic"),
+    (gh(GITHUB_EVENT_NAME="schedule"), {}, "automatic"),
+    (gh(GITHUB_EVENT_NAME="repository_dispatch", GITHUB_TRIGGERING_ACTOR="octocat"), {}, "automatic"),
+    (gh(), {}, None),  # no event name: unknown
+    ({"GITLAB_CI": "true", "CI_PIPELINE_SOURCE": "web"}, {}, "manual"),
+    ({"GITLAB_CI": "true", "CI_PIPELINE_SOURCE": "push", "CI_JOB_MANUAL": "true"}, {}, "manual"),
+    ({"GITLAB_CI": "true", "CI_PIPELINE_SOURCE": "schedule"}, {}, "automatic"),
+    ({"GITLAB_CI": "true"}, {}, None),
+    ({"TF_BUILD": "True", "BUILD_REASON": "Manual"}, {}, "manual"),
+    ({"TF_BUILD": "True", "BUILD_REASON": "IndividualCI"}, {}, "automatic"),
+    ({"JENKINS_URL": "https://ci.example", "BUILD_CAUSE": "MANUALTRIGGER"}, {}, "manual"),
+    ({"JENKINS_URL": "https://ci.example", "BUILD_CAUSE": "USERIDCAUSE"}, {}, "manual"),
+    ({"JENKINS_URL": "https://ci.example", "BUILD_CAUSE": "TIMERTRIGGER"}, {}, "automatic"),
+    ({"JENKINS_URL": "https://ci.example"}, {}, None),
+    ({}, {}, None),
+])
+def test_trigger_classification(env, event, expected):
+    assert detect_trigger(env, read_event=lambda _path: event) == expected
+
+
+def test_detect_fills_trigger(tmp_path):
+    event = tmp_path / "event.json"
+    event.write_text(json.dumps({"inputs": {"request_id": "7"}}), encoding="utf-8")
+    env = gh(GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_TRIGGERING_ACTOR="octocat", GITHUB_EVENT_PATH=str(event))
+    assert detect(env).trigger == "qeos"
+
+
+@pytest.mark.parametrize("content", [None, "not json", "[1, 2]", '{"inputs": "x"}'])
+def test_unreadable_event_payload_is_not_qeos(tmp_path, content):
+    env = gh(GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_TRIGGERING_ACTOR="octocat")
+    if content is not None:
+        (tmp_path / "e.json").write_text(content, encoding="utf-8")
+        env["GITHUB_EVENT_PATH"] = str(tmp_path / "e.json")
+    else:
+        env["GITHUB_EVENT_PATH"] = str(tmp_path / "missing.json")
+    assert detect(env).trigger == "manual"
