@@ -351,9 +351,7 @@ coverage instrumentation, no AI: co-failure statistics on PostgreSQL.
   live in `src/ingestion/analytics/impact_rules.py`.
 - **How a pass is built:** Python computes each run's path units (`impact_rules.py`) and its new failures, stages
   them in temporary tables (one `unnest()` insert each), and PostgreSQL does the rest: one `INSERT ... SELECT` per
-  table. Early timing on PostgreSQL 15 (Docker, default settings; 1,980 runs of 1,000 tests over 90 days, one commit
-  per run, 5% random failures, 502,000 pairs): 25-41 s per pass, against the 60 s budget. The pairs insert (about
-  13 s) and the outcome read (8-14 s) are the largest parts; a full benchmark is to follow.
+  table, the base rows first, then the pairs joined to them. Measured against the budgets under *Budgets* below.
 
 ### At upload
 
@@ -415,6 +413,24 @@ long as a nightly pass); run it once, off hours.
 
 The gateway routes them with the other `/projects/{id}/runs` and `/projects/{id}/analytics` paths; a 5,000-path body
 of full-length paths (about 5 MB) stays under its 10 MB body cap.
+
+### Budgets (`scripts/impact_benchmark.py`)
+
+Measured on 2026-10-12 against a throwaway `postgres:15` container (Docker, default settings), never the stack's
+database: 1,980 runs × 1,000 tests over 90 days (about 2 million results, as the analytics benchmark above), one
+commit per run, 5% random failures, each run with 3 to 12 changed files from 40 folders, and the daily flaky rollups
+the analytics-rollup job keeps. The script's docstring says how to run it; it exits 1 over a budget.
+
+| Measure | Result | Budget (spec §3.7) |
+|---|---|---|
+| Impact rollup, one project (`rebuild_statistics`, flaky keys included) | 19.0 s (flaky keys 3.9 s; 94,669 pairs, 1,000 tests, 0 flaky) | under 60 s |
+| Live scoring of a 10-file change on main, p95 of 50 (p50) | 50 ms (34 ms); 76 tests suggested on average | under 200 ms |
+| Upload: scoring inside the request, p50 (max of 10) | 32 ms (51 ms) | under the 2 s statement timeout |
+| Upload: outcome after the response, p50 (max of 10) | 502 ms (696 ms) | not in the request |
+| Replay of the last 3 days | 66 runs in 177 s: 0.4 runs/s, about 44 s per replayed day | none (one-off) |
+
+Before pairs were filtered by every threshold at rollup time (spec §9), the same data stored 143,987 pairs and live
+scoring missed its budget (p95 249 ms): reading the pairs of a change's units was the cost.
 
 ## Operations
 
