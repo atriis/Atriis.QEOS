@@ -1,7 +1,8 @@
 # Collect manual CI runs (project toggle) — design
 
-Status: approved in conversation 2026-10-12 (sections 1–3 and the self-review amendments), pending review of
-this written spec.
+Status: approved in conversation 2026-10-12 (sections 1–3 and the self-review amendments), plus a second
+self-review of the written spec (upload counting, toggle history, token-dispatched runs, container image,
+atomic counter).
 ADR: ADR-030 (ADR-029 is test impact analysis).
 Blueprint: ingestion (Intelligence/QIP domain) owns per-project collection settings, as it owns masking
 patterns and notification channels; PostgreSQL only; no new service, no cross-service call on the upload path.
@@ -37,7 +38,8 @@ Project Settings › **Collection** card, placed before "Run from QEOS":
 - Help text: what counts as manual (§3, short form); runs started from QEOS are always collected; needs
   `qeos-collector` 0.5.0 or later, because older collectors send no trigger and their manual runs are still
   collected.
-- When anything was discarded: "*N* manual runs not collected, last *time ago*".
+- When anything was discarded: "*N* manual uploads not collected, last *time ago*". Uploads, not runs: a
+  matrix run uploads once per job, so one manual run can count several times.
 - Owners and admins change it; other members see it read-only (the switch disabled, with the reason).
 
 ### 2.2 An upload while the toggle is off
@@ -48,6 +50,9 @@ Project Settings › **Collection** card, placed before "Run from QEOS":
 | `automatic`, `qeos`, absent | stored as today (`201`, or `200` on an idempotent replay) |
 
 While the toggle is on, every upload is stored, with its `trigger` saved.
+
+Switching the toggle never touches stored runs: turning it off does not delete manual runs already
+collected, and turning it on does not bring back discarded ones (they were never stored).
 
 The collector prints `qeos: run not collected: manual runs are not collected for this project` and exits 0:
 results deliberately left out must not fail the CI job.
@@ -68,6 +73,16 @@ rules below; anything not matched is unknown, and the field is left out of the p
 means no `request_id`. Jenkins without `BUILD_CAUSE` is unknown, so collected; `--trigger` covers that setup.
 
 `--trigger manual|automatic|qeos` overrides detection, for CI the rules don't cover.
+
+Two cases to document in SETUP:
+
+- **A script dispatching with a person's token.** A scheduler that calls `workflow_dispatch` with a
+  personal access token looks manual (the triggering actor is that person). Use a GitHub App or
+  `GITHUB_TOKEN` for automated dispatches, or pass `--trigger automatic` in that workflow.
+- **The collector container image.** It sees only the variables passed to it. Without
+  `GITHUB_EVENT_NAME`, `GITHUB_TRIGGERING_ACTOR`, `GITHUB_RUN_ATTEMPT` and the event file
+  (`GITHUB_EVENT_PATH`, mounted), the trigger is unknown and the run is collected. The composite
+  action and `pip` installs see the runner's environment and need nothing extra.
 
 ## 4. Server (ingestion-service)
 
@@ -96,6 +111,9 @@ No row means the defaults. `test_runs.trigger`: `String(10)`, nullable, check co
   written, so a replay is evaluated again and, with the toggle still off, gets the same 202.
 - The check runs before any test-result processing, so a discarded upload costs one indexed read and one
   update.
+- The counter update is one atomic `UPDATE … SET discarded_count = discarded_count + 1`: concurrent
+  matrix uploads must not lose increments. A row always exists when the toggle is off, because only a
+  `PUT` can switch it off.
 - Otherwise unchanged, with `trigger` stored on the run. Run list and detail responses include `trigger`.
 
 ### 4.3 Settings API
@@ -124,11 +142,12 @@ states this.
 Test-first, red then green.
 
 - **Collector:** one test per cell of the §3 table (including a bot dispatch, a person's re-run attempt,
-  `request_id`, Jenkins with and without `BUILD_CAUSE`, an unreadable event payload); `--trigger` overrides;
+  `request_id`, Jenkins with and without `BUILD_CAUSE`, an unreadable event payload, a missing
+  `GITHUB_TRIGGERING_ACTOR` falling back to `GITHUB_ACTOR`); `--trigger` overrides;
   `trigger` omitted when unknown; a 202 discard prints the notice and exits 0.
 - **Ingestion:** unit tests of the discard rule; integration: off + manual is 202, nothing stored, counter
   and timestamp updated; off + `automatic` / `qeos` / absent stored; on + manual stored with `trigger`;
-  replay of a discarded upload gets 202 again; invalid `trigger` is 422; settings defaults without a row,
+  replay of a discarded upload gets 202 again; concurrent discards all counted; invalid `trigger` is 422; settings defaults without a row,
   admin `PUT`, member `PUT` 403, non-member 404; migration test for the new revision.
 - **Gateway:** the architecture docs check and `scripts/smoke_gateway.sh` (one `GET` of the settings).
 - **Dashboard:** Collection card renders the default, toggles and saves, read-only for members, shows the
