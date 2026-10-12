@@ -398,6 +398,64 @@ check "login is never compressed" 401 POST "$BASE/api/v1/auth/login" -H "Accept-
 if grep -qi '^content-encoding: gzip' "$TMP/headers"; then fail "login is gzip-encoded"; else pass "login is not compressed"; fi
 
 
+# ---- test impact (spec 2026-10-12 §5): a test passes, then fails, in two runs that changed the same file ----
+# Unique names per smoke run: a rerun on the same stack must not find the test in an earlier run's statistics.
+# Two runs cannot meet the statistical thresholds, so "scoring that path suggests the test" is shown by the
+# "failing on this branch" label: run B is the branch's latest run and the test fails in it.
+IMPACT_BRANCH="smoke-impact-$SUFFIX"
+IMPACT_TEST="impact-breaks-$SUFFIX"
+IMPACT_CHANGES='"changes":{"base_ref":"origin/main","truncated":false,"files":[{"path":"src/impact/smoke.py","status":"M","additions":1,"deletions":0}]}'
+IMPACT_RUN_A="{\"run\":{\"ci_provider\":\"local\",\"branch\":\"$IMPACT_BRANCH\",\"started_at\":\"$(at -50)\",\"finished_at\":\"$(at -45)\"},\"results\":[{\"name\":\"$IMPACT_TEST\",\"status\":\"passed\"}],$IMPACT_CHANGES}"
+IMPACT_RUN_B="{\"run\":{\"ci_provider\":\"local\",\"branch\":\"$IMPACT_BRANCH\",\"started_at\":\"$(at -40)\",\"finished_at\":\"$(at -35)\"},\"results\":[{\"name\":\"$IMPACT_TEST\",\"status\":\"failed\",\"message\":\"broke\"}],$IMPACT_CHANGES}"
+check "upload impact run A (changed files, the test passes)" 201 POST "$BASE/api/v1/collect/runs" \
+  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "$IMPACT_RUN_A"
+check "upload impact run B (the same file, the test fails)" 201 POST "$BASE/api/v1/collect/runs" \
+  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "$IMPACT_RUN_B"
+IMPACT_RUN_B_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
+IMPACT_URL="$BASE/api/v1/projects/$PROJECT_ID/runs/${IMPACT_RUN_B_ID:-0}/impact"
+# The outcome is written right after the upload's response: give it up to 5 seconds
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  curl -ks -o "$TMP/body" "${AUTH[@]}" "$IMPACT_URL"
+  grep -q '"evaluated_at"' "$TMP/body" && break
+  sleep 0.5
+done
+check "impact of run B -> ingestion-service (runs route)" 200 GET "$IMPACT_URL" "${AUTH[@]}"
+body_has "... names the changed file" '"changed_paths":["src/impact/smoke.py"]'
+body_has "... scored with too little history" '"state":"not_enough_history"'
+body_has "... with its model version" '"model_version":"stats-v1"'
+body_matches "... the new failure was missed: the suggestion was scored before the run's own results" \
+  "\"missed\":\[\{\"test_key\":\"[0-9a-f]{64}\",\"suite\":\"[^\"]*\",\"class_name\":\"[^\"]*\",\"name\":\"$IMPACT_TEST\"\}\]"
+check "impact of a run that is not there -> 404" 404 GET "$BASE/api/v1/projects/$PROJECT_ID/runs/999999999/impact" "${AUTH[@]}"
+if docker compose ps --status running --services 2>/dev/null | grep -qx impact-rollup; then
+  pass "impact-rollup is running"
+else
+  fail "impact-rollup is not running"
+fi
+if docker compose run --rm -T impact-rollup python -m src.ingestion.jobs.impact_rollup \
+     >"$TMP/impact_out" 2>"$TMP/impact_err"; then
+  if grep -q '"event": "impact_rollup"' "$TMP/impact_out"; then
+    pass "impact rollup pass inside the stack (staged statistics and unit hashes on PostgreSQL)"
+  else
+    fail "impact rollup printed no summary: $(tail -c 300 "$TMP/impact_out")"
+  fi
+else
+  fail "impact rollup pass: $(tail -c 400 "$TMP/impact_err")"
+fi
+check "score a change -> ingestion-service (analytics route)" 200 POST \
+  "$BASE/api/v1/projects/$PROJECT_ID/analytics/impact" "${AUTH[@]}" -H "Content-Type: application/json" \
+  -d "{\"changed_paths\":[\"src/impact/smoke.py\"],\"branch\":\"$IMPACT_BRANCH\"}"
+body_has "... suggests the test that now fails on the branch" "\"name\":\"$IMPACT_TEST\",\"kind\":\"failing_on_branch\""
+check "score a change without paths -> 422" 422 POST \
+  "$BASE/api/v1/projects/$PROJECT_ID/analytics/impact" "${AUTH[@]}" -H "Content-Type: application/json" \
+  -d '{"changed_paths":[]}'
+check "impact accuracy -> ingestion-service (analytics route)" 200 GET \
+  "$BASE/api/v1/projects/$PROJECT_ID/analytics/impact-accuracy?days=7" "${AUTH[@]}"
+body_matches "... counts the miss" '"missed":[1-9]'
+body_matches "... with the suggested tests per run" '"avg_suggested":[0-9]'
+body_has "... no replayed runs" '"includes_replayed":false'
+check "impact accuracy over 10 days -> 422" 422 GET \
+  "$BASE/api/v1/projects/$PROJECT_ID/analytics/impact-accuracy?days=10" "${AUTH[@]}"
+
 check "revoke the key" 204 DELETE "$BASE/api/v1/projects/$PROJECT_ID/api-keys/$KEY_ID" "${AUTH[@]}"
 check "a revoked key is rejected" 401 POST "$BASE/api/v1/collect/runs" \
   -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "$RUN_BODY"
