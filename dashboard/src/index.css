@@ -1085,3 +1085,8 @@ button.switch[aria-busy="true"] { cursor: progress; }
 .impact-parts > div { display: contents; }
 .impact-parts dt { font-weight: 600; }
 .impact-parts dd { margin: 0; }
+/* Run likely affected: an inline panel on the Cases page, never a modal (head: .card-head, close: .widget-tool) */
+.likely-affected-form { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-3); margin-bottom: var(--space-3); }
+.likely-affected-form label { flex: 0 1 320px; min-width: min(100%, 240px); }
+.likely-affected-status:empty { margin: 0; }
+.likely-affected-heading { margin: var(--space-4) 0 var(--space-2); }

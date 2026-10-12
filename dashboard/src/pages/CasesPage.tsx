@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Upload } from "lucide-react";
+import { Crosshair, Plus, Upload } from "lucide-react";
 import {
   CaseStatus, MAX_SEARCH_KEYS, PRIORITIES, Priority, SEARCH_IN, type SearchIn, listCases, listFeatureGroups, listFeatures,
   listFolders, listLabels,
@@ -18,9 +18,11 @@ import FiltersDisclosure from "../components/FiltersDisclosure";
 import FilterSelect from "../components/FilterSelect";
 import FolderSelect from "../components/FolderSelect";
 import FeatureList from "../components/FeatureList";
+import LikelyAffectedPanel from "../components/LikelyAffectedPanel";
 import RunControl from "../components/RunControl";
 import RunPanel from "../components/RunPanel";
 import { useCanEdit } from "../lib/useCanEdit";
+import { useFocusReturn } from "../lib/useFocusReturn";
 import { ESTIMATE_DEBOUNCE_MS, approxDuration, useDurationEstimate } from "../lib/durationEstimate";
 import { useStickyBottomOffset } from "../lib/useStickyOffset";
 import { pageOffset, withOffset } from "../lib/useUrlState";
@@ -99,6 +101,9 @@ export default function CasesPage() {
   }, [setCard]);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [picked, setPicked] = useState<Map<number, Picked>>(new Map());
+  // Run likely affected: an inline panel that replaces the selection; closing it puts focus back on its button
+  const [impactOpen, setImpactOpen] = useState(false);
+  const impactButtonRef = useFocusReturn<HTMLButtonElement>(impactOpen);
   const barRef = useRef<HTMLDivElement>(null);
   // The bar sticks to the viewport bottom: rows reached by keyboard must stay above it
   const barHeight = useStickyBottomOffset(barRef, picked.size > 0);
@@ -264,9 +269,10 @@ export default function CasesPage() {
   const advancedHidden = KEYS.filter((k) => k !== "q" && k !== "folder" && applied[k] !== ""
     && !QUICK.some((c) => c.key === k && c.value === applied[k])).length;
   const filtered = KEYS.some((k) => applied[k] !== "");
-  // One primary per view: the empty state's "Write the first case", or Run on a selection, take it from the header button
+  // One primary per view: the empty state's "Write the first case", Run on a selection, or the open Run likely affected
+  // panel's Find tests take it from the header button; a selection takes it from Find tests
   const emptyList = total === 0 && !filtered;
-  const newIsPrimary = !emptyList && picked.size === 0;
+  const newIsPrimary = !emptyList && picked.size === 0 && !impactOpen;
 
   return (
     <section>
@@ -276,6 +282,9 @@ export default function CasesPage() {
         tabs={[{ label: "Cases" }, { label: "Suites", to: "../suites" }]}
         actions={canEdit ? (
           <>
+            <button ref={impactButtonRef} type="button" aria-expanded={impactOpen} onClick={() => setImpactOpen(true)}>
+              <Crosshair size={16} aria-hidden="true" /> Run likely affected
+            </button>
             <Link className="button" to="import">
               <Upload size={16} aria-hidden="true" /> Import from Gherkin
             </Link>
@@ -287,6 +296,10 @@ export default function CasesPage() {
       />
       <CasesKpis projectId={id} />
       <RunPanel projectId={id} />
+      {canEdit && impactOpen && (
+        <LikelyAffectedPanel projectId={id} primary={picked.size === 0} onClose={() => setImpactOpen(false)}
+          onSelect={(cases) => setPicked(new Map(cases.map((c) => [c.number, { title: c.title, testKey: c.automated_test_key }])))} />
+      )}
 
       <form onSubmit={apply}>
         <FilterBar>

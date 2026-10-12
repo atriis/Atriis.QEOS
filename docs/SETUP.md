@@ -1032,6 +1032,19 @@ GitHub Actions workflow in your test repository (`workflow_dispatch`) for exactl
 scenarios, shows its progress, and lets you **Stop** it. QEOS never runs test code itself. The
 results come back through the normal upload ([4.1](#41-sending-test-results)).
 
+**Run likely affected.** On **Test cases**, members and above can choose **Run likely affected**:
+
+1. Enter a branch; it defaults to the CI target's branch. Choose **Find tests**.
+2. QEOS takes the newest run with changed files among the branch's last 20 runs, scores that change now
+   (the same likely affected tests as on the run page, see [4.4](#44-analytics)) and selects the cases linked
+   to the suggested tests, strongest first, at most 200.
+3. Review the selection; the duration estimate follows it. Then **Run selected** as usual.
+
+Suggested tests that no case links to are listed as *not runnable from QEOS (no linked case)*; link them by
+setting the case's automated test. When no recent run of the branch has changed files (the CI checkout had fewer
+than 2 commits, see [4.1.3](#413-collector-cli-any-machine)), when the project has too little history and nothing else applies,
+or when nothing is suggested, the panel says so and selects nothing. Viewers do not get the button.
+
 **Prerequisites**
 
 - The test repository is on **GitHub**. Other CI providers are not supported for Play.
