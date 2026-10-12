@@ -13,6 +13,8 @@ MIN_LIFT = 2.0
 MAX_STATISTICAL = 50
 MIN_HISTORY_RUNS = 20        # runs with changed files in the window before statistics are used
 MAX_PER_LABEL = 100          # always-included tests listed per label (plan Ruling 10)
+NO_HISTORY_RUNS = 3          # a test with fewer change runs than this is "no history yet", always included; its own
+                             # value, not MIN_CHANGED_RUNS, so the two can be tuned apart
 FLAKY_MIN_RUNS = 5           # the Flaky view's defaults (plan Ruling 6)
 FLAKY_MIN_FLIP_RATE = 0.3
 FAILING = ("failed", "errored")
