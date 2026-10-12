@@ -156,7 +156,7 @@ run loop with your CI, the Integrations domain and the opt-in monitoring profile
 
 ```mermaid
 %%{init: {"flowchart": {"htmlLabels": false, "wrappingWidth": 400}}}%%
-flowchart LR
+flowchart TB
     subgraph CI["Your CI"]
         WF["your workflow<br/>GitHub Actions · GitLab · Jenkins"]
         COL["qeos-collector<br/>upload · import-features"]
@@ -198,6 +198,10 @@ flowchart LR
     end
     AM -->|alerts| NOTIFY
     GW["gateway"] -->|/grafana/, signed in| GRAF
+
+    %% Invisible links stack the groups top to bottom, so the diagram stays narrow
+    AM ~~~ WF
+    TM ~~~ RET
 ```
 
 The run loop: test-management-service dispatches your workflow, which runs the tests and sends the
