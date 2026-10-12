@@ -30,6 +30,31 @@ Receives test results from CI. Design: `docs/superpowers/specs/2026-09-29-ingest
 
    `201` returns the run id and counts. Retrying with the same `Idempotency-Key` returns `200` and
    the same run — never a duplicate. The same key with a different body is `409`.
+   The run may carry `"trigger": "manual" | "automatic" | "qeos"` (anything else is `422`). The request hash
+   includes it (`null` when absent), so a retry that spans the deploy of this field, of a run stored earlier
+   under the same `Idempotency-Key`, gets `409`; this is accepted (ADR-030).
+
+## Collection settings
+
+`GET /api/v1/projects/{id}/collection-settings` (any project member) returns `collect_manual` (default
+`true`; no row means the defaults), `discarded_count`, `last_discarded_at`, `updated_at` and `updated_by`.
+`PUT` with `{"collect_manual": bool}` (owner or admin; other roles 403, non-members 404) upserts it and
+returns the stored settings.
+
+With `collect_manual` off, an upload whose `run.trigger` is `manual` answers
+`202 {"discarded": true, "reason": "manual runs are not collected for this project"}` and stores nothing.
+`automatic`, `qeos` and no trigger are stored as usual. A discard:
+
+- is counted by one atomic `UPDATE` (`discarded_count`, `last_discarded_at`): uploads, not runs, because a
+  matrix run uploads once per job;
+- writes a WARNING log line with the CI URL masked, and bumps the key's `last_used_at`;
+- increments `qeos_runs_discarded_total{reason="manual"}`;
+- writes no idempotency record, so a replay is evaluated again; a replay of a run stored earlier still
+  answers `200`.
+
+Turning the setting off or on never touches stored runs. `trigger` is reported by the collector, so it is a
+noise filter, not access control. `test_runs.trigger` (migration 019) stores it and the run list and detail
+return it. See ADR-030.
 
 ## Import token
 

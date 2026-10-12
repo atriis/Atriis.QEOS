@@ -135,6 +135,11 @@
 - [x] Dogfooding: this repository's CI reports its own results (four service suites, dashboard, collector on 3.9/3.12) through the collector built from the same commit; enabled by the QEOS_URL repository variable + QEOS_API_KEY secret, push and same-repo PRs only, never fails the build
 - [ ] Phase 2 exit criteria: agents on 3 CI platforms in real projects; 10k test executions ingested
 
+### Collect manual CI runs (ADR-030)
+- [x] Server side (2026-10-12): `collection_settings` and `test_runs.trigger` (migration 019), `GET/PUT /projects/{id}/collection-settings`, a manual upload to a project that switched collection off answers 202 and stores nothing, gateway route
+- [ ] Collector 0.5.0: classify the run from the CI environment, `--trigger`, the 202 notice; tag `collector-v0.5.0`
+- [ ] Dashboard: the Collection card in Project Settings
+
 ### Collector — nice to have
 Distribution
 - [~] Publish to PyPI: workflow ready (trusted publishing, gated on repo variable PYPI_PUBLISH=true); needs the one-off publisher config on pypi.org (project qeos-collector, repo carneiru/QA-Vision-Platform, workflow release-collector.yml, environment pypi)

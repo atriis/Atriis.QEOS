@@ -23,6 +23,7 @@ TODO.md, commit messages and benchmark rulings:
 | [ADR-026](ADR-026-report-joins-in-the-dashboard.md) | The report joins in the dashboard (case-areas + test keys); run origin is matched by CI run URL |
 | [ADR-027](ADR-027-monitoring-profile.md) | Monitoring is an opt-in Prometheus/Alertmanager/Grafana compose profile; blueprint metric names; job heartbeats in a table; Grafana behind a QEOS cookie hand-off |
 | [ADR-028](ADR-028-customisable-overview.md) | The customisable Overview: layouts in project-service (project default and personal, optimistic versions), one widget catalogue file shared by validation and the dashboard registry, refresh keys declared per widget, "my" widgets matched exactly by commit author name |
+| [ADR-030](ADR-030-collect-manual-runs.md) | A project setting decides whether manual CI runs are collected: owned by ingestion, the collector classifies and sends `run.trigger`, an off project answers 202 and stores nothing, the trigger is client-reported (a noise filter, not access control) |
 
 **Proposed** — ADR-001..010 describe the TARGET architecture (DDD, Kafka,
 Kubernetes, Go services, Neo4j, Qdrant, ...). Reclassified 2026-10-02: their

@@ -93,6 +93,10 @@ details.
 - **CI uploads.** Per-project API keys, stored as SHA-256 hashes and shown once.
   A key can also be traded for a 5-minute service token that only the Gherkin
   import accepts.
+- **Collection of manual runs.** The project toggle that discards manual CI runs is a noise
+  filter, not an access control. The collector reports `run.trigger`, so whoever holds the project's
+  API key can label a manual run `automatic` and have it stored. API keys remain the boundary.
+  Only owners and admins change the toggle (ADR-030).
 - **Masking.** Secrets and personal data in failure messages (authorization
   headers, cookies, passwords in URLs and command lines, JWTs, cloud and vendor
   tokens, private keys, key=value secrets, email addresses, card numbers) are

@@ -102,6 +102,13 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   `quarantined`/`blocking` failures for `qeos-collector upload --gate`.
   `GET /collect/key` checks a key; `POST /collect/token` trades it for a
   5-minute service token that only test-management's import accepts (ADR-024).
+  Optional `run.trigger` (`manual`, `automatic` or `qeos`; anything else is a 422), reported by the
+  collector and stored on the run. When the project has switched off collection of manual runs
+  and `trigger` is `manual`, the answer is `202 {"discarded": true, "reason": "manual runs are
+  not collected for this project"}` and nothing is stored (ADR-030).
+- **Collection settings**: `GET/PUT /projects/{id}/collection-settings` (`collect_manual`, default
+  true; the discard count and time; members read, owners and admins write), table
+  `collection_settings` (ADR-030).
 - **Masking**: built-in rules (authorization headers, cookies, URL and CLI
   passwords, JWTs, vendor tokens, private keys, key=value secrets, emails, card
   numbers) plus up to 20 per-project patterns on RE2 (`/masking-patterns`, with
@@ -167,7 +174,7 @@ Key ingestion tables: test_runs (+ change summary columns), test_results
 (message/details masked+truncated, `(test_key, run_id)` index),
 run_changed_files, run_components, muted_tests (quarantine), flaky_daily /
 flaky_rollup_days (daily flip aggregates + computed-day markers), api_keys
-(SHA-256 of the key), masking_patterns, notification_channels. Test-management:
+(SHA-256 of the key), masking_patterns, notification_channels, collection_settings. Test-management:
 cases, case_labels, suites, suite_cases, feature_files, ci_targets,
 run_requests. Project: projects, repositories, overview_layouts (a JSONB layout
 per project default or user, with a version for conflict checks).
