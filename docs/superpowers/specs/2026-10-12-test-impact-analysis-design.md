@@ -194,3 +194,8 @@ rulings); they replace the text above where they differ:
   everything is visible (§2.3).
 - `impact_pairs` keeps only pairs with at least `MIN_NEW_FAILURES` (2) new failures, since a pair with one
   can never be suggested; the nightly rebuild applies a changed threshold the next night (§3.2).
+- `impact_pairs` stores only pairs that pass every threshold, lift included (computed against
+  `impact_test_base` at rollup time), so live scoring reads only suggestible rows (benchmark: whole-pair loads
+  missed the 200 ms budget). A test is suggested through the strongest passing unit of the change. Threshold
+  changes apply at the next rollup; replay applies the same rule (§3.2, §3.3).
+
