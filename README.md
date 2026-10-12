@@ -173,6 +173,7 @@ flowchart TB
     subgraph JOBS["Jobs (ingestion image)"]
         RET[ingestion-retention]
         ROLL[analytics-rollup]
+        IMPR[impact-rollup]
         WEEK[weekly-summary]
     end
     RET -.->|retention periods| PROJ
@@ -217,7 +218,7 @@ into test-management-service ([SETUP §4.2.3](docs/SETUP.md)).
 | project-service | [`platforms/project-service/`](platforms/project-service/) | Platform | Projects, repositories, settings, retention |
 | test-management-service | [`platforms/test-management-service/`](platforms/test-management-service/README.md) | Execution | Test cases, suites, Gherkin import and sync, run requests |
 | ingestion-service | [`platforms/ingestion-service/`](platforms/ingestion-service/README.md) | Intelligence (QIP), Collaboration | Uploads, runs, analytics, the Report, notification channels |
-| Jobs | [`platforms/ingestion-service/src/ingestion/jobs/`](platforms/ingestion-service/src/ingestion/jobs/) | Intelligence (QIP) | `ingestion-retention`, `analytics-rollup` (flaky rollups) and `weekly-summary`: containers of the ingestion image |
+| Jobs | [`platforms/ingestion-service/src/ingestion/jobs/`](platforms/ingestion-service/src/ingestion/jobs/) | Intelligence (QIP) | `ingestion-retention`, `analytics-rollup` (flaky rollups), `impact-rollup` (test impact statistics) and `weekly-summary`: containers of the ingestion image |
 | Collector | [`collector/`](collector/README.md) | Integrations | The CI-side uploader and feature sync (`pip`, single-file `.pyz` or container image) |
 | PostgreSQL | [`scripts/postgres-init.sh`](scripts/postgres-init.sh) | Infrastructure | `postgres`: PostgreSQL 15, one database per service, created on every start if missing |
 | Shared library | [`shared/qeos_shared/`](shared/) | Shared kernel | Settings, database session, mail and metrics helpers |

@@ -36,12 +36,13 @@ groups:
 
   - name: qeos-jobs-and-uploads
     rules:
-      # 2x each job's interval: retention 24 h, rollup 6 h, weekly summary 30 min (Ruling 6)
+      # 2x each job's interval: retention 24 h, rollup 6 h, weekly summary 30 min (Ruling 6), impact rollup 24 h
       - alert: JobStale
         expr: |
           time() - job_last_success_timestamp_seconds{job="retention"} > 2 * 86400
           or time() - job_last_success_timestamp_seconds{job="rollup"} > 12 * 3600
           or time() - job_last_success_timestamp_seconds{job="weekly_summary"} > 3600
+          or time() - job_last_success_timestamp_seconds{job="impact_rollup"} > 2 * 86400
         for: 5m
         labels:
           severity: warning

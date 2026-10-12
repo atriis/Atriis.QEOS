@@ -17,7 +17,7 @@ Caddy TLS edge, `deploy/`, ADR-019).
 qeos-collector (CI) ──► gateway ──► ingestion-service ──► ingestion_db
                                └──► test-management-service (Gherkin sync)
 browser (dashboard SPA) ─► gateway ─► auth / organization / project / ingestion / test-management
-jobs: ingestion-retention, analytics-rollup, weekly-summary (ingestion image, advisory locks)
+jobs: ingestion-retention, analytics-rollup, impact-rollup, weekly-summary (ingestion image, advisory locks)
 ```
 
 All cross-service communication is synchronous HTTP: project-role checks
@@ -138,7 +138,8 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   legal hold, empties deleted projects after a 7-day grace, pg advisory lock
   7351001); `analytics-rollup` (flaky_daily backfill ≤90 d + yesterday/today
   every 6 h, lock 7351002); `weekly-summary` (Mondays, once per channel per
-  week, lock 7351003).
+  week, lock 7351003); `impact-rollup` (test impact statistics: impact_pairs
+  and impact_test_base over 90 days, every 24 h, lock 7351004; ADR-029).
 
 ### 2.5 test-management-service (`platforms/test-management-service`, ADR-022)
 - **Cases**: per-project numbers shown as `TC-n` (never reused; archive, no delete), title,

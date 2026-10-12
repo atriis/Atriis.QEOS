@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from src.ingestion.models.job_heartbeat import JobHeartbeat
 from src.ingestion.utils.redaction import _SECRET_NAMES, redact
 
-JOBS = ("retention", "rollup", "weekly_summary")
+JOBS = ("retention", "rollup", "weekly_summary", "impact_rollup")
 MAX_ERROR = 500
 # Userinfo of scheme://userinfo@host up to the LAST "@" before whitespace or a quote, so a
 # password holding "@" or "/" is removed whole.

@@ -6,7 +6,7 @@
 >
 > | Area | Status today |
 > |---|---|
-> | Services | CURRENT: auth, organization, project, ingestion, test-management (`platforms/`), NGINX gateway, React dashboard (`dashboard/`), collector agent (`collector/`, plus `collector-action/` and `collector-jenkins/`), ingestion-retention + analytics-rollup + weekly-summary jobs |
+> | Services | CURRENT: auth, organization, project, ingestion, test-management (`platforms/`), NGINX gateway, React dashboard (`dashboard/`), collector agent (`collector/`, plus `collector-action/` and `collector-jenkins/`), ingestion-retention + analytics-rollup + impact-rollup + weekly-summary jobs |
 > | Data layer | CURRENT: PostgreSQL 15 only (one DB per service). Kafka, MongoDB, Neo4j, Qdrant, ClickHouse, Redis, MinIO, Elasticsearch: TARGET, none deployed |
 > | Events / CDC / QIP backbone (sect. 6, 8, 12) | TARGET. All cross-service communication today is synchronous HTTP via the gateway |
 > | Deployment (sect. 9, 18, 23) | CURRENT: docker-compose (maturity L0); production package for one VM behind a Caddy TLS edge (`deploy/`, ADR-019). Kubernetes/Istio/Vault/ArgoCD: TARGET |

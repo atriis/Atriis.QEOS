@@ -114,6 +114,35 @@ tests:
           - exp_labels: {severity: warning, job: rollup, instance: "ingestion-service:8000"}
             exp_annotations: {summary: "Job rollup has not succeeded for over twice its interval"}
 
+  - name: JobStale gives impact_rollup two days (it passes every 24 hours)
+    interval: 1m
+    input_series:
+      # at eval_time 10m, time() = 600: impact_rollup last succeeded 173,600 s ago, and 173,300 s ago when the
+      # 5-minute "for" starts: both over 2 days (172,800 s)
+      - series: 'job_last_success_timestamp_seconds{job="impact_rollup",instance="ingestion-service:8000"}'
+        values: '-173000+0x15'
+      # rollup: 600 s ago, fresh
+      - series: 'job_last_success_timestamp_seconds{job="rollup",instance="ingestion-service:8000"}'
+        values: '0+0x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: JobStale
+        exp_alerts:
+          - exp_labels: {severity: warning, job: impact_rollup, instance: "ingestion-service:8000"}
+            exp_annotations: {summary: "Job impact_rollup has not succeeded for over twice its interval"}
+
+  - name: JobStale leaves a one-day-old impact_rollup alone
+    interval: 1m
+    input_series:
+      # at eval_time 10m: 90,600 s ago (25 h), and 90,300 s when the "for" starts: over one interval (24 h), so a
+      # threshold of one day, or the rollup's 12 h, would fire; under the two days the rule gives it
+      - series: 'job_last_success_timestamp_seconds{job="impact_rollup",instance="ingestion-service:8000"}'
+        values: '-90000+0x15'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: JobStale
+        exp_alerts: []
+
   - name: JobFailing after 30 minutes of an error newer than the last success
     interval: 1m
     input_series:

@@ -207,7 +207,7 @@ docker compose up -d --build --wait gateway
 - You only name `gateway`: it depends on every service, so this starts everything. That means
   PostgreSQL, the `db-init` job (it creates any missing database), the five `*-migrate` jobs
   (`alembic upgrade head`), the five services, the dashboard, the background jobs
-  (`ingestion-retention`, `analytics-rollup`, `weekly-summary`) and finally the gateway.
+  (`ingestion-retention`, `analytics-rollup`, `impact-rollup`, `weekly-summary`) and finally the gateway.
 - `--wait` returns only when everything is healthy. The first run takes a few minutes.
 - Open **https://localhost:8443**. Until you complete [2.7](#27-trust-the-local-https-certificate),
   the browser warns about the certificate. Accept it once.

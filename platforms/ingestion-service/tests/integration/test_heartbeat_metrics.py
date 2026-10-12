@@ -17,7 +17,7 @@ def sample(name, job):
 
 def test_every_known_job_is_exposed_at_zero_before_its_first_pass(client):
     text = client.get("/metrics").text
-    for job in ("retention", "rollup", "weekly_summary"):
+    for job in ("retention", "rollup", "weekly_summary", "impact_rollup"):
         assert f'job_last_success_timestamp_seconds{{job="{job}"}} 0.0' in text
         assert f'job_last_error_timestamp_seconds{{job="{job}"}} 0.0' in text
 

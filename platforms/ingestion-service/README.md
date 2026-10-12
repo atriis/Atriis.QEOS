@@ -332,7 +332,8 @@ coverage instrumentation, no AI: co-failure statistics on PostgreSQL.
   are not units. A change of more than 300 distinct paths counts at folder level only. Runs whose change list the
   collector truncated are left out.
 - **Tables** (migration 018), rebuilt per project in one transaction by `python -m src.ingestion.jobs.impact_rollup`
-  (one pass on start, then every 24 hours with `--loop`, lock 7351004, heartbeat `impact_rollup`):
+  (one pass on start, then every 24 hours with `--loop`, lock 7351004, heartbeat `impact_rollup`; the
+  `impact-rollup` compose service runs it, and the JobStale alert fires after two days without a success):
   - `impact_pairs (project_id, unit_hash, test_key, path_unit, changed_runs, new_failures, computed_at)`: only
     pairs with at least `MIN_NEW_FAILURES` (2) new failures, the fewest a suggestion can use (a pair below that
     can never be suggested; lowering the constant takes effect at the next pass), over the runs with changed files from 90 days before today 00:00 UTC.
@@ -355,7 +356,7 @@ coverage instrumentation, no AI: co-failure statistics on PostgreSQL.
   gateway): `qav_ingest_runs_total`, `qav_ingest_results_total`, `qav_ingest_rejected_total{reason}`,
   `qav_ingest_duration_seconds` (the `qav_` prefix predates the QEOS rename and is kept so dashboards and alerts keep working).
 - Job heartbeats, read from `job_heartbeats` on every scrape: `job_last_success_timestamp_seconds{job}` and
-  `job_last_error_timestamp_seconds{job}` (Unix seconds) for `retention`, `rollup` and `weekly_summary` (always present; any other job name with a row is exposed too). `0` means
+  `job_last_error_timestamp_seconds{job}` (Unix seconds) for `retention`, `rollup`, `weekly_summary` and `impact_rollup` (always present; any other job name with a row is exposed too). `0` means
   never: no successful (or no failed) pass has been recorded yet, so a job that has not succeeded yet looks stale.
   If the database read fails, the job series are left out and `job_heartbeat_read_errors_total` increases while
   `/metrics` keeps answering (the read has its own one-connection engine and a 2 s connect, pool and statement budget). Prometheus scrapes ingestion with `honor_labels: true` so `job` keeps the loop job's name.

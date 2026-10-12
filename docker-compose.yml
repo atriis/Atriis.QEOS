@@ -276,6 +276,16 @@ services:
       ingestion-migrate:
         condition: service_completed_successfully
 
+  # Rebuilds the test impact statistics (impact_pairs, impact_test_base): one pass on start, then every 24 hours.
+  impact-rollup:
+    image: qeos/ingestion-service:local
+    pull_policy: never
+    environment: *ingestion-env
+    command: ["python", "-m", "src.ingestion.jobs.impact_rollup", "--loop"]
+    depends_on:
+      ingestion-migrate:
+        condition: service_completed_successfully
+
   # Sends last week's summary to channels that ask for it, Mondays from
   # WEEKLY_SUMMARY_HOUR_UTC; once per channel per week (see the job's docstring)
   weekly-summary:
@@ -328,6 +338,8 @@ services:
       ingestion-retention:
         condition: service_started
       analytics-rollup:
+        condition: service_started
+      impact-rollup:
         condition: service_started
       weekly-summary:
         condition: service_started

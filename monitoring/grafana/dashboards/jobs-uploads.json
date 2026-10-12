@@ -11,7 +11,7 @@
   "time": {"from": "now-24h", "to": "now"},
   "templating": {"list": []},
   "panels": [
-    {"id": 1, "type": "stat", "title": "Since last success", "description": "Stale above 2 days (retention), 12 h (rollup), 1 h (weekly summary). never: no success since the service started", "gridPos": {"h": 5, "w": 12, "x": 0, "y": 0},
+    {"id": 1, "type": "stat", "title": "Since last success", "description": "Stale above 2 days (retention, impact rollup), 12 h (rollup), 1 h (weekly summary). never: no success since the service started", "gridPos": {"h": 5, "w": 12, "x": 0, "y": 0},
      "datasource": {"type": "prometheus", "uid": "prometheus"},
      "fieldConfig": {"defaults": {"unit": "s", "mappings": [{"type": "value", "options": {"-1": {"text": "never", "index": 0}}}]}, "overrides": []},
      "options": {"graphMode": "none", "reduceOptions": {"calcs": ["lastNotNull"]}},
