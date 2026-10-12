@@ -596,7 +596,7 @@ are skipped with a warning.
 
 PowerShell:
 ```powershell
-pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.4.1#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
 $env:QEOS_URL = "https://localhost:8443"
 $env:QEOS_API_KEY = "<your key>"
 qeos-collector check "reports/**/*.xml" --ca-file $HOME\qeos-ca.crt     # verifies everything, uploads nothing
@@ -604,14 +604,14 @@ qeos-collector upload "reports/**/*.xml" --ca-file $HOME\qeos-ca.crt
 ```
 bash:
 ```bash
-pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.4.1#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
 export QEOS_URL=https://localhost:8443
 export QEOS_API_KEY=<your key>
 qeos-collector check "reports/**/*.xml" --ca-file ~/qeos-ca.crt
 qeos-collector upload "reports/**/*.xml" --ca-file ~/qeos-ca.crt
 ```
 
-- Always pin the tag (`collector-v0.4.1`). `--ca-file` is needed only for the local
+- Always pin the tag (`collector-v0.5.0`). `--ca-file` is needed only for the local
   self-signed certificate or a private CA.
 - `check` tests, in order: the URL, TLS trust, the API key (it names the project), and that the
   files match and parse. It exits 2 on the first failure.
@@ -642,7 +642,7 @@ are shown on the run page. For a list of changed files per run, check out at lea
    - **Variable** `QEOS_URL` = `https://qeos.example.com` (no trailing slash)
 2. After the test step (the tests must write a report), add:
    ```yaml
-   - uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.4.1
+   - uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.5.0
      if: always()                      # report failing builds too
      with:
        url: ${{ vars.QEOS_URL }}
@@ -661,7 +661,7 @@ are shown on the run page. For a list of changed files per run, check out at lea
 2. In `.gitlab-ci.yml`:
    ```yaml
    include:
-     - remote: https://raw.githubusercontent.com/carneiru/QA-Vision-Platform/collector-v0.4.1/templates/qeos-collector.gitlab-ci.yml
+     - remote: https://raw.githubusercontent.com/carneiru/QA-Vision-Platform/collector-v0.5.0/templates/qeos-collector.gitlab-ci.yml
 
    qeos-collector-upload:
      variables:
@@ -707,7 +707,7 @@ are shown on the run page. For a list of changed files per run, check out at lea
      always {
        withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')]) {
          withEnv(['QEOS_URL=https://qeos.example.com']) {
-           qeosCollectorUpload(patterns: 'reports/**/*.xml', ref: 'collector-v0.4.1')
+           qeosCollectorUpload(patterns: 'reports/**/*.xml', ref: 'collector-v0.5.0')
          }
        }
      }
@@ -726,6 +726,20 @@ If `QEOS_URL` uses a certificate from a **private/corporate CA**, give the colle
 certificate: `--ca-file`, `QEOS_CA_FILE`, `ca-file:` in `.qeos.yml`, `extra-args: --ca-file …`
 in the GitHub action, or `caFile:` in Jenkins. Through a proxy, `HTTPS_PROXY` and `NO_PROXY`
 are honoured.
+
+#### 4.1.8a Manual runs and the run trigger
+
+From 0.5.0 the collector sends how each run started (`manual`, `automatic` or `qeos`), detected from the CI
+environment; `--trigger` / `QEOS_TRIGGER` overrides it. A project can switch manual collection off
+(Project Settings, Collection); the platform then answers 202, the collector prints `qeos: run not
+collected: manual runs are not collected for this project` and exits 0. The detection table is in the
+[collector README](../collector/README.md#run-trigger-and-manual-runs). Two cases:
+
+- **A script dispatching with a person's token** looks manual (the triggering actor is that person). Use a
+  GitHub App or `GITHUB_TOKEN` for automated dispatches, or pass `--trigger automatic` in that workflow.
+- **The collector container image** sees only the variables passed to it. Without `GITHUB_EVENT_NAME`,
+  `GITHUB_TRIGGERING_ACTOR`, `GITHUB_RUN_ATTEMPT` and the event file (`GITHUB_EVENT_PATH`, mounted), the
+  trigger is unknown and the run is collected. The composite action and `pip` installs need nothing extra.
 
 #### 4.1.9 Hosted CI against a local stack (tunnel)
 
@@ -890,7 +904,7 @@ picked, such as `MyRepo/tests/features/...`).
          - uses: actions/checkout@v4
          - uses: actions/setup-python@v5
            with: { python-version: "3.12" }
-         - run: pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.4.1#subdirectory=collector"
+         - run: pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
          - run: qeos-collector import-features "tests/features/**/*.feature" ${{ inputs.first_sync && '--allow-mass-archive' || '' }}
            env:
              QEOS_URL: ${{ vars.QEOS_URL }}
@@ -1372,7 +1386,7 @@ workflow that runs the suite (scheduled, per area, nightly…):
 ```yaml
       - name: Upload results to QEOS
         if: always() && vars.QEOS_URL != ''      # skipped cleanly where QEOS is not set up
-        uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.4.1
+        uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.5.0
         with:
           url: ${{ vars.QEOS_URL }}
           patterns: test-results/cucumber-report.json
@@ -1453,7 +1467,7 @@ restore it on the VM (`deploy/README.md` §7), and copy the local `TM_SECRETS_KE
   unset.
 - CI keeps working: `QAV_URL` / `QAV_API_KEY`, the `qav-collector` command, `qav_` keys, the
   `qavCollectorUpload` Jenkins step and old GitLab template variables all still work, with a
-  deprecation warning. Move to `QEOS_*` and `collector-v0.4.1` when convenient. On Azure, a
+  deprecation warning. Move to `QEOS_*` and `collector-v0.5.0` when convenient. On Azure, a
   secret still named `QAV_API_KEY` must be renamed, or mapped as `QEOS_API_KEY: $(QAV_API_KEY)`.
 - Data does not move: the volumes keep their `qa-vision_qav_*` names, pinned in the compose files. If Compose asks to
   recreate a volume, answer **N**.
@@ -1486,7 +1500,7 @@ qeos up -d --build --wait edge
   and 004 (scenario names for Play), run one **full** Gherkin import per project (dashboard
   with "This is my complete features folder", or `import-features` from CI). After new masking
   rules, run the `remask` job ([4.6](#46-masking)).
-- **Collector:** CI pins a tag (`collector-v0.4.1`). Upgrading the platform does not change it.
+- **Collector:** CI pins a tag (`collector-v0.5.0`). Upgrading the platform does not change it.
   Move pipelines to a new tag when the release notes ask for it.
 - **Compose project renamed to `qeos` (2026-10-11).** Containers are now `qeos-*` and local images
   `qeos/*`. Once, before the first `up` after pulling this change, stop the old project:

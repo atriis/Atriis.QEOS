@@ -137,7 +137,7 @@
 
 ### Collect manual CI runs (ADR-030)
 - [x] Server side (2026-10-12): `collection_settings` and `test_runs.trigger` (migration 019), `GET/PUT /projects/{id}/collection-settings`, a manual upload to a project that switched collection off answers 202 and stores nothing, gateway route
-- [ ] Collector 0.5.0: classify the run from the CI environment, `--trigger`, the 202 notice; tag `collector-v0.5.0`
+- [x] Collector 0.5.0: classify the run from the CI environment, `--trigger`, the 202 notice; tag `collector-v0.5.0`
 - [ ] Dashboard: the Collection card in Project Settings
 
 ### Collector — nice to have

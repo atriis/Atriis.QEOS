@@ -14,7 +14,7 @@
 // checkout or an internal mirror).
 def call(Map config = [:]) {
     String patterns = config.patterns ?: 'reports/**/*.xml'
-    String ref = config.ref ?: 'collector-v0.4.1'
+    String ref = config.ref ?: 'collector-v0.5.0'
     String source = config.source ?:
         "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@${ref}#subdirectory=collector"
     String args = [

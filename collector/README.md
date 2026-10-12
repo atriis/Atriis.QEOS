@@ -6,7 +6,7 @@ Python 3.9 or newer, nothing else to install.
 ## Install
 
 ```bash
-pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.4.1#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
 ```
 
 ### Renamed from `qav-collector` (0.4.0)
@@ -67,7 +67,7 @@ instead of storing it twice.
           QEOS_URL: https://qeos.example.com
           QEOS_API_KEY: ${{ secrets.QEOS_API_KEY }}
         run: |
-          pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.4.1#subdirectory=collector"
+          pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
           qeos-collector upload "reports/**/*.xml"
 ```
 
@@ -78,7 +78,7 @@ test:
   script:
     - pytest --junitxml=reports/junit.xml
   after_script:
-    - pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.4.1#subdirectory=collector"
+    - pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
     - qeos-collector upload "reports/**/*.xml"
   variables:
     QEOS_URL: https://qeos.example.com
@@ -92,7 +92,7 @@ post {
   always {
     withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')]) {
       sh '''
-        pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.4.1#subdirectory=collector"
+        pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
         QEOS_URL=https://qeos.example.com qeos-collector upload "target/surefire-reports/*.xml"
       '''
     }
@@ -111,7 +111,7 @@ mass-archive guard is the backstop.
 steps:
   - script: mvn test   # or pytest --junitxml=reports/junit.xml, dotnet test --logger trx, …
   - script: |
-      pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.4.1#subdirectory=collector"
+      pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
       qeos-collector upload "**/TEST-*.xml"
     displayName: Upload test results to QEOS
     condition: always()        # report results even when the tests failed
@@ -154,10 +154,42 @@ variable, and both win over what is detected from the CI system.
 | `--component` | `QEOS_COMPONENTS` | `NAME@SHA` of a repo/version this run exercised, e.g. the product build an E2E suite ran against. Flag repeatable; variable comma-separated. Up to 20 |
 | `--client-cert` | `QEOS_CLIENT_CERT` | Client certificate for mTLS, presented when the server asks for one |
 | `--client-key` | `QEOS_CLIENT_KEY` | Private key belonging to `--client-cert` |
+| `--trigger` | `QEOS_TRIGGER` | `manual`, `automatic` or `qeos`: how the run started. Overrides detection (see below) |
 | `--fail-on-error` | `QEOS_FAIL_ON_ERROR=1` | Exit 1 if the upload fails |
 | `--gate` | `QEOS_GATE=1` | Exit 1 if the run has failures outside quarantine, or could not be uploaded (see below) |
 | `--spool` | `QEOS_SPOOL` | Directory keeping parts a failed upload could not deliver; the next invocation resends them first, under their original Idempotency-Key (so nothing is ever stored twice). Capped at 100 files; rejected uploads (401/409) are never spooled. Point it at a persistent runner path — a wiped workspace wipes the spool |
 | `--dry-run` | — | Print the JSON; upload nothing |
+
+## Run trigger and manual runs
+
+The collector tells the platform how each run started (`run.trigger`), so a project can choose not to
+collect manual runs (Project Settings, Collection). An explicit `--trigger` / `QEOS_TRIGGER` wins
+(the legacy `QAV_TRIGGER` still works, with a deprecation warning); otherwise the CI environment decides:
+
+| CI | `qeos` | `manual` | `automatic` |
+|---|---|---|---|
+| GitHub Actions | `GITHUB_EVENT_NAME=workflow_dispatch` and the event payload (`GITHUB_EVENT_PATH`) has `inputs.request_id` | `workflow_dispatch` without `request_id` and `GITHUB_TRIGGERING_ACTOR` not ending in `[bot]`; or `GITHUB_RUN_ATTEMPT` > 1 with a triggering actor not ending in `[bot]` | every other event (`push`, `pull_request`, `schedule`, `repository_dispatch`, ...) and dispatches by a bot |
+| GitLab CI | — | `CI_PIPELINE_SOURCE=web`, or `CI_JOB_MANUAL=true` | any other `CI_PIPELINE_SOURCE` |
+| Azure Pipelines | — | `BUILD_REASON=Manual` | any other `BUILD_REASON` |
+| Jenkins | — | `BUILD_CAUSE` contains `MANUALTRIGGER` or `USERIDCAUSE` (needs a plugin that sets it) | `BUILD_CAUSE` set to anything else |
+
+`GITHUB_TRIGGERING_ACTOR` falls back to `GITHUB_ACTOR`. An unreadable or missing event payload means no
+`request_id`. Anything not matched is unknown: the field is left out and the run is collected. Jenkins
+without `BUILD_CAUSE` is unknown; use `--trigger` there.
+
+When the project has switched manual collection off and the run is manual, the platform answers 202 and
+stores nothing. The collector prints `qeos: run not collected: manual runs are not collected for this
+project`, sends no further parts and exits 0, also with `--gate` or `--fail-on-error`.
+
+Two cases to know:
+
+- **A script dispatching with a person's token.** A scheduler that calls `workflow_dispatch` with a
+  personal access token looks manual (the triggering actor is that person). Use a GitHub App or
+  `GITHUB_TOKEN` for automated dispatches, or pass `--trigger automatic` in that workflow.
+- **The container image.** It sees only the variables passed to it. Without `GITHUB_EVENT_NAME`,
+  `GITHUB_TRIGGERING_ACTOR`, `GITHUB_RUN_ATTEMPT` and the event file (`GITHUB_EVENT_PATH`, mounted), the
+  trigger is unknown and the run is collected. The composite action and `pip` installs see the runner's
+  environment and need nothing extra.
 
 ## `qeos-collector check`
 
@@ -220,7 +252,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.4.1#subdirectory=collector"
+      - run: pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
       - run: qeos-collector import-features
         env:
           QEOS_URL: ${{ vars.QEOS_URL }}
