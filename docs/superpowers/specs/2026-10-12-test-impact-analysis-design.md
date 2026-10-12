@@ -184,4 +184,12 @@ rulings); they replace the text above where they differ:
   statistical thresholds (§5).
 - The new compose job is added to the README diagram, component table and blueprint Services row, which CI's
   architecture-docs check requires (§6).
+- Performance design (pre-flight measurement missed the budgets with per-row inserts and whole-project
+  loads): the rollup builds both statistics tables inside PostgreSQL with `INSERT … SELECT`; `impact_pairs`
+  is keyed by `(project_id, unit_hash, test_key)` with `unit_hash = md5(path_unit)` (no surrogate id); live
+  scoring reads only the rows for the change's unit hashes. Budgets unchanged (§3.7), measured with one commit
+  per run.
+- Replay takes its own lock and may run long on large projects; it is a one-off (§3.6).
+- The accuracy figure also shows the average suggestion size, so a high catch rate from suggesting nearly
+  everything is visible (§2.3).
 
