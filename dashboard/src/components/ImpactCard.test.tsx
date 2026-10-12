@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
@@ -6,6 +6,7 @@ import { http, HttpResponse } from "msw";
 import { server } from "../test/server";
 import { setAccessToken } from "../auth/tokens";
 import type { RunImpact, SuggestedTest } from "../api/impact";
+import { IMPACT_POLL_MAX, IMPACT_POLL_MS } from "../lib/impactQueries";
 import ImpactCard from "./ImpactCard";
 
 const IMPACT_URL = "/api/v1/projects/42/runs/61/impact";
@@ -100,7 +101,8 @@ test("a run with changes but no stored suggestion says why", async () => {
 
 test("a replayed suggestion is marked", async () => {
   renderCard(impact({ replayed: true }));
-  expect(await screen.findByText("Replayed")).toBeInTheDocument();
+  const heading = await screen.findByRole("heading", { name: "Likely affected tests" });
+  expect(await within(heading.parentElement!).findByText("Replayed")).toHaveClass("pill");
   expect(screen.getByText("Replayed: scored later from the runs before this one, not at upload.")).toBeInTheDocument();
 });
 
@@ -122,14 +124,46 @@ test("long lists fold behind Show all", async () => {
   const region = await card();
   expect(await within(region).findAllByRole("link")).toHaveLength(15);
   expect(within(region).getByText("Showing the 20 strongest of 64 statistical suggestions")).toBeInTheDocument();
-  await userEvent.click(within(region).getByRole("button", { name: "Show all 20" }));
+  const toggle = within(region).getByRole("button", { name: "Show all 20" });
+  expect(toggle).toHaveAttribute("aria-expanded", "false");
+  await userEvent.click(toggle);
   expect(within(region).getAllByRole("link")).toHaveLength(20);
+  const fewer = within(region).getByRole("button", { name: "Show fewer" });
+  expect(fewer).toHaveAttribute("aria-expanded", "true");
+  await userEvent.click(fewer);
+  expect(within(region).getAllByRole("link")).toHaveLength(15);
+  expect(within(region).getByRole("button", { name: "Show all 20" })).toBeInTheDocument();
+});
+
+test("capped statistical rows beside always-included ones say how many were left out", async () => {
+  const tests = [...Array.from({ length: 20 }, (_, i) => statistical(`s${String(i).padStart(2, "0")}`)),
+    labelled("checkout_spec", "test_file_changed"), labelled("cart", "failing_on_branch")];
+  renderCard(impact({
+    suggestion: { state: "ok", model_version: "stats-v1", history_runs: 34, needed_runs: 20, statistical_total: 57, tests },
+    outcome: null,
+  }));
+  const region = await card();
+  expect(await within(region).findByText("Showing the 20 strongest of 57 statistical suggestions")).toBeInTheDocument();
+  expect(within(region).getByText("Suggested 22 tests · outcome not recorded yet")).toBeInTheDocument();
+  expect(within(region).getByRole("button", { name: "Show all 22" })).toBeInTheDocument();
+});
+
+test("too little history and no labelled tests: nothing to suggest yet", async () => {
+  renderCard(impact({
+    state: "not_enough_history", outcome: null,
+    suggestion: { state: "not_enough_history", model_version: "stats-v1", history_runs: 2, needed_runs: 20, statistical_total: 0,
+      tests: [] },
+  }));
+  expect(await screen.findByText("Nothing to suggest yet.")).toBeInTheDocument();
+  expect(screen.queryByText("No tests are likely affected by this change")).not.toBeInTheDocument();
 });
 
 test("loading is a status of the card's own", async () => {
   server.use(http.get(IMPACT_URL, () => new Promise<never>(() => {})));
   mount();
-  expect(await screen.findByRole("status", { name: "Loading likely affected tests…" })).toBeInTheDocument();
+  const region = await card();
+  expect(within(region).getByRole("heading", { name: "Likely affected tests" })).toBeInTheDocument();
+  expect(within(region).getByRole("status", { name: "Loading likely affected tests…" })).toBeInTheDocument();
 });
 
 test("a failed load shows the error with Retry, and Retry asks again", async () => {
@@ -138,7 +172,46 @@ test("a failed load shows the error with Retry, and Retry asks again", async () 
     ? HttpResponse.json({ detail: "Ingestion is unavailable" }, { status: 503 })
     : HttpResponse.json(impact()))));
   mount();
-  expect(await screen.findByRole("alert")).toHaveTextContent("Ingestion is unavailable");
+  const region = await card();
+  expect(await within(region).findByRole("alert")).toHaveTextContent("Ingestion is unavailable");
+  expect(within(region).getByRole("heading", { name: "Likely affected tests" })).toBeInTheDocument();
   await userEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(await screen.findByRole("link", { name: "pays" })).toBeInTheDocument();
+});
+
+describe("a pending outcome", () => {
+  beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
+  afterEach(() => vi.useRealTimers());
+
+  test("is asked for again every few seconds until it arrives", async () => {
+    let calls = 0;
+    server.use(http.get(IMPACT_URL, () => HttpResponse.json(++calls === 1 ? impact({ outcome: null }) : impact())));
+    mount();
+    expect(await screen.findByText("Suggested 4 tests · outcome not recorded yet")).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(IMPACT_POLL_MS));
+    expect(await screen.findByText("All caught")).toBeInTheDocument();
+    const after = calls;
+    await act(() => vi.advanceTimersByTimeAsync(IMPACT_POLL_MS * 5));
+    expect(calls).toBe(after); // written: no more asking
+  });
+
+  test("stops asking at the cap, and keeps saying it is not recorded yet", async () => {
+    let calls = 0;
+    server.use(http.get(IMPACT_URL, () => { calls += 1; return HttpResponse.json(impact({ outcome: null })); }));
+    mount();
+    expect(await screen.findByText("Suggested 4 tests · outcome not recorded yet")).toBeInTheDocument();
+    for (let i = 0; i < IMPACT_POLL_MAX + 10; i += 1) await act(() => vi.advanceTimersByTimeAsync(IMPACT_POLL_MS));
+    expect(calls).toBe(IMPACT_POLL_MAX);
+    expect(screen.getByText("Suggested 4 tests · outcome not recorded yet")).toBeInTheDocument();
+  });
+
+  test("is not asked for when the run has no suggestion", async () => {
+    let calls = 0;
+    server.use(http.get(IMPACT_URL, () => { calls += 1;
+      return HttpResponse.json(impact({ state: "not_scored", suggestion: null, outcome: null })); }));
+    mount();
+    expect(await screen.findByText(/No suggestion was stored/)).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(IMPACT_POLL_MS * 3));
+    expect(calls).toBe(1);
+  });
 });

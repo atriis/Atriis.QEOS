@@ -81,7 +81,7 @@ function Body({ projectId, data }: { projectId: number; data: RunImpact }) {
       )}
       <Outcome projectId={projectId} suggested={s.tests.length} outcome={data.outcome} />
       {s.tests.length === 0 ? (
-        <p className="muted">No tests are likely affected by this change</p>
+        <p className="muted">{s.state === "not_enough_history" ? "Nothing to suggest yet." : "No tests are likely affected by this change"}</p>
       ) : (
         <ul className="impact-list">
           {shown.map((t) => (
@@ -94,8 +94,10 @@ function Body({ projectId, data }: { projectId: number; data: RunImpact }) {
           {`Showing the ${formatCount(statistical)} strongest of ${formatCount(s.statistical_total)} statistical suggestions`}
         </p>
       )}
-      {!all && s.tests.length > IMPACT_SHOWN && (
-        <button type="button" className="ghost" onClick={() => setAll(true)}>{`Show all ${formatCount(s.tests.length)}`}</button>
+      {s.tests.length > IMPACT_SHOWN && (
+        <button type="button" className="ghost" aria-expanded={all} onClick={() => setAll(!all)}>
+          {all ? "Show fewer" : `Show all ${formatCount(s.tests.length)}`}
+        </button>
       )}
     </>
   );

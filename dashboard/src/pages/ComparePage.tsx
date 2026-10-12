@@ -9,6 +9,7 @@ import NarrowMeta from "../components/NarrowMeta";
 import SortableTh from "../components/SortableTh";
 import StatusDot from "../components/StatusDot";
 import { nextSort, parseSort, sortRows, SortState } from "../lib/sort";
+import { plural } from "../lib/words";
 import PageHeader from "../components/PageHeader";
 import { tableCardClass, useIsWide } from "../lib/useIsWide";
 
@@ -28,8 +29,6 @@ const SECTIONS = [
 ] as const;
 
 type SectionKey = (typeof SECTIONS)[number]["key"];
-
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 function RunLine({ label, run }: { label: string; run: RunOverview }) {
   return (

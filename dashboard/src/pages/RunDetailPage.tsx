@@ -140,8 +140,9 @@ export default function RunDetailPage() {
 
           {run.failed + run.errored > 0 && <FailureGroups runId={run.id} projectId={projectId} />}
 
-          {run.change_base_ref !== null && (
-            <div className="run-change-cards">
+          {/* The impact card is on every run, so a run without changed files says "No change data" (spec §2.1) */}
+          <div className="run-change-cards">
+            {run.change_base_ref !== null && (
               <div className="card">
                 <h2>Changes</h2>
                 <p className="muted">
@@ -168,9 +169,9 @@ export default function RunDetailPage() {
                   </table>
                 )}
               </div>
-              <ImpactCard projectId={Number(projectId)} runId={run.id} />
-            </div>
-          )}
+            )}
+            <ImpactCard projectId={Number(projectId)} runId={run.id} />
+          </div>
 
           <FilterBar>
             <label>

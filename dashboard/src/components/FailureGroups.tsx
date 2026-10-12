@@ -2,9 +2,8 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { CauseHistory, getFailureGroups } from "../api/runs";
 import ErrorBanner from "./ErrorBanner";
+import { plural } from "../lib/words";
 import StatusDot from "./StatusDot";
-
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** How long a cause has been around on this branch, in words. */
 export function historyText(h: CauseHistory): string {
@@ -29,7 +28,7 @@ export default function FailureGroups({ runId, projectId }: { runId: number; pro
       {data && (
         <>
           <p className="muted">
-            {plural(data.total, "failure")}, {plural(data.groups.length, "cause")}. Tests share a cause when their
+            {plural(data.total, "failure", "failures")}, {plural(data.groups.length, "cause", "causes")}. Tests share a cause when their
             first error line matches once numbers, ids and hashes are ignored.
           </p>
           <ol className="cause-list">
@@ -50,7 +49,7 @@ export default function FailureGroups({ runId, projectId }: { runId: number; pro
                 </p>
                 <details>
                   <summary>
-                    {plural(g.count, "test")}
+                    {plural(g.count, "test", "tests")}
                     {g.errored > 0 && g.failed > 0 && ` (${g.failed} failed, ${g.errored} errored)`}
                   </summary>
                   <ul className="cause-tests">

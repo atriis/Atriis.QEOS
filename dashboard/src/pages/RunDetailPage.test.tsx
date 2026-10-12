@@ -349,3 +349,11 @@ test("a run that reported changes shows its likely affected tests beside them", 
   const region = await screen.findByRole("region", { name: "Likely affected tests" });
   expect(await within(region).findByText(/No suggestion was stored for this run/)).toBeInTheDocument();
 });
+
+test("a run that reported no changes says so in its likely affected tests card", async () => {
+  server.use(http.get("/api/v1/runs/61", () => HttpResponse.json(detail([result]))));
+  renderDetail();
+  const region = await screen.findByRole("region", { name: "Likely affected tests" });
+  expect(await within(region).findByText("No change data for this run")).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Changes" })).not.toBeInTheDocument();
+});
