@@ -91,3 +91,19 @@ def test_concurrent_discards_are_all_counted(db):
         t.join()
     db.expire_all()
     assert db.get(CollectionSettings, 1).discarded_count == 8
+
+
+def test_discard_is_logged_with_a_masked_url_and_marks_the_key_used(client, make_key, db, caplog):
+    from src.ingestion.models import ApiKey
+    api_key, key = make_key(project_id=1)
+    switch_off(db)
+    secret = "ghp_" + "a1B2c3D4e5" * 3 + "a1B2c3"
+    url = f"https://ci.example/run?token={secret}"
+    with caplog.at_level("WARNING"):
+        response = client.post(URL, json=upload_body(trigger="manual", ci_run_url=url), headers=key_headers(key))
+    assert response.status_code == 202
+    assert "upload discarded" in caplog.text and "project=1" in caplog.text
+    assert secret not in caplog.text
+    assert any(r.levelname == "WARNING" and "upload discarded" in r.getMessage() for r in caplog.records)
+    db.expire_all()
+    assert db.get(ApiKey, api_key.id if hasattr(api_key, "id") else api_key).last_used_at is not None

@@ -30,9 +30,10 @@ class IdempotencyConflict(Exception):
 class Discarded(Exception):
     """The upload is valid and deliberately not stored (ADR-030)."""
 
-    def __init__(self, reason: str):
+    def __init__(self, reason: str, ci_run_url: Optional[str] = None):
         super().__init__(reason)
         self.reason = reason
+        self.ci_run_url = ci_run_url  # masked: safe to log
 
 
 def truncate_utf8(text: Optional[str], limit: int) -> tuple[Optional[str], bool]:
@@ -79,8 +80,11 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
             return _replay(existing, request_hash)
 
     if upload.run.trigger == "manual" and not collection_settings_service.collects_manual(db, key.project_id):
+        # Same commit as the counter: a key that only sends discarded runs is not unused
+        key.last_used_at = datetime.now(timezone.utc)
         collection_settings_service.count_discard(db, key.project_id)
-        raise Discarded(DISCARD_REASON)
+        patterns = tuple(masking_pattern_service.compiled_for(db, key.project_id))
+        raise Discarded(DISCARD_REASON, mask(upload.run.ci_run_url, patterns)[0])
 
     counts = Counter(result.status for result in upload.results)
     meta = upload.run

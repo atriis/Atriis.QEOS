@@ -65,8 +65,8 @@ def collect_run(
             run, created = ingest_service.ingest(db, key, upload, idempotency_key)
         except ingest_service.Discarded as exc:
             metrics.DISCARDED.labels(reason="manual").inc()
-            logger.info("upload discarded", extra={"project_id": key.project_id, "api_key_id": key.id,
-                                                   "ci_run_url": upload.run.ci_run_url, "reason": exc.reason})
+            logger.warning("upload discarded: project=%s api_key_id=%s ci_run_url=%s reason=%s",
+                           key.project_id, key.id, exc.ci_run_url, exc.reason)
             return JSONResponse(status_code=status.HTTP_202_ACCEPTED,
                                 content={"discarded": True, "reason": exc.reason})
         except ingest_service.IdempotencyConflict:
