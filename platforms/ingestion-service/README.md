@@ -334,7 +334,8 @@ coverage instrumentation, no AI: co-failure statistics on PostgreSQL.
 - **Tables** (migration 018), rebuilt per project in one transaction by `python -m src.ingestion.jobs.impact_rollup`
   (one pass on start, then every 24 hours with `--loop`, lock 7351004, heartbeat `impact_rollup`):
   - `impact_pairs (project_id, unit_hash, test_key, path_unit, changed_runs, new_failures, computed_at)`: only
-    pairs with at least one new failure, over the runs with changed files from 90 days before today 00:00 UTC.
+    pairs with at least `MIN_NEW_FAILURES` (2) new failures, the fewest a suggestion can use (a pair below that
+    can never be suggested; lowering the constant takes effect at the next pass), over the runs with changed files from 90 days before today 00:00 UTC.
     Keyed by `(project_id, unit_hash, test_key)` with `unit_hash = md5(path_unit)`: no id to run out, and a long
     path never enters an index;
   - `impact_test_base (project_id, test_key, runs, new_failures, flaky, suite, class_name, name, file,

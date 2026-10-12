@@ -18,7 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session, aliased
 
-from src.ingestion.analytics.impact_rules import change_units
+from src.ingestion.analytics.impact_rules import MIN_NEW_FAILURES, change_units
 from src.ingestion.analytics.impact_score import BaseStat, ImpactTest, PairStat
 from src.ingestion.models import RunResult
 from src.ingestion.models.impact import ImpactPair, ImpactTestBase
@@ -55,13 +55,18 @@ def _staged(db: Session, project_id: int, start: datetime, end: datetime, exclud
     newly = newly_failed_bulk(db, runs, excluded)
     connection = db.connection()
     for table in _STAGE.sorted_tables:
-        connection.execute(text(f"DROP TABLE IF EXISTS {table.name}"))  # a pass that died mid-way on this connection
+        # a pass that died mid-way on this connection; pg_temp so a same-named table elsewhere on search_path is safe
+        scope = "pg_temp." if connection.dialect.name == "postgresql" else ""
+        connection.execute(text(f"DROP TABLE IF EXISTS {scope}{table.name}"))
         table.create(connection)
     _stage(db, _RUNS, [[run.id for run in runs]])
     units = [(run.id, unit) for run in runs for unit in sorted(change_units(run.paths))]
     _stage(db, _UNITS, [[run_id for run_id, _ in units], [unit for _, unit in units]])
     failed = [(run_id, key) for run_id, keys in sorted(newly.items()) for key in sorted(keys)]
     _stage(db, _NEWLY, [[run_id for run_id, _ in failed], [key for _, key in failed]])
+    if connection.dialect.name == "postgresql":  # fresh temp tables have no statistics; the joins below need them
+        for table in _STAGE.sorted_tables:
+            connection.execute(text(f"ANALYZE {table.name}"))
     yield
     # Not in a finally: after an error the transaction is aborted and the caller's rollback removes the tables
     for table in reversed(_STAGE.sorted_tables):
@@ -69,13 +74,14 @@ def _staged(db: Session, project_id: int, start: datetime, end: datetime, exclud
 
 
 def _pairs(project_id: int, computed_at: datetime):
-    """(project_id, unit_hash, test_key, path_unit, changed_runs, new_failures, computed_at): pairs with at least one
-    new failure."""
+    """(project_id, unit_hash, test_key, path_unit, changed_runs, new_failures, computed_at): the pairs with at least
+    MIN_NEW_FAILURES new failures, the fewest a suggestion can use (spec §9)."""
     changed = (select(_UNITS.c.path_unit, func.count().label("changed_runs"))
                .group_by(_UNITS.c.path_unit).subquery())
     counted = (select(_UNITS.c.path_unit, _NEWLY.c.test_key, func.count().label("new_failures"))
                .join(_NEWLY, _NEWLY.c.run_id == _UNITS.c.run_id)
-               .group_by(_UNITS.c.path_unit, _NEWLY.c.test_key).subquery())
+               .group_by(_UNITS.c.path_unit, _NEWLY.c.test_key)
+               .having(func.count() >= MIN_NEW_FAILURES).subquery())
     return (
         select(literal(project_id, Integer).label("project_id"), func.md5(counted.c.path_unit).label("unit_hash"),
                counted.c.test_key, counted.c.path_unit, changed.c.changed_runs, counted.c.new_failures,
@@ -101,7 +107,8 @@ def _bases(db: Session, project_id: int, flaky: Set[str], computed_at: datetime)
     counted = (select(per_run.c.test_key, func.count().label("runs"), func.max(per_run.c.run_id).label("newest"))
                .group_by(per_run.c.test_key)).subquery()
     newest_row = (select(func.max(RunResult.id))
-                  .where(RunResult.test_key == counted.c.test_key, RunResult.run_id == counted.c.newest)
+                  .where(RunResult.test_key == counted.c.test_key, RunResult.run_id == counted.c.newest,
+                         RunResult.status != "skipped")
                   .scalar_subquery())
     tested = select(counted.c.test_key, counted.c.runs, newest_row.label("row_id")).subquery()
     named = aliased(RunResult)

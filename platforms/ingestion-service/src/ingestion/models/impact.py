@@ -20,7 +20,7 @@ def unit_hash(path_unit: str) -> str:
 
 
 class ImpactPair(Base):
-    """How often a test newly failed in the window's runs that changed one path unit (pairs with at least one).
+    """How often a test newly failed in the window's runs that changed one path unit (only pairs with at least MIN_NEW_FAILURES).
 
     No surrogate id: keyed by (project_id, unit_hash, test_key), so a long path_unit is never in an index entry and a
     table rebuilt nightly never runs out of ids (supersedes plan Ruling 27)."""

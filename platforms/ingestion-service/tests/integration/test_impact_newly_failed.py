@@ -92,6 +92,19 @@ def test_a_previous_result_older_than_90_days_does_not_count(db, seed_run):
     assert newly(db, seed_run(ago(1), results=(("pays", "failed", 1),))) == []
 
 
+def test_passed_then_failed_on_a_null_branch_is_newly_failed(db, seed_run):
+    seed_run(ago(3), results=(("pays", "passed", 1),), branch=None)
+    assert newly(db, seed_run(ago(2), results=(("pays", "failed", 1),), branch=None)) == ["pays"]
+
+
+def test_the_base_branch_fallback_stops_at_90_days(db, seed_run, seed_change_run):
+    seed_run(NOW - timedelta(days=91), results=(("pays", "passed", 1), ("cart", "passed", 1)), branch="main")
+    seed_run(NOW - timedelta(days=89), results=(("cart", "passed", 1),), branch="main")
+    pr = seed_change_run(ago(1), results=(("pays", "failed", 1), ("cart", "failed", 1)), branch="feature/pay",
+                         base_branch="main")
+    assert newly(db, pr) == ["cart"]  # pays' base pass is 91 days old; cart's is 89
+
+
 def test_change_runs_leave_out_truncated_runs_and_runs_without_files(db, seed_run, seed_change_run):
     kept = seed_change_run(ago(3), paths=("src/a.py", "src/b.py"))
     seed_change_run(ago(2), paths=("src/c.py",), truncated=True)
@@ -120,6 +133,17 @@ def test_the_bulk_answer_agrees_with_the_one_run_answer(db, seed_run, seed_chang
         expected = {t.test_key for t in impact_history.newly_failed_in_run(db, db.get(Run, run.id), set())}
         assert bulk.get(run.id, set()) == expected, run.id
     assert sum(len(keys) for keys in bulk.values()) == 4  # pays at 50 h and 30 h, ship at 20 h (base) and 10 h
+
+
+def test_the_bulk_answer_keeps_the_90_day_look_back_for_a_late_target(db, seed_run, seed_change_run):
+    """The bulk history reaches 90 days before the first target; a later target must not use a pass older than 90
+    days of its own that the shared history still holds."""
+    seed_run(NOW - timedelta(days=100), results=(("pays", "passed", 1),))
+    seed_change_run(NOW - timedelta(days=95), results=(("cart", "passed", 1),))
+    late = seed_change_run(ago(1), results=(("pays", "failed", 1),))
+    runs = impact_history.change_runs(db, 1, NOW - timedelta(days=100), NOW)
+    assert impact_history.newly_failed_bulk(db, runs, set()) == {}
+    assert newly(db, late) == []
 
 
 def test_flaky_keys_use_the_flaky_views_defaults(db, seed_run):

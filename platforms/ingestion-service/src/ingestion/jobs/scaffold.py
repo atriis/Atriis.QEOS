@@ -6,6 +6,7 @@ module's `_advisory_lock` and `run_pass`, and retention adds its own failure han
 a separate change."""
 import argparse
 import json
+import signal
 import sys
 import threading
 from contextlib import contextmanager
@@ -76,8 +77,11 @@ def connections(session_factory: Optional[sessionmaker], lock_engine: Optional[E
 
 def serve(once: Callable[[], bool], *, loop: bool, stop: Optional[threading.Event], interval_seconds: float) -> int:
     """One pass now; without `loop` the exit code says how it went, with `loop` one more pass every interval until
-    `stop` is set."""
-    stop = stop or threading.Event()
+    `stop` is set; SIGTERM sets it too, so the loop ends cleanly."""
+    if stop is None:
+        stop = threading.Event()
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGTERM, lambda *_: stop.set())
     ok = once()
     if not loop:
         return 0 if ok else 1

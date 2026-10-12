@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy.orm import sessionmaker
 
-from src.ingestion.analytics.impact_rules import change_units
+from src.ingestion.analytics.impact_rules import MIN_NEW_FAILURES, change_units
 from src.ingestion.jobs import impact_rollup
 from src.ingestion.models import Run, RunChangedFile, RunResult
 from src.ingestion.models.impact import ImpactPair, ImpactTestBase, unit_hash
@@ -61,7 +61,7 @@ def test_the_sql_statistics_equal_the_python_rules(db, seed_run, seed_change_run
         (30, "main", None, ("src/pay/api.py", "src/pay/util.py", "poetry.lock")),
         (28, "main", None, ("src//pay/api.py", "web/node_modules/x/i.js", "a/b/c/d/e.py")),
         (26, "main", None, tuple(f"lib/m{i}/f.py" for i in range(301))),
-        (24, "main", None, ("lib/m1/f.py", "README.md", "./lib/../lib/m1/f.py")),
+        (24, "main", None, ("lib/m1/f.py", "README.md", "./lib/../lib/m1/f.py", "src/pay/x.py")),
         (22, "feature/x", "main", ("src/pay/api.py",)),
         (20, "main", None, ("src/páginas/ação.py",)),
         (18, "main", None, ("src/páginas/ação.py", "dist/app.js")),
@@ -71,6 +71,8 @@ def test_the_sql_statistics_equal_the_python_rules(db, seed_run, seed_change_run
     for index, (hours, branch, base, paths) in enumerate(plan):
         results = [(name, "failed" if index >= at else "passed", 5) for name, at in first_failing.items()]
         results.append(("c", "failed" if branch == "feature/x" else "passed", 5))
+        if index < 4:  # e: two new failures, but in 4 runs (the Flaky view wants 5), so the one pair that is kept
+            results.append(("e", "failed" if index % 2 else "passed", 5))
         if index == 7:
             results[-2] = ("d", "errored", 5)
         seed_change_run(hours_ago(hours), results=tuple(results), paths=paths, branch=branch, base_branch=base)
@@ -87,11 +89,13 @@ def test_the_sql_statistics_equal_the_python_rules(db, seed_run, seed_change_run
         changed.update(units)
         failed.update(newly.get(run.id, set()))
         pairs.update((unit, key) for unit in units for key in newly.get(run.id, set()))
-    expected_pairs = {(unit, key): (changed[unit], count) for (unit, key), count in pairs.items()}
-    expected_bases = {key_of("s", "C", name): (len(runs), failed[key_of("s", "C", name)], key_of("s", "C", name) in flaky)
-                      for name in ("a", "b", "c", "d")}
+    expected_pairs = {(unit, key): (changed[unit], count) for (unit, key), count in pairs.items()
+                      if count >= MIN_NEW_FAILURES}
+    expected_bases = {key_of("s", "C", name): (4 if name == "e" else len(runs), failed[key_of("s", "C", name)],
+                                               key_of("s", "C", name) in flaky) for name in ("a", "b", "c", "d", "e")}
     assert rows(db) == (expected_pairs, expected_bases)
-    assert not flaky and sum(failed.values()) == 4 and len(expected_pairs) > 10  # the fixture exercises the rules
+    assert not flaky and sum(failed.values()) == 6  # the fixture exercises the rules
+    assert len(pairs) > 10 and expected_pairs and len(expected_pairs) < len(pairs)  # and the filter keeps some
 
 
 def test_build_statistics_reads_what_a_pass_writes(db, seed_impact_history):
@@ -126,6 +130,15 @@ def test_the_test_file_comes_from_the_newest_run(db, seed_change_run):
     assert db.query(ImpactTestBase).one().file == "tests/test_pay.py"
 
 
+def test_a_skipped_row_does_not_name_the_test(db, seed_change_run):
+    run = seed_change_run(hours_ago(1), results=(("pays", "passed", 5), ("pays", "skipped", 0)))
+    first, second = db.query(RunResult).filter_by(run_id=run.id).order_by(RunResult.id).all()
+    first.file, second.file = "tests/test_pay.py", "tests/skipped_copy.py"
+    db.commit()
+    rollup(db)
+    assert db.query(ImpactTestBase).one().file == "tests/test_pay.py"
+
+
 def test_running_twice_the_same_day_writes_the_same_rows(db, seed_impact_history):
     seed_impact_history(start=NOW - timedelta(days=15))
     rollup(db)
@@ -134,30 +147,48 @@ def test_running_twice_the_same_day_writes_the_same_rows(db, seed_impact_history
     assert rows(db) == first
 
 
+def test_a_pair_with_one_new_failure_is_not_stored(db, seed_change_run):
+    """Spec §9: a pair below MIN_NEW_FAILURES can never be suggested, so it is not stored; the test's base rate
+    still counts the failure."""
+    seed_change_run(hours_ago(2), results=(("pays", "passed", 5),), paths=("docs/guide.md",))
+    seed_change_run(hours_ago(1), results=(("pays", "failed", 5),), paths=("src/pay/api.py",))
+    summary = rollup(db)
+    pairs, bases = rows(db)
+    assert pairs == {} and bases[PAYS] == (2, 1, False)
+    assert summary["pairs"] == 0
+
+
 def test_a_truncated_change_list_is_left_out_but_its_results_are_still_history(db, seed_change_run):
-    seed_change_run(hours_ago(3), results=(("pays", "failed", 5),), paths=("docs/guide.md",))
-    seed_change_run(hours_ago(2), results=(("pays", "passed", 5),), paths=("src/pay/api.py",), truncated=True)
-    seed_change_run(hours_ago(1), results=(("pays", "failed", 5),), paths=("src/cart/x.py",))
+    for hours, status, paths, truncated in (
+            (8, "passed", ("src/pay/api.py",), True),
+            (7, "failed", ("src/cart/x.py",), False), (6, "passed", ("src/pay/api.py",), True),
+            (5, "failed", ("src/cart/x.py",), False)):
+        seed_change_run(hours_ago(hours), results=(("pays", status, 5),), paths=paths, truncated=truncated)
     rollup(db)
     pairs, bases = rows(db)
-    # newly failed after the truncated run's pass; the truncated run's src/pay/ is not counted
-    assert pairs == {(unit, PAYS): (1, 1) for unit in ("src/cart/x.py", "src/cart/", "src/")}
-    assert bases[PAYS] == (2, 1, False)
+    # newly failed after each truncated run's pass; the truncated runs' src/pay/ is not counted
+    assert pairs == {(unit, PAYS): (2, 2) for unit in ("src/cart/x.py", "src/cart/", "src/")}
+    assert bases[PAYS] == (2, 2, False)
 
 
 def test_a_change_of_more_than_300_files_counts_only_its_folders(db, seed_change_run):
-    seed_change_run(hours_ago(2), results=(("pays", "passed", 5),), paths=("docs/guide.md",))
-    seed_change_run(hours_ago(1), results=(("pays", "failed", 5),), paths=tuple(f"src/big/f{i}.py" for i in range(301)))
+    big = tuple(f"src/big/f{i}.py" for i in range(301))
+    for hours, status, paths in ((4, "passed", ("docs/guide.md",)), (3, "failed", big),
+                                 (2, "passed", ("docs/guide.md",)), (1, "failed", big)):
+        seed_change_run(hours_ago(hours), results=(("pays", status, 5),), paths=paths)
     rollup(db)
-    assert rows(db)[0] == {("src/big/", PAYS): (1, 1), ("src/", PAYS): (1, 1)}
+    assert rows(db)[0] == {("src/big/", PAYS): (2, 2), ("src/", PAYS): (2, 2)}
 
 
 def test_lock_files_and_vendored_paths_make_no_pairs(db, seed_change_run):
-    seed_change_run(hours_ago(2), results=(("pays", "passed", 5),), paths=("docs/guide.md",))
-    seed_change_run(hours_ago(1), results=(("pays", "failed", 5),), paths=("poetry.lock", "web/node_modules/x/index.js"))
+    for hours, status, paths in ((4, "passed", ("docs/guide.md",)),
+                                 (3, "failed", ("poetry.lock", "web/node_modules/x/index.js")),
+                                 (2, "passed", ("docs/guide.md",)),
+                                 (1, "failed", ("poetry.lock", "web/node_modules/x/index.js"))):
+        seed_change_run(hours_ago(hours), results=(("pays", status, 5),), paths=paths)
     rollup(db)
     pairs, bases = rows(db)
-    assert pairs == {} and bases[PAYS] == (2, 1, False)
+    assert pairs == {} and bases[PAYS] == (4, 2, False)
 
 
 def test_a_flaky_test_counts_no_new_failures_and_is_flagged(db, seed_change_run):
@@ -259,3 +290,23 @@ def test_the_loop_survives_a_failed_pass_and_stops_when_asked(session_factory, m
     monkeypatch.setattr(impact_rollup, "run_pass", flaky_pass)
     assert impact_rollup.main(["--loop"], session_factory=session_factory, stop=stop, interval_hours=0) == 0
     assert len(calls) == 2
+
+
+def test_sigterm_ends_the_loop_cleanly():
+    import signal
+
+    from src.ingestion.jobs import scaffold
+
+    previous = signal.getsignal(signal.SIGTERM)
+    calls = []
+
+    def once():
+        calls.append(1)
+        signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)  # what the signal does, without killing the test run
+        return True
+
+    try:
+        assert scaffold.serve(once, loop=True, stop=None, interval_seconds=60) == 0
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+    assert calls == [1]
