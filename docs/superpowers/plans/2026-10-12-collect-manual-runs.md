@@ -1086,7 +1086,7 @@ and the import. Update `ProjectSettingsPage.test.tsx` if it asserts card order o
   cases (token-dispatched schedulers, container image), and a troubleshooting row "My run doesn't appear in QEOS"
   → check Settings › Collection and the collector's `run not collected` line.
 - [ ] **Step 2: PRODUCT / README Features / TODO** — one line each; TODO item done with the date.
-- [ ] **Step 3: `git grep -in atriis`** prints nothing.
+- [ ] **Step 3: Employer-name check** — a case-insensitive `git grep` for the employer's name prints nothing (Global Constraints).
 - [ ] **Step 4: Full CI locally**, commit `docs: collect manual runs, setup and product`, push, watch CI green.
 - [ ] **Step 5: Rebuild the local stack's dashboard and ingestion** —
   `docker compose up -d --build --wait ingestion-migrate ingestion-service dashboard gateway`, then
