@@ -433,6 +433,20 @@ Coverage and duration is one frame over the `tests` and `duration` requests; Ret
 
 Legends: both charts have a `SeriesLegend` whose entries show or hide a series ("Linked (automated)", "Manual (striped)"; "Average", "p90 (dashed)"); the legend names the texture or dash, so no series is told apart by colour alone.
 
+### Test Impact
+Likely affected tests (spec `docs/superpowers/specs/2026-10-12-test-impact-analysis-design.md`, ADR-029).
+
+- **Run page card** "Likely affected tests", beside Changes, on runs that reported changes.
+  - **Layout:** the two share a row when there is room (`.run-change-cards`, columns of at least 420px) and stack on narrow screens.
+  - **Suggestions,** strongest first: each is a link to the test's history, followed by its evidence in Graphite with tabular figures and the unit in a code span ("newly failed in 4 of 6 runs that changed `src/payment/` (normally 3%)"; the "normally" part is left out when the test never newly failed otherwise), or by a neutral Status Pill label (*test file changed*, *no history yet*, *failing on this branch*).
+  - **Outcome line:**
+    - "Suggested 12 tests · 3 newly failed · all 3 were suggested" with an "All caught" pill in the passed tone (circled check);
+    - or "… · 1 not suggested:" with a "Missed" pill in the failed tone (circled cross) and each missed test linked, indented under that sentence so it never reads as a suggestion;
+    - "no new failures" when there are none, and "outcome not recorded yet" while it is written.
+  - **Plain Graphite sentences** for "Not enough history yet: N runs with changed files, needs 20" (the labelled tests are still listed), "No change data for this run", and a run with changes but no stored suggestion ("uploaded before test impact analysis, or scoring failed").
+  - **Replayed:** a neutral "Replayed" pill beside the heading, and a sentence that says so.
+  - Lists past 15 fold behind a ghost "Show all n" button. Loading is a skeleton in the card's own status region; a failure is an Error Banner with Retry inside the card, so the rest of the run page stays usable.
+
 ### Inputs / Fields
 - **Style:** Paper fill, Hairline Strong border, 6px radius, 34px height (44px on coarse pointers). Labels stack above the field at 13px/500 in Graphite.
 - **Hover:** the border darkens to Tick Grey.

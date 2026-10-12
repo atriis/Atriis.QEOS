@@ -333,3 +333,19 @@ test("changing page scrolls to the top of the table", async () => {
     delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
   }
 });
+
+test("a run that reported changes shows its likely affected tests beside them", async () => {
+  server.use(
+    http.get("/api/v1/runs/61", () => HttpResponse.json({
+      ...detail([result]), change_base_ref: "origin/main", changed_files: 1, additions: 3, deletions: 1, changes_truncated: false,
+      changes: [{ path: "src/payment/api.py", status: "M", additions: 3, deletions: 1 }],
+    })),
+    http.get("/api/v1/projects/42/runs/61/impact", () => HttpResponse.json({
+      run_id: 61, state: "not_scored", changed_paths: ["src/payment/api.py"], replayed: false, scored_at: null,
+      suggestion: null, outcome: null })),
+  );
+  renderDetail();
+  expect(await screen.findByRole("heading", { name: "Changes" })).toBeInTheDocument();
+  const region = await screen.findByRole("region", { name: "Likely affected tests" });
+  expect(await within(region).findByText(/No suggestion was stored for this run/)).toBeInTheDocument();
+});

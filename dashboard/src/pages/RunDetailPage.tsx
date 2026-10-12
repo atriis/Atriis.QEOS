@@ -7,6 +7,7 @@ import { formatDuration } from "../api/analytics";
 import ErrorBanner from "../components/ErrorBanner";
 import FailureGroups from "../components/FailureGroups";
 import FilterBar from "../components/FilterBar";
+import ImpactCard from "../components/ImpactCard";
 import Message from "../components/Message";
 import StatusDot from "../components/StatusDot";
 import { oneOf, useUrlState } from "../lib/useUrlState";
@@ -140,31 +141,34 @@ export default function RunDetailPage() {
           {run.failed + run.errored > 0 && <FailureGroups runId={run.id} projectId={projectId} />}
 
           {run.change_base_ref !== null && (
-            <div className="card">
-              <h2>Changes</h2>
-              <p className="muted">
-                {run.changed_files} file(s), +{run.additions ?? 0} −{run.deletions ?? 0} vs {run.change_base_ref}
-                {run.changes_truncated && <span> · list truncated at 1000 files</span>}
-              </p>
-              {run.changes.length > 0 && (
-                <table className="data">
-                  <thead>
-                    <tr>
-                      <th>File</th><th>Status</th><th className="num">+</th><th className="num">−</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {run.changes.map((f) => (
-                      <tr key={f.path}>
-                        <td>{f.path}</td>
-                        <td>{f.status}</td>
-                        <td className="num">{f.additions ?? "—"}</td>
-                        <td className="num">{f.deletions ?? "—"}</td>
+            <div className="run-change-cards">
+              <div className="card">
+                <h2>Changes</h2>
+                <p className="muted">
+                  {run.changed_files} file(s), +{run.additions ?? 0} −{run.deletions ?? 0} vs {run.change_base_ref}
+                  {run.changes_truncated && <span> · list truncated at 1000 files</span>}
+                </p>
+                {run.changes.length > 0 && (
+                  <table className="data">
+                    <thead>
+                      <tr>
+                        <th>File</th><th>Status</th><th className="num">+</th><th className="num">−</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+                    </thead>
+                    <tbody>
+                      {run.changes.map((f) => (
+                        <tr key={f.path}>
+                          <td>{f.path}</td>
+                          <td>{f.status}</td>
+                          <td className="num">{f.additions ?? "—"}</td>
+                          <td className="num">{f.deletions ?? "—"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+              <ImpactCard projectId={Number(projectId)} runId={run.id} />
             </div>
           )}
 

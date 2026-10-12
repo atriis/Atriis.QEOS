@@ -1060,3 +1060,16 @@ button.switch[aria-checked="true"] .switch-thumb { background: #fff; transform: 
 button.switch[aria-busy="true"] { cursor: progress; }
 .switch-state { min-width: 4.5em; }
 @media (prefers-reduced-motion: reduce) { .switch-track, .switch-thumb { transition: none; } }
+
+/* Test impact (spec 2026-10-12): a run's Changes and Likely affected tests side by side when there is room, stacked
+   when not; the evidence and the outcome line use tabular figures */
+.run-change-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: var(--space-4); margin-block: var(--space-4); align-items: start; }
+.run-change-cards > .card { margin: 0; min-width: 0; overflow-x: auto; }
+.impact-head { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); margin-bottom: var(--space-3); }
+.impact-head h2 { margin: 0; }
+.impact-list { list-style: none; margin: 0 0 var(--space-3); padding: 0; display: grid; gap: var(--space-2); }
+.impact-list li { overflow-wrap: anywhere; }
+.impact-evidence, .impact-outcome { font-variant-numeric: tabular-nums; }
+.impact-outcome .pill { vertical-align: middle; }
+.impact-outcome .impact-list { padding-left: var(--space-4); } /* the missed tests sit under their sentence, apart from the suggestions */
+.impact-usual { white-space: nowrap; }
