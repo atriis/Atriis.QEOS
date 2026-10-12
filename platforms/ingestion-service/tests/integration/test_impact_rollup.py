@@ -6,13 +6,15 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from sqlalchemy.orm import sessionmaker
 
+from src.ingestion.analytics import impact_score
 from src.ingestion.analytics.impact_rules import MIN_NEW_FAILURES, change_units
+from src.ingestion.analytics.impact_score import BaseStat, ImpactTest, PairStat, evidence
 from src.ingestion.jobs import impact_rollup
 from src.ingestion.models import Run, RunChangedFile, RunResult
 from src.ingestion.models.impact import ImpactPair, ImpactTestBase, unit_hash
 from src.ingestion.models.job_heartbeat import JobHeartbeat
 from src.ingestion.models.muted import MutedTest
-from src.ingestion.service import impact_stats
+from src.ingestion.service import impact_service, impact_stats
 from src.ingestion.service.impact_history import change_runs, flaky_keys, newly_failed_bulk
 from src.ingestion.service.impact_stats import live_excluded
 from src.ingestion.service.ingest_service import test_key as key_of
@@ -29,6 +31,15 @@ def rows(db, project_id=1):
     bases = {b.test_key: (b.runs, b.new_failures, b.flaky)
              for b in db.query(ImpactTestBase).filter_by(project_id=project_id)}
     return pairs, bases
+
+
+def history(seed_change_run, paths, *, first=("docs/guide.md",), name="pays"):
+    """15 runs, one an hour up to an hour ago: 11 change `first` and the test passes; the last 4 change `paths` and
+    it passes, fails, passes, fails. So it newly fails twice in 4 runs that changed `paths` against 2 in 15 overall
+    (lift 3.75, every threshold passed), and is not flaky (3 flips in 14 pairs)."""
+    statuses = ["passed"] * 11 + ["passed", "failed", "passed", "failed"]
+    for index, status in enumerate(statuses):
+        seed_change_run(hours_ago(15 - index), results=((name, status, 5),), paths=first if index < 11 else paths)
 
 
 def rollup(db, at=NOW):
@@ -79,10 +90,13 @@ def test_the_sql_statistics_equal_the_python_rules(db, seed_run, seed_change_run
         (16, "main", None, ("src/pay/api.py",)),
     ]
     first_failing = {"a": 1, "b": 3, "d": 6}  # c fails only on feature/x: newly failed through the base branch
+    for hours in range(50, 34, -2):  # 8 passes after unrelated changes first: base rates drop, so lift can pass
+        seed_change_run(hours_ago(hours), results=tuple((name, "passed", 5) for name in "abcde"),
+                        paths=("docs/guide.md",))
     for index, (hours, branch, base, paths) in enumerate(plan):
         results = [(name, "failed" if index >= at else "passed", 5) for name, at in first_failing.items()]
         results.append(("c", "failed" if branch == "feature/x" else "passed", 5))
-        if index < 4:  # e: two new failures, but in 4 runs (the Flaky view wants 5), so the one pair that is kept
+        if index < 4:  # e: two new failures in 12 runs (3 flips in 11: not flaky); src/pay/ passes lift, src/ not
             results.append(("e", "failed" if index % 2 else "passed", 5))
         if index == 7:
             results[-2] = ("d", "errored", 5)
@@ -100,13 +114,20 @@ def test_the_sql_statistics_equal_the_python_rules(db, seed_run, seed_change_run
         changed.update(units)
         failed.update(newly.get(run.id, set()))
         pairs.update((unit, key) for unit in units for key in newly.get(run.id, set()))
-    expected_pairs = {(unit, key): (changed[unit], count) for (unit, key), count in pairs.items()
-                      if count >= MIN_NEW_FAILURES}
-    expected_bases = {key_of("s", "C", name): (4 if name == "e" else len(runs), failed[key_of("s", "C", name)],
+    expected_bases = {key_of("s", "C", name): (12 if name == "e" else len(runs), failed[key_of("s", "C", name)],
                                                key_of("s", "C", name) in flaky) for name in ("a", "b", "c", "d", "e")}
+    base_stats = {key: BaseStat(ImpactTest(key, "s", "C", "?"), runs_, new, None, flag)
+                  for key, (runs_, new, flag) in expected_bases.items()}
+    candidates = [PairStat(unit, key, changed[unit], count) for (unit, key), count in pairs.items()]
+    # Spec §9: only the pairs that pass every threshold, by impact_score.evidence() (the one definition)
+    expected_pairs = {(p.path_unit, p.test_key): (p.changed_runs, p.new_failures) for p in candidates
+                      if evidence(p, base_stats[p.test_key]) is not None}
     assert rows(db) == (expected_pairs, expected_bases)
     assert not flaky and sum(failed.values()) == 6  # the fixture exercises the rules
     assert len(pairs) > 10 and expected_pairs and len(expected_pairs) < len(pairs)  # and the filter keeps some
+    two_or_more = [p for p in candidates if p.new_failures >= MIN_NEW_FAILURES]
+    assert len(expected_pairs) < len(two_or_more)  # the other thresholds leave some out too
+    assert set(expected_pairs) == {("src/pay/", key_of("s", "C", "e"))}  # src/ (7 change runs) fails lift
 
 
 def test_build_statistics_reads_what_a_pass_writes(db, seed_impact_history):
@@ -116,6 +137,19 @@ def test_build_statistics_reads_what_a_pass_writes(db, seed_impact_history):
     assert ({(p.path_unit, p.test_key): (p.changed_runs, p.new_failures) for p in pairs},
             {b.test.test_key: (b.runs, b.new_failures, b.flaky) for b in bases}) == rows(db)
     assert {b.test.name for b in bases} == {"pays", "steady"}
+
+
+def test_build_statistics_keeps_only_the_pairs_a_pass_stores(db, seed_change_run):
+    """Replay's statistics apply the same thresholds (evidence()) as the pass's SQL: here src/pay/ is stored, while
+    src/ (changed in every run, lift 1) and the file itself (2 change runs) are not."""
+    statuses = ["passed"] * 11 + ["passed", "failed", "passed", "failed"]
+    paths = [("src/other.py",)] * 11 + [("src/pay/x.py",), ("src/pay/api.py",), ("src/pay/x.py",), ("src/pay/api.py",)]
+    for index, (status, changed) in enumerate(zip(statuses, paths)):
+        seed_change_run(hours_ago(15 - index), results=(("pays", status, 5),), paths=changed)
+    rollup(db)
+    pairs, _ = impact_stats.build_statistics(db, 1, impact_rollup.window_start(NOW), NOW, set(), set())
+    assert {(p.path_unit, p.test_key): (p.changed_runs, p.new_failures) for p in pairs} == rows(db)[0] == {
+        ("src/pay/", PAYS): (4, 2)}
 
 
 def test_names_and_the_test_file_are_kept_for_scoring(db, seed_change_run):
@@ -169,37 +203,76 @@ def test_a_pair_with_one_new_failure_is_not_stored(db, seed_change_run):
     assert summary["pairs"] == 0
 
 
+def test_a_pair_below_the_lift_threshold_is_not_stored(db, seed_change_run):
+    """Spec §9: changed_runs >= 3 and new_failures >= 2, but every run changed src/pay/api.py, so the pair's rate is
+    the test's base rate (lift 1): never suggested, so not stored."""
+    history(seed_change_run, ("src/pay/api.py",), first=("src/pay/api.py",))
+    rollup(db)
+    pairs, bases = rows(db)
+    assert pairs == {} and bases[PAYS] == (15, 2, False)
+
+
+def test_a_pair_at_exactly_the_lift_threshold_is_stored(db, seed_change_run):
+    """Lift exactly MIN_LIFT is kept (>=), compared in integers: new_failures * base runs (2 * 12) ==
+    MIN_LIFT * changed_runs * base new failures (2 * 6 * 2). 3 flips in 11 pairs: not flaky."""
+    statuses = ["passed"] * 9 + ["failed", "passed", "failed"]
+    for index, status in enumerate(statuses):
+        seed_change_run(hours_ago(12 - index), results=(("pays", status, 5),),
+                        paths=("docs/a.md",) if index < 6 else ("src/pay/api.py",))
+    rollup(db)
+    pairs, bases = rows(db)
+    assert bases[PAYS] == (12, 2, False) and pairs[("src/pay/", PAYS)] == (6, 2)
+
+
+def test_a_test_is_suggested_through_a_unit_that_passes_when_a_stronger_one_does_not(db, seed_change_run,
+                                                                                     monkeypatch):
+    """The changed file itself (src/pay/api.py) has confidence 1.0 but only 2 change runs, so its pair is not stored;
+    the test is still suggested through src/pay/ (4 runs, 2 new failures), the strongest unit that passes."""
+    monkeypatch.setattr(impact_score, "MIN_HISTORY_RUNS", 10)
+    statuses = ["passed"] * 11 + ["passed", "failed", "passed", "failed"]
+    paths = [("docs/guide.md",)] * 11 + [("src/pay/x.py",), ("src/pay/api.py",), ("src/pay/x.py",), ("src/pay/api.py",)]
+    for index, (status, changed) in enumerate(zip(statuses, paths)):
+        seed_change_run(hours_ago(15 - index), results=(("pays", status, 5),), paths=changed)
+    rollup(db)
+    stored = rows(db)[0]
+    assert ("src/pay/api.py", PAYS) not in stored and stored[("src/pay/", PAYS)] == (4, 2)
+    suggestion = impact_service.score_change(db, 1, ["src/pay/api.py"], None, now=NOW)
+    assert [(t["name"], t["kind"], t["evidence"]["path_unit"]) for t in suggestion["tests"]] == [
+        ("pays", "statistical", "src/pay/")]
+
+
 def test_a_truncated_change_list_is_left_out_but_its_results_are_still_history(db, seed_change_run):
+    for hours in range(20, 9, -1):
+        seed_change_run(hours_ago(hours), results=(("pays", "passed", 5),), paths=("docs/guide.md",))
     for hours, status, paths, truncated in (
-            (8, "passed", ("src/pay/api.py",), True),
+            (9, "passed", ("src/cart/x.py",), False), (8, "passed", ("src/pay/api.py",), True),
             (7, "failed", ("src/cart/x.py",), False), (6, "passed", ("src/pay/api.py",), True),
             (5, "failed", ("src/cart/x.py",), False)):
         seed_change_run(hours_ago(hours), results=(("pays", status, 5),), paths=paths, truncated=truncated)
     rollup(db)
     pairs, bases = rows(db)
-    # newly failed after each truncated run's pass; the truncated runs' src/pay/ is not counted
-    assert pairs == {(unit, PAYS): (2, 2) for unit in ("src/cart/x.py", "src/cart/", "src/")}
-    assert bases[PAYS] == (2, 2, False)
+    # newly failed after each truncated run's pass; the truncated runs' src/pay/ (and src/) are not counted
+    assert pairs == {(unit, PAYS): (3, 2) for unit in ("src/cart/x.py", "src/cart/", "src/")}
+    assert bases[PAYS] == (14, 2, False)
 
 
 def test_a_change_of_more_than_300_files_counts_only_its_folders(db, seed_change_run):
     big = tuple(f"src/big/f{i}.py" for i in range(301))
-    for hours, status, paths in ((4, "passed", ("docs/guide.md",)), (3, "failed", big),
+    for hours in range(16, 6, -1):
+        seed_change_run(hours_ago(hours), results=(("pays", "passed", 5),), paths=("docs/guide.md",))
+    for hours, status, paths in ((5, "passed", big), (4, "passed", ("docs/guide.md",)), (3, "failed", big),
                                  (2, "passed", ("docs/guide.md",)), (1, "failed", big)):
         seed_change_run(hours_ago(hours), results=(("pays", status, 5),), paths=paths)
     rollup(db)
-    assert rows(db)[0] == {("src/big/", PAYS): (2, 2), ("src/", PAYS): (2, 2)}
+    assert rows(db)[0] == {("src/big/", PAYS): (3, 2), ("src/", PAYS): (3, 2)}
 
 
 def test_lock_files_and_vendored_paths_make_no_pairs(db, seed_change_run):
-    for hours, status, paths in ((4, "passed", ("docs/guide.md",)),
-                                 (3, "failed", ("poetry.lock", "web/node_modules/x/index.js")),
-                                 (2, "passed", ("docs/guide.md",)),
-                                 (1, "failed", ("poetry.lock", "web/node_modules/x/index.js"))):
-        seed_change_run(hours_ago(hours), results=(("pays", status, 5),), paths=paths)
+    # Units of these paths would pass every threshold (as src/pay/ does in history()): they are simply not units
+    history(seed_change_run, ("poetry.lock", "web/node_modules/x/index.js"))
     rollup(db)
     pairs, bases = rows(db)
-    assert pairs == {} and bases[PAYS] == (4, 2, False)
+    assert pairs == {} and bases[PAYS] == (15, 2, False)
 
 
 def test_a_flaky_test_counts_no_new_failures_and_is_flagged(db, seed_change_run):
@@ -212,13 +285,12 @@ def test_a_flaky_test_counts_no_new_failures_and_is_flagged(db, seed_change_run)
 
 
 def test_a_muted_test_counts_no_new_failures(db, seed_change_run):
-    seed_change_run(hours_ago(2), results=(("pays", "passed", 5),))
-    seed_change_run(hours_ago(1), results=(("pays", "failed", 5),))
+    history(seed_change_run, ("src/pay/api.py",))  # unmuted, src/pay/ pairs would be stored
     db.add(MutedTest(project_id=1, test_key=PAYS, muted_by_user_id=1))
     db.commit()
     rollup(db)
     pairs, bases = rows(db)
-    assert pairs == {} and bases[PAYS] == (2, 0, False)
+    assert pairs == {} and bases[PAYS] == (15, 0, False)
     assert live_excluded(db, 1) == {PAYS}
 
 

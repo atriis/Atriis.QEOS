@@ -5,8 +5,9 @@ replay reads the same numbers for earlier windows.
 Built inside the database. Python computes only what impact_rules.py defines: each run's path units (once per run)
 and, through impact_history, which tests newly failed in it. Both are staged in temporary tables with one insert
 each (on PostgreSQL one statement over unnest() of array parameters: 0.4 s where executemany took about 7 s for the
-benchmark's 115,000 rows); the counting, the join with test_results and the writes are SQL: one INSERT ... SELECT per table, with
-unit_hash = md5(path_unit) computed there (tests register md5 on SQLite)."""
+benchmark's 115,000 rows); the counting, the join with test_results and the writes are SQL: one INSERT ... SELECT per
+table, the base rows first and then the pairs that pass every threshold against them, with unit_hash = md5(path_unit)
+computed there (tests register md5 on SQLite)."""
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Iterator, List, Sequence, Set, Tuple
@@ -18,8 +19,8 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Session, aliased
 
-from src.ingestion.analytics.impact_rules import MIN_NEW_FAILURES, change_units
-from src.ingestion.analytics.impact_score import BaseStat, ImpactTest, PairStat
+from src.ingestion.analytics.impact_rules import MIN_CHANGED_RUNS, MIN_LIFT, MIN_NEW_FAILURES, change_units
+from src.ingestion.analytics.impact_score import BaseStat, ImpactTest, PairStat, evidence
 from src.ingestion.models import RunResult
 from src.ingestion.models.impact import ImpactPair, ImpactTestBase
 from src.ingestion.service import analytics_service
@@ -73,21 +74,35 @@ def _staged(db: Session, project_id: int, start: datetime, end: datetime, exclud
         table.drop(connection, checkfirst=False)
 
 
-def _pairs(project_id: int, computed_at: datetime):
-    """(project_id, unit_hash, test_key, path_unit, changed_runs, new_failures, computed_at): the pairs with at least
-    MIN_NEW_FAILURES new failures, the fewest a suggestion can use (spec §9)."""
+# MIN_LIFT as SQL multiplies it: an integer when it is one, so the cross-multiplied test stays exact integer arithmetic
+_LIFT = int(MIN_LIFT) if float(MIN_LIFT).is_integer() else MIN_LIFT
+
+
+def _pairs(project_id: int, computed_at: datetime, bases=None):
+    """(project_id, unit_hash, test_key, path_unit, changed_runs, new_failures, computed_at). With `bases` (the
+    project's freshly built impact_test_base rows: test_key, runs, new_failures), only the pairs that pass every
+    threshold (spec §9): changed_runs >= MIN_CHANGED_RUNS, new_failures >= MIN_NEW_FAILURES, and lift >= MIN_LIFT
+    cross-multiplied as impact_score.evidence does (new_failures * base runs >= MIN_LIFT * changed_runs * base new
+    failures; a base rate of 0 passes). Without `bases`, every pair with MIN_NEW_FAILURES (build_statistics keeps
+    those evidence() passes). tests/integration/test_impact_rollup.py pins the SQL and evidence() equal."""
     changed = (select(_UNITS.c.path_unit, func.count().label("changed_runs"))
                .group_by(_UNITS.c.path_unit).subquery())
     counted = (select(_UNITS.c.path_unit, _NEWLY.c.test_key, func.count().label("new_failures"))
                .join(_NEWLY, _NEWLY.c.run_id == _UNITS.c.run_id)
                .group_by(_UNITS.c.path_unit, _NEWLY.c.test_key)
                .having(func.count() >= MIN_NEW_FAILURES).subquery())
-    return (
+    query = (
         select(literal(project_id, Integer).label("project_id"), func.md5(counted.c.path_unit).label("unit_hash"),
                counted.c.test_key, counted.c.path_unit, changed.c.changed_runs, counted.c.new_failures,
                literal(computed_at, DateTime(timezone=True)).label("computed_at"))
         .join(changed, changed.c.path_unit == counted.c.path_unit)
     )
+    if bases is None:
+        return query
+    return (query.join(bases, bases.c.test_key == counted.c.test_key)
+            .where(changed.c.changed_runs >= MIN_CHANGED_RUNS,
+                   counted.c.new_failures * bases.c.runs
+                   >= literal(_LIFT) * changed.c.changed_runs * bases.c.new_failures))
 
 
 def _bases(db: Session, project_id: int, flaky: Set[str], computed_at: datetime):
@@ -128,19 +143,21 @@ def _bases(db: Session, project_id: int, flaky: Set[str], computed_at: datetime)
 
 def build_statistics(db: Session, project_id: int, start: datetime, end: datetime, flaky: Set[str],
                      muted: Set[str]) -> Tuple[List[PairStat], List[BaseStat]]:
-    """The statistics of a window, read back without writing (replay). Flaky and muted tests count no new failures
-    (spec §3.1); flaky ones are flagged."""
+    """The statistics of a window, read back without writing (replay): the rows a pass writes. Flaky and muted tests
+    count no new failures (spec §3.1); flaky ones are flagged. Pairs are kept by impact_score.evidence(), the rule the
+    pass applies in SQL."""
     with _staged(db, project_id, start, end, flaky | muted):
         pair_rows = _pairs(project_id, end)
         base_rows = _bases(db, project_id, flaky, end)
         pairs = db.execute(pair_rows.order_by(pair_rows.selected_columns.path_unit,
                                               pair_rows.selected_columns.test_key)).all()
         bases = db.execute(base_rows.order_by(base_rows.selected_columns.test_key)).all()
-    return (
-        [PairStat(row.path_unit, row.test_key, row.changed_runs, row.new_failures) for row in pairs],
-        [BaseStat(ImpactTest(row.test_key, row.suite, row.class_name, row.name), row.runs, row.new_failures,
-                  row.file, bool(row.flaky)) for row in bases],
-    )
+    base_stats = [BaseStat(ImpactTest(row.test_key, row.suite, row.class_name, row.name), row.runs, row.new_failures,
+                           row.file, bool(row.flaky)) for row in bases]
+    by_key = {base.test.test_key: base for base in base_stats}
+    pair_stats = [PairStat(row.path_unit, row.test_key, row.changed_runs, row.new_failures) for row in pairs]
+    return [pair for pair in pair_stats
+            if pair.test_key in by_key and evidence(pair, by_key[pair.test_key]) is not None], base_stats
 
 
 def rebuild_statistics(db: Session, project_id: int, start: datetime, end: datetime, flaky: Set[str], muted: Set[str],
@@ -150,12 +167,15 @@ def rebuild_statistics(db: Session, project_id: int, start: datetime, end: datet
     with _staged(db, project_id, start, end, flaky | muted):
         db.execute(delete(ImpactPair).where(ImpactPair.project_id == project_id))
         db.execute(delete(ImpactTestBase).where(ImpactTestBase.project_id == project_id))
-        pair_columns = ["project_id", "unit_hash", "test_key", "path_unit", "changed_runs", "new_failures",
-                        "computed_at"]
-        db.execute(insert(ImpactPair).from_select(pair_columns, _pairs(project_id, computed_at)))
         base_columns = ["project_id", "test_key", "runs", "new_failures", "flaky", "suite", "class_name", "name",
                         "file", "computed_at"]
         db.execute(insert(ImpactTestBase).from_select(base_columns, _bases(db, project_id, flaky, computed_at)))
+        # The pairs are checked against the base rows just written, in the same transaction: only those that pass
+        fresh = (select(ImpactTestBase.test_key, ImpactTestBase.runs, ImpactTestBase.new_failures)
+                 .where(ImpactTestBase.project_id == project_id).subquery())
+        pair_columns = ["project_id", "unit_hash", "test_key", "path_unit", "changed_runs", "new_failures",
+                        "computed_at"]
+        db.execute(insert(ImpactPair).from_select(pair_columns, _pairs(project_id, computed_at, fresh)))
         # Counted in the same transaction, not from rowcount: psycopg 3 reports -1 for INSERT ... SELECT here
         pairs = db.execute(select(func.count()).select_from(ImpactPair)
                            .where(ImpactPair.project_id == project_id)).scalar_one()

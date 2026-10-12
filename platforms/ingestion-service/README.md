@@ -337,9 +337,12 @@ coverage instrumentation, no AI: co-failure statistics on PostgreSQL.
   `impact-rollup` compose service runs it, and the JobStale alert fires after two days without a success; each pass
   also writes the outcomes uploads left unwritten, see *At upload*):
   - `impact_pairs (project_id, unit_hash, test_key, path_unit, changed_runs, new_failures, computed_at)`: only
-    pairs with at least `MIN_NEW_FAILURES` (2) new failures, the fewest a suggestion can use (a pair below that
-    can never be suggested; lowering the constant takes effect at the next pass), over the runs with changed files from 90 days before today 00:00 UTC.
-    Keyed by `(project_id, unit_hash, test_key)` with `unit_hash = md5(path_unit)`: no id to run out, and a long
+    the pairs that pass every threshold (spec §9), over the runs with changed files from 90 days before today
+    00:00 UTC: `changed_runs >= 3`, `new_failures >= 2` and lift `>= 2` against the test's row in
+    `impact_test_base`, checked in the pass's `INSERT ... SELECT` with the same integer cross-multiplication as
+    scoring (`new_failures * base runs >= 2 * changed_runs * base new failures`; a base rate of 0 passes). A pair
+    below a threshold can never be suggested, so scoring reads only pairs it can use; a change to a threshold takes
+    effect at the next pass. Keyed by `(project_id, unit_hash, test_key)` with `unit_hash = md5(path_unit)`: no id to run out, and a long
     path never enters an index;
   - `impact_test_base (project_id, test_key, runs, new_failures, flaky, suite, class_name, name, file,
     computed_at)`: every test that ran in those runs, with names and file from its newest such run, so scoring never
