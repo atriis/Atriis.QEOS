@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from src.ingestion.api.v1.endpoints import analytics, api_keys, collect, export, masking_patterns, notifications, report, runs
+from src.ingestion.api.v1.endpoints import analytics, api_keys, collect, collection_settings, export, masking_patterns, notifications, report, runs
 
 api_router = APIRouter()
 api_router.include_router(api_keys.router, prefix="/projects/{project_id}/api-keys", tags=["api-keys"])
@@ -16,5 +16,8 @@ api_router.include_router(analytics.router, prefix="/projects/{project_id}/analy
 api_router.include_router(report.router, prefix="/projects/{project_id}/analytics", tags=["analytics"])
 api_router.include_router(runs.router, prefix="/runs", tags=["runs"])
 api_router.include_router(collect.router, prefix="/collect", tags=["collect"])
+api_router.include_router(
+    collection_settings.router, prefix="/projects/{project_id}/collection-settings", tags=["collection"]
+)
 
 __all__ = ["api_router"]
