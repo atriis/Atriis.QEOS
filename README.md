@@ -60,7 +60,8 @@ pipeline already produces, and it starts runs only through workflows you own.
 - **Trends** by day, week or month, per branch, and run-to-run comparison.
 - **Flaky tests:** same-commit detection over up to 90 days, backed by daily rollups, with quarantine.
 - **Failure causes:** new, recurring and resolved failures, grouped by cause.
-- **Customisable Overview:** each person arranges their own Overview per project: move, resize, remove and add widgets and change their settings, then save. Owners and admins also set the project's default layout, which everyone without a personal layout sees. Start from a template (QA lead, Developer, Flaky hunt) or pick from fifteen widgets: the built-in four, plus Pass-rate trend, Failure causes, Regressions and flips, Slowest tests, Coverage, Recent runs, Branch health, Test cases, My suites, My recent failures and Impact accuracy.
+- **Test impact:** for each change, a **Likely affected tests** card on the run page lists the tests it is likely to affect, from which tests newly failed after earlier changes to the same files (no coverage instrumentation, no AI). Each suggestion shows its evidence, and the card says which new failures it caught and missed once the results are in. Suggestions are stored at upload, before the results, so the accuracy is honest.
+- **Customisable Overview:** each person arranges their own Overview per project: move, resize, remove and add widgets and change their settings, then save. Owners and admins also set the project's default layout, which everyone without a personal layout sees. Start from a template (QA lead, Developer, Flaky hunt) or pick from fifteen widgets: the built-in four, plus Pass-rate trend, Failure causes, Regressions and flips, Slowest tests, Coverage, Recent runs, Branch health, Test cases, My suites, My recent failures and Impact accuracy (the test impact catch rate).
 
 ### Report
 - **One report per period:**
@@ -68,7 +69,8 @@ pipeline already produces, and it starts runs only through workflows you own.
   - regressions and instability (flips);
   - results by feature, folder, label or suite;
   - coverage: cases never run, and tests without a case;
-  - duration.
+  - duration;
+  - **Test impact:** how often the likely affected tests contained a run's new failures, with the average suggestion size beside it, live and replayed history apart, and the misses.
 - Printable, with CSV export.
 
 ### Test management
@@ -76,6 +78,7 @@ pipeline already produces, and it starts runs only through workflows you own.
 - A **Feature view** grouped by `.feature` file.
 - **Gherkin import:** from the browser, or synced from the repository's default branch.
 - **Run from QEOS:** run a selection, a case or a suite in your GitHub Actions workflow, with a duration estimate before, during and after the run.
+- **Run likely affected:** on the Test cases page, select the cases linked to the tests a branch's latest change is likely to affect, then run them as usual.
 
 ### Accounts and access
 - **Sign-in:**
@@ -422,11 +425,12 @@ The threat model and operational guidance are in [`SECURITY.md`](SECURITY.md).
 - the platform foundation: accounts, organisations, projects and the gateway;
 - ingestion with the collector and its CI integrations;
 - analytics, the report, notifications and the customisable Overview;
+- test impact analysis (ADR-029): suggestions stored at upload with their outcome, accuracy in the Report and on the Overview, and Run likely affected;
 - test management with Gherkin sync and Run from QEOS;
 - the optional monitoring stack;
 - the single-VM production package.
 
-**Next:** test impact analysis. The full plan is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
+**Next:** release B (a collector command that runs the suggested tests first), then tuning test impact on real data. The full plan is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
 
 The directories `execution/`, `automation/`, `marketplace/`, `collaboration/`, `intelligence/` and
 `platforms/qip-service` are **unwired prototypes**. They are not in Compose, CI or the gateway, and they

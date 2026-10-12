@@ -1036,7 +1036,7 @@ results come back through the normal upload ([4.1](#41-sending-test-results)).
 
 1. Enter a branch; it defaults to the CI target's branch. Choose **Find tests**.
 2. QEOS takes the newest run with changed files among the branch's last 20 runs, scores that change now
-   (the same likely affected tests as on the run page, see [4.4](#44-analytics)) and selects the cases linked
+   (the same likely affected tests as on the run page, see [Test impact](#test-impact)) and selects the cases linked
    to the suggested tests, strongest first, at most 200.
 3. Review the selection; the duration estimate follows it. Then **Run selected** as usual.
 
@@ -1176,6 +1176,37 @@ everything listed here.
   or when the upload did not happen.
 - **Weekly summary**: an email, Slack, Teams or webhook message on Mondays, set up per channel
   in [4.5](#45-notifications).
+
+#### Test impact
+
+Nothing to configure. **What it needs:** runs uploaded with changed files (the collector sends them by default;
+`--no-changes` turns that off, and the CI checkout needs at least 2 commits) and 20 runs with changed files in
+the last 90 days before suggestions appear. The `impact-rollup` job (started by compose) rebuilds the statistics
+every 24 hours.
+
+- **Run page, Likely affected tests** (beside **Changes**): the suggested tests come strongest first, each with its
+  evidence (in how many of the runs that changed a file or folder the test newly failed, and how often it fails
+  normally). Tests always included carry a label instead: *test file changed*, *failing on this branch* or *no
+  history yet*. The suggestion was made at upload, before the results. While the outcome is being written the card
+  says so and updates itself; then it says which new failures were suggested and which were missed. A run with no
+  change data gets a compact one-line card.
+- **Not enough history yet:** below 20 runs with changed files only the labelled tests are listed.
+- **Report, Test impact** and the Overview widget **Impact accuracy:** the catch rate, caught ÷ (caught + missed)
+  new failures in runs that had a stored suggestion, over 7, 14 or 30 days, with the average number of tests
+  suggested per run beside it (suggesting everything catches everything), live and replayed apart, and the misses.
+- **Run likely affected** on **Test cases**: see [4.3](#43-run-from-qeos-play-and-stop).
+- **Replay history:** to fill the figure from past runs, run once
+  `docker compose run --rm impact-rollup python -m src.ingestion.jobs.impact_rollup --backfill-days 30`
+  (1 to 90 days). Those runs are scored with statistics from earlier days only, marked *replayed* and counted
+  apart. It takes its own lock and can take long on a large project (about 44 s per day on a busy one): run it
+  once, off hours.
+- **What counts:**
+  - a test newly fails when it fails after passing on the same branch (or on the base branch for a new branch);
+    flaky and muted tests never do;
+  - lock files and `dist/`, `build/`, `vendor/`, `node_modules/` are ignored;
+  - a change of more than 300 files counts by folder;
+  - a change list the collector truncated is still scored but not learned from.
+- **Monitoring:** the job's heartbeat is `impact_rollup`, and the JobStale alert fires after two days without a pass.
 
 #### Customise the Overview
 

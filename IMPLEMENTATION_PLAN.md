@@ -1,6 +1,6 @@
 # QEOS — Implementation Plan
 
-Updated 2026-10-11. Single forward plan, reconciled with TODO.md (the live
+Updated 2026-10-12. Single forward plan, reconciled with TODO.md (the live
 per-item record) and ARCHITECTURE_BLUEPRINT_V1_0.md (the target; its
 Implementation Status banner carries the adoption triggers referenced here).
 The previous version of this file was a day-one snapshot that still named
@@ -47,8 +47,11 @@ numbers in platforms/ingestion-service/README.md.
    Grafana at `/grafana/` behind the QEOS sign-in, and CI smoke checks run with and without the
    profile. Logs, tracing and long retention stay TARGET behind their triggers (blueprint §11).
 8. Then, in the order agreed 2026-10-08 (TODO.md "Execution intelligence and
-   operations"): customisable Overview (done 2026-10-11, ADR-028: 14 widgets, three templates, a
-   project default and personal layouts), then test impact analysis.
+   operations"): customisable Overview (done 2026-10-11, ADR-028: 15 widgets as of now, three templates, a
+   project default and personal layouts), then test impact analysis (done 2026-10-12, ADR-029:
+   co-failure statistics, suggestions stored at upload with their outcome, accuracy in the Report and on
+   the Overview, Run likely affected). Next from that line: release B, a collector command that runs the
+   suggested tests first.
 
 ## 3. Blocked on external input
 

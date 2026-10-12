@@ -233,10 +233,11 @@ customisable grid of 15 code-split widgets and three templates over the
 existing queries, a personal layout and a project default, edit mode with
 Reload/Overwrite on a stale save, ADR-028), trends
 (day/week/month), tests, history, flaky (quarantine, CSV export), branches
-(pick-two pass-rate comparison), runs (list + detail incl. changed files and
+(pick-two pass-rate comparison), runs (list + detail incl. changed files with
+the likely affected tests and their outcome, ADR-029, and
 failures by cause; new runs by polling every 30 s, ADR-021), run compare,
-requested runs, report, test cases (Scenario and Feature views, editor,
-Gherkin import, Feature page), suites, project settings (API keys, CI
+requested runs, report (incl. Test impact accuracy), test cases (Scenario and
+Feature views, editor, Gherkin import, Feature page, Run likely affected), suites, project settings (API keys, CI
 snippet, repositories, masking, notifications, Run from QEOS, legal hold,
 export), account security (TOTP enrollment, password change), Ctrl K command
 palette.

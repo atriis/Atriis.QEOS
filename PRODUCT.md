@@ -110,6 +110,25 @@ yet.
   <branch> in the last N days"; a failure stays in its own card with Retry; missing data is never
   shown as zero.
 
+## Test Impact Rules
+
+- QEOS suggests the tests a change is likely to affect from history only: which tests newly failed after earlier
+  changes to the same files or folders (a path unit is the file plus its 3 nearest parent folders; noisy files such
+  as lock files are ignored). No coverage instrumentation, no AI (ADR-029).
+- Every suggestion explains itself: the file or folder, in how many of the runs that changed it the test newly
+  failed, and how often it fails otherwise. Tests whose file changed, that already fail on the branch, or that have
+  no history yet are always included, with that label instead of statistics.
+- Honest by construction (Principle 1): the suggestion stored with a run is made before its results are read, and
+  its outcome is recorded (which new failures it caught and which it missed). The trust figure is the catch rate,
+  always with the average suggestion size beside it, so suggesting everything cannot look good. Live suggestions
+  and replayed history (`--backfill-days`) are shown separately.
+- Below 20 runs with changed files, QEOS says "Not enough history yet" rather than guessing; a run with no change
+  data gets a compact one-line card, not an empty one.
+- Suggestions decide what to run **first**, never what to skip. Skipping tests is considered only when the accuracy
+  figure supports it.
+- **Run likely affected** selects the linked cases. A suggested test with no linked case is listed as not runnable
+  from QEOS, never silently dropped.
+
 ## Accessibility & Inclusion
 
 - WCAG AA: chart and table contrast meets AA; status is never conveyed by

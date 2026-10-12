@@ -281,9 +281,15 @@ Kubernetes stays out until its blueprint trigger fires (first multi-node deploym
 2. [x] Monitoring: Prometheus, Grafana and Alertmanager as an opt-in profile of the production compose; `/metrics` on every service, Postgres and container exporters, starter dashboards and alerts (service down, 5xx rate, disk). Done 2026-10: ADR-027, spec `docs/superpowers/specs/2026-10-10-monitoring-design.md`; blueprint §11 names, job heartbeats (ingestion migration 017), five dashboards, alerts to email/Slack/Teams, Grafana at `/grafana/` for superusers
 3. [x] Customisable Overview (done 2026-10-11, ADR-028, spec `docs/superpowers/specs/2026-10-11-customisable-overview-design.md`): 14 widgets over the existing analytics and three templates (QA lead, Developer, Flaky hunt); a project default (owners/admins) and a personal layout per user with "reset to project default" (project-service migration 004, optimistic versions, 409 Reload/Overwrite); one widget catalogue file shared by validation and the dashboard registry (24 widgets, 64 KB); refresh on a new run driven by each widget's stale keys; test-management `GET /suites?created_by=me`
    - [ ] Follow-up (Phase 2 review, 2026-10-11): `DELETE /overview-layout/project` carries no version (spec §3.3), so one admin's stale "Reset to built-in default" removes another admin's newer default; give DELETE the same version check as PUT in a later spec revision
-4. [ ] Test impact analysis: from collected commits' changed files and later failures, suggest which tests to run for a change (history-based; no coverage instrumentation)
+4. [x] Test impact analysis (done 2026-10-12, ADR-029, spec `docs/superpowers/specs/2026-10-12-test-impact-analysis-design.md`): co-failure statistics on PostgreSQL rebuilt by the `impact-rollup` job (ingestion migration 018, heartbeat `impact_rollup`); each upload with changed files stores its suggestion before its results and its outcome after; `GET /runs/{id}/impact`, `POST /analytics/impact`, `GET /analytics/impact-accuracy`; the run page card, the Report's Test impact section, the Overview widget Impact accuracy (15 widgets now), and Run likely affected on Test cases; `--backfill-days` replays history
    - Follow-up: `impact_test_base.id` is a 32-bit serial rebuilt nightly; make it BigInteger or drop it for `(project_id, test_key)` before real scale.
    - Follow-up: tune the thresholds with real data. The random-failure benchmark suggested about 76 tests per change; watch `avg_suggested`.
+   - [ ] Release B: a collector command that runs the suggested tests first (never instead of the full suite), from `POST /analytics/impact`
+   - [ ] A learned model on the same features once outcomes accumulate; it must beat `stats-v1` on the catch rate (with the average suggestion size beside it), with no new infrastructure
+   - [ ] Phase 6 embeddings: code embeddings and semantic similarity (Qdrant) when "Phase 6 AI engine work begins"
+   - [ ] The accuracy figure in the weekly summary
+   - [ ] A repository prefix for path units once runs record their repository (the collector sends it; spec §3.1)
+   - [ ] A narrow layout for Report tables (Report-wide: the Test impact misses table is one of several that overflow at phone width)
 - [ ] Report origin marker (ADR-026 fallback): a Play workflow input → collector field → ingestion `test_runs.origin` column and a backfill. Only if the URL match proves unreliable.
 - [ ] My recent failures by email (ADR-028 follow-up): the collector records the commit author's email (`git log --format=%ae`), ingestion stores it (column and migration), and the widget matches the signed-in user's email instead of a name
 - [ ] The project export includes the Overview project default (ADR-028, spec §3.4): needs project-service data in the export, which today holds ingestion data only
@@ -441,8 +447,8 @@ These are not features, but groups B, C, D, E and G cannot ship without them:
 All architectural specifications and design documents from the initial brainstorming phase have been completed and serve as the foundation for implementation phases.
 
 ## Current Status
-Updated 2026-10-11. Phases 1–3 are delivered, test management (Phase 4) is in use, and the Report,
+Updated 2026-10-12. Phases 1–3 are delivered, test management (Phase 4) is in use, and the Report,
 notifications, Run from QEOS and the single-VM production package have shipped. Monitoring has
 shipped (item 2 under "Execution intelligence and operations", ADR-027), and so has the customisable
-Overview (item 3, ADR-028). What runs today: README.md and
+Overview (item 3, ADR-028) and test impact analysis (item 4, ADR-029). What runs today: README.md and
 TECHNICAL_SPECIFICATION.md; next steps: IMPLEMENTATION_PLAN.md §2.
