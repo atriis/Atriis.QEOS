@@ -10,6 +10,8 @@ REGISTRY = CollectorRegistry()
 RUNS = Counter("qav_ingest_runs", "Test runs stored", registry=REGISTRY)
 RESULTS = Counter("qav_ingest_results", "Test results stored", registry=REGISTRY)
 REJECTED = Counter("qav_ingest_rejected", "Uploads rejected", ["reason"], registry=REGISTRY)
+DISCARDED = Counter("qeos_runs_discarded", "Uploads accepted and not stored, by reason", ["reason"], registry=REGISTRY)
+DISCARDED.labels(reason="manual")
 DURATION = Histogram("qav_ingest_duration_seconds", "Time to handle POST /collect/runs", registry=REGISTRY)
 REDACTIONS = Counter(
     "qav_ingest_redactions", "Results in which masking replaced a kind of secret or personal data", ["kind"],

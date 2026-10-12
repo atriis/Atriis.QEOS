@@ -45,6 +45,8 @@ class RunIn(BaseModel):
     commit_message: Optional[_text(500)] = None  # first line is enough; collector truncates
     pr_number: Optional[int] = Field(None, ge=1, le=2_147_483_647)
     base_branch: Optional[_text(255)] = None
+    # How the CI run started, as the collector classified it (ADR-030); absent: unknown, collected
+    trigger: Optional[Literal["manual", "automatic", "qeos"]] = None
     started_at: AwareDatetime
     finished_at: AwareDatetime
 
@@ -160,6 +162,7 @@ class RunReceipt(BaseModel):
     commit_message: Optional[str] = None
     pr_number: Optional[int] = None
     base_branch: Optional[str] = None
+    trigger: Optional[str] = None
     change_base_ref: Optional[str] = None
     changed_files: Optional[int] = None
     additions: Optional[int] = None

@@ -112,3 +112,14 @@ def test_nul_or_lone_surrogate_in_a_result_identity_field_is_rejected(field, bad
 def test_nul_in_run_metadata_is_rejected(field):
     with pytest.raises(ValidationError):
         RunUpload.model_validate(body(run={field: "a\x00b"}))
+
+
+@pytest.mark.parametrize("trigger", ["manual", "automatic", "qeos", None])
+def test_trigger_values(trigger):
+    run = {} if trigger is None else {"trigger": trigger}
+    assert RunUpload.model_validate(body(run=run)).run.trigger == trigger
+
+
+def test_an_unknown_trigger_is_rejected():
+    with pytest.raises(ValidationError):
+        RunUpload.model_validate(body(run={"trigger": "cron"}))

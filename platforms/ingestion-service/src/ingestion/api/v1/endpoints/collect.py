@@ -1,8 +1,10 @@
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import jwt
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.ingestion.api.deps import get_db
@@ -13,6 +15,7 @@ from src.ingestion.schemas.collect import KeyCheck, RunReceipt, RunUpload
 from src.ingestion.service import ingest_service, notification_service, run_service
 from src.ingestion.utils import metrics
 
+logger = logging.getLogger(__name__)
 router = APIRouter()  # mounted at /collect
 
 SERVICE_TOKEN_SECONDS = 300
@@ -43,7 +46,10 @@ def import_token(db: Session = Depends(get_db), key: ApiKey = Depends(get_api_ke
     }
 
 
-@router.post("/runs", response_model=RunReceipt, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/runs", response_model=RunReceipt, status_code=status.HTTP_201_CREATED,
+    responses={202: {"description": "Accepted and not stored (manual run, ADR-030)"}},
+)
 def collect_run(
     upload: RunUpload,
     response: Response,
@@ -57,6 +63,12 @@ def collect_run(
     with metrics.DURATION.time():
         try:
             run, created = ingest_service.ingest(db, key, upload, idempotency_key)
+        except ingest_service.Discarded as exc:
+            metrics.DISCARDED.labels(reason="manual").inc()
+            logger.info("upload discarded", extra={"project_id": key.project_id, "api_key_id": key.id,
+                                                   "ci_run_url": upload.run.ci_run_url, "reason": exc.reason})
+            return JSONResponse(status_code=status.HTTP_202_ACCEPTED,
+                                content={"discarded": True, "reason": exc.reason})
         except ingest_service.IdempotencyConflict:
             metrics.REJECTED.labels(reason="conflict").inc()
             raise HTTPException(

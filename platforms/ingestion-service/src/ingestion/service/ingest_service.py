@@ -12,7 +12,7 @@ from qeos_shared.keys import test_key
 from src.ingestion.core.config import settings
 from src.ingestion.models import ApiKey, Run, RunChangedFile, RunComponent, RunResult
 from src.ingestion.schemas.collect import RunUpload
-from src.ingestion.service import masking_pattern_service
+from src.ingestion.service import collection_settings_service, masking_pattern_service
 from src.ingestion.utils import custom_masking, metrics
 from src.ingestion.utils.redaction import redact
 
@@ -20,8 +20,19 @@ CI_RUN_URL_LENGTH = 2048
 COMMIT_MESSAGE_LENGTH = 500
 
 
+DISCARD_REASON = "manual runs are not collected for this project"
+
+
 class IdempotencyConflict(Exception):
     pass
+
+
+class Discarded(Exception):
+    """The upload is valid and deliberately not stored (ADR-030)."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
 
 
 def truncate_utf8(text: Optional[str], limit: int) -> tuple[Optional[str], bool]:
@@ -67,6 +78,10 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
         if existing is not None:
             return _replay(existing, request_hash)
 
+    if upload.run.trigger == "manual" and not collection_settings_service.collects_manual(db, key.project_id):
+        collection_settings_service.count_discard(db, key.project_id)
+        raise Discarded(DISCARD_REASON)
+
     counts = Counter(result.status for result in upload.results)
     meta = upload.run
     patterns = tuple(masking_pattern_service.compiled_for(db, key.project_id))
@@ -94,6 +109,7 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
         commit_message=commit_message,
         pr_number=meta.pr_number,
         base_branch=meta.base_branch,
+        trigger=meta.trigger,
         started_at=meta.started_at,
         finished_at=meta.finished_at,
         duration_ms=int((meta.finished_at - meta.started_at).total_seconds() * 1000),

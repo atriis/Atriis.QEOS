@@ -19,6 +19,7 @@ class RunOut(BaseModel):
     commit_message: Optional[str] = None
     pr_number: Optional[int] = None
     base_branch: Optional[str] = None
+    trigger: Optional[str] = None
     started_at: datetime
     finished_at: datetime
     duration_ms: int
