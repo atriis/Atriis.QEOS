@@ -161,3 +161,27 @@ Builds history-based test impact analysis on PostgreSQL inside ingestion-service
 recorded evaluation. Stays out: a learned model (next, once outcomes exist; no new infrastructure),
 embeddings and semantic similarity (Qdrant, Phase 6), coverage instrumentation, and skipping tests in CI.
 No TARGET technology is introduced.
+
+## 9. Amendments from the implementation plan (2026-10-12)
+
+Checked against the code while planning (`docs/superpowers/plans/2026-10-12-test-impact-analysis.md`, its
+rulings); they replace the text above where they differ:
+
+- Ingestion has no upload parts: the collector sends each part as its own run, so each part gets its own
+  suggestion and outcome. The suggestion is scored before the run row is written, in the upload's
+  transaction; the outcome is written after the response. Neither can fail an upload (§3.4).
+- Runs record no repository today, so path units carry no repository prefix yet; follow-up in TODO (§3.1).
+- "Failed" includes `errored`, as everywhere in QEOS; a test's outcome is its last attempt (§3.1).
+- Only `run_impact` cascades from `test_runs`; the aggregate tables are rebuilt nightly from the runs that
+  remain (§3.7).
+- `impact_test_base` also stores each test's names, file and flaky flag, so live scoring never scans results.
+  "No history" means fewer than 3 runs (§3.2, §3.3).
+- There is no Play dialog per branch: **Run likely affected** is a button on the Test cases page that opens a
+  panel, scores the branch's newest change with changed files among its last 20 runs, and replaces the
+  selection; Play then runs it as usual (§2.2).
+- The Report section uses the Report's period when it is 7, 14 or 30 days ending today, else 30 (§2.3).
+- The smoke proves the suggestion through the *failing on this branch* label, since two runs cannot meet the
+  statistical thresholds (§5).
+- The new compose job is added to the README diagram, component table and blueprint Services row, which CI's
+  architecture-docs check requires (§6).
+
