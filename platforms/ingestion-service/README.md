@@ -43,7 +43,8 @@ returns the stored settings.
 
 With `collect_manual` off, an upload whose `run.trigger` is `manual` answers
 `202 {"discarded": true, "reason": "manual runs are not collected for this project"}` and stores nothing.
-`automatic`, `qeos` and no trigger are stored as usual. A discard:
+`automatic`, `qeos` and no trigger are stored as usual. Collectors older than 0.5.0 send no trigger, so manual
+runs from them are still collected; classification needs collector 0.5.0. A discard:
 
 - is counted by one atomic `UPDATE` (`discarded_count`, `last_discarded_at`): uploads, not runs, because a
   matrix run uploads once per job;

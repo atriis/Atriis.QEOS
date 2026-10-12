@@ -107,7 +107,7 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   and `trigger` is `manual`, the answer is `202 {"discarded": true, "reason": "manual runs are
   not collected for this project"}` and nothing is stored (ADR-030).
 - **Collection settings**: `GET/PUT /projects/{id}/collection-settings` (`collect_manual`, default
-  true; the discard count and time; members read, owners and admins write), table
+  true; `discarded_count` and `last_discarded_at`; members read, owners and admins write), table
   `collection_settings` (ADR-030).
 - **Masking**: built-in rules (authorization headers, cookies, URL and CLI
   passwords, JWTs, vendor tokens, private keys, key=value secrets, emails, card

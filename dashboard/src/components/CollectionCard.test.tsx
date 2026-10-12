@@ -54,6 +54,14 @@ test("says how many manual uploads were not collected", async () => {
   expect(await screen.findByText(/3 manual uploads not collected/i)).toBeInTheDocument();
 });
 
+test("uses the singular for one manual upload", async () => {
+  server.use(http.get(URL, () => HttpResponse.json({
+    ...DEFAULTS, collect_manual: false, discarded_count: 1, last_discarded_at: new Date(Date.now() - 2 * 3600e3).toISOString(),
+  })));
+  renderCard();
+  expect(await screen.findByText(/1 manual upload not collected/i)).toBeInTheDocument();
+});
+
 test("a failed save shows the error and keeps the old state", async () => {
   server.use(
     http.get(URL, () => HttpResponse.json(DEFAULTS)),

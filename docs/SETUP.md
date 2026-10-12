@@ -619,10 +619,11 @@ qeos-collector upload "reports/**/*.xml" --ca-file ~/qeos-ca.crt
 - Exit codes: `0` uploaded (or the platform was unreachable: by default, an outage never turns a
   build red); `1` the upload failed and `--fail-on-error` or `--gate` is set; `2` a
   configuration error (no URL or key, no file matched, `http://` to a non-localhost address,
-  a bad `--ca-file`).
+  a bad `--ca-file`, an invalid `--trigger`).
 
 Useful options (flag / environment variable): `--environment` / `QEOS_ENVIRONMENT` (set it per
-CI matrix leg; it makes flaky detection precise), `--branch`, `--commit`, `--ci-run-url`
+CI matrix leg; it makes flaky detection precise), `--trigger` / `QEOS_TRIGGER`
+(`manual`, `automatic` or `qeos`; [4.1.8a](#418a-manual-runs-and-the-run-trigger)), `--branch`, `--commit`, `--ci-run-url`
 (detected automatically on GitHub, GitLab, Jenkins and Azure), `--component NAME@SHA` /
 `QEOS_COMPONENTS` (the product build an E2E suite ran against, up to 20), `--fail-on-error`,
 `--gate` ([4.4](#44-analytics), quarantine), `--spool DIR` (keeps undelivered parts and
@@ -730,10 +731,18 @@ are honoured.
 #### 4.1.8a Manual runs and the run trigger
 
 From 0.5.0 the collector sends how each run started (`manual`, `automatic` or `qeos`), detected from the CI
-environment; `--trigger` / `QEOS_TRIGGER` overrides it. A project can switch manual collection off
-(Project Settings, Collection); the platform then answers 202, the collector prints `qeos: run not
-collected: manual runs are not collected for this project` and exits 0. The detection table is in the
-[collector README](../collector/README.md#run-trigger-and-manual-runs). Two cases:
+environment; `--trigger` / `QEOS_TRIGGER` overrides it. Any other value than `manual`, `automatic` or
+`qeos` is a configuration error (exit 2). Collectors older than 0.5.0 send no trigger, so their runs are
+always collected.
+
+A project can switch manual collection off: **Settings › Collection**, the switch "Collect runs started
+manually in CI". Everyone in the project sees it; only owners and admins can change it. While it is off, the
+platform answers 202 and stores nothing, and the collector prints
+`qeos: run not collected: manual runs are not collected for this project` and exits 0. The card counts the
+manual uploads not collected and when the last one arrived (uploads, not runs: a matrix run uploads once
+per job). Turning it on or off never touches stored runs. Runs started from QEOS are always collected.
+The detection table is in the [collector README](../collector/README.md#run-trigger-and-manual-runs).
+Two cases:
 
 - **A script dispatching with a person's token** looks manual (the triggering actor is that person). Use a
   GitHub App or `GITHUB_TOKEN` for automated dispatches, or pass `--trigger automatic` in that workflow.
@@ -1590,7 +1599,8 @@ The gateway always joins a Docker network fixed at `172.30.1.0/24`, with monitor
 | No verification or reset email | SMTP not configured: the links are in `docker compose logs auth-service`. If SMTP is configured, check that log for the SMTP error. |
 | 429 Too Many Requests | Per-IP rate limit (5/s on sign-in, 20/s API, 10/s uploads). Wait a second. Behind a proxy in production, check `GATEWAY_TRUSTED_PROXIES` (set by the prod file). |
 | SSO button shows, sign-in answers 503 | auth-service lacks `GOOGLE_CLIENT_ID` / `AZURE_CLIENT_ID` + `AZURE_ALLOWED_TENANTS`: use the override file ([3.8](#38-single-sign-on-google-and-microsoft)). |
-| Collector exits 2 | A configuration problem (URL, key, no matching files, `http://` URL, bad `--ca-file`). `qeos-collector check` names it. |
+| Collector exits 2 | A configuration problem (URL, key, no matching files, `http://` URL, bad `--ca-file`, invalid `--trigger`). `qeos-collector check` names it. |
+| My run doesn't appear in QEOS | Check Settings › Collection and the collector's `run not collected` line: the run looked manual and the project does not collect manual runs ([4.1.8a](#418a-manual-runs-and-the-run-trigger)). Pass `--trigger automatic` if it is not. |
 | Collector: certificate verify failed | Local stack: `--ca-file` with the gateway certificate. Private CA: `--ca-file` with that CA. |
 | Upload 401 | Wrong, revoked or missing key. On Azure, the secret is not mapped in `env:` (you see the literal `$(QEOS_API_KEY)`). |
 | CI build is green but no run arrives | `QEOS_URL` missing or unreachable (hosted runner → localhost, or a closed tunnel). By default the collector never fails the build; add `--fail-on-error` while you debug. |

@@ -58,6 +58,8 @@ yet.
   month in any IANA time zone; per-test list, history; flaky detection with
   `window_days` up to 90, served from daily rollups (3.9 s at 90 days on ~2M
   results, against 11.3 s live — see the ingestion README).
+- Collection: a project can switch off collection of runs a person started by hand in CI
+  (Settings › Collection, owners and admins); the platform answers 202 and counts what it skipped.
 - Access model: organization membership grants project access; roles are
   owner/admin/member/viewer/billing_manager (viewers and billing managers
   read only).

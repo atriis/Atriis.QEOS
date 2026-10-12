@@ -178,8 +178,12 @@ collect manual runs (Project Settings, Collection). An explicit `--trigger` / `Q
 without `BUILD_CAUSE` is unknown; use `--trigger` there.
 
 When the project has switched manual collection off and the run is manual, the platform answers 202 and
-stores nothing. The collector prints `qeos: run not collected: manual runs are not collected for this
-project`, sends no further parts and exits 0, also with `--gate` or `--fail-on-error`.
+stores nothing. The collector prints
+`qeos: run not collected: manual runs are not collected for this project`, sends no further parts and
+exits 0, also with `--gate` or `--fail-on-error`.
+
+Any `--trigger` / `QEOS_TRIGGER` value other than `manual`, `automatic` or `qeos` is a configuration error
+(exit 2). Collectors older than 0.5.0 send no trigger, so their runs are always collected.
 
 Two cases to know:
 

@@ -49,7 +49,7 @@ export default function CollectionCard({ projectId, canManage }: Props) {
       </p>
       {settings.data != null && settings.data.discarded_count > 0 && (
         <p className="muted">
-          {settings.data.discarded_count} manual uploads not collected
+          {settings.data.discarded_count} manual {settings.data.discarded_count === 1 ? "upload" : "uploads"} not collected
           {settings.data.last_discarded_at != null && `, last ${ago(settings.data.last_discarded_at)}`}.
         </p>
       )}

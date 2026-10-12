@@ -55,6 +55,7 @@ pipeline already produces, and it starts runs only through workflows you own.
   - TRX, NUnit, xUnit and TestNG.
 
   Ready-made integrations: a [GitHub Action](collector-action/action.yml), a [Jenkins library](collector-jenkins/README.md), and GitLab and Azure DevOps templates.
+- **Collect manual CI runs or not:** a per-project switch in Settings › Collection; runs a person started by hand in CI can be left out (needs collector 0.5.0).
 - **Runs and history:** every run with its commit, branch, pull request, author and changed files, plus the history of each test.
 - **Trends** by day, week or month, per branch, and run-to-run comparison.
 - **Flaky tests:** same-commit detection over up to 90 days, backed by daily rollups, with quarantine.
