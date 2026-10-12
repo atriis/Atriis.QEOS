@@ -5,7 +5,7 @@ stored with an uploaded run, and its outcome."""
 import hashlib
 
 from sqlalchemy import (
-    JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, PrimaryKeyConstraint, String, UniqueConstraint, false,
+    JSON, Boolean, Column, DateTime, ForeignKey, Integer, PrimaryKeyConstraint, String, UniqueConstraint, false,
 )
 
 from src.ingestion.db.base import Base
@@ -26,10 +26,8 @@ class ImpactPair(Base):
     table rebuilt nightly never runs out of ids (supersedes plan Ruling 27)."""
 
     __tablename__ = "impact_pairs"
-    __table_args__ = (
-        PrimaryKeyConstraint("project_id", "unit_hash", "test_key", name="pk_impact_pairs"),
-        Index("ix_impact_pairs_unit", "project_id", "unit_hash"),
-    )
+    # The key's leading (project_id, unit_hash) serves the unit lookups: no secondary index
+    __table_args__ = (PrimaryKeyConstraint("project_id", "unit_hash", "test_key", name="pk_impact_pairs"),)
 
     project_id = Column(Integer, nullable=False)
     unit_hash = Column(String(32), nullable=False)  # unit_hash(path_unit)

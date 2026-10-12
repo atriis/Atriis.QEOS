@@ -22,6 +22,23 @@ def test_empty_segments_are_dropped():
     assert path_units("/src//payment/api.py") == ["src/payment/api.py", "src/payment/", "src/"]
 
 
+def test_dot_segments_are_dropped_not_resolved():
+    """Git never sends "." or ".."; dropping them keeps "../" from ever being a unit."""
+    assert path_units("./src/pay/api.py") == ["src/pay/api.py", "src/pay/", "src/"]
+    assert path_units("src/../pay/api.py") == ["src/pay/api.py", "src/pay/", "src/"]
+    assert path_units("../..") == [] and is_ignored("./..")
+
+
+def test_unicode_paths_keep_their_characters():
+    assert path_units("src/páginas/ação.py", repository="repó") == [
+        "repó:src/páginas/ação.py", "repó:src/páginas/", "repó:src/"]
+
+
+def test_an_empty_change_has_no_units():
+    assert change_units([]) == set()
+    assert not ChangedFiles([]).touches("tests/test_pay.py")
+
+
 def test_a_repository_prefixes_every_unit():
     assert path_units("src/payment/api.py", repository="repo-a") == [
         "repo-a:src/payment/api.py", "repo-a:src/payment/", "repo-a:src/"]
@@ -55,6 +72,11 @@ def test_a_change_of_more_than_300_files_counts_at_folder_level_only():
 
 def test_a_change_of_exactly_300_files_keeps_its_files():
     assert "src/mod0/f.py" in change_units([f"src/mod{i}/f.py" for i in range(FOLDER_ONLY_ABOVE)])
+
+
+def test_the_300_counts_paths_once_normalised():
+    paths = [f"src/mod{i}/f.py" for i in range(FOLDER_ONLY_ABOVE)] + ["src//mod0/f.py", "/src/mod1/f.py", "/"]
+    assert "src/mod0/f.py" in change_units(paths)
 
 
 def test_ignored_paths_still_count_toward_the_300():

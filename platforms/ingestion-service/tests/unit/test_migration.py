@@ -212,8 +212,8 @@ def test_test_impact_tables(migrated_engine):
     """Migration 018 (spec 2026-10-12 §3.2, §3.4)."""
     inspector = inspect(migrated_engine)
     assert inspector.get_pk_constraint("impact_pairs")["constrained_columns"] == ["project_id", "unit_hash", "test_key"]
-    pair_indexes = {ix["name"]: ix["column_names"] for ix in inspector.get_indexes("impact_pairs")}
-    assert pair_indexes == {"ix_impact_pairs_unit": ["project_id", "unit_hash"]}
+    # No secondary index: the primary key's leading (project_id, unit_hash) serves the unit lookups
+    assert inspector.get_indexes("impact_pairs") == []
     base_unique = {uc["name"]: uc["column_names"] for uc in inspector.get_unique_constraints("impact_test_base")}
     assert base_unique["uq_impact_test_base"] == ["project_id", "test_key"]
     assert inspector.get_pk_constraint("run_impact")["constrained_columns"] == ["run_id"]
@@ -221,13 +221,12 @@ def test_test_impact_tables(migrated_engine):
     assert (fk["referred_table"], fk["referred_columns"], fk["options"].get("ondelete")) == ("test_runs", ["id"], "CASCADE")
 
 
-def test_model_declares_the_impact_pairs_key_and_index():
+def test_model_declares_the_impact_pairs_key_and_no_other_index():
     from src.ingestion.models.impact import ImpactPair
 
     table = ImpactPair.__table__
     assert [col.name for col in table.primary_key.columns] == ["project_id", "unit_hash", "test_key"]
-    assert {ix.name: [col.name for col in ix.columns] for ix in table.indexes} == {
-        "ix_impact_pairs_unit": ["project_id", "unit_hash"]}
+    assert not table.indexes
 
 
 PAIR = ("INSERT INTO impact_pairs (project_id, unit_hash, path_unit, test_key, changed_runs, new_failures, computed_at)"

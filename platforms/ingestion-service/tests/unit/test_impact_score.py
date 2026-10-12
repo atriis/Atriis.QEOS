@@ -50,6 +50,31 @@ def test_lift_must_be_at_least_2(base_runs, kept):
     assert (evidence(pair("pays"), base("pays", runs=base_runs, new_failures=10)) is not None) is kept
 
 
+def test_a_lift_of_exactly_2_is_kept():
+    found = evidence(pair("pays", changed_runs=4, new_failures=2), base("pays", runs=40, new_failures=10))
+    assert found is not None and found["lift"] == 2.0
+
+
+def test_the_lift_threshold_is_compared_exactly_not_in_floats(monkeypatch):
+    """3/5 over 1/5 is exactly 3, but (3/5) / (1/5) is 2.9999999999999996 in floats."""
+    monkeypatch.setattr(impact_score, "MIN_LIFT", 3)
+    found = evidence(pair("pays", changed_runs=5, new_failures=3), base("pays", runs=5, new_failures=1))
+    assert found is not None and found["lift"] == 3.0
+
+
+def test_a_base_rate_of_0_passes_the_lift_test_and_shows_no_normal_rate():
+    """Any new failure is infinitely above a test that never newly fails otherwise: the clearest signal, so kept."""
+    assert evidence(pair("pays"), base("pays", new_failures=0)) == {
+        "path_unit": "src/pay/", "changed_runs": 4, "new_failures": 2, "confidence": 0.5, "lift": None, "base_rate": None}
+    assert evidence(pair("pays", changed_runs=2), base("pays", new_failures=0)) is None  # the other thresholds still hold
+
+
+def test_a_base_rate_of_0_ranks_above_any_finite_lift_at_the_same_confidence():
+    result = score([pair("a_finite", changed_runs=3, new_failures=3), pair("z_never_fails", changed_runs=3, new_failures=3)],
+                   [base("a_finite", runs=80, new_failures=1), base("z_never_fails", new_failures=0)])
+    assert [t["name"] for t in result["tests"]] == ["z_never_fails", "a_finite"]
+
+
 def test_the_evidence_holds_what_the_card_shows():
     assert evidence(pair("pays"), base("pays")) == {
         "path_unit": "src/pay/", "changed_runs": 4, "new_failures": 2, "confidence": 0.5, "lift": 2.0, "base_rate": 0.25}
@@ -62,8 +87,21 @@ def test_each_test_takes_its_best_unit_of_the_change():
 
 
 def test_a_tie_goes_to_the_more_specific_unit():
-    result = score([pair("pays", "src/"), pair("pays", "src/pay/")], [base("pays")])
+    # "web/" is shorter but sorts above "src/pay/" as a string: only the length rule picks "src/pay/"
+    result = score([pair("pays", "web/"), pair("pays", "src/pay/")], [base("pays")],
+                   paths=("src/pay/api.py", "web/app.py"), units=UNITS | {"web/app.py", "web/"})
     assert result["tests"][0]["evidence"]["path_unit"] == "src/pay/"
+
+
+def test_a_tie_in_confidence_and_lift_goes_to_more_changed_runs_before_specificity():
+    result = score([pair("pays", "src/", changed_runs=6, new_failures=3), pair("pays", "src/pay/")], [base("pays")])
+    assert result["tests"][0]["evidence"]["path_unit"] == "src/"
+
+
+def test_confidence_ranks_before_lift():
+    pairs = [pair("a_high_lift", changed_runs=4, new_failures=2), pair("z_high_confidence", changed_runs=3, new_failures=3)]
+    bases = [base("a_high_lift", runs=80, new_failures=2), base("z_high_confidence")]  # lift 20 at 0.5, lift 4 at 1.0
+    assert [t["name"] for t in score(pairs, bases)["tests"]] == ["z_high_confidence", "a_high_lift"]
 
 
 def test_strongest_first_by_confidence_then_lift_then_name():
@@ -72,10 +110,13 @@ def test_strongest_first_by_confidence_then_lift_then_name():
     assert [t["name"] for t in score(pairs, bases)["tests"]] == ["strong", "c_higher_lift", "a_lower_lift", "b_lower_lift"]
 
 
-def test_at_most_50_statistical_suggestions():
-    names = [f"t{i:03d}" for i in range(MAX_STATISTICAL + 10)]
-    result = score([pair(n) for n in names], [base(n) for n in names])
-    assert len(result["tests"]) == MAX_STATISTICAL and result["statistical_total"] == MAX_STATISTICAL + 10
+def test_at_most_50_statistical_suggestions_the_strongest():
+    strong = [f"z{i:03d}" for i in range(MAX_STATISTICAL)]
+    weak = [f"a{i:03d}" for i in range(10)]  # first by name, so only strength drops them
+    pairs = [pair(n, changed_runs=3, new_failures=3) for n in strong] + [pair(n) for n in weak]
+    result = score(pairs, [base(n) for n in strong + weak])
+    assert [t["name"] for t in result["tests"]] == strong
+    assert result["statistical_total"] == MAX_STATISTICAL + 10
 
 
 def test_a_flaky_test_is_never_suggested_from_statistics():

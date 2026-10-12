@@ -4,7 +4,9 @@ For each test, the change's best path unit gives confidence = new_failures / cha
 base rate. A test is suggested when changed_runs >= 3, new_failures >= 2 and lift >= 2, strongest first, at most 50.
 Tests whose file changed, that fail on the branch, or that have no history yet (fewer than NO_HISTORY_RUNS change
 runs) are always included, labelled, outside that cap, each test once (plan Ruling 11). Below 20 runs with changed
-files in the window, statistics are not used at all."""
+files in the window, statistics are not used at all. A base rate of 0 passes the lift test and ranks above any
+finite lift; its evidence has lift and base_rate None."""
+import math
 from dataclasses import dataclass
 from typing import Dict, Iterable, Mapping, Optional
 
@@ -55,19 +57,29 @@ class BaseStat:
 
 def evidence(pair: PairStat, base: BaseStat) -> Optional[dict]:
     """The pair's evidence when it passes all three thresholds, else None."""
-    if pair.changed_runs < MIN_CHANGED_RUNS or pair.new_failures < MIN_NEW_FAILURES or base.rate <= 0:
+    if pair.changed_runs < MIN_CHANGED_RUNS or pair.new_failures < MIN_NEW_FAILURES:
         return None
-    confidence = pair.new_failures / pair.changed_runs
-    lift = confidence / base.rate
-    if lift < MIN_LIFT:
+    # lift = (new_failures / changed_runs) / (base new_failures / base runs) >= MIN_LIFT, cross-multiplied so the edge
+    # is exact (3/5 over 1/5 is 2.9999999999999996 in floats). A base rate of 0 always passes: a test that never
+    # newly fails otherwise is infinitely above normal, the clearest signal there is.
+    if pair.new_failures * base.runs < MIN_LIFT * pair.changed_runs * base.new_failures:
         return None
+    if base.new_failures:
+        lift: Optional[float] = round(pair.new_failures * base.runs / (pair.changed_runs * base.new_failures), 4)
+        base_rate: Optional[float] = round(base.rate, 4)
+    else:
+        lift = base_rate = None  # no "normally" part to show
     return {"path_unit": pair.path_unit, "changed_runs": pair.changed_runs, "new_failures": pair.new_failures,
-            "confidence": round(confidence, 4), "lift": round(lift, 4), "base_rate": round(base.rate, 4)}
+            "confidence": round(pair.new_failures / pair.changed_runs, 4), "lift": lift, "base_rate": base_rate}
+
+
+def _lift(found: dict) -> float:
+    return math.inf if found["lift"] is None else found["lift"]
 
 
 def _strength(found: dict) -> tuple:
     # Ties: more changed runs, then the more specific (longer) unit, then the unit itself for a stable answer
-    return (found["confidence"], found["lift"], found["changed_runs"], len(found["path_unit"]), found["path_unit"])
+    return (found["confidence"], _lift(found), found["changed_runs"], len(found["path_unit"]), found["path_unit"])
 
 
 def _entry(test: ImpactTest, kind: str, found: Optional[dict] = None) -> dict:
@@ -89,7 +101,7 @@ def suggest(units: Iterable[str], pairs: Iterable[PairStat], bases: Mapping[str,
             found = evidence(pair, base)
             if found is not None and (pair.test_key not in best or _strength(found) > _strength(best[pair.test_key])):
                 best[pair.test_key] = found
-    ranked = sorted(best.items(), key=lambda item: (-item[1]["confidence"], -item[1]["lift"],
+    ranked = sorted(best.items(), key=lambda item: (-item[1]["confidence"], -_lift(item[1]),
                                                    bases[item[0]].test.name, item[0]))
     tests = [_entry(bases[key].test, STATISTICAL, found) for key, found in ranked[:MAX_STATISTICAL]]
     listed = {entry["test_key"] for entry in tests}

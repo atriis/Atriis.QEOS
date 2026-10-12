@@ -24,8 +24,13 @@ IGNORED_SUFFIX = ".lock"
 IGNORED_FOLDERS = frozenset({"dist", "build", "vendor", "node_modules"})
 
 
+DOT_SEGMENTS = frozenset({"", ".", ".."})
+
+
 def _parts(path: str) -> List[str]:
-    return [part for part in path.split("/") if part]
+    """The path's segments without empty, "." and ".." ones. Dot segments are dropped, not resolved: git never sends
+    them, and dropping them keeps "../" from ever being a unit."""
+    return [part for part in path.split("/") if part not in DOT_SEGMENTS]
 
 
 def is_ignored(path: str) -> bool:
@@ -49,9 +54,9 @@ def path_units(path: str, *, folders_only: bool = False, repository: Optional[st
 
 
 def change_units(paths: Iterable[str], repository: Optional[str] = None) -> Set[str]:
-    """The path units of one change: ignored paths add none; more than FOLDER_ONLY_ABOVE distinct paths count at
-    folder level only."""
-    distinct = set(paths)
+    """The path units of one change: ignored paths add none; more than FOLDER_ONLY_ABOVE distinct paths, counted once
+    normalised (so "src//a.py" and "src/a.py" are one, and a blank path is none), count at folder level only."""
+    distinct = {"/".join(_parts(path)) for path in paths} - {""}
     folders_only = len(distinct) > FOLDER_ONLY_ABOVE
     units: Set[str] = set()
     for path in distinct:
