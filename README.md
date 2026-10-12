@@ -106,10 +106,11 @@ the same domains, filled with what runs today. Dotted arrows are the role checks
 another for; the grey box is the blueprint's target infrastructure, none of it deployed.
 
 ```mermaid
+%%{init: {"flowchart": {"htmlLabels": false, "wrappingWidth": 400}}}%%
 flowchart TB
     Browser["Browser<br/>QA engineers · developers · product owners"]
-    subgraph CI["Your CI: GitHub Actions · GitLab · Jenkins"]
-        COL["qeos-collector<br/>upload · import-features"]
+    subgraph CI["Your CI"]
+        COL["qeos-collector: upload · import-features<br/>GitHub Actions · GitLab · Jenkins"]
     end
     Browser -->|HTTPS| GW
     COL -->|HTTPS + API key| GW
@@ -161,7 +162,7 @@ flowchart TB
         GRAF[Grafana]
         EXP["node-exporter · cadvisor<br/>postgres-exporter"] --> PROM
     end
-    GW -->|/grafana/ behind the QEOS sign-in| GRAF
+    GW -->|/grafana/, signed in| GRAF
     AM --> NOTIFY
 
     classDef target fill:#eee,stroke:#999,stroke-dasharray:4 3,color:#555
