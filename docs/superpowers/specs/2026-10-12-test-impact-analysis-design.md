@@ -192,4 +192,5 @@ rulings); they replace the text above where they differ:
 - Replay takes its own lock and may run long on large projects; it is a one-off (§3.6).
 - The accuracy figure also shows the average suggestion size, so a high catch rate from suggesting nearly
   everything is visible (§2.3).
-
+- `impact_pairs` keeps only pairs with at least `MIN_NEW_FAILURES` (2) new failures, since a pair with one
+  can never be suggested; the nightly rebuild applies a changed threshold the next night (§3.2).
