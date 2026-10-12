@@ -212,8 +212,8 @@ http {
         }
 
         # A regex location wins over prefix locations, so this takes /api/v1/projects/{id}/api-keys,
-        # /runs, /analytics, /masking-patterns, /export and /notification-channels away from project-service's /api/v1/projects prefix below.
-        location ~ ^/api/v1/projects/[0-9]+/(api-keys|runs|analytics|masking-patterns|export|notification-channels)(/|$) {
+        # /runs, /analytics, /masking-patterns, /export and /notification-channels and /collection-settings away from project-service's /api/v1/projects prefix below.
+        location ~ ^/api/v1/projects/[0-9]+/(api-keys|runs|analytics|masking-patterns|export|notification-channels|collection-settings)(/|$) {
             limit_req zone=api burst=40 nodelay;
             set $upstream http://ingestion-service:8000;
             proxy_pass $upstream;

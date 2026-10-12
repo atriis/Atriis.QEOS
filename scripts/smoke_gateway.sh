@@ -154,6 +154,7 @@ check "create an API key -> ingestion-service (overlap route)" 201 POST \
   "$BASE/api/v1/projects/$PROJECT_ID/api-keys" "${AUTH[@]}" -H "Content-Type: application/json" -d '{"name":"smoke"}'
 API_KEY="$(sed -n 's/.*"key":"\(qeos_[^"]*\)".*/\1/p' "$TMP/body")"
 KEY_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
+check "collection settings -> ingestion-service" 200 GET "$BASE/api/v1/projects/$PROJECT_ID/collection-settings" "${AUTH[@]}"
 # ---- test-management-service: a case through the gateway (ADR-022) ----
 check "create a test case -> test-management-service (overlap route)" 201 POST   "$BASE/api/v1/projects/$PROJECT_ID/cases" "${AUTH[@]}" -H "Content-Type: application/json"   -d '{"title":"Smoke case","labels":["smoke"]}'
 body_has "... numbered in the project" '"key":"TC-1"'
