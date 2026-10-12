@@ -284,3 +284,22 @@ def test_test_impact_downgrade_drops_the_tables(tmp_path):
         assert not {"impact_pairs", "impact_test_base", "run_impact"} & set(inspect(engine).get_table_names())
     finally:
         engine.dispose()
+
+
+def test_trigger_check(migrated_engine):
+    with migrated_engine.begin() as conn:
+        conn.execute(text(KEY), {"hash": "c" * 64})
+        conn.execute(text(RUN), {"idem": "t1", "provider": "github_actions"})
+        conn.execute(text("UPDATE test_runs SET \"trigger\" = 'manual' WHERE idempotency_key = 't1'"))
+    with pytest.raises(IntegrityError):
+        with migrated_engine.begin() as conn:
+            conn.execute(text("UPDATE test_runs SET \"trigger\" = 'cron' WHERE idempotency_key = 't1'"))
+
+
+def test_collection_settings_defaults(migrated_engine):
+    with migrated_engine.begin() as conn:
+        conn.execute(text("INSERT INTO collection_settings (project_id) VALUES (5)"))
+        row = conn.execute(text(
+            "SELECT collect_manual, discarded_count, last_discarded_at FROM collection_settings WHERE project_id = 5"
+        )).one()
+    assert (bool(row[0]), row[1], row[2]) == (True, 0, None)

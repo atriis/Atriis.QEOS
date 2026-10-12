@@ -7,6 +7,7 @@ from src.ingestion.db.base import Base
 
 CI_PROVIDERS = ("github_actions", "gitlab_ci", "jenkins", "azure_pipelines", "other", "local")
 STATUSES = ("passed", "failed", "skipped", "errored")
+TRIGGERS = ("manual", "automatic", "qeos")
 
 
 class Run(Base):
@@ -30,6 +31,8 @@ class Run(Base):
     commit_message = Column(String(500), nullable=True)
     pr_number = Column(Integer, nullable=True)
     base_branch = Column(String(255), nullable=True)
+    # How the CI run started, as the collector classified it (ADR-030); null: unknown or an older collector
+    trigger = Column(String(10), nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=False)
     finished_at = Column(DateTime(timezone=True), nullable=False)
     duration_ms = Column(Integer, nullable=False)
@@ -52,6 +55,7 @@ class Run(Base):
         CheckConstraint(
             "ci_provider IN ('github_actions','gitlab_ci','jenkins','azure_pipelines','other','local')", name="chk_test_runs_ci_provider"
         ),
+        CheckConstraint("\"trigger\" IN ('manual','automatic','qeos')", name="chk_test_runs_trigger"),
         Index("ix_test_runs_project_created", "project_id", "created_at"),
         Index("ix_test_runs_project_branch", "project_id", "branch"),
         Index("ix_test_runs_project_started", "project_id", "started_at"),
