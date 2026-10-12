@@ -9,7 +9,7 @@ this file duplicated Blueprint §5–§11 and described an unbuilt system.
 ## 1. System Overview
 
 Five FastAPI services behind one NGINX gateway, a React SPA, a CLI collector
-agent, and three background jobs — all on PostgreSQL 15, all deployed via the
+agent, and four background jobs — all on PostgreSQL 15, all deployed via the
 repository-root docker-compose (production: the same stack on one VM behind a
 Caddy TLS edge, `deploy/`, ADR-019).
 

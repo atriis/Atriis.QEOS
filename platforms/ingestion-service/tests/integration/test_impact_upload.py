@@ -243,3 +243,108 @@ def test_a_truncated_change_list_is_still_scored(client, db, make_key):
     response = client.post(URL, json=body, headers={"Authorization": f"Bearer {key}"})
     assert response.status_code == 201
     assert stored(db, response.json()["id"]) is not None
+
+
+def test_the_nightly_pass_writes_an_outcome_the_response_never_wrote(client, db, make_key, seed_change_run,
+                                                                      monkeypatch):
+    from src.ingestion.jobs import impact_rollup
+
+    seed_change_run(hours_ago(3), results=(("pays", "passed", 5),))
+    monkeypatch.setattr(impact_service, "evaluate_run", lambda *_args: None)  # the process stopped after the response
+    _, key = make_key(project_id=1)
+    late, recent = upload(client, key, [("pays", "failed")]), upload(client, key, [("pays", "failed")])
+    db.get(RunImpact, late).scored_at = hours_ago(0.6)
+    db.get(RunImpact, recent).scored_at = hours_ago(0.4)  # under 30 minutes: the response's step may still come
+    db.commit()
+    assert impact_rollup.run_pass(db)["outcomes"] == 1
+    row = stored(db, late)
+    assert row.evaluated_at is not None and row.caught == [] and [t["name"] for t in row.missed] == ["pays"]
+    assert stored(db, recent).evaluated_at is None
+
+
+def test_an_outcome_is_written_once(client, db, make_key, seed_change_run, monkeypatch):
+    """The background step and the nightly pass can both reach a run: the first outcome stays."""
+    from sqlalchemy.orm import sessionmaker
+
+    seed_change_run(hours_ago(3), results=(("pays", "passed", 5),))
+    monkeypatch.setattr(impact_service, "evaluate_run", lambda *_args: None)
+    _, key = make_key(project_id=1)
+    run_id = upload(client, key, [("pays", "failed")])
+    factory = sessionmaker(bind=db.get_bind())
+    real = impact_service.newly_failed_in_run
+
+    def raced(session, run, excluded):
+        monkeypatch.setattr(impact_service, "newly_failed_in_run", real)
+        with factory() as other:  # another evaluation finishes first, while this one is computing
+            assert impact_service.evaluate(other, run.id, hours_ago(0.01)) is True
+        return real(session, run, excluded)
+
+    monkeypatch.setattr(impact_service, "newly_failed_in_run", raced)
+    with factory() as session:
+        assert impact_service.evaluate(session, run_id, datetime.now(timezone.utc)) is False
+    first = stored(db, run_id).evaluated_at
+    with factory() as session:
+        assert impact_service.evaluate(session, run_id, datetime.now(timezone.utc)) is False
+    assert stored(db, run_id).evaluated_at == first
+
+
+def test_no_history_rows_are_read_only_as_far_as_the_label_can_list(db):
+    from src.ingestion.analytics.impact_rules import MAX_PER_LABEL
+
+    db.add_all([base_row(f"n{i:03d}", runs=1) for i in range(MAX_PER_LABEL * 3)])
+    db.add_all([pair_row("src/pay/", "n250"), pair_row("src/pay/", "n251")])
+    db.commit()
+    _, bases = impact_service.load_statistics(db, 1, set(), ChangedFiles([]))
+    assert sorted(b.test.name for b in bases.values()) == [f"n{i:03d}" for i in range(MAX_PER_LABEL)]
+    # two pair tests may be listed first, as statistical: two more rows, and the pair tests themselves
+    _, bases = impact_service.load_statistics(db, 1, change_units(["src/pay/a.py"]), ChangedFiles([]), failing=3)
+    assert len(bases) == MAX_PER_LABEL + 2 + 3 + 2
+
+
+def test_failing_on_branch_reads_the_last_attempt(db, seed_run):
+    seed_run(hours_ago(2), results=(("flip", "failed", 5), ("flip", "passed", 5), ("bad", "errored", 5),
+                                    ("late", "passed", 5), ("late", "failed", 5), ("fine", "passed", 5)))
+    names = [t.name for t in impact_service.failing_on_branch(db, 1, "main", hours_ago(1))]
+    assert names == ["bad", "late"]
+
+
+class _FakeSession:
+    """Records what score_upload sends, as PostgreSQL would receive it."""
+
+    def __init__(self, log):
+        self.log = log
+        self.dialect = type("Dialect", (), {"name": "postgresql"})()
+
+    def get_bind(self):
+        return self
+
+    def execute(self, statement, params=None):
+        self.log.append((str(statement), params))
+        return type("Result", (), {"scalar_one": lambda _self: "30s"})()
+
+    def rollback(self):
+        self.log.append(("rollback", None))
+
+
+def test_scoring_runs_under_a_statement_timeout_on_postgresql_and_restores_it(monkeypatch):
+    log = []
+    monkeypatch.setattr(impact_service, "score_change", lambda *_a, **_k: log.append(("score", None)) or {"tests": []})
+    assert impact_service.score_upload(_FakeSession(log), 1, ["a.py"], "main", hours_ago(0)) is not None
+    assert [entry for entry, _ in log] == [
+        "SELECT current_setting('statement_timeout')", "SET LOCAL statement_timeout = '2s'", "score",
+        "SELECT set_config('statement_timeout', :value, true)"]
+    assert log[-1][1] == {"value": "30s"}
+
+
+def test_a_scoring_timeout_rolls_back_and_the_upload_carries_on(monkeypatch, capsys):
+    class QueryCanceled(Exception):
+        pass
+
+    def timed_out(*_args, **_kwargs):
+        raise QueryCanceled()
+
+    log = []
+    monkeypatch.setattr(impact_service, "score_change", timed_out)
+    assert impact_service.score_upload(_FakeSession(log), 1, ["a.py"], "main", hours_ago(0)) is None
+    assert log[-1][0] == "rollback"  # which also undoes SET LOCAL
+    assert '"error": "QueryCanceled"' in capsys.readouterr().err

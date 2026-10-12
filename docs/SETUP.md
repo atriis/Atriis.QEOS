@@ -258,7 +258,7 @@ curl -k https://localhost:8443/health
 for s in auth organizations projects ingestion test-management; do curl -ks -o /dev/null -w "$s %{http_code}\n" "https://localhost:8443/health/$s"; done
 ```
 `/health` answers `{"status":"healthy"}`. `docker compose ps -a` must show every long-running
-service `healthy` (or `running`, for the three background jobs) and the `*-migrate` and `db-init`
+service `healthy` (or `running`, for the four background jobs) and the `*-migrate` and `db-init`
 jobs `exited (0)`. Plain `docker compose ps` hides the finished jobs.
 
 **Full smoke test.** `scripts/smoke_gateway.sh` runs end-to-end checks through the gateway:

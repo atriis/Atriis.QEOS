@@ -45,7 +45,18 @@ def test_a_pass_writes_the_pairs_with_new_failures_and_every_tests_base_rate(db,
     pairs, bases = rows(db)
     assert pairs == {(unit, PAYS): (4, 2) for unit in PAY_UNITS}
     assert bases == {PAYS: (15, 2, False), STEADY: (15, 0, False)}
-    assert summary == {"event": "impact_rollup", "projects": 1, "pairs": 3, "tests": 2}
+    assert summary == {"event": "impact_rollup", "projects": 1, "pairs": 3, "tests": 2, "outcomes": 0}
+
+
+def test_the_summary_counts_the_rows_written_even_when_the_driver_reports_no_rowcount(db, seed_impact_history,
+                                                                                    monkeypatch):
+    """psycopg 3 reports rowcount -1 for INSERT ... SELECT through SQLAlchemy: the counts must not come from it."""
+    from sqlalchemy.engine import CursorResult
+
+    seed_impact_history(start=NOW - timedelta(days=15))
+    monkeypatch.setattr(CursorResult, "rowcount", property(lambda self: -1))
+    summary = rollup(db)
+    assert (summary["pairs"], summary["tests"]) == (3, 2)
 
 
 def test_each_pair_is_keyed_by_the_md5_of_its_unit(db, seed_impact_history):

@@ -333,7 +333,8 @@ coverage instrumentation, no AI: co-failure statistics on PostgreSQL.
   collector truncated are left out.
 - **Tables** (migration 018), rebuilt per project in one transaction by `python -m src.ingestion.jobs.impact_rollup`
   (one pass on start, then every 24 hours with `--loop`, lock 7351004, heartbeat `impact_rollup`; the
-  `impact-rollup` compose service runs it, and the JobStale alert fires after two days without a success):
+  `impact-rollup` compose service runs it, and the JobStale alert fires after two days without a success; each pass
+  also writes the outcomes uploads left unwritten, see *At upload*):
   - `impact_pairs (project_id, unit_hash, test_key, path_unit, changed_runs, new_failures, computed_at)`: only
     pairs with at least `MIN_NEW_FAILURES` (2) new failures, the fewest a suggestion can use (a pair below that
     can never be suggested; lowering the constant takes effect at the next pass), over the runs with changed files from 90 days before today 00:00 UTC.
@@ -355,15 +356,20 @@ coverage instrumentation, no AI: co-failure statistics on PostgreSQL.
 When an upload carries changed files, ingestion scores the change against the statistics **before** it stores the
 run, inside the upload's transaction, so the suggestion cannot see the run's own results, and stores it in
 `run_impact` (model `stats-v1`) with the run. Scoring reads only what the change needs: the `impact_pairs` rows of
-the change's unit hashes (`unit_hash IN (...)`, the key's leading columns) and the `impact_test_base` rows of those
-tests, plus the rows that can carry a label (a recorded file containing a changed file's name, or fewer than 3
-runs); never the whole project's statistics. Right after the response, a background task compares the suggestion
-with the run's new failures and writes `caught` and `missed` (flaky and muted tests left out); that step costs
-120-585 ms per run, so it never runs inside the request. A truncated change list is scored too. A failure of either
-step is logged as `{"event": "impact_failed", "step": "score"|"outcome", "error": "<type>"}` (the exception type
-only) and never fails the upload: no suggestion is stored, or the outcome stays empty (`evaluated_at` null). A
-collector upload split into parts is one run per part, so each part gets its own suggestion and outcome. A
-replayed upload (same Idempotency-Key) is not scored again.
+the change's unit hashes (`unit_hash IN (...)`, the key's leading columns), the `impact_test_base` rows of those
+tests and of tests whose recorded file contains a changed file's name, and only as many "no history yet" rows (by
+name) as that label can list; never the whole project's statistics. On PostgreSQL scoring runs under
+`SET LOCAL statement_timeout = '2s'`, and the previous timeout is restored for the rest of the upload; a timeout
+leaves the upload without a suggestion. Right after the response, a background task compares the suggestion with
+the run's new failures and writes `caught` and `missed` (flaky and muted tests left out); that step costs 120-585 ms
+per run, so it never runs inside the request. If the process stops before that step, or the step fails, the next
+`impact-rollup` pass writes the same outcome for every suggestion still without one 30 minutes after scoring (its
+log line's `outcomes`). The outcome is written once (`UPDATE ... WHERE evaluated_at IS NULL`): a second evaluation
+changes nothing. A truncated change list is scored too. A failure of either step is logged as
+`{"event": "impact_failed", "step": "score"|"outcome", "error": "<type>"}` (the exception type only) and never fails
+the upload: no suggestion is stored, or the outcome stays empty (`evaluated_at` null) until the nightly pass. A
+collector upload split into parts is one run per part, so each part gets its own suggestion and outcome. A replayed
+upload (same Idempotency-Key) is not scored again.
 
 The suggestion lists:
 

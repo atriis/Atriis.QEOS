@@ -5,7 +5,8 @@
 Each pass visits every project with runs, and every project that still has statistics (so a project whose runs are
 gone loses them). Over the runs with changed files from 90 days before today 00:00 UTC until now, it replaces the
 project's rows in one transaction; the same data gives the same rows. One pass at a time across copies (PostgreSQL
-advisory lock), like the other jobs; each pass that ran writes the impact_rollup heartbeat.
+advisory lock), like the other jobs; each pass that ran writes the impact_rollup heartbeat. Each pass then writes the
+outcome of every stored suggestion still without one 30 minutes after scoring (impact_service.evaluate_pending).
 """
 import sys
 import threading
@@ -20,7 +21,7 @@ from src.ingestion.analytics.impact_rules import WINDOW_DAYS
 from src.ingestion.jobs import scaffold
 from src.ingestion.models import Run
 from src.ingestion.models.impact import ImpactTestBase
-from src.ingestion.service import analytics_service
+from src.ingestion.service import analytics_service, impact_service
 from src.ingestion.service.impact_history import flaky_keys
 from src.ingestion.service.impact_stats import rebuild_statistics
 
@@ -51,7 +52,10 @@ def run_pass(db: Session, now: Callable[[], datetime] = lambda: datetime.now(tim
                                           analytics_service.muted_keys(db, project_id), moment)
         pairs_written += pairs
         tests_written += tests
-    summary = {"event": "impact_rollup", "projects": len(projects), "pairs": pairs_written, "tests": tests_written}
+    # Suggestions whose outcome never came (the process stopped after the upload's response): written here
+    outcomes = impact_service.evaluate_pending(db, moment)
+    summary = {"event": "impact_rollup", "projects": len(projects), "pairs": pairs_written, "tests": tests_written,
+               "outcomes": outcomes}
     scaffold.log(summary)
     return summary
 

@@ -152,11 +152,15 @@ def rebuild_statistics(db: Session, project_id: int, start: datetime, end: datet
         db.execute(delete(ImpactTestBase).where(ImpactTestBase.project_id == project_id))
         pair_columns = ["project_id", "unit_hash", "test_key", "path_unit", "changed_runs", "new_failures",
                         "computed_at"]
-        pairs = db.execute(insert(ImpactPair).from_select(pair_columns, _pairs(project_id, computed_at))).rowcount
+        db.execute(insert(ImpactPair).from_select(pair_columns, _pairs(project_id, computed_at)))
         base_columns = ["project_id", "test_key", "runs", "new_failures", "flaky", "suite", "class_name", "name",
                         "file", "computed_at"]
-        tests = db.execute(
-            insert(ImpactTestBase).from_select(base_columns, _bases(db, project_id, flaky, computed_at))).rowcount
+        db.execute(insert(ImpactTestBase).from_select(base_columns, _bases(db, project_id, flaky, computed_at)))
+        # Counted in the same transaction, not from rowcount: psycopg 3 reports -1 for INSERT ... SELECT here
+        pairs = db.execute(select(func.count()).select_from(ImpactPair)
+                           .where(ImpactPair.project_id == project_id)).scalar_one()
+        tests = db.execute(select(func.count()).select_from(ImpactTestBase)
+                           .where(ImpactTestBase.project_id == project_id)).scalar_one()
     db.commit()
     return pairs, tests
 
