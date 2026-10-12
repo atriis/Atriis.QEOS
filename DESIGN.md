@@ -436,7 +436,7 @@ Legends: both charts have a `SeriesLegend` whose entries show or hide a series (
 ### Test Impact
 Likely affected tests (spec `docs/superpowers/specs/2026-10-12-test-impact-analysis-design.md`, ADR-029).
 
-- **Run page card** "Likely affected tests", on every run: beside Changes when the run reported changes, alone (saying "No change data for this run") when it did not.
+- **Run page card** "Likely affected tests", on every run: beside Changes when the run reported changes, and when it did not, compact (`.impact-card-compact`): only as wide as its content, the heading and "No change data for this run" on one line, so older runs are not cluttered.
   - **Layout:** the two share a row when there is room (`.run-change-cards`, columns of at least 420px) and stack on narrow screens.
   - **Suggestions,** strongest first: each is a link to the test's history, followed by its evidence in Graphite with tabular figures and the unit in a code span ("newly failed in 4 of 6 runs that changed `src/payment/` (normally 3%)"; the "normally" part is left out when the test never newly failed otherwise), or by a neutral Status Pill label (*test file changed*, *no history yet*, *failing on this branch*).
   - **Outcome line:**

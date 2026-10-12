@@ -91,6 +91,15 @@ test("not enough history still lists the tests that are always included; a pendi
 test("a run without changed files says so", async () => {
   renderCard(impact({ state: "no_change_data", changed_paths: [], scored_at: null, suggestion: null, outcome: null }));
   expect(await screen.findByText("No change data for this run")).toBeInTheDocument();
+  // compact: an older run without changed files is not cluttered by a full-width card
+  expect(await card()).toHaveClass("impact-card-compact");
+});
+
+test("a card with a suggestion is not compact", async () => {
+  renderCard(impact());
+  const region = await card();
+  await within(region).findByRole("link", { name: "pays" });
+  expect(region).not.toHaveClass("impact-card-compact");
 });
 
 test("a run with changes but no stored suggestion says why", async () => {

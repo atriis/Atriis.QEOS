@@ -1073,3 +1073,6 @@ button.switch[aria-busy="true"] { cursor: progress; }
 .impact-outcome .pill { vertical-align: middle; }
 .impact-outcome .impact-list { padding-left: var(--space-4); } /* the missed tests sit under their sentence, apart from the suggestions */
 .impact-usual { white-space: nowrap; }
+/* No change data: heading and sentence on one line, as wide as they need */
+.run-change-cards > .impact-card-compact { justify-self: start; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-3); }
+.impact-card-compact .impact-head, .impact-card-compact p { margin: 0; }

@@ -109,7 +109,8 @@ export default function ImpactCard({ projectId, runId }: { projectId: number; ru
   const titleId = useId();
   const query = useQuery(runImpactQuery(projectId, runId));
   return (
-    <section className="card impact-card" aria-labelledby={titleId}>
+    // No change data (an older run, or a collector without git): one compact line, not a full-width card
+    <section className={`card impact-card${query.data?.state === "no_change_data" ? " impact-card-compact" : ""}`} aria-labelledby={titleId}>
       <div className="impact-head">
         <h2 id={titleId}>Likely affected tests</h2>
         {query.data?.replayed && <StatusPill tone="neutral" label="Replayed" />}
