@@ -234,3 +234,9 @@ def test_unreadable_event_payload_is_not_qeos(tmp_path, content):
     else:
         env["GITHUB_EVENT_PATH"] = str(tmp_path / "missing.json")
     assert detect(env).trigger == "manual"
+
+
+def test_workflow_dispatch_without_an_event_path_reads_nothing_and_is_manual():
+    env = gh(GITHUB_EVENT_NAME="workflow_dispatch", GITHUB_TRIGGERING_ACTOR="octocat")
+    assert "GITHUB_EVENT_PATH" not in env
+    assert detect_trigger(env) == "manual"  # the real reader, no stub

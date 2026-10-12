@@ -6,7 +6,7 @@ Python 3.9 or newer, nothing else to install.
 ## Install
 
 ```bash
-pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.1#subdirectory=collector"
 ```
 
 ### Renamed from `qav-collector` (0.4.0)
@@ -67,7 +67,7 @@ instead of storing it twice.
           QEOS_URL: https://qeos.example.com
           QEOS_API_KEY: ${{ secrets.QEOS_API_KEY }}
         run: |
-          pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
+          pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.1#subdirectory=collector"
           qeos-collector upload "reports/**/*.xml"
 ```
 
@@ -78,12 +78,16 @@ test:
   script:
     - pytest --junitxml=reports/junit.xml
   after_script:
-    - pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
+    - pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.1#subdirectory=collector"
     - qeos-collector upload "reports/**/*.xml"
   variables:
     QEOS_URL: https://qeos.example.com
   # QEOS_API_KEY: a masked CI/CD variable in the project settings
 ```
+
+The remote template uploads from its own `.post` job, where `CI_JOB_MANUAL` (a per-job value) is not seen, so
+a manual test job inside an automatic pipeline would be stored as automatic. Pass `--trigger manual` through
+`QEOS_EXTRA_ARGS`, or upload from the test job itself (as above).
 
 ### Jenkins
 
@@ -92,7 +96,7 @@ post {
   always {
     withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')]) {
       sh '''
-        pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
+        pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.1#subdirectory=collector"
         QEOS_URL=https://qeos.example.com qeos-collector upload "target/surefire-reports/*.xml"
       '''
     }
@@ -111,7 +115,7 @@ mass-archive guard is the backstop.
 steps:
   - script: mvn test   # or pytest --junitxml=reports/junit.xml, dotnet test --logger trx, …
   - script: |
-      pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
+      pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.1#subdirectory=collector"
       qeos-collector upload "**/TEST-*.xml"
     displayName: Upload test results to QEOS
     condition: always()        # report results even when the tests failed
@@ -179,8 +183,12 @@ without `BUILD_CAUSE` is unknown; use `--trigger` there.
 
 When the project has switched manual collection off and the run is manual, the platform answers 202 and
 stores nothing. The collector prints
-`qeos: run not collected: manual runs are not collected for this project`, sends no further parts and
-exits 0, also with `--gate` or `--fail-on-error`.
+`qeos: run not collected: manual runs are not collected for this project` and sends no further parts. It
+exits 0, also with `--fail-on-error` (that flag is about upload failures). With `--gate` the verdict comes
+from the local results instead, since the platform has none to give: it prints
+`gate: decided on local results (run not collected)` and exits 1 when any test failed or errored, else 0.
+A person's re-run of a failing job therefore still fails the required check. If earlier parts of the run were
+already stored, `stored before the discard: …` names them.
 
 Any `--trigger` / `QEOS_TRIGGER` value other than `manual`, `automatic` or `qeos` is a configuration error
 (exit 2). Collectors older than 0.5.0 send no trigger, so their runs are always collected.
@@ -256,7 +264,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.0#subdirectory=collector"
+      - run: pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.1#subdirectory=collector"
       - run: qeos-collector import-features
         env:
           QEOS_URL: ${{ vars.QEOS_URL }}
@@ -294,9 +302,9 @@ a failing test names the team that owns it.
 
 | Code | When |
 |---|---|
-| 0 | Uploaded; nothing to upload; or the upload failed and neither `--fail-on-error` nor `--gate` is set |
-| 1 | The upload failed and `--fail-on-error` or `--gate` is set; or `--gate` found failures outside quarantine |
-| 2 | A usage or configuration error: no URL or key, no file matched, an `http://` URL that is not localhost, an unusable `--ca-file` |
+| 0 | Uploaded; nothing to upload; not collected (discarded, without `--gate`); or the upload failed and neither `--fail-on-error` nor `--gate` is set |
+| 1 | The upload failed and `--fail-on-error` or `--gate` is set; or `--gate` found failures outside quarantine (on a discarded run: any failure or error in the local results) |
+| 2 | A usage or configuration error: no URL or key, no file matched, an `http://` URL that is not localhost, an unusable `--ca-file`, an invalid `--trigger` / `QEOS_TRIGGER` |
 
 By default an unreachable platform never turns a build red; a misconfigured collector always does.
 

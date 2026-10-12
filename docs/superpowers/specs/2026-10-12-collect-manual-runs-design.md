@@ -57,6 +57,11 @@ collected, and turning it on does not bring back discarded ones (they were never
 The collector prints `qeos: run not collected: manual runs are not collected for this project` and exits 0:
 results deliberately left out must not fail the CI job.
 
+*Amended 2026-10-12 after the final review:* with `--gate` the exit code is decided on the local results
+(failed + errored > 0 gives 1, else 0) and the collector prints `gate: decided on local results (run not
+collected)`; otherwise a person's re-run of a failing job would pass the required check. Without `--gate`,
+and with `--fail-on-error` alone, a discard still exits 0.
+
 ## 3. Classification (collector)
 
 The collector sets `trigger` from the CI environment. Order: an explicit `--trigger` flag wins; then the
@@ -107,7 +112,7 @@ No row means the defaults. `test_runs.trigger`: `String(10)`, nullable, check co
 - Payload: optional `trigger` (`Literal["manual","automatic","qeos"] | None`); any other value is a 422.
 - When `trigger == "manual"` and the project's settings have `collect_manual = false`: increment
   `discarded_count`, set `last_discarded_at`, write a structured log line (project, API key id, CI run URL),
-  increment `runs_discarded_total{reason="manual"}`, answer 202 as in §2.2. The idempotency record is not
+  increment `qeos_runs_discarded_total{reason="manual"}`, answer 202 as in §2.2. The idempotency record is not
   written, so a replay is evaluated again and, with the toggle still off, gets the same 202.
 - The check runs before any test-result processing, so a discarded upload costs one indexed read and one
   update.
@@ -144,7 +149,7 @@ Test-first, red then green.
 - **Collector:** one test per cell of the §3 table (including a bot dispatch, a person's re-run attempt,
   `request_id`, Jenkins with and without `BUILD_CAUSE`, an unreadable event payload, a missing
   `GITHUB_TRIGGERING_ACTOR` falling back to `GITHUB_ACTOR`); `--trigger` overrides;
-  `trigger` omitted when unknown; a 202 discard prints the notice and exits 0.
+  `trigger` omitted when unknown; a 202 discard prints the notice and exits 0 (1 with `--gate` and local failures, see the §2.2 amendment).
 - **Ingestion:** unit tests of the discard rule; integration: off + manual is 202, nothing stored, counter
   and timestamp updated; off + `automatic` / `qeos` / absent stored; on + manual stored with `trigger`;
   replay of a discarded upload gets 202 again; concurrent discards all counted; invalid `trigger` is 422; settings defaults without a row,

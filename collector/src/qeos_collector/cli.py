@@ -194,6 +194,11 @@ def main(
         receipt = _upload(args, env, api_key, say, now=now, sleep=sleep, clock=clock)
         if isinstance(receipt, int):  # dry run, or nothing to upload
             return receipt
+        if receipt.get("discarded"):  # not collected: the platform has no verdict to give
+            if not gate:
+                return 0
+            say("gate: decided on local results (run not collected)")
+            return _gate({"blocking": receipt["failed"] + receipt["errored"]}, say)
         return _gate(receipt, say) if gate else 0
     except ConfigError as exc:
         say(str(exc))
@@ -302,7 +307,7 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
 
     trigger = pick(args.trigger, "QEOS_TRIGGER", ci.trigger)
     if trigger is not None and trigger not in TRIGGERS:
-        raise ConfigError(f"--trigger must be one of {', '.join(TRIGGERS)}, got {trigger!r}")
+        raise ConfigError(f"--trigger / QEOS_TRIGGER must be one of {', '.join(TRIGGERS)}, got {trigger!r}")
 
     patterns = args.patterns or list(file_config.get("patterns") or [])
     if not patterns:
@@ -414,7 +419,11 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
             raise _UploadFailed() from None
         if status == 202 and receipt.get("discarded"):
             say(f"run not collected: {receipt.get('reason', 'the platform discarded it')}")
-            return 0  # every part shares the trigger: the rest would be discarded too
+            if stored:
+                say(f"stored before the discard: {', '.join(stored)}")
+            # every part shares the trigger: the rest would be discarded too. The caller gates
+            # on the local counts when asked to
+            return {"discarded": True, "failed": counts["failed"], "errored": counts["errored"]}
         run_id = receipt.get("id", "?")
         say(f"uploaded run {run_id} ({status})" + (f", {of}" if len(parts) > 1 else ""))
         stored.append(f"run {run_id} ({of})")
@@ -425,23 +434,28 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
 def _resend_spooled(spool_dir, endpoint, api_key, context, say: _Output, *, sleep, clock) -> None:
     """Best effort before the current run: a still-broken platform keeps the
     files, a non-retryable answer (replayed key, revoked access) drops them."""
-    resent = 0
+    resent = discarded = 0
     for path, part in spooled_parts(spool_dir):
         try:
-            upload_part(endpoint, api_key, part, context, sleep=sleep, clock=clock)
+            status, receipt = upload_part(endpoint, api_key, part, context, sleep=sleep, clock=clock)
         except UploadError as exc:
             if exc.retryable:
                 say(f"a spooled part still fails: {exc}")
                 continue
             say(f"dropping a spooled part the platform will never take: {exc}")
         else:
-            resent += 1
+            if status == 202 and receipt.get("discarded"):
+                discarded += 1
+            else:
+                resent += 1
         try:
             path.unlink()
         except OSError:
             pass
     if resent:
         say(f"resent {resent} spooled part(s)")
+    if discarded:
+        say(f"{discarded} spooled part(s) not collected (discarded by the platform)")
 
 
 def _expand(patterns: Sequence[str]) -> List[str]:

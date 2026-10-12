@@ -536,11 +536,42 @@ def test_a_discarded_first_part_stops_the_upload(platform, report, monkeypatch):
     assert len(platform.requests) == 1
 
 
-def test_gate_on_a_discarded_run_exits_zero(platform, report):
-    # REPORT has a failing test: a gate that ran on the 202 would exit 1
+def test_gate_on_a_discarded_run_is_decided_on_the_local_results(platform, report, capsys):
+    # REPORT has a failing test: not collected, but the required check must still fail
     platform.reply(202, DISCARDED)
 
-    assert run(["upload", "--gate", "--fail-on-error", str(report)], env_for(platform)) == 0
+    assert run(["upload", "--gate", str(report)], env_for(platform)) == 1
+    err = capsys.readouterr().err
+    assert NOTICE in err
+    assert "gate: decided on local results (run not collected)" in err
+    assert "gate failed" in err
+
+
+def test_gate_on_a_discarded_run_passes_when_every_result_passes(platform, tmp_path, capsys):
+    green = tmp_path / "green.xml"
+    green.write_text('<testsuite name="s" tests="1"><testcase classname="c" name="ok"/></testsuite>',
+                     encoding="utf-8")
+    platform.reply(202, DISCARDED)
+
+    assert run(["upload", "--gate", str(green)], env_for(platform)) == 0
+    assert "gate passed" in capsys.readouterr().err
+
+
+def test_fail_on_error_alone_on_a_discarded_run_exits_zero(platform, report):
+    platform.reply(202, DISCARDED)
+
+    assert run(["upload", "--fail-on-error", str(report)], env_for(platform)) == 0
+
+
+def test_a_discard_after_stored_parts_names_what_was_stored(platform, report, monkeypatch, capsys):
+    monkeypatch.setattr(payload, "MAX_RESULTS_PER_PART", 1)
+    platform.reply(201, RECEIPT)
+    platform.reply(202, DISCARDED)
+
+    assert run(["upload", str(report)], env_for(platform)) == 0
+    err = capsys.readouterr().err
+    assert NOTICE in err
+    assert "stored before the discard: run " in err
 
 
 def test_trigger_flag_overrides_detection(platform, report):
@@ -561,3 +592,24 @@ def test_trigger_variable_is_sent(platform, report):
 
 def test_an_invalid_trigger_is_a_config_error(platform, report):
     assert run(["upload", "--trigger", "cron", str(report)], env_for(platform)) == 2
+
+
+def test_a_discarded_spooled_part_is_counted_apart_from_resent_ones(platform, report, tmp_path, capsys):
+    for _ in range(5):
+        platform.reply(503, {"detail": "down"})
+    assert run(["upload", str(report), "--spool", str(tmp_path), "--idempotency-key", "job-9"],
+               env_for(platform)) == 0
+
+    platform.reply(202, DISCARDED)  # the spooled part
+    platform.reply(201, RECEIPT)    # the current run
+    assert run(["upload", str(report), "--spool", str(tmp_path), "--idempotency-key", "job-10"],
+               env_for(platform)) == 0
+    err = capsys.readouterr().err
+    assert "resent" not in err
+    assert "1 spooled part(s) not collected (discarded by the platform)" in err
+    assert list(tmp_path.glob("*.json")) == []
+
+
+def test_the_trigger_error_names_flag_and_variable(platform, report, capsys):
+    assert run(["upload", "--trigger", "cron", str(report)], env_for(platform)) == 2
+    assert "--trigger / QEOS_TRIGGER must be one of" in capsys.readouterr().err

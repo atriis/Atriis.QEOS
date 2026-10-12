@@ -32,7 +32,7 @@ therefore needs rules and an override, not a single variable.
 - **The counter counts uploads, not runs.** A matrix run uploads once per job, so one manual run can count several times.
 - Switching the toggle never touches stored runs, and discarded uploads cannot be brought back.
 - A script that dispatches a workflow with a person's token looks manual. The collector docs tell teams to use a GitHub App, `GITHUB_TOKEN` or `--trigger automatic`.
-- The collector exits 0 on a discard, so a deliberately omitted result never fails a CI job.
+- The collector exits 0 on a discard, so a deliberately omitted result never fails a CI job. With `--gate` it decides on the local results (exit 1 on any failed or errored test), the same as against a platform that reports no quarantine: a person's re-run of a failing job must not pass the required check just because it was not collected. `--fail-on-error` alone keeps meaning upload failures.
 
 ## Alternatives rejected
 - **Store everything and hide manual runs in the views (option B):** every analytic and notification would need the filter, and the noise stays in the data. Left as a possible later step; the API already returns `trigger`.

@@ -1,6 +1,6 @@
 # qeos-collector for runners without Python:
 #   docker run --rm -v "$PWD:/work" -w /work -e QEOS_URL -e QEOS_API_KEY \
-#     ghcr.io/carneiru/qeos-collector:0.5.0 upload "reports/**/*.xml"
+#     ghcr.io/carneiru/qeos-collector:0.5.1 upload "reports/**/*.xml"
 FROM python:3.12-slim
 
 # git: code-change data and commit metadata (best effort without it)
