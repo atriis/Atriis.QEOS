@@ -186,6 +186,29 @@ def seed_run(db, make_key):
     return _seed
 
 
+@pytest.fixture
+def seed_change_run(db, seed_run):
+    """seed_change_run(started_at, results, paths=("src/app.py",), truncated=False, base_branch=None, **seed_run fields):
+    a run with changed files, stored as an upload with `changes` stores it (test impact, spec 2026-10-12). Without a
+    base branch the diff's base ref is a single commit ("abc1234^"), as the collector sends outside pull requests."""
+    from src.ingestion.models import RunChangedFile
+
+    def _seed(started_at, results=(("t1", "passed", 10),), paths=("src/app.py",), truncated=False, base_branch=None,
+              **fields):
+        run = seed_run(started_at, results=results, **fields)
+        run.base_branch = base_branch
+        run.change_base_ref = f"origin/{base_branch}" if base_branch else "abc1234^"
+        run.changed_files = len(paths)
+        run.additions, run.deletions = len(paths), 0
+        run.changes_truncated = truncated
+        for path in paths:
+            db.add(RunChangedFile(run_id=run.id, path=path, status="M", additions=1, deletions=0))
+        db.commit()
+        return run
+
+    return _seed
+
+
 def post_report(client, auth, **body):
     """POST the report with a 7-day UTC period (1-7 October 2026) unless the body says otherwise."""
     payload = {"from": "2026-10-01", "to": "2026-10-07", "tz": "UTC", "sections": ["summary"], **body}

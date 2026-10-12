@@ -390,7 +390,8 @@ def _candidates(db: Session, scope: Scope, ids: list) -> Dict[str, tuple]:
     return {key: (suite, class_name, name) for key, suite, class_name, name in rows}
 
 
-def _outcomes(db: Session, ids: list, keys: list, by_id: Dict[int, ScopedRun]) -> List[Outcome]:
+def _outcomes(db: Session, ids: list, keys: list, by_id: Dict[int, ScopedRun], *,
+              with_headlines: bool = True) -> List[Outcome]:
     """The outcomes that streaks and flips depend on, per test and branch.
 
     A test's outcome in a run is its last attempt (highest id) among non-skipped rows. Only the failing outcomes
@@ -402,7 +403,11 @@ def _outcomes(db: Session, ids: list, keys: list, by_id: Dict[int, ScopedRun]) -
     One sort and one window over the attempts in sequence order (run start, run, then attempt): a row is its run's
     outcome when the next row belongs to another run, and the row before a run's first attempt is the previous
     outcome. Only across a retried run is the next row not the next outcome, so an outcome that was retried, or is
-    followed by a retried run, is kept whatever its neighbours."""
+    followed by a retried run, is kept whatever its neighbours.
+
+    Test impact's "newly failed" reads the same outcomes (service/impact_history.py): every failing outcome comes with
+    the one before it on its branch. `by_id` values need only `branch` and `started_at`; `with_headlines=False` skips
+    the headline read, which only this section shows."""
     if not ids or not keys:
         return []
     keys = list(keys)
@@ -439,7 +444,8 @@ def _outcomes(db: Session, ids: list, keys: list, by_id: Dict[int, ScopedRun]) -
                    c.run_after == c.run_after_2))  # the next run was: the row after is not the next outcome
     ).all()
     # A failing outcome with nothing after it ends its sequence: its headline is shown
-    headlines = _headlines(db, [row_id for _, _, status, row_id, after in rows if after is None and status in FAILING])
+    headlines = _headlines(db, [row_id for _, _, status, row_id, after in rows
+                                if with_headlines and after is None and status in FAILING])
     out = []
     for run_id, key, status, row_id, _ in rows:
         if numbered_rows:
