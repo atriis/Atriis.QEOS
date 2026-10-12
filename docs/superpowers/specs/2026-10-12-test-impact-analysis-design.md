@@ -74,7 +74,7 @@ A compose job `impact-rollup` (like `analytics-rollup`) with a job heartbeat
 the last 90 days of runs with changed files, it writes:
 
 - `impact_pairs (project_id, path_unit, test_key, changed_runs, new_failures, computed_at)` — only pairs with
-  at least one new failure;
+  at least one new failure (superseded: see §9);
 - `impact_test_base (project_id, test_key, runs, new_failures)` — each test's base rate.
 
 It replaces a project's rows in one transaction; re-running on the same day yields the same rows.
