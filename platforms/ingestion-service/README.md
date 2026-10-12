@@ -400,6 +400,17 @@ never run at once, and it writes no heartbeat (it is not the nightly pass). **It
 each replayed day rebuilds 90 days of statistics, so 30 days on a busy project means 30 such builds (each about as
 long as a nightly pass); run it once, off hours.
 
+### Endpoints (every role that can read runs)
+
+| Endpoint | Returns |
+|---|---|
+| `GET /api/v1/projects/{id}/runs/{run_id}/impact` | `state`: `ok`, `not_enough_history`, `no_change_data` (no changed files uploaded) or `not_scored` (changed files, but uploaded before test impact or scoring failed); `changed_paths`; `replayed`; `scored_at`; `suggestion` (`history_runs`, `needed_runs`, `statistical_total`, `model_version`, `tests` with `kind` and `evidence`); `outcome` (`caught`, `missed`, `evaluated_at`), null until written. A run of another project is a 404 |
+| `POST /api/v1/projects/{id}/analytics/impact` | Body `{"changed_paths": [...], "branch": "main" or null}`: the upload's scoring for any change, as of now, reading only the change's unit hashes. 1 to 5,000 paths of 1 to 1,000 characters, no NUL, branch at most 255, no other field; else 422. On PostgreSQL it runs under the same 2 s `statement_timeout` as at upload; a timeout answers 503 `{"code": "impact_timeout", "message": ...}` |
+| `GET /api/v1/projects/{id}/analytics/impact-accuracy?days=30` | `days` 7, 14 or 30 (else 422, checked after the role): over the runs started in those days whose outcome is written, `caught`, `missed`, `rate` (`caught / (caught + missed)`, null without new failures), `avg_suggested` (suggested tests per run, null without runs: suggesting every test would catch everything, and this shows it), `includes_replayed`, the `live` and `replayed` parts (`runs`, `caught`, `missed`, `suggested`), and the `misses` (newest run first, at most 50; `misses_total` counts them all) |
+
+The gateway routes them with the other `/projects/{id}/runs` and `/projects/{id}/analytics` paths; a 5,000-path body
+of full-length paths (about 5 MB) stays under its 10 MB body cap.
+
 ## Operations
 
 - `GET /health`; `GET /metrics` (Prometheus, inside the Docker network only — not routed by the

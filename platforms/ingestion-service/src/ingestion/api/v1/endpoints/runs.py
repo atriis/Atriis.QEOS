@@ -12,7 +12,8 @@ from src.ingestion.models.run import CI_PROVIDERS
 from src.ingestion.schemas.run import (
     ChangedFileOut, ComponentOut, FailureGroupsOut, ResultOut, RunComparison, RunDetail, RunOut, RunSummary,
 )
-from src.ingestion.service import run_service
+from src.ingestion.schemas.impact import RunImpactOut
+from src.ingestion.service import impact_read, run_service
 
 project_router = APIRouter()  # mounted at /projects/{project_id}/runs
 router = APIRouter()          # mounted at /runs
@@ -53,6 +54,20 @@ def get_run_summary(
     if run is None or run.project_id != access.project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return RunSummary.from_run(run)
+
+
+@project_router.get("/{run_id}/impact", response_model=RunImpactOut)
+def get_run_impact(
+    run_id: int,
+    db: Session = Depends(get_db),
+    access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
+):
+    """The suggestion stored with the run and its outcome (spec 2026-10-12 §3.5)."""
+    run = run_service.get_run(db, run_id)
+    # A run of another project is indistinguishable from a missing one
+    if run is None or run.project_id != access.project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return impact_read.run_impact(db, run)
 
 
 @router.get("/{run_id}", response_model=RunDetail)

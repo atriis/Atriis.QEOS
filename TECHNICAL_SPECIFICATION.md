@@ -124,7 +124,17 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   min_flip_rate, branch, include_muted), branches (per-branch aggregates),
   quarantine (`PUT/DELETE /flaky/mute`, edit roles: a quarantined test still
   runs and shows, but its failures do not fail a run or alert), latest-keys and
-  run-strip (latest results for case lists), duration-estimate (Run from QEOS).
+  run-strip (latest results for case lists), duration-estimate (Run from QEOS),
+  test impact (ADR-029; every role that reads runs): `POST /analytics/impact`
+  scores any change (1–5,000 paths of 1–1,000 characters, optional branch)
+  against the co-failure statistics with the upload's scoring under the same
+  2 s statement timeout (503 `impact_timeout` when it runs out);
+  `GET /analytics/impact-accuracy?days=7|14|30` gives caught, missed, rate
+  (null without new failures) and suggested tests per run, live and replayed
+  apart, with at most 50 misses and their total; and
+  `GET /projects/{id}/runs/{run_id}/impact` reads the suggestion stored with a
+  run at upload (scored before its results), its changed paths and its outcome
+  (`ok`, `not_enough_history`, `no_change_data` or `not_scored`).
 - **Report**: `POST /analytics/report` with sections summary, failure_causes,
   regressions, tests, duration over a period (ADR-026; the dashboard joins
   test-management's case areas for "by area" and coverage).
@@ -176,7 +186,9 @@ reads go through APIs (blueprint principle, enforced in practice).
 Key ingestion tables: test_runs (+ change summary columns), test_results
 (message/details masked+truncated, `(test_key, run_id)` index),
 run_changed_files, run_components, muted_tests (quarantine), flaky_daily /
-flaky_rollup_days (daily flip aggregates + computed-day markers), api_keys
+flaky_rollup_days (daily flip aggregates + computed-day markers), impact_pairs /
+impact_test_base (test impact statistics, rebuilt nightly) and run_impact (the
+suggestion stored with a run and its outcome; cascades with the run), api_keys
 (SHA-256 of the key), masking_patterns, notification_channels, collection_settings. Test-management:
 cases, case_labels, suites, suite_cases, feature_files, ci_targets,
 run_requests. Project: projects, repositories, overview_layouts (a JSONB layout

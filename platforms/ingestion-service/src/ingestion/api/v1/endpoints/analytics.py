@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo, available_timezones
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from src.ingestion.analytics import rollup
@@ -15,7 +16,9 @@ from src.ingestion.api.deps import EDIT_ROLES, READ_ROLES, ProjectAccess, get_db
 from src.ingestion.schemas.analytics import (
     BranchStatsOut, DurationEstimateOut, FlakyOut, HistoryOut, MuteIn, StatsRowOut, TrendsOut,
 )
-from src.ingestion.service import analytics_service, duration_service
+from src.ingestion.analytics.impact_rules import MODEL_VERSION
+from src.ingestion.schemas.impact import ImpactAccuracyOut, SuggestionOut
+from src.ingestion.service import analytics_service, duration_service, impact_read, impact_service, report_service
 
 router = APIRouter()  # mounted at /projects/{project_id}/analytics
 
@@ -189,3 +192,50 @@ def duration_estimate(
     """How long a Play of these tests should take, from the last 30 days (the dashboard sends the keys)."""
     since = _now() - timedelta(days=ESTIMATE_WINDOW_DAYS)
     return duration_service.estimate(db, access.project_id, body.test_keys, since, body.environment or None)
+
+
+MAX_IMPACT_PATHS = 5000
+
+
+class ImpactIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    changed_paths: List[Annotated[str, StringConstraints(min_length=1, max_length=1000, pattern=NO_NUL)]] = Field(
+        min_length=1, max_length=MAX_IMPACT_PATHS)
+    branch: Optional[Annotated[str, StringConstraints(max_length=255, pattern=NO_NUL)]] = None
+
+
+@router.post("/impact", response_model=SuggestionOut)
+def impact(
+    body: ImpactIn,
+    db: Session = Depends(get_db),
+    access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
+):
+    """Likely affected tests for any change, as of now (spec 2026-10-12 §3.5): the upload's scoring, under its 2 s
+    statement timeout on PostgreSQL; a timeout is a 503 with a message, not a 500."""
+    try:
+        impact_service.limit_scoring_time(db)
+        suggestion = impact_service.score_change(db, access.project_id, body.changed_paths, body.branch, now=_now())
+    except OperationalError as exc:
+        if report_service.is_timeout(exc):
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                                detail={"code": "impact_timeout", "message": impact_service.SCORING_TIMEOUT_MESSAGE})
+        raise
+    finally:
+        db.rollback()  # read-only: end the transaction (and its SET LOCAL) before the response
+    return {**suggestion, "model_version": MODEL_VERSION}
+
+
+ACCURACY_DAYS = (7, 14, 30)
+
+
+@router.get("/impact-accuracy", response_model=ImpactAccuracyOut)
+def impact_accuracy(
+    days: int = Query(30),
+    db: Session = Depends(get_db),
+    access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
+):
+    """How often the stored suggestions contained the new failures, live and replayed apart, with the suggested tests
+    per run beside it (spec §2.3, §9). `days` is checked here, after the role check."""
+    if days not in ACCURACY_DAYS:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="days must be 7, 14 or 30")
+    return impact_read.accuracy(db, access.project_id, _now() - timedelta(days=days), days)

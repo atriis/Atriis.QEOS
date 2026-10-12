@@ -28,7 +28,9 @@ from src.ingestion.service.impact_stats import live_excluded
 from src.ingestion.service.report_service import in_list
 
 NAMES_PER_QUERY = 200  # LIKE terms per query: SQLite's expression depth limit is 1,000
-SCORING_TIMEOUT = "2s"  # PostgreSQL statement_timeout while an upload is scored
+SCORING_TIMEOUT = "2s"  # PostgreSQL statement_timeout while a change is scored (upload and POST /analytics/impact)
+SCORING_TIMEOUT_MESSAGE = ("Scoring this change took longer than 2 seconds and was stopped. Try again in a moment, or "
+                           "with fewer changed files.")
 PENDING_AFTER = timedelta(minutes=30)  # a suggestion with no outcome this long after scoring is evaluated nightly
 MAX_PENDING_PER_PASS = 500  # outcomes one nightly pass writes at most, oldest first; the rest wait for the next pass
 
@@ -147,6 +149,13 @@ def score_change(db: Session, project_id: int, changed_paths: Sequence[str], bra
                    failing_on_branch=failing)
 
 
+def limit_scoring_time(db: Session) -> None:
+    """Every statement of this transaction is cancelled after SCORING_TIMEOUT (PostgreSQL only; SET LOCAL ends with the
+    transaction)."""
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text(f"SET LOCAL statement_timeout = '{SCORING_TIMEOUT}'"))
+
+
 @dataclass(frozen=True)
 class Scored:
     suggestion: dict
@@ -172,7 +181,7 @@ def score_upload(db: Session, project_id: int, changed_paths: Sequence[str], bra
         limited = db.get_bind().dialect.name == "postgresql"
         if limited:
             previous = db.execute(text("SELECT current_setting('statement_timeout')")).scalar_one()
-            db.execute(text(f"SET LOCAL statement_timeout = '{SCORING_TIMEOUT}'"))
+            limit_scoring_time(db)
         suggestion = score_change(db, project_id, changed_paths, branch, now=as_utc(started_at))
         if limited:
             db.execute(text("SELECT set_config('statement_timeout', :value, true)"), {"value": previous})
