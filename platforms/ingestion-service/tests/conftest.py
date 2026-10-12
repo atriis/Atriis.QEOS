@@ -8,7 +8,7 @@ import jwt
 import pytest
 import respx
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from src.ingestion.api.main import app
@@ -24,6 +24,15 @@ SQLALCHEMY_DATABASE_URL = f"sqlite:///{Path(_DB_DIR, 'test.db').as_posix()}"
 atexit.register(lambda: (engine.dispose(), shutil.rmtree(_DB_DIR, ignore_errors=True)))
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+
+
+@event.listens_for(engine, "connect")
+def _sqlite_md5(dbapi_connection, _record):
+    """PostgreSQL's md5(text) for SQLite, so the impact rollup's SQL runs here unchanged (models/impact.unit_hash)."""
+    from src.ingestion.models.impact import unit_hash
+
+    dbapi_connection.create_function("md5", 1, lambda value: None if value is None else unit_hash(value),
+                                     deterministic=True)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -205,6 +214,26 @@ def seed_change_run(db, seed_run):
             db.add(RunChangedFile(run_id=run.id, path=path, status="M", additions=1, deletions=0))
         db.commit()
         return run
+
+    return _seed
+
+
+@pytest.fixture
+def seed_impact_history(seed_change_run):
+    """seed_impact_history(start, branch="main", project_id=1) -> runs: 15 runs with changed files, one a day from
+    `start`. The first 11 change docs/guide.md and `pays` passes; the last 4 change src/pay/api.py and `pays` passes,
+    fails, passes, fails. So `pays` newly failed in 2 of the 4 runs that changed src/pay/ (confidence 0.5) and in 2 of
+    15 overall (base rate 0.1333, lift 3.75), and is not flaky (3 flips in 14 pairs, under the Flaky view's 0.3).
+    `steady` passes in every run."""
+
+    def _seed(start, branch="main", project_id=1):
+        runs = []
+        statuses = ["passed"] * 11 + ["passed", "failed", "passed", "failed"]
+        for day, status in enumerate(statuses):
+            paths = ("docs/guide.md",) if day < 11 else ("src/pay/api.py",)
+            runs.append(seed_change_run(start + timedelta(days=day), results=(("pays", status, 5), ("steady", "passed", 5)),
+                                        paths=paths, branch=branch, project_id=project_id))
+        return runs
 
     return _seed
 

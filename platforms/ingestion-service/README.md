@@ -124,7 +124,7 @@ service runs it with `--loop`):
   reports `projects_held`. The field is required: an answer without it is untrustworthy.
 - Without a trustworthy answer (unreachable, not 200, unexpected body) it deletes nothing and
   exits 1. Projects missing from the answer are never touched.
-- Each loop job (`retention`, `rollup`, `weekly_summary`) records a heartbeat after every pass it
+- Each loop job (`retention`, `rollup`, `weekly_summary`, `impact_rollup`) records a heartbeat after every pass it
   runs (last success and last error, with a scrubbed one-line error text) in `job_heartbeats`;
   a pass skipped because another copy holds the advisory lock records nothing.
 
@@ -286,6 +286,42 @@ Report sections (`scripts/bench_report.py`, 90-day period plus 90 days of look-b
 Every section meets its size A target (p95 1 s). At size B every section meets 8 s but one: `regressions` over 90 days on every branch, p95 8.4 s (p50 7.7 s), well under the 20 s statement timeout; `tests` there is 6.8 s, and `regressions` on main only is 7.5 s. A noisier earlier run (another test session overlapping) read 12.2 s and 8.5 s for the two. The two share one cost: one sort and window over the non-skipped results of every test that failed in scope (about 2 million rows for `tests`, the period; 3.9 million for `regressions`, with the look-back). The rest of `tests` no longer sorts every row of the period: the last status reads the newest runs first in doubling batches, and `pairs` counts non-skipped rows per (test, branch) less repeated attempts, instead of `count(DISTINCT run_id)`. `summary` counts distinct tests through a grouped subquery (2.5 s at B; 5.0 to 9.3 s on the same day before the change). A covering index `(run_id) INCLUDE (test_key, status, duration_ms)` was built on the size B data and EXPLAINed: PostgreSQL used it for none of these queries (the costs are sorts and hashes, not the scan), so it was not added. The next remedy for `regressions` at B is a daily per-test rollup of outcomes, or as an interim step a per-request `SET LOCAL work_mem` that keeps the sort in memory; neither is built: the size B miss was accepted on 2026-10-10, to revisit when a real project nears size B.
 
 The flaky window goes up to 90 days. Flip counting recombines from the `flaky_daily` rollups the `analytics-rollup` job keeps current (backfill on start, then yesterday + today every 6 hours); a project the job has not visited yet falls back to the live scan with identical results (equivalence is pinned by `tests/unit/test_flaky_rollup.py`). Confirmed same-commit detection stays on the live failure-driven pass at every window — it rides the `(test_key, run_id)` index and dominates the remaining 90-day cost. The data is deliberately hard: failures are spread randomly, so nearly every test is a candidate.
+
+## Test impact
+
+QEOS suggests which tests a change is likely to affect, from which tests **newly failed** after earlier changes to
+the same files or folders (spec `docs/superpowers/specs/2026-10-12-test-impact-analysis-design.md`, ADR-029). No
+coverage instrumentation, no AI: co-failure statistics on PostgreSQL.
+
+### Statistics (the `impact-rollup` job)
+
+- **Newly failed:** the test's outcome in run R fails (failed or errored; the outcome is the last attempt among
+  non-skipped results) and its previous outcome on R's branch, within the 90 days before R, passed. A branch with
+  no previous outcome there (a new PR branch) uses the test's latest outcome on the base branch before R
+  (`base_branch`, else `change_base_ref` without `origin/`). Flaky tests (the Flaky view's defaults: 5 runs, 30%
+  flips) and muted tests never newly fail. Outcomes are read with the Report's regressions query (one sort; only
+  failing outcomes and their neighbours), so the two features cannot disagree on what an outcome is.
+- **Path units:** each changed path and its nearest parent folders, at most 3 (`src/payment/api.py`,
+  `src/payment/`, `src/`); empty, `.` and `..` segments are dropped. Lock files (`*.lock`, `package-lock.json`,
+  `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`) and anything under `dist/`, `build/`, `vendor/` or `node_modules/`
+  are not units. A change of more than 300 distinct paths counts at folder level only. Runs whose change list the
+  collector truncated are left out.
+- **Tables** (migration 018), rebuilt per project in one transaction by `python -m src.ingestion.jobs.impact_rollup`
+  (one pass on start, then every 24 hours with `--loop`, lock 7351004, heartbeat `impact_rollup`):
+  - `impact_pairs (project_id, unit_hash, test_key, path_unit, changed_runs, new_failures, computed_at)`: only
+    pairs with at least one new failure, over the runs with changed files from 90 days before today 00:00 UTC.
+    Keyed by `(project_id, unit_hash, test_key)` with `unit_hash = md5(path_unit)`: no id to run out, and a long
+    path never enters an index;
+  - `impact_test_base (project_id, test_key, runs, new_failures, flaky, suite, class_name, name, file,
+    computed_at)`: every test that ran in those runs, with names and file from its newest such run, so scoring never
+    scans `test_results`.
+  The same data gives the same rows; a project whose runs are gone loses its rows at the next pass. The thresholds
+  live in `src/ingestion/analytics/impact_rules.py`.
+- **How a pass is built:** Python computes each run's path units (`impact_rules.py`) and its new failures, stages
+  them in temporary tables (one `unnest()` insert each), and PostgreSQL does the rest: one `INSERT ... SELECT` per
+  table. Early timing on PostgreSQL 15 (Docker, default settings; 1,980 runs of 1,000 tests over 90 days, one commit
+  per run, 5% random failures, 502,000 pairs): 25-41 s per pass, against the 60 s budget. The pairs insert (about
+  13 s) and the outcome read (8-14 s) are the largest parts; a full benchmark is to follow.
 
 ## Operations
 
