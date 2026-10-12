@@ -101,77 +101,108 @@ pipeline already produces, and it starts runs only through workflows you own.
 
 ## Architecture
 
-The diagram follows the blueprint's container view ([§22, Level 2](ARCHITECTURE_BLUEPRINT_V1_0.md#22-c4-architecture-model)):
-the same domains, filled with what runs today. Dotted arrows are the role checks one service asks
-another for; the grey box is the blueprint's target infrastructure, none of it deployed.
+Two diagrams. The first follows the blueprint's container view
+([§22, Level 2](ARCHITECTURE_BLUEPRINT_V1_0.md#22-c4-architecture-model)): the same domains, filled with
+what runs today. Dotted arrows are the role checks one service asks another for; the grey box is the
+blueprint's target infrastructure, none of it deployed.
 
 ```mermaid
 %%{init: {"flowchart": {"htmlLabels": false, "wrappingWidth": 400}}}%%
 flowchart TB
-    Browser["Browser<br/>QA engineers · developers · product owners"]
-    subgraph CI["Your CI"]
-        COL["qeos-collector: upload · import-features<br/>GitHub Actions · GitLab · Jenkins"]
-    end
+    Browser["Browser<br/>QA engineers · developers"]
+    COL["qeos-collector<br/>in your CI"]
+    GW["API gateway: NGINX<br/>TLS · routing · rate limits"]
     Browser -->|HTTPS| GW
     COL -->|HTTPS + API key| GW
-    GW["API gateway: NGINX<br/>TLS · routing · rate limits"]
 
-    subgraph QEOS["QEOS"]
-        subgraph PLAT["Platform"]
-            AUTH[auth-service]
-            ORG[organization-service]
-            PROJ[project-service]
-        end
-        subgraph EXEC["Execution"]
-            TM["test-management-service<br/>cases · suites · run requests"]
-        end
-        subgraph QIP["Intelligence (QIP)"]
-            ING["ingestion-service<br/>runs · analytics · Report"]
-            JOBS["jobs: ingestion-retention<br/>analytics-rollup · weekly-summary"]
-        end
-        subgraph COLLAB["Collaboration"]
-            DASH["dashboard<br/>React SPA"]
-        end
+    subgraph COLLAB["Collaboration"]
+        DASH["dashboard<br/>React SPA"]
+    end
+    subgraph EXEC["Execution"]
+        TM["test-management-service<br/>cases · suites · run requests"]
+    end
+    subgraph QIP["Intelligence (QIP)"]
+        ING["ingestion-service<br/>runs · analytics · Report"]
+    end
+    subgraph PLAT["Platform"]
+        PROJ[project-service]
+        ORG[organization-service]
+        AUTH[auth-service]
     end
     GW --> DASH
-    GW --> AUTH & ORG & PROJ
-    GW --> TM & ING
-    ORG -.->|user exists| AUTH
+    GW --> TM
+    GW --> ING
+    GW --> PROJ
+    GW --> ORG
+    GW --> AUTH
+    TM -.->|project role| PROJ
+    ING -.->|project role| PROJ
     PROJ -.->|org role| ORG
-    TM & ING -.->|project role| PROJ
-    JOBS -.->|retention periods| PROJ
+    ORG -.->|user exists| AUTH
 
     subgraph INFRA["Infrastructure"]
-        PG[("PostgreSQL 15<br/>one database per service")]
-        TARGET["target, not deployed:<br/>Redis · Kafka · Neo4j · Qdrant<br/>ClickHouse · object storage"]
+        PG[("PostgreSQL 15 (postgres)<br/>one database per service")]
     end
-    PLAT & EXEC & QIP --> PG
-
-    subgraph INTEG["Integrations"]
-        GH["GitHub · GitLab APIs"]
-        IDP["Microsoft · Google SSO"]
-        NOTIFY["Email · Slack · Teams"]
-    end
-    TM -->|workflow_dispatch| CI
-    PROJ -->|verify repository| GH
-    AUTH --> IDP
-    AUTH & ING & JOBS --> NOTIFY
-
-    subgraph MON["Monitoring: opt-in profile"]
-        PROM[Prometheus] --> AM[Alertmanager]
-        GRAF[Grafana]
-        EXP["node-exporter · cadvisor<br/>postgres-exporter"] --> PROM
-    end
-    GW -->|/grafana/, signed in| GRAF
-    AM --> NOTIFY
+    EXEC & QIP & PLAT --> PG
+    TARGET["target infrastructure, not deployed:<br/>Redis · Kafka · Neo4j · Qdrant<br/>ClickHouse · object storage"]
+    PG ~~~ TARGET
 
     classDef target fill:#eee,stroke:#999,stroke-dasharray:4 3,color:#555
     class TARGET target
 ```
 
-The run loop: test-management-service dispatches the customer's workflow, which runs the tests and sends
-the results back through the collector to ingestion-service. A second workflow syncs the `.feature`
-files into test-management-service ([SETUP §4.2.3](docs/SETUP.md)).
+The second shows what runs beside the services and what they reach outside QEOS: the jobs, the
+run loop with your CI, the Integrations domain and the opt-in monitoring profile.
+
+```mermaid
+%%{init: {"flowchart": {"htmlLabels": false, "wrappingWidth": 400}}}%%
+flowchart LR
+    subgraph CI["Your CI"]
+        WF["your workflow<br/>GitHub Actions · GitLab · Jenkins"]
+        COL["qeos-collector<br/>upload · import-features"]
+        WF --> COL
+    end
+    TM[test-management-service]
+    ING[ingestion-service]
+    PROJ[project-service]
+    AUTH[auth-service]
+    TM -->|workflow_dispatch| WF
+    COL -->|results| ING
+    COL -->|.feature files| TM
+
+    subgraph JOBS["Jobs (ingestion image)"]
+        RET[ingestion-retention]
+        ROLL[analytics-rollup]
+        WEEK[weekly-summary]
+    end
+    RET -.->|retention periods| PROJ
+
+    subgraph INTEG["Integrations"]
+        NOTIFY["Email · Slack · Teams"]
+        IDP["Microsoft · Google SSO"]
+        GH["GitHub · GitLab APIs"]
+    end
+    PROJ -->|verify repository| GH
+    AUTH -->|SSO| IDP
+    AUTH -->|email| NOTIFY
+    ING -->|failed-run alerts| NOTIFY
+    WEEK -->|weekly summary| NOTIFY
+
+    subgraph MON["Monitoring: opt-in profile"]
+        EXP["node-exporter · cadvisor<br/>postgres-exporter"]
+        PROM[Prometheus]
+        AM[Alertmanager]
+        GRAF[Grafana]
+        EXP --> PROM --> AM
+        GRAF --> PROM
+    end
+    AM -->|alerts| NOTIFY
+    GW["gateway"] -->|/grafana/, signed in| GRAF
+```
+
+The run loop: test-management-service dispatches your workflow, which runs the tests and sends the
+results back through the collector to ingestion-service. A second workflow syncs the `.feature` files
+into test-management-service ([SETUP §4.2.3](docs/SETUP.md)).
 
 | Component | Path | Blueprint domain | Responsibility |
 |---|---|---|---|

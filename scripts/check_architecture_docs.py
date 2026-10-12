@@ -8,7 +8,7 @@ Implementation, read from the repository:
   - the hosts the gateway proxies to (gateway/*.conf*);
   - each service's public API: the router prefixes in platforms/**/api/v1/api.py, mounted at /api/v1.
 Documentation:
-  - the Mermaid diagram and the component table in README.md's Architecture section;
+  - the Mermaid diagrams and the component table in README.md's Architecture section;
   - the Services row of the implementation status banner in ARCHITECTURE_BLUEPRINT_V1_0.md;
   - the Routes table in gateway/README.md.
 
@@ -61,8 +61,8 @@ def architecture_section(readme: str) -> str:
 
 
 def diagram_of(section: str) -> str:
-    m = re.search(r"```mermaid\n(.*?)```", section, re.DOTALL)
-    return m.group(1) if m else ""
+    """Every Mermaid diagram of the section, as one text: a service may be drawn in any of them."""
+    return "\n".join(re.findall(r"```mermaid\n(.*?)```", section, re.DOTALL))
 
 
 def table_of(section: str) -> list[list[str]]:
