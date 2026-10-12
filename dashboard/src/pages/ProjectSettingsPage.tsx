@@ -3,6 +3,7 @@ import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiKeyCreated, createKey, listKeys, revokeKey } from "../api/keys";
 import { getProject } from "../api/orgs";
+import CollectionCard from "../components/CollectionCard";
 import CiTargetCard from "../components/CiTargetCard";
 import ConfirmButton from "../components/ConfirmButton";
 import ErrorBanner from "../components/ErrorBanner";
@@ -279,6 +280,10 @@ export default function ProjectSettingsPage() {
         </button>
       </div>
 
+      <CollectionCard
+        projectId={id}
+        canManage={project.data == null ? undefined : MANAGE_ROLES.includes(project.data.my_role ?? "")}
+      />
       {project.data != null && MANAGE_ROLES.includes(project.data.my_role ?? "") && <CiTargetCard projectId={id} />}
 
       <MaskingCard projectId={id} canEdit={project.data == null ? undefined : canEdit} />
