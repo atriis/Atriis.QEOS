@@ -33,7 +33,7 @@
 1. **Idempotent replay of a run stored while the toggle was on, after it is switched off** — must return the stored
    run (200), not a discard. Pinned in Task 3 (`test_replay_of_a_stored_run_is_not_discarded_later`).
 2. **Matrix jobs uploading in parallel while off** — every discard counted. Pinned in Task 3
-   (`test_concurrent_discards_are_all_counted`, sequential-in-threads against the real session factory).
+   (`test_concurrent_discards_are_all_counted`: `count_discard` from 8 threads, one session each).
 3. **A multi-part upload (more than `MAX_RESULTS_PER_RUN` results) while off** — the collector stops after the first
    202 and does not send the remaining parts. Pinned in Task 7 (`test_a_discarded_first_part_stops_the_upload`).
 4. **`--gate` / `--fail-on-error` on a discarded run** — exit 0, never a failed build. Pinned in Task 7
@@ -418,6 +418,7 @@ import threading
 from sqlalchemy.orm import sessionmaker
 
 from src.ingestion.models import CollectionSettings, Run
+from src.ingestion.service import collection_settings_service
 from src.ingestion.utils import metrics
 from tests.integration.test_collect_endpoint import URL, key_headers, upload_body
 
@@ -441,8 +442,8 @@ def test_off_and_manual_is_discarded(client, make_key, db):
     assert response.status_code == 202
     assert response.json() == {"discarded": True, "reason": REASON}
     assert db.query(Run).count() == 0
+    db.expire_all()
     row = db.get(CollectionSettings, 1)
-    db.refresh(row)
     assert row.discarded_count == 1 and row.last_discarded_at is not None
     assert discarded() == before + 1
 
@@ -470,6 +471,7 @@ def test_replay_of_a_discarded_upload_is_discarded_again(client, make_key, db):
     switch_off(db)
     for _ in range(2):
         assert client.post(URL, json=upload_body(trigger="manual"), headers=key_headers(key, idem="k-1")).status_code == 202
+    db.expire_all()  # the counter was updated by SQL, not through this session's cached row
     assert db.get(CollectionSettings, 1).discarded_count == 2
 
 
@@ -483,17 +485,26 @@ def test_replay_of_a_stored_run_is_not_discarded_later(client, make_key, db):
     assert again.status_code == 200 and again.json()["id"] == first.json()["id"]
 
 
-def test_concurrent_discards_are_all_counted(client, make_key, db):
-    _, key = make_key(project_id=1)
+def test_concurrent_discards_are_all_counted(db):
+    """The test client shares one session across requests, so this drives the service directly: one
+    session per thread, as concurrent requests have in production."""
     switch_off(db)
-    threads = [threading.Thread(target=lambda: client.post(URL, json=upload_body(trigger="manual"),
-                                                             headers=key_headers(key))) for _ in range(8)]
+    factory = sessionmaker(bind=db.get_bind())
+
+    def discard():
+        session = factory()
+        try:
+            collection_settings_service.count_discard(session, 1)
+        finally:
+            session.close()
+
+    threads = [threading.Thread(target=discard) for _ in range(8)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
-    fresh = sessionmaker(bind=db.get_bind())()
-    assert fresh.get(CollectionSettings, 1).discarded_count == 8
+    db.expire_all()
+    assert db.get(CollectionSettings, 1).discarded_count == 8
 ```
 
 - [ ] **Step 3: Run** — FAIL (schema forbids `trigger`; no 202).
