@@ -7,6 +7,7 @@ import { coverage } from "./coverage";
 import { failingNow } from "./failingNow";
 import { failureCauses } from "./failureCauses";
 import { flakyCount } from "./flakyCount";
+import { impactAccuracy } from "./impactAccuracy";
 import { latestRun } from "./latestRun";
 import { myFailures } from "./myFailures";
 import { mySuites } from "./mySuites";
@@ -33,6 +34,7 @@ export const REGISTRY: Partial<Record<WidgetType, WidgetDefinition>> = {
   case_tiles: caseTiles,
   my_failures: myFailures,
   my_suites: mySuites,
+  impact_accuracy: impactAccuracy,
 };
 
 /** What a new latest run makes stale: the page's keys, then each registered widget's own. A key that an earlier

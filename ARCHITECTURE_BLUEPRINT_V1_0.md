@@ -999,7 +999,7 @@ KnowledgeObject {
 - Approval workflows for manual gates
 
 #### Enhanced Collaboration
-- Interactive dashboards with customizable widgets (realized for the project Overview: 14 widgets, templates, project default and personal layouts; ADR-028)
+- Interactive dashboards with customizable widgets (realized for the project Overview: 15 widgets, templates, project default and personal layouts; ADR-028)
 - Basic reporting engine with export capabilities
 - Commenting and discussion features
 - Notification system (email, in-app)

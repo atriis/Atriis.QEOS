@@ -28,6 +28,7 @@ EVERY_TYPE = layout(
     widget("w12", "case_tiles", "wide"),
     widget("w13", "my_failures", author="Ada Lovelace", rows=5),
     widget("w14", "my_suites", rows=10),
+    widget("w15", "impact_accuracy", period=7),
 )
 
 

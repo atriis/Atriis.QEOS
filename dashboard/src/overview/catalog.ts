@@ -10,7 +10,7 @@ export type SettingName = "rows" | "period" | "granularity" | "branch" | "author
 export type WidgetType =
   | "latest_run" | "failing_now" | "pass_rate_week" | "flaky_count" | "pass_rate_trend" | "failure_causes"
   | "regressions" | "recent_runs" | "branch_health" | "slowest_tests" | "coverage" | "case_tiles"
-  | "my_failures" | "my_suites";
+  | "my_failures" | "my_suites" | "impact_accuracy";
 
 export interface ChoiceSetting { kind: "choice"; values: (string | number)[] }
 export interface TextSetting { kind: "text"; min_length: number; max_length: number }

@@ -14,7 +14,7 @@ Configuration and database wiring shared by QEOS services.
   `http_requests_in_flight`, `build_info`), the process collector, and `GET /metrics`. Labels carry the
   route template, never the raw path. One uvicorn worker is assumed (see the module docstring).
 - `load_catalog()` (`qeos_shared.overview_widgets`) — the Overview widget catalogue,
-  `overview_widgets.json` beside the module: the 14 widget types, their settings and allowed values,
+  `overview_widgets.json` beside the module: the 15 widget types, their settings and allowed values,
   and the layout limits (24 widgets, 64 KB). project-service validates layouts against it; the
   dashboard registry imports the same file (its Dockerfile copies it) and a dashboard test fails when
   the two disagree.

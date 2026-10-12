@@ -1179,7 +1179,7 @@ discards the draft, asking first when you changed something. If the same layout 
 meanwhile, Save offers **Reload** (start again from the stored layout) or **Overwrite**. A layout
 holds at most 24 widgets, and a widget type may appear more than once with different settings.
 
-**Widgets** (14; settings are a period of 7, 14 or 30 days, 5 or 10 rows, a view, a branch or a name):
+**Widgets** (15; settings are a period of 7, 14 or 30 days, 5 or 10 rows, a view, a branch or a name):
 
 - **Latest run**, **Failing in latest run**, **Pass rate this week** and **Flaky tests**: the built-in
   four cards.
@@ -1192,6 +1192,7 @@ holds at most 24 widgets, and a widget type may appear more than once with diffe
 - **Branch health:** each branch's pass rate, runs and last run over 30 days, newest first.
 - **Test cases:** the Cases tiles, wide by default.
 - **My suites:** the suites you created.
+- **Impact accuracy:** how often the likely affected tests stored with each run contained its new failures, over 7, 14 or 30 days on every branch, with how many tests were suggested per run; replayed runs are counted and said.
 - **My recent failures:** failed runs whose commit author is you. It matches the name git records
   exactly (ignoring case): by default your QEOS full name. If git spells it differently, or your profile
   has no full name, set **Your name in git** in its settings; with no name at all it says so and loads

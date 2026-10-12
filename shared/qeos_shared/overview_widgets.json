@@ -25,6 +25,7 @@
     "coverage": {"settings": ["period"]},
     "case_tiles": {"settings": []},
     "my_failures": {"settings": ["author", "rows"]},
-    "my_suites": {"settings": ["rows"]}
+    "my_suites": {"settings": ["rows"]},
+    "impact_accuracy": {"settings": ["period"]}
   }
 }

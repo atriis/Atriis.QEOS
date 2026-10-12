@@ -97,7 +97,7 @@ yet.
   flaky tests in 14 days). With nothing configured it looks as it always did.
 - Every role, viewers included, may keep a personal layout; "Reset to project default" removes it, so
   later changes to the default reach that person again.
-- Fourteen widget types; a type may appear more than once with different settings (period 7, 14 or
+- Fifteen widget types; a type may appear more than once with different settings (period 7, 14 or
   30 days; 5 or 10 rows; all branches or one, where no branch setting means all branches). Three
   templates: QA lead, Developer, Flaky hunt. At most 24 widgets per layout.
 - "My" widgets match by name: My recent failures shows failed runs whose commit author, as git records

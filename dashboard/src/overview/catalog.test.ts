@@ -4,7 +4,8 @@ import { BUILTIN_DEFAULT } from "./templates";
 test("the dashboard reads the shared catalogue file", () => {
   expect(CATALOG.schema).toBe(1);
   expect(MAX_WIDGETS).toBe(24);
-  expect(Object.keys(CATALOG.types)).toHaveLength(14);
+  expect(Object.keys(CATALOG.types)).toHaveLength(15);
+  expect(CATALOG.types.impact_accuracy.settings).toEqual(["period"]);
   expect(CATALOG.types.my_failures.settings).toEqual(["author", "rows"]);
   expect(CATALOG.settings.branch).toEqual({ kind: "text", min_length: 1, max_length: 255 });
 });

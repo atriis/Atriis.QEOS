@@ -229,7 +229,7 @@ httpOnly cookie; 401s refresh once (auth/sso endpoints excluded). Views:
 login (password/MFA step/SSO buttons when VITE_* client ids are baked),
 register, verify email, forgot/reset password, org→project picker,
 organization (members, invitations) and invitation accept, overview (a
-customisable grid of 14 code-split widgets and three templates over the
+customisable grid of 15 code-split widgets and three templates over the
 existing queries, a personal layout and a project default, edit mode with
 Reload/Overwrite on a stale save, ADR-028), trends
 (day/week/month), tests, history, flaky (quarantine, CSV export), branches

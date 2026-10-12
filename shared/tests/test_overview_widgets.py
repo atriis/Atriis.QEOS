@@ -20,10 +20,11 @@ TYPES = {
     "case_tiles": [],
     "my_failures": ["author", "rows"],
     "my_suites": ["rows"],
+    "impact_accuracy": ["period"],
 }
 
 
-def test_the_fourteen_types_and_their_settings():
+def test_the_fifteen_types_and_their_settings():
     catalog = load_catalog()
     assert {name: spec["settings"] for name, spec in catalog["types"].items()} == TYPES
 
