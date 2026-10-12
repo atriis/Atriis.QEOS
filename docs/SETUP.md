@@ -611,7 +611,9 @@ qeos-collector check "reports/**/*.xml" --ca-file ~/qeos-ca.crt
 qeos-collector upload "reports/**/*.xml" --ca-file ~/qeos-ca.crt
 ```
 
-- Always pin the tag (`collector-v0.5.1`). `--ca-file` is needed only for the local
+- Pin the tag (`collector-v0.5.1`) for strict reproducibility, or use the floating `collector-v0` (the latest
+  0.x release; it moves on every stable release, so a new collector reaches your CI without an edit; the
+  GitHub Action and the Jenkins `ref` accept it). `--ca-file` is needed only for the local
   self-signed certificate or a private CA.
 - `check` tests, in order: the URL, TLS trust, the API key (it names the project), and that the
   files match and parse. It exits 2 on the first failure.
@@ -754,6 +756,22 @@ Two cases:
 - **The collector container image** sees only the variables passed to it. Without `GITHUB_EVENT_NAME`,
   `GITHUB_TRIGGERING_ACTOR`, `GITHUB_RUN_ATTEMPT` and the event file (`GITHUB_EVENT_PATH`, mounted), the
   trigger is unknown and the run is collected. The composite action and `pip` installs need nothing extra.
+
+In the workflow that uploads, use `collector-action@collector-v0.5.0` or later (or the floating
+`@collector-v0`); an older pin sends no trigger and everything is collected. A workflow QEOS dispatches
+(**Run from QEOS**) keeps its `request_id` input, so its runs are `qeos` and always collected. If the same
+workflow can also be started by hand and you want those runs collected, set the trigger on the step:
+
+```yaml
+- uses: carneiru/QA-Vision-Platform/collector-action@collector-v0
+  if: always()
+  with:
+    url: ${{ vars.QEOS_URL }}
+    patterns: "reports/**/*.xml"
+  env:
+    QEOS_API_KEY: ${{ secrets.QEOS_API_KEY }}
+    QEOS_TRIGGER: automatic   # omit to let a hand-started run count as manual
+```
 
 #### 4.1.9 Hosted CI against a local stack (tunnel)
 

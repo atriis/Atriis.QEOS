@@ -9,7 +9,8 @@ name: Release collector
 
 on:
   push:
-    tags: ["collector-v*"]
+    # Full versions only, so moving the floating major tag (collector-v0) never starts a release
+    tags: ["collector-v[0-9]+.[0-9]+.[0-9]+*"]
 
 permissions:
   contents: read
@@ -110,6 +111,23 @@ jobs:
           docker push "$image:latest"
           docker push "$legacy:$version"
           docker push "$legacy:latest"
+
+  float:
+    name: Move the floating major tag
+    needs: [test, build]
+    # Stable versions only (no -rc, -beta). Workflows using collector-action@collector-v0 follow this tag.
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Point collector-vN at this release
+        run: |
+          version="${GITHUB_REF_NAME#collector-v}"
+          major="collector-v${version%%.*}"
+          git tag -f "$major" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$major"
 
   publish:
     name: Publish to PyPI (trusted publishing)
