@@ -206,3 +206,82 @@ def test_job_heartbeats_downgrade_drops_it(tmp_path):
         assert "job_heartbeats" not in inspect(engine).get_table_names()
     finally:
         engine.dispose()
+
+
+def test_test_impact_tables(migrated_engine):
+    """Migration 018 (spec 2026-10-12 §3.2, §3.4)."""
+    inspector = inspect(migrated_engine)
+    assert inspector.get_pk_constraint("impact_pairs")["constrained_columns"] == ["project_id", "unit_hash", "test_key"]
+    pair_indexes = {ix["name"]: ix["column_names"] for ix in inspector.get_indexes("impact_pairs")}
+    assert pair_indexes == {"ix_impact_pairs_unit": ["project_id", "unit_hash"]}
+    base_unique = {uc["name"]: uc["column_names"] for uc in inspector.get_unique_constraints("impact_test_base")}
+    assert base_unique["uq_impact_test_base"] == ["project_id", "test_key"]
+    assert inspector.get_pk_constraint("run_impact")["constrained_columns"] == ["run_id"]
+    (fk,) = inspector.get_foreign_keys("run_impact")
+    assert (fk["referred_table"], fk["referred_columns"], fk["options"].get("ondelete")) == ("test_runs", ["id"], "CASCADE")
+
+
+def test_model_declares_the_impact_pairs_key_and_index():
+    from src.ingestion.models.impact import ImpactPair
+
+    table = ImpactPair.__table__
+    assert [col.name for col in table.primary_key.columns] == ["project_id", "unit_hash", "test_key"]
+    assert {ix.name: [col.name for col in ix.columns] for ix in table.indexes} == {
+        "ix_impact_pairs_unit": ["project_id", "unit_hash"]}
+
+
+PAIR = ("INSERT INTO impact_pairs (project_id, unit_hash, path_unit, test_key, changed_runs, new_failures, computed_at)"
+        " VALUES (1, :hash, :unit, :test, 3, 2, '2026-10-12T00:00:00+00:00')")
+
+
+def test_an_impact_pair_is_keyed_by_project_unit_hash_and_test(migrated_engine):
+    """No surrogate id: the key is (project_id, md5(path_unit), test_key), so a long path_unit never enters an
+    index and the table never runs out of 32-bit ids (plan ruling, supersedes Ruling 27)."""
+    from src.ingestion.models.impact import PATH_UNIT_LENGTH, unit_hash
+
+    long_unit = "repo:" + "é" * (PATH_UNIT_LENGTH - 5)  # over 2,704 bytes in UTF-8
+    with migrated_engine.begin() as conn:
+        conn.execute(text(PAIR), {"hash": unit_hash(long_unit), "unit": long_unit, "test": "a" * 64})
+        conn.execute(text(PAIR), {"hash": unit_hash(long_unit), "unit": long_unit, "test": "b" * 64})
+    with pytest.raises(IntegrityError):
+        with migrated_engine.begin() as conn:
+            conn.execute(text(PAIR), {"hash": unit_hash(long_unit), "unit": long_unit, "test": "a" * 64})
+
+
+def test_unit_hash_is_the_md5_hex_of_the_utf8_path_unit():
+    """Matches PostgreSQL's md5(path_unit) in a UTF-8 database, which the rollup uses."""
+    from src.ingestion.models.impact import unit_hash
+
+    assert unit_hash("src/pay/") == "3fa93b389b1e676426c191c185932113"
+    assert unit_hash("é") == "66ddcd97cfdeabb2f6fb8a999b4bc76f"  # é as two UTF-8 bytes
+
+
+def test_a_runs_stored_suggestion_goes_with_the_run(migrated_engine):
+    """Retention and legal hold act on test_runs; the suggestion follows its run (spec §3.7)."""
+    from sqlalchemy import event
+
+    # SQLite enforces foreign keys only when asked, per connection
+    event.listen(migrated_engine, "connect", lambda dbapi_connection, _: dbapi_connection.execute("PRAGMA foreign_keys=ON"))
+    migrated_engine.dispose()
+    with migrated_engine.begin() as conn:
+        conn.execute(text(KEY), {"hash": "d" * 64})
+        conn.execute(text(RUN), {"idem": "impact", "provider": "local"})
+        run_id = conn.execute(text("SELECT id FROM test_runs WHERE idempotency_key = 'impact'")).scalar()
+        conn.execute(text("INSERT INTO run_impact (run_id, suggested, model_version, replayed, scored_at)"
+                          " VALUES (:id, '{}', 'stats-v1', 0, '2026-10-12T00:00:00+00:00')"), {"id": run_id})
+        conn.execute(text("DELETE FROM test_runs WHERE id = :id"), {"id": run_id})
+        assert conn.execute(text("SELECT COUNT(*) FROM run_impact")).scalar() == 0
+
+
+def test_test_impact_downgrade_drops_the_tables(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'downgrade_018.db').as_posix()}"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(SERVICE_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "017")
+    engine = create_engine(url)
+    try:
+        assert not {"impact_pairs", "impact_test_base", "run_impact"} & set(inspect(engine).get_table_names())
+    finally:
+        engine.dispose()
