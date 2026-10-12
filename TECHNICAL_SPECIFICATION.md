@@ -139,7 +139,9 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   7351001); `analytics-rollup` (flaky_daily backfill ≤90 d + yesterday/today
   every 6 h, lock 7351002); `weekly-summary` (Mondays, once per channel per
   week, lock 7351003); `impact-rollup` (test impact statistics: impact_pairs
-  and impact_test_base over 90 days, every 24 h, lock 7351004; ADR-029).
+  and impact_test_base over 90 days, every 24 h, lock 7351004; ADR-029;
+  `--backfill-days N`, 1–90, replays past runs once under lock 7351005, no
+  heartbeat).
 
 ### 2.5 test-management-service (`platforms/test-management-service`, ADR-022)
 - **Cases**: per-project numbers shown as `TC-n` (never reused; archive, no delete), title,

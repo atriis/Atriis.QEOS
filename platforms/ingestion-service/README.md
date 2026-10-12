@@ -364,7 +364,7 @@ leaves the upload without a suggestion. Right after the response, a background t
 the run's new failures and writes `caught` and `missed` (flaky and muted tests left out); that step costs 120-585 ms
 per run, so it never runs inside the request. If the process stops before that step, or the step fails, the next
 `impact-rollup` pass writes the same outcome for every suggestion still without one 30 minutes after scoring (its
-log line's `outcomes`). The outcome is written once (`UPDATE ... WHERE evaluated_at IS NULL`): a second evaluation
+log line's `outcomes`), at most 500 per pass, oldest first, so a backlog is worked off over several nights. The outcome is written once (`UPDATE ... WHERE evaluated_at IS NULL`): a second evaluation
 changes nothing. A truncated change list is scored too. A failure of either step is logged as
 `{"event": "impact_failed", "step": "score"|"outcome", "error": "<type>"}` (the exception type only) and never fails
 the upload: no suggestion is stored, or the outcome stays empty (`evaluated_at` null) until the nightly pass. A
@@ -381,6 +381,24 @@ The suggestion lists:
 
 Below 20 runs with changed files in the 90 days before the run, it answers "not enough history" and lists only the
 labels.
+
+### Replay
+
+`docker compose run --rm impact-rollup python -m src.ingestion.jobs.impact_rollup --backfill-days 30` (1 to 90
+days, one-off, never with `--loop`) scores every run with changed files started in those days that has no stored
+suggestion (truncated change lists too), with statistics built only from runs started before that run's day (UTC),
+and stores it with `replayed = true` and its real outcome. The scoring is the upload's own (`score_change`, fed that
+day's statistics instead of the stored ones), so live and replay agree on the same statistics; the branch's failing
+tests and the history count are read as of the run's start, as at upload. Live suggestions are never replaced, so
+running it again adds nothing. Flaky and muted tests are the ones known at replay time.
+
+Days are replayed oldest first, in batches of 200 runs: one commit and one
+`{"event": "impact_backfill_progress", "project_id", "day", "done", "total"}` line per batch, so a replay that stops
+keeps what it stored, and the next one carries on. It ends with `{"event": "impact_backfill", "days", "projects",
+"runs_replayed"}`. It takes its own lock (7351005), so it never blocks the nightly pass (7351004) and two replays
+never run at once, and it writes no heartbeat (it is not the nightly pass). **It can take long on a large project:**
+each replayed day rebuilds 90 days of statistics, so 30 days on a busy project means 30 such builds (each about as
+long as a nightly pass); run it once, off hours.
 
 ## Operations
 

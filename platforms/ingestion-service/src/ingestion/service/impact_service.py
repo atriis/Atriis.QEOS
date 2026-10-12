@@ -10,7 +10,7 @@ import json
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Sequence, Set, Tuple
+from typing import Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 
 from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
@@ -30,6 +30,7 @@ from src.ingestion.service.report_service import in_list
 NAMES_PER_QUERY = 200  # LIKE terms per query: SQLite's expression depth limit is 1,000
 SCORING_TIMEOUT = "2s"  # PostgreSQL statement_timeout while an upload is scored
 PENDING_AFTER = timedelta(minutes=30)  # a suggestion with no outcome this long after scoring is evaluated nightly
+MAX_PENDING_PER_PASS = 500  # outcomes one nightly pass writes at most, oldest first; the rest wait for the next pass
 
 
 def history_runs(db: Session, project_id: int, until: datetime) -> int:
@@ -127,13 +128,21 @@ def load_statistics(db: Session, project_id: int, units: Set[str], changed_files
     return pairs, bases
 
 
+# (units, changed files, tests failing on the branch) -> (pairs, base rows by test key): where the statistics come from
+Statistics = Callable[[Set[str], ChangedFiles, int], Tuple[Sequence[PairStat], Mapping[str, BaseStat]]]
+
+
 def score_change(db: Session, project_id: int, changed_paths: Sequence[str], branch: Optional[str], *,
-                 now: datetime) -> dict:
-    """The suggestion for a change as of `now` (spec §3.3)."""
+                 now: datetime, statistics: Optional[Statistics] = None) -> dict:
+    """The suggestion for a change as of `now` (spec §3.3), from the stored statistics, or from `statistics` (replay,
+    whose statistics are those of the days before the run): one scoring for live and replay."""
     units = change_units(changed_paths)
     changed_files = ChangedFiles(changed_paths)
     failing = failing_on_branch(db, project_id, branch, now)
-    pairs, bases = load_statistics(db, project_id, units, changed_files, failing=len(failing))
+    if statistics is None:
+        pairs, bases = load_statistics(db, project_id, units, changed_files, failing=len(failing))
+    else:
+        pairs, bases = statistics(units, changed_files, len(failing))
     return suggest(units, pairs, bases, history_runs=history_runs(db, project_id, now), changed_files=changed_files,
                    failing_on_branch=failing)
 
@@ -220,11 +229,12 @@ def evaluate_run(session_factory: sessionmaker, run_id: int) -> None:
 
 def evaluate_pending(db: Session, now: datetime) -> int:
     """The impact-rollup pass: the outcome of every suggestion still without one PENDING_AFTER after scoring (the
-    process stopped after the response, or the background step failed). One run at a time, oldest first; a run that
-    fails is logged and left for the next pass. Returns the outcomes written."""
+    process stopped after the response, or the background step failed). One run at a time, oldest first, at most
+    MAX_PENDING_PER_PASS (a backlog is worked off over several passes, never one unbounded pass); a run that fails is
+    logged and left for the next pass. Returns the outcomes written."""
     run_ids = [run_id for (run_id,) in db.execute(
         select(RunImpact.run_id).where(RunImpact.evaluated_at.is_(None), RunImpact.scored_at < now - PENDING_AFTER)
-        .order_by(RunImpact.scored_at, RunImpact.run_id))]
+        .order_by(RunImpact.scored_at, RunImpact.run_id).limit(MAX_PENDING_PER_PASS))]
     written = 0
     for run_id in run_ids:
         try:
