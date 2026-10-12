@@ -29,6 +29,14 @@ export const server = setupServer(
   // The Overview's layout: nothing saved, so the built-in four cards; tests about layouts override
   http.get("/api/v1/projects/:projectId/overview-layout", () =>
     HttpResponse.json({ effective: null, source: "builtin", personal: null, project: null })),
+  // Test impact: the run page's card and the Report's section ask for these; tests about them override
+  http.get("/api/v1/projects/:projectId/runs/:runId/impact", ({ params }) => HttpResponse.json({
+    run_id: Number(params.runId), state: "no_change_data", changed_paths: [], replayed: false, scored_at: null,
+    suggestion: null, outcome: null })),
+  http.get("/api/v1/projects/:projectId/analytics/impact-accuracy", ({ request }) => HttpResponse.json({
+    days: Number(new URL(request.url).searchParams.get("days") ?? 30), caught: 0, missed: 0, rate: null,
+    avg_suggested: null, includes_replayed: false, live: { runs: 0, caught: 0, missed: 0, suggested: 0 },
+    replayed: { runs: 0, caught: 0, missed: 0, suggested: 0 }, misses: [], misses_total: 0 })),
   // Names of the people who ran or stopped something
   http.get("/api/v1/organizations/:orgId/members", () => HttpResponse.json([])),
 );
