@@ -12,7 +12,7 @@ from src.ingestion.api.key_auth import get_api_key
 from src.ingestion.core.config import settings
 from src.ingestion.models import ApiKey
 from src.ingestion.schemas.collect import KeyCheck, RunReceipt, RunUpload
-from src.ingestion.service import ingest_service, notification_service, run_service
+from src.ingestion.service import impact_service, ingest_service, notification_service, run_service
 from src.ingestion.utils import metrics
 
 logger = logging.getLogger(__name__)
@@ -82,6 +82,10 @@ def collect_run(
         if run.failed + run.errored:
             # After the response: the collector never waits on Slack or Teams
             background.add_task(notification_service.notify_run, sessionmaker(bind=db.get_bind()), run.id)
+        if run.changed_files:
+            # After the response, from the stored results: the outcome of the suggestion stored with the run (spec
+            # §3.4). Never in the request: finding the new failures takes 120-585 ms per run
+            background.add_task(impact_service.evaluate_run, sessionmaker(bind=db.get_bind()), run.id)
     else:
         response.status_code = status.HTTP_200_OK
     return RunReceipt.model_validate(run).model_copy(update=run_service.quarantine_counts(db, run))

@@ -12,7 +12,7 @@ from qeos_shared.keys import test_key
 from src.ingestion.core.config import settings
 from src.ingestion.models import ApiKey, Run, RunChangedFile, RunComponent, RunResult
 from src.ingestion.schemas.collect import RunUpload
-from src.ingestion.service import collection_settings_service, masking_pattern_service
+from src.ingestion.service import collection_settings_service, impact_service, masking_pattern_service
 from src.ingestion.utils import custom_masking, metrics
 from src.ingestion.utils.redaction import redact
 
@@ -129,6 +129,10 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
         run.additions = sum(f.additions or 0 for f in upload.changes.files)
         run.deletions = sum(f.deletions or 0 for f in upload.changes.files)
         run.changes_truncated = upload.changes.truncated
+    # Test impact (spec 2026-10-12 §3.4): scored before this run or any of its results exists, so it cannot see them.
+    # Each collector part is its own upload, so each part gets its own suggestion (spec §9)
+    changed_paths = [f.path for f in upload.changes.files] if upload.changes is not None else []
+    scored = impact_service.score_upload(db, run.project_id, changed_paths, run.branch, meta.started_at)
     try:
         db.add(run)
         db.flush()  # assigns run.id inside the transaction
@@ -170,6 +174,9 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
             db.execute(insert(RunComponent), [
                 {"run_id": run.id, "name": c.name, "sha": c.sha} for c in upload.components
             ])
+
+        if scored is not None:
+            db.add(impact_service.stored_suggestion(run.id, scored, replayed=False))
 
         key.last_used_at = datetime.now(timezone.utc)
         db.commit()

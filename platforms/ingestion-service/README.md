@@ -350,6 +350,32 @@ coverage instrumentation, no AI: co-failure statistics on PostgreSQL.
   per run, 5% random failures, 502,000 pairs): 25-41 s per pass, against the 60 s budget. The pairs insert (about
   13 s) and the outcome read (8-14 s) are the largest parts; a full benchmark is to follow.
 
+### At upload
+
+When an upload carries changed files, ingestion scores the change against the statistics **before** it stores the
+run, inside the upload's transaction, so the suggestion cannot see the run's own results, and stores it in
+`run_impact` (model `stats-v1`) with the run. Scoring reads only what the change needs: the `impact_pairs` rows of
+the change's unit hashes (`unit_hash IN (...)`, the key's leading columns) and the `impact_test_base` rows of those
+tests, plus the rows that can carry a label (a recorded file containing a changed file's name, or fewer than 3
+runs); never the whole project's statistics. Right after the response, a background task compares the suggestion
+with the run's new failures and writes `caught` and `missed` (flaky and muted tests left out); that step costs
+120-585 ms per run, so it never runs inside the request. A truncated change list is scored too. A failure of either
+step is logged as `{"event": "impact_failed", "step": "score"|"outcome", "error": "<type>"}` (the exception type
+only) and never fails the upload: no suggestion is stored, or the outcome stays empty (`evaluated_at` null). A
+collector upload split into parts is one run per part, so each part gets its own suggestion and outcome. A
+replayed upload (same Idempotency-Key) is not scored again.
+
+The suggestion lists:
+
+- statistical suggestions, at most 50: `changed_runs ≥ 3`, `new_failures ≥ 2` and `lift ≥ 2`, ordered by
+  confidence then lift, each with its evidence;
+- always-included tests outside that cap, each test once and at most 100 per label: *test file changed* (the
+  test's recorded file and a changed path end one another), *failing on this branch* (the branch's latest run
+  started before this one), *no history yet* (fewer than 3 runs with changed files).
+
+Below 20 runs with changed files in the 90 days before the run, it answers "not enough history" and lists only the
+labels.
+
 ## Operations
 
 - `GET /health`; `GET /metrics` (Prometheus, inside the Docker network only — not routed by the
