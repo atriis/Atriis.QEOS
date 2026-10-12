@@ -365,8 +365,9 @@ leaves the upload without a suggestion. Right after the response, a background t
 the run's new failures and writes `caught` and `missed` (flaky and muted tests left out); that step costs 120-585 ms
 per run, so it never runs inside the request. If the process stops before that step, or the step fails, the next
 `impact-rollup` pass writes the same outcome for every suggestion still without one 30 minutes after scoring (its
-log line's `outcomes`), at most 500 per pass, oldest first, so a backlog is worked off over several nights. The outcome is written once (`UPDATE ... WHERE evaluated_at IS NULL`): a second evaluation
-changes nothing. A truncated change list is scored too. A failure of either step is logged as
+log line's `outcomes`), at most 500 per pass, oldest first, so a backlog is worked off over several nights. The
+outcome is written once (`UPDATE ... WHERE evaluated_at IS NULL`): a second evaluation changes nothing. A truncated
+change list is scored too. A failure of either step is logged as
 `{"event": "impact_failed", "step": "score"|"outcome", "error": "<type>"}` (the exception type only) and never fails
 the upload: no suggestion is stored, or the outcome stays empty (`evaluated_at` null) until the nightly pass. A
 collector upload split into parts is one run per part, so each part gets its own suggestion and outcome. A replayed

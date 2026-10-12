@@ -150,6 +150,20 @@ def test_a_project_the_rollup_has_not_visited_answers_without_statistics(client,
     assert (body["state"], body["history_runs"], body["tests"]) == ("ok", 20, [])
 
 
+@pytest.fixture
+def rollbacks(db, monkeypatch):
+    """Counts db.rollback calls: the scoring endpoint ends its read-only transaction (and its SET LOCAL) itself."""
+    calls = []
+    real = db.rollback
+    monkeypatch.setattr(db, "rollback", lambda: (calls.append(1), real())[1])
+    return calls
+
+
+def test_scoring_ends_its_transaction(client, auth, viewer, rollbacks):
+    assert client.post(IMPACT, json={"changed_paths": ["src/a.py"]}, headers=auth()).status_code == 200
+    assert rollbacks
+
+
 def test_scoring_runs_under_the_uploads_statement_timeout(client, auth, viewer, monkeypatch):
     """The same 2 s budget as at upload (PostgreSQL only; limit_scoring_time is a no-op on SQLite), set first."""
     calls = []
@@ -174,7 +188,7 @@ def test_limit_scoring_time_sets_the_2s_timeout_on_postgresql():
     assert sent == ["SET LOCAL statement_timeout = '2s'"]
 
 
-def test_a_scoring_timeout_answers_503_with_a_message(client, auth, viewer, monkeypatch):
+def test_a_scoring_timeout_answers_503_with_a_message(client, auth, viewer, monkeypatch, rollbacks):
     class Canceled(Exception):
         sqlstate = "57014"
 
@@ -185,6 +199,7 @@ def test_a_scoring_timeout_answers_503_with_a_message(client, auth, viewer, monk
     response = client.post(IMPACT, json={"changed_paths": ["src/a.py"]}, headers=auth())
     assert response.status_code == 503
     assert response.json()["detail"] == {"code": "impact_timeout", "message": impact_service.SCORING_TIMEOUT_MESSAGE}
+    assert rollbacks
 
 
 def test_another_database_error_is_not_turned_into_a_timeout(client, auth, viewer, monkeypatch):
@@ -224,6 +239,8 @@ def test_accuracy_counts_caught_and_missed_new_failures_in_the_window(client, au
     c = seed_change_run(NOW - timedelta(days=10))
     store(db, c, missed=("old",), tests=suggested("a", "b", "c", "d", "e"))
     store(db, seed_change_run(NOW - timedelta(days=1)), evaluated=False, tests=suggested("p"))  # pending: not counted
+    store(db, seed_change_run(NOW - timedelta(days=1), project_id=2), caught=("x",), missed=("elsewhere",),
+          tests=suggested("x"))  # another project: neither counted nor listed
     week = client.get(ACCURACY, params={"days": 7}, headers=auth()).json()
     assert (week["days"], week["caught"], week["missed"], week["rate"], week["includes_replayed"]) == (7, 3, 1, 0.75, False)
     assert week["live"] == {"runs": 2, "caught": 3, "missed": 1, "suggested": 4}

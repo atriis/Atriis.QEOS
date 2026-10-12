@@ -53,6 +53,19 @@ def test_a_replayed_run_is_scored_from_the_days_before_it_only(db, seed_impact_h
                                 "confidence": 0.5, "lift": 3.75, "base_rate": 0.1333}
 
 
+def test_runs_earlier_on_the_same_day_are_not_in_the_statistics(db, seed_impact_history, seed_change_run):
+    """Ruling 13: the cut-off is the start of the run's UTC day, not its start. A run at 01:00 today changes src/pay/
+    and steady newly fails in it; the 11:00 run's evidence for pays still counts only the days before (4 change runs
+    of src/pay/, not 5)."""
+    seed_impact_history(start=NOW - timedelta(days=15))
+    day = datetime.combine(NOW.date(), time.min, tzinfo=timezone.utc)
+    seed_change_run(day + timedelta(hours=1), results=(("steady", "failed", 5),), paths=("src/pay/b.py",))
+    late = seed_change_run(day + timedelta(hours=11), results=(("pays", "passed", 5),), paths=("src/pay/new.py",))
+    backfill(db)
+    pays = next(t for t in row(db, late.id).suggested["tests"] if t["name"] == "pays")
+    assert (pays["evidence"]["changed_runs"], pays["evidence"]["new_failures"]) == (4, 2)
+
+
 def test_replay_scores_as_live_scoring_does_from_the_same_statistics(db, seed_impact_history, seed_change_run):
     """Live and replay agree: the statistics the nightly pass would have written at the start of the run's day, read
     by live scoring, give the suggestion replay stored. The fixture reaches every kind: statistical (pays), test file
