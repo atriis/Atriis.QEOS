@@ -351,3 +351,35 @@ describe("the section named by the link's anchor", () => {
     expect(scrollIntoView).not.toHaveBeenCalled();
   });
 });
+
+const NO_ACCURACY_PART = { runs: 0, caught: 0, missed: 0, suggested: 0 };
+
+function serveAccuracy(asked: string[]) {
+  server.use(http.get(`${P}/analytics/impact-accuracy`, ({ request }) => {
+    const days = Number(new URL(request.url).searchParams.get("days"));
+    asked.push(String(days));
+    return HttpResponse.json({ days, caught: 0, missed: 0, rate: null, avg_suggested: null, includes_replayed: false,
+      live: NO_ACCURACY_PART, replayed: NO_ACCURACY_PART, misses: [], misses_total: 0 });
+  }));
+}
+
+test("Test impact closes the report and follows a 7-day period", async () => {
+  serve();
+  const asked: string[] = [];
+  serveAccuracy(asked);
+  renderPage("?period=7");
+  expect(await screen.findByRole("heading", { name: "Test impact" })).toBeInTheDocument();
+  expect(await screen.findByText("No run with a stored suggestion in the last 7 days")).toBeInTheDocument();
+  expect(asked).toEqual(["7"]);
+  const headings = screen.getAllByRole("heading", { level: 2 });
+  expect(headings[headings.length - 1]).toHaveTextContent("Test impact");
+});
+
+test("Test impact uses 30 days, and says so, when the Report's period is 90 days", async () => {
+  serve();
+  const asked: string[] = [];
+  serveAccuracy(asked);
+  renderPage("?period=90");
+  expect(await screen.findByText(/the Report's period is not the last 7, 14 or 30 days/)).toBeInTheDocument();
+  expect(asked).toEqual(["30"]);
+});

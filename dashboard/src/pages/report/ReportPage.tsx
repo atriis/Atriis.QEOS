@@ -12,8 +12,10 @@ import { describeFilters, formatPeriod } from "./describeFilters";
 import AreaSection from "./sections/AreaSection";
 import CoverageDurationSection from "./sections/CoverageDurationSection";
 import FailureCausesSection from "./sections/FailureCausesSection";
+import ImpactSection from "./sections/ImpactSection";
 import RegressionsSection from "./sections/RegressionsSection";
 import SummarySection from "./sections/SummarySection";
+import { accuracyDays } from "../../lib/impactQueries";
 import { todayIn, useReportFilters } from "./useReportFilters";
 import { useReportRequest, useReportSection } from "./useReportRequest";
 
@@ -103,6 +105,7 @@ export default function ReportPage() {
   const today = todayIn(tz);
   const qc = useQueryClient();
   const { filters, update, clearAll, notice, dismissNotice } = useReportFilters(tz);
+  const impactDays = accuracyDays(filters.days, filters.to, today);
   const project = useQuery({ queryKey: ["project", id], queryFn: () => getProject(id) });
   const { gate, caseAreas, runUrls, defaultBranch, effectiveBranch } = useReportRequest(id, filters, tz, { loadCaseAreas: true });
   const summary = useReportSection(id, gate, "summary");
@@ -173,6 +176,9 @@ export default function ReportPage() {
       <RegressionsSection projectId={id} gate={gate} query={regressions} branch={effectiveBranch} onResetFilters={clearAll} />
       <CoverageDurationSection projectId={id} gate={gate} testsQuery={tests} durationQuery={duration} caseAreas={caseAreas}
         filters={filters} onResetFilters={clearAll} />
+      {/* Ruling 21: the Report's period when it is the last 7, 14 or 30 days, else 30 days, said in the note */}
+      <ImpactSection projectId={id} days={impactDays} followsReport={impactDays === filters.days && filters.to === today}
+        onResetFilters={clearAll} />
     </div>
   );
 }

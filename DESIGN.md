@@ -446,6 +446,13 @@ Likely affected tests (spec `docs/superpowers/specs/2026-10-12-test-impact-analy
   - **Plain Graphite sentences** for "Not enough history yet: N runs with changed files, needs 20" (the labelled tests are still listed; with none, "Nothing to suggest yet."), "No change data for this run", and a run with changes but no stored suggestion ("uploaded before test impact analysis, or scoring failed").
   - **Replayed:** a neutral "Replayed" pill beside the heading, and a sentence that says so.
   - Lists past 15 fold behind a ghost "Show all n" button that becomes "Show fewer" (`aria-expanded`). Loading is a skeleton in the card's own status region; a failure is an Error Banner with Retry inside the card, so the rest of the run page stays usable.
+- **Report section** "Test impact" (`#report-impact`, the Report's last section). It follows no Report filter but the period, and has no gate.
+  - **Period:** the Report's when it is the last 7, 14 or 30 days up to today; otherwise the last 30 days, and the note says why ("the Report's period is not the last 7, 14 or 30 days").
+  - **Two Stats side by side** (`.impact-figures`, `.stat-big`, tabular figures): the catch rate ("75.0%", then "Suggestions caught 9 of 12 new failures") and the tests suggested per run ("6.4", one decimal at most, then "tests suggested per run, on average"), so a high rate bought by suggesting everything shows (spec §9). Without new failures the rate is "—" with "No new failures in 4 runs with a stored suggestion", never 0%.
+  - **Note:** the period, every branch, the other filters not applied.
+  - **Replayed runs present:** a definition list (`.impact-parts`, not the Overview's figure list) with Live and Replayed ("caught 3 of 4 new failures in 10 runs").
+  - **Misses:** a table of up to 50 with a screen-reader caption, linking the test's history on that branch and the run, the start in the run strip's date format, and the Suggestion column reading "Live" or a neutral "Replayed" pill; "And n more." under it.
+  - **No run with a stored suggestion:** "No run with a stored suggestion in the last 7 days". Loading and failure behave as in every Report section.
 
 ### Inputs / Fields
 - **Style:** Paper fill, Hairline Strong border, 6px radius, 34px height (44px on coarse pointers). Labels stack above the field at 13px/500 in Graphite.

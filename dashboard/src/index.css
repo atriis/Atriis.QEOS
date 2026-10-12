@@ -1076,3 +1076,12 @@ button.switch[aria-busy="true"] { cursor: progress; }
 /* No change data: heading and sentence on one line, as wide as they need */
 .run-change-cards > .impact-card-compact { justify-self: start; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2) var(--space-3); }
 .impact-card-compact .impact-head, .impact-card-compact p { margin: 0; }
+
+/* Report: Test impact. The catch rate and the suggestions per run side by side (spec §9), each a Stat with its sentence;
+   the live and replayed parts as a plain definition list */
+.impact-figures { display: flex; flex-wrap: wrap; gap: var(--space-4) var(--space-6); margin-bottom: var(--space-3); }
+.impact-figures p { margin: var(--space-1) 0 0; font-variant-numeric: tabular-nums; }
+.impact-parts { display: grid; grid-template-columns: max-content 1fr; gap: var(--space-1) var(--space-3); margin: 0 0 var(--space-3); font-variant-numeric: tabular-nums; }
+.impact-parts > div { display: contents; }
+.impact-parts dt { font-weight: 600; }
+.impact-parts dd { margin: 0; }

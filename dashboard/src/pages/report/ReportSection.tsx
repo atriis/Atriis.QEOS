@@ -5,30 +5,37 @@ import ErrorBanner from "../../components/ErrorBanner";
 import { SkeletonStatus } from "../../components/Skeleton";
 import type { Gate } from "./useReportRequest";
 
-/** What a section needs from its query (UseQueryResult<Report> fits). */
-export interface SectionQuery {
-  data: Report | undefined;
+/** What a section needs from its query (UseQueryResult<Report> fits; a section with its own answer names its type). */
+export interface SectionQuery<T = Report> {
+  data: T | undefined;
   error: unknown;
   isPending: boolean;
   refetch: () => unknown;
 }
 
-interface Props {
+interface Props<T> {
   id: string;
   title: string;
-  gate: Gate;
-  query: SectionQuery;
+  /** The Report's gate. A section that does not follow the Report's filters (Test impact) leaves it out. */
+  gate?: Gate;
+  query: SectionQuery<T>;
   /** The skeleton's height, so the page does not jump when the data arrives */
   height?: number;
   /** CSV buttons and grouping controls; never printed */
   actions?: ReactNode;
   /** A help line under the heading (what a figure counts, which filters do not apply) */
   note?: ReactNode;
-  /** Extra content for "No runs match these filters in this period" */
-  noRuns?: (report: Report) => ReactNode;
+  /** Whether the answer has nothing to show; by default a Report with no runs in scope */
+  isEmpty?: (data: T) => boolean;
+  /** The sentence for an empty answer */
+  emptyText?: string;
+  /** Extra content under the empty sentence */
+  noRuns?: (data: T) => ReactNode;
   onResetFilters: () => void;
-  children: (report: Report) => ReactNode;
+  children: (data: T) => ReactNode;
 }
+
+const noRunsInScope = (data: unknown) => (data as Report).scope.runs === 0;
 
 function SectionError({ error, retry, reset }: { error: unknown; retry: () => unknown; reset: () => void }) {
   if (error instanceof ApiError && error.status === 422) {
@@ -45,24 +52,27 @@ function SectionError({ error, retry, reset }: { error: unknown; retry: () => un
 
 /** One report section: an h2-named region whose body is loading, blocked, an error with Retry, "no runs", or the data.
  *  An error is never shown as an empty period. */
-export default function ReportSection({ id, title, gate, query, height = 240, actions, note, noRuns, onResetFilters, children }: Props) {
+export default function ReportSection<T = Report>({
+  id, title, gate, query, height = 240, actions, note, isEmpty = noRunsInScope,
+  emptyText = "No runs match these filters in this period", noRuns, onResetFilters, children,
+}: Props<T>) {
   let body: ReactNode;
-  if (gate.state === "blocked") {
+  if (gate?.state === "blocked") {
     body = gate.error != null
       ? <><p>{gate.message}</p><ErrorBanner error={gate.error} onRetry={gate.retry} /></>
       : <p className="muted">{gate.message}</p>;
   } else if (query.error != null) {
     body = <SectionError error={query.error} retry={query.refetch} reset={onResetFilters} />;
-  } else if (gate.state === "wait" || query.isPending || !query.data) {
+  } else if (gate?.state === "wait" || query.isPending || !query.data) {
     body = (
       <SkeletonStatus label={`Loading ${title.toLowerCase()}…`}>
         <span className="skeleton skeleton-block" style={{ height }} aria-hidden="true" />
       </SkeletonStatus>
     );
-  } else if (query.data.scope.runs === 0) {
+  } else if (isEmpty(query.data)) {
     body = (
       <div className="report-empty">
-        <p className="muted">No runs match these filters in this period</p>
+        <p className="muted">{emptyText}</p>
         {noRuns?.(query.data)}
       </div>
     );

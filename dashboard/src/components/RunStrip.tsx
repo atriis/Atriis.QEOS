@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import type { StripRun, StripStatus } from "../api/analytics";
+import { dateFormat } from "../lib/words";
 
 export type { StripRun, StripStatus };
 
@@ -11,8 +12,6 @@ const WORD: Record<"passed" | "failed" | "rerun" | "skipped" | "none", string> =
   none: "not run",
 };
 const ORDER = ["passed", "failed", "rerun", "skipped", "none"] as const;
-
-const dateFormat = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 
 export function stripSummary(statuses: StripStatus[]): string {
   const parts = ORDER.flatMap((k) => {
