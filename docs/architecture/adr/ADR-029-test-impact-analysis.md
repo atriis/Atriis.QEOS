@@ -119,4 +119,6 @@ time is what met the budget. The figures are in the ingestion README "Budgets".
   - a part after the first of a split upload may list the previous part's failures as *failing on this branch*;
   - the random-failure benchmark suggested about 76 tests per change, so thresholds need tuning on real data.
 - **Follow-ups in TODO.md:** release B, the learned model, Phase 6 embeddings, the accuracy figure in the weekly
-  summary, a repository prefix for path units, and a narrow layout for Report tables.
+  summary, a repository prefix for path units, a narrow layout for Report tables, `impact_test_base.id` as a
+  BigInteger (or dropped for `(project_id, test_key)`) before real scale, and threshold tuning on real data while
+  watching `avg_suggested`.

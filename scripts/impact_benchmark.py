@@ -162,10 +162,14 @@ try:
     db.execute(delete(RunImpact).where(RunImpact.run_id.in_(select(Run.id).where(Run.project_id == PROJECT))))
     db.commit()
     before = time.perf_counter()
-    replayed = replay_project(db, PROJECT, now - timedelta(days=REPLAY_DAYS), now)
+    replay_since = now - timedelta(days=REPLAY_DAYS)
+    replayed = replay_project(db, PROJECT, replay_since, now)
     replay_s = time.perf_counter() - before
-    print(f"replay, last {REPLAY_DAYS} days: {replayed} runs in {replay_s:.0f} s ({replayed / replay_s:.1f} runs/s, "
-          f"{replay_s / (REPLAY_DAYS + 1):.0f} s per replayed day)")
+    # Replay rebuilds the statistics once per date that has runs (as replay_project groups them), not per window day
+    dates = len({started.date() for started in db.scalars(select(Run.started_at).where(
+        Run.project_id == PROJECT, Run.started_at >= replay_since, Run.started_at < now))})
+    print(f"replay, last {REPLAY_DAYS} days: {replayed} runs on {dates} dates in {replay_s:.0f} s "
+          f"({replayed / replay_s:.1f} runs/s, {replay_s / max(dates, 1):.0f} s per replayed date)")
 finally:
     db.rollback()
     run_ids = select(Run.id).where(Run.project_id == PROJECT)

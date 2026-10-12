@@ -1037,13 +1037,16 @@ results come back through the normal upload ([4.1](#41-sending-test-results)).
 1. Enter a branch; it defaults to the CI target's branch. Choose **Find tests**.
 2. QEOS takes the newest run with changed files among the branch's last 20 runs, scores that change now
    (the same likely affected tests as on the run page, see [Test impact](#test-impact)) and selects the cases linked
-   to the suggested tests, strongest first, at most 200.
+   to the suggested tests, strongest first, at most 200. Only imported cases are selected: Play cannot run a
+   manual case.
 3. Review the selection; the duration estimate follows it. Then **Run selected** as usual.
 
 Suggested tests that no case links to are listed as *not runnable from QEOS (no linked case)*; link them by
-setting the case's automated test. When no recent run of the branch has changed files (the CI checkout had fewer
+setting an imported case's automated test. Tests linked only to manual cases are listed as *not runnable from QEOS
+(linked only to a manual case)*. When no recent run of the branch has changed files (the CI checkout had fewer
 than 2 commits, see [4.1.3](#413-collector-cli-any-machine)), when the project has too little history and nothing else applies,
-or when nothing is suggested, the panel says so and selects nothing. Viewers do not get the button.
+or when nothing is suggested, the panel says so and selects nothing; so does a run whose changed files can no longer
+be read ("Run #N has no readable change data"). Viewers do not get the button.
 
 **Prerequisites**
 
@@ -1198,7 +1201,7 @@ every 24 hours.
 - **Replay history:** to fill the figure from past runs, run once
   `docker compose run --rm impact-rollup python -m src.ingestion.jobs.impact_rollup --backfill-days 30`
   (1 to 90 days). Those runs are scored with statistics from earlier days only, marked *replayed* and counted
-  apart. It takes its own lock and can take long on a large project (about 44 s per day on a busy one): run it
+  apart. It takes its own lock and can take long on a large project (about 1 min per replayed day on a busy one): run it
   once, off hours.
 - **What counts:**
   - a test newly fails when it fails after passing on the same branch (or on the base branch for a new branch);

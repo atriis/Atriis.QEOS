@@ -38,6 +38,7 @@ type Values = Record<(typeof FORM_KEYS)[number], string>;
 // Filters GET /features cannot apply: with one of these the Feature view groups the matching cases itself
 const CASE_ONLY = ["result", "origin", "feature", "ado"] as const;
 type Group = "feature" | "scenario";
+const LIKELY_AFFECTED_ID = "likely-affected";
 const SEARCH_IN_NAMES: Record<SearchIn, string> = { feature: "Feature", scenario: "Scenario", both: "Both" };
 const SEARCH_HINT: Record<SearchIn, string> = { feature: "feature name or path", scenario: "title, steps or TC key", both: "feature or scenario" };
 
@@ -282,7 +283,8 @@ export default function CasesPage() {
         tabs={[{ label: "Cases" }, { label: "Suites", to: "../suites" }]}
         actions={canEdit ? (
           <>
-            <button ref={impactButtonRef} type="button" aria-expanded={impactOpen} onClick={() => setImpactOpen(true)}>
+            <button ref={impactButtonRef} type="button" aria-expanded={impactOpen}
+              aria-controls={impactOpen ? LIKELY_AFFECTED_ID : undefined} onClick={() => setImpactOpen((open) => !open)}>
               <Crosshair size={16} aria-hidden="true" /> Run likely affected
             </button>
             <Link className="button" to="import">
@@ -297,7 +299,7 @@ export default function CasesPage() {
       <CasesKpis projectId={id} />
       <RunPanel projectId={id} />
       {canEdit && impactOpen && (
-        <LikelyAffectedPanel projectId={id} primary={picked.size === 0} onClose={() => setImpactOpen(false)}
+        <LikelyAffectedPanel id={LIKELY_AFFECTED_ID} projectId={id} primary={picked.size === 0} onClose={() => setImpactOpen(false)}
           onSelect={(cases) => setPicked(new Map(cases.map((c) => [c.number, { title: c.title, testKey: c.automated_test_key }])))} />
       )}
 

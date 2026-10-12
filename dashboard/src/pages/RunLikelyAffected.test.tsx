@@ -14,10 +14,12 @@ const TARGET = { available: true, configured: true, provider: "github", repo: "a
 const key = (name: string) => name.padEnd(64, "0");
 const suggested = (name: string, kind: SuggestedTest["kind"]): SuggestedTest => ({
   test_key: key(name), suite: "s", class_name: "C", name, kind, evidence: null });
-const kase = (number: number, title: string, testKey: string) => ({
+/** An imported case (runnable from QEOS) unless `manual`. */
+const kase = (number: number, title: string, testKey: string, manual = false) => ({
   number, key: `TC-${number}`, title, description: null, steps: [], labels: [], priority: "medium", status: "ready",
   automated_test_key: testKey, automated_name: null, created_by: 1, created_at: "2026-10-06T10:00:00Z", updated_by: null,
-  updated_at: null, suites: [], source_path: "tests/features/a.feature", gherkin: "Scenario: x", feature_name: "A",
+  updated_at: null, suites: [], source_path: manual ? null : "tests/features/a.feature", gherkin: manual ? null : "Scenario: x",
+  feature_name: manual ? null : "A",
 });
 const RUN = {
   id: 70, project_id: 42, ci_provider: "github_actions", ci_run_url: null, commit_sha: "abcdef1234567890", branch: "main",
@@ -43,26 +45,26 @@ beforeEach(() => {
   );
 });
 
-function mockImpact({ runs = [RUN], tests, cases, impact }: {
-  runs?: object[]; tests: SuggestedTest[]; cases: object[]; impact?: () => Response;
+function mockImpact({ runs = [RUN], tests, cases, impact, paths = ["src/pay/api.py", "src/cart/x.py"] }: {
+  runs?: object[]; paths?: string[]; tests: SuggestedTest[]; cases: object[]; impact?: () => Response;
 }) {
   const bodies = { impact: [] as unknown[], search: [] as unknown[], estimate: [] as { test_keys: string[] }[] };
   server.use(
     http.get(`${P}/runs`, ({ request }) =>
       HttpResponse.json(new URL(request.url).searchParams.get("branch") === "main" ? runs : [])),
     http.get(`${P}/runs/70/impact`, () => HttpResponse.json({ run_id: 70, state: "ok",
-      changed_paths: ["src/pay/api.py", "src/cart/x.py"], replayed: false, scored_at: null, suggestion: null, outcome: null })),
+      changed_paths: paths, replayed: false, scored_at: null, suggestion: null, outcome: null })),
     http.post(`${P}/analytics/impact`, async ({ request }) => {
       bodies.impact.push(await request.json());
       return impact ? impact() : HttpResponse.json({ state: "ok", model_version: "stats-v1", history_runs: 30, needed_runs: 20,
         statistical_total: 1, tests });
     }),
     http.post(`${P}/cases/search`, async ({ request }) => {
-      const body = (await request.json()) as { test_keys: string[] };
+      const body = (await request.json()) as { test_keys: string[]; limit: number; offset: number };
       // The Cases tiles ask with other keys; only the panel's question gets the linked cases
       if (!tests.some((t) => body.test_keys.includes(t.test_key))) return HttpResponse.json({ total: 0, items: [] });
       bodies.search.push(body);
-      return HttpResponse.json({ total: cases.length, items: cases });
+      return HttpResponse.json({ total: cases.length, items: cases.slice(body.offset, body.offset + body.limit) });
     }),
     http.post(`${P}/analytics/duration-estimate`, async ({ request }) => {
       bodies.estimate.push((await request.json()) as { test_keys: string[] });
@@ -188,4 +190,67 @@ test("a member gets the button once the role loads", async () => {
   server.use(http.get(`${P}/cases`, () => HttpResponse.json({ total: 1, items: [kase(1, "Pay by card", key("pays"))] })));
   renderCases();
   expect(await screen.findByRole("button", { name: "Run likely affected" })).toHaveAttribute("aria-expanded", "false");
+});
+
+test("a test linked only to a manual case is listed as not runnable, never selected", async () => {
+  mockImpact({ tests: [suggested("pays", "statistical")], cases: [kase(1, "Pay by card", key("pays"), true)] });
+  renderCases();
+  const panel = await findTests();
+  expect(await within(panel).findByText("1 likely affected test, none linked to an imported case")).toBeInTheDocument();
+  expect(within(panel).getByRole("heading", { name: "Not runnable from QEOS (linked only to a manual case)" })).toBeInTheDocument();
+  expect(within(panel).getByRole("link", { name: "pays" })).toHaveAttribute("href", `/projects/42/tests/${key("pays")}`);
+  expect(within(panel).queryByRole("heading", { name: "Not runnable from QEOS (no linked case)" })).not.toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Selected cases" })).not.toBeInTheDocument();
+});
+
+test("only imported cases are selected: a test with both kinds selects its imported case", async () => {
+  const bodies = mockImpact({
+    tests: [suggested("pays", "statistical"), suggested("cart", "failing_on_branch")],
+    cases: [kase(1, "Pay by card", key("pays"), true), kase(2, "Cart totals", key("cart")), kase(3, "Cart by hand", key("cart"), true)],
+  });
+  renderCases();
+  const panel = await findTests();
+  expect(await within(panel).findByText("Selected 1 linked case for 2 likely affected tests")).toBeInTheDocument();
+  const notRunnable = within(panel).getByRole("list", { name: "Not runnable from QEOS (linked only to a manual case)" });
+  expect(within(notRunnable).getAllByRole("link").map((a) => a.textContent)).toEqual(["pays"]);
+  const bar = await screen.findByRole("region", { name: "Selected cases" });
+  expect(within(bar).getByRole("button", { name: "Run selected (1)" })).toBeInTheDocument();
+  await waitFor(() => expect(bodies.estimate.length).toBeGreaterThan(0));
+  expect(bodies.estimate.at(-1)!.test_keys).toEqual([key("cart")]);
+});
+
+test("more than 200 linked cases: every page is read and the first 200 are selected", async () => {
+  const many = Array.from({ length: 250 }, (_, i) => kase(i + 1, `Case ${i + 1}`, key("pays")));
+  const bodies = mockImpact({ tests: [suggested("pays", "statistical")], cases: many });
+  renderCases();
+  const panel = await findTests();
+  expect(await within(panel).findByText(
+    "Selected 200 linked cases (the first 200: at most 200 cases per run) for 1 likely affected test")).toBeInTheDocument();
+  expect((bodies.search as { offset: number }[]).map((b) => b.offset)).toEqual([0, 200]);
+  const bar = await screen.findByRole("region", { name: "Selected cases" });
+  expect(within(bar).getByRole("button", { name: "Run selected (200)" })).toBeInTheDocument();
+});
+
+test("the header button toggles the panel it controls, keeping focus on itself", async () => {
+  mockImpact({ tests: [], cases: [] });
+  renderCases();
+  const button = await screen.findByRole("button", { name: "Run likely affected" });
+  await userEvent.click(button);
+  const panel = screen.getByRole("region", { name: "Run likely affected" });
+  expect(button).toHaveAttribute("aria-expanded", "true");
+  expect(button).toHaveAttribute("aria-controls", panel.id);
+  expect(panel.id).not.toBe("");
+  await userEvent.click(button);
+  expect(screen.queryByRole("region", { name: "Run likely affected" })).not.toBeInTheDocument();
+  expect(button).toHaveAttribute("aria-expanded", "false");
+  expect(button).toHaveFocus();
+});
+
+test("a run that counts changed files but has none readable says so", async () => {
+  mockImpact({ tests: [], cases: [], paths: [] });
+  renderCases();
+  const panel = await findTests();
+  expect(await within(panel).findByText("Run #70 has no readable change data")).toBeInTheDocument();
+  expect(within(panel).getByRole("link", { name: "run #70" })).toHaveAttribute("href", "/projects/42/runs/70");
+  expect(screen.queryByRole("region", { name: "Selected cases" })).not.toBeInTheDocument();
 });

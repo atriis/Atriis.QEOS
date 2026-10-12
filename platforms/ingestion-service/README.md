@@ -427,7 +427,7 @@ the analytics-rollup job keeps. The script's docstring says how to run it; it ex
 | Live scoring of a 10-file change on main, p95 of 50 (p50) | 50 ms (34 ms); 76 tests suggested on average | under 200 ms |
 | Upload: scoring inside the request, p50 (max of 10) | 32 ms (51 ms) | within the 2 s total scoring budget |
 | Upload: outcome after the response, p50 (max of 10) | 502 ms (696 ms) | not in the request |
-| Replay of the last 3 days | 66 runs in 177 s: 0.4 runs/s, about 44 s per replayed day | none (one-off) |
+| Replay of the last 3 days | 66 runs (3 days of 22) on 3 dates in 177 s: 0.4 runs/s, about 59 s per replayed date (each date with runs rebuilds 90 days of statistics once) | none (one-off) |
 
 Before pairs were filtered by every threshold at rollup time (spec §9), the same data stored 143,987 pairs and live
 scoring missed its budget (p95 249 ms): reading the pairs of a change's units was the cost.
