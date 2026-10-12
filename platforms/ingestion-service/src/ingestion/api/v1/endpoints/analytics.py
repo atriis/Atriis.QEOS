@@ -210,11 +210,16 @@ def impact(
     db: Session = Depends(get_db),
     access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
 ):
-    """Likely affected tests for any change, as of now (spec 2026-10-12 §3.5): the upload's scoring, under its 2 s
-    statement timeout on PostgreSQL; a timeout is a 503 with a message, not a 500."""
+    """Likely affected tests for any change, as of now (spec 2026-10-12 §3.5): the upload's scoring, within one total 2 s
+    budget (each PostgreSQL statement capped at what is left); a timeout is a 503 with a message, not a 500."""
     try:
-        impact_service.limit_scoring_time(db)
-        suggestion = impact_service.score_change(db, access.project_id, body.changed_paths, body.branch, now=_now())
+        deadline = impact_service.Deadline()
+        deadline.step(db)
+        suggestion = impact_service.score_change(db, access.project_id, body.changed_paths, body.branch, now=_now(),
+                                                 deadline=deadline)
+    except impact_service.ScoringTimeout:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail={"code": "impact_timeout", "message": impact_service.SCORING_TIMEOUT_MESSAGE})
     except OperationalError as exc:
         if report_service.is_timeout(exc):
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

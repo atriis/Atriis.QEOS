@@ -360,9 +360,9 @@ run, inside the upload's transaction, so the suggestion cannot see the run's own
 `run_impact` (model `stats-v1`) with the run. Scoring reads only what the change needs: the `impact_pairs` rows of
 the change's unit hashes (`unit_hash IN (...)`, the key's leading columns), the `impact_test_base` rows of those
 tests and of tests whose recorded file contains a changed file's name, and only as many "no history yet" rows (by
-name) as that label can list; never the whole project's statistics. On PostgreSQL scoring runs under
-`SET LOCAL statement_timeout = '2s'`, and the previous timeout is restored for the rest of the upload; a timeout
-leaves the upload without a suggestion. Right after the response, a background task compares the suggestion with
+name) as that label can list; never the whole project's statistics. Scoring has one total budget of 2 s (a monotonic
+clock checked before each statement); on PostgreSQL each statement's `SET LOCAL statement_timeout` is the time left
+(at least 1 ms), and the previous timeout is restored for the rest of the upload; running out of budget leaves the upload without a suggestion. Right after the response, a background task compares the suggestion with
 the run's new failures and writes `caught` and `missed` (flaky and muted tests left out); that step costs 120-585 ms
 per run, so it never runs inside the request. If the process stops before that step, or the step fails, the next
 `impact-rollup` pass writes the same outcome for every suggestion still without one 30 minutes after scoring (its
@@ -408,7 +408,7 @@ long as a nightly pass); run it once, off hours.
 | Endpoint | Returns |
 |---|---|
 | `GET /api/v1/projects/{id}/runs/{run_id}/impact` | `state`: `ok`, `not_enough_history`, `no_change_data` (no changed files uploaded) or `not_scored` (changed files, but uploaded before test impact or scoring failed); `changed_paths`; `replayed`; `scored_at`; `suggestion` (`history_runs`, `needed_runs`, `statistical_total`, `model_version`, `tests` with `kind` and `evidence`); `outcome` (`caught`, `missed`, `evaluated_at`), null until written. A run of another project is a 404 |
-| `POST /api/v1/projects/{id}/analytics/impact` | Body `{"changed_paths": [...], "branch": "main" or null}`: the upload's scoring for any change, as of now, reading only the change's unit hashes. 1 to 5,000 paths of 1 to 1,000 characters, no NUL, branch at most 255, no other field; else 422. On PostgreSQL it runs under the same 2 s `statement_timeout` as at upload; a timeout answers 503 `{"code": "impact_timeout", "message": ...}` |
+| `POST /api/v1/projects/{id}/analytics/impact` | Body `{"changed_paths": [...], "branch": "main" or null}`: the upload's scoring for any change, as of now, reading only the change's unit hashes. 1 to 5,000 paths of 1 to 1,000 characters, no NUL, branch at most 255, no other field; else 422. It has the same one total 2 s budget as at upload (each PostgreSQL statement capped at the time left); running out answers 503 `{"code": "impact_timeout", "message": ...}` |
 | `GET /api/v1/projects/{id}/analytics/impact-accuracy?days=30` | `days` 7, 14 or 30 (else 422, checked after the role): over the runs started in those days whose outcome is written, `caught`, `missed`, `rate` (`caught / (caught + missed)`, null without new failures), `avg_suggested` (suggested tests per run, null without runs: suggesting every test would catch everything, and this shows it), `includes_replayed`, the `live` and `replayed` parts (`runs`, `caught`, `missed`, `suggested`), and the `misses` (newest run first, at most 50; `misses_total` counts them all) |
 
 The gateway routes them with the other `/projects/{id}/runs` and `/projects/{id}/analytics` paths; a 5,000-path body
@@ -425,7 +425,7 @@ the analytics-rollup job keeps. The script's docstring says how to run it; it ex
 |---|---|---|
 | Impact rollup, one project (`rebuild_statistics`, flaky keys included) | 19.0 s (flaky keys 3.9 s; 94,669 pairs, 1,000 tests, 0 flaky) | under 60 s |
 | Live scoring of a 10-file change on main, p95 of 50 (p50) | 50 ms (34 ms); 76 tests suggested on average | under 200 ms |
-| Upload: scoring inside the request, p50 (max of 10) | 32 ms (51 ms) | under the 2 s statement timeout |
+| Upload: scoring inside the request, p50 (max of 10) | 32 ms (51 ms) | within the 2 s total scoring budget |
 | Upload: outcome after the response, p50 (max of 10) | 502 ms (696 ms) | not in the request |
 | Replay of the last 3 days | 66 runs in 177 s: 0.4 runs/s, about 44 s per replayed day | none (one-off) |
 

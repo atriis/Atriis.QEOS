@@ -164,17 +164,17 @@ def test_scoring_ends_its_transaction(client, auth, viewer, rollbacks):
     assert rollbacks
 
 
-def test_scoring_runs_under_the_uploads_statement_timeout(client, auth, viewer, monkeypatch):
-    """The same 2 s budget as at upload (PostgreSQL only; limit_scoring_time is a no-op on SQLite), set first."""
+def test_scoring_starts_its_budget_before_scoring(client, auth, viewer, monkeypatch):
+    """The same 2 s total budget as at upload (PostgreSQL only; limit_scoring_time is a no-op on SQLite), set first."""
     calls = []
-    monkeypatch.setattr(impact_service, "limit_scoring_time", lambda db: calls.append("limit"))
+    monkeypatch.setattr(impact_service, "limit_scoring_time", lambda db, remaining=None: calls.append("limit"))
     real = impact_service.score_change
     monkeypatch.setattr(impact_service, "score_change", lambda *a, **k: (calls.append("score"), real(*a, **k))[1])
     assert client.post(IMPACT, json={"changed_paths": ["src/a.py"]}, headers=auth()).status_code == 200
-    assert calls == ["limit", "score"]
+    assert calls[0] == "limit" and "score" in calls
 
 
-def test_limit_scoring_time_sets_the_2s_timeout_on_postgresql():
+def test_limit_scoring_time_caps_the_timeout_at_what_is_left_but_at_least_1ms():
     sent = []
 
     class Session:
@@ -184,8 +184,19 @@ def test_limit_scoring_time_sets_the_2s_timeout_on_postgresql():
         def execute(self, statement, *args):
             sent.append(str(statement))
 
-    impact_service.limit_scoring_time(Session())
-    assert sent == ["SET LOCAL statement_timeout = '2s'"]
+    impact_service.limit_scoring_time(Session(), 0.75)
+    impact_service.limit_scoring_time(Session(), 0.0001)
+    assert sent == ["SET LOCAL statement_timeout = '750ms'", "SET LOCAL statement_timeout = '1ms'"]
+
+
+def test_a_budget_used_up_between_statements_answers_503(client, auth, viewer, monkeypatch, rollbacks):
+    """One total budget: each statement is fast, but the scoring as a whole is over 2 s."""
+    ticks = iter([0.0, 0.0, 0.5] + [3.0] * 100)
+    monkeypatch.setattr(impact_service, "monotonic", lambda: next(ticks))
+    response = client.post(IMPACT, json={"changed_paths": ["src/a.py"]}, headers=auth())
+    assert response.status_code == 503
+    assert response.json()["detail"] == {"code": "impact_timeout", "message": impact_service.SCORING_TIMEOUT_MESSAGE}
+    assert rollbacks
 
 
 def test_a_scoring_timeout_answers_503_with_a_message(client, auth, viewer, monkeypatch, rollbacks):

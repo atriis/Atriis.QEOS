@@ -70,9 +70,9 @@ def test_the_suggestion_never_sees_its_own_run_or_results(client, db, make_key, 
     seen = {}
     real = impact_service.score_change
 
-    def spy(session, project_id, changed_paths, branch, *, now):
+    def spy(session, project_id, changed_paths, branch, *, now, **kw):
         seen["runs"], seen["results"] = session.query(Run).count(), session.query(RunResult).count()
-        return real(session, project_id, changed_paths, branch, now=now)
+        return real(session, project_id, changed_paths, branch, now=now, **kw)
 
     monkeypatch.setattr(impact_service, "score_change", spy)
     _, key = make_key(project_id=1)
@@ -328,10 +328,11 @@ class _FakeSession:
 
 def test_scoring_runs_under_a_statement_timeout_on_postgresql_and_restores_it(monkeypatch):
     log = []
+    monkeypatch.setattr(impact_service, "monotonic", lambda: 0.0)
     monkeypatch.setattr(impact_service, "score_change", lambda *_a, **_k: log.append(("score", None)) or {"tests": []})
     assert impact_service.score_upload(_FakeSession(log), 1, ["a.py"], "main", hours_ago(0)) is not None
     assert [entry for entry, _ in log] == [
-        "SELECT current_setting('statement_timeout')", "SET LOCAL statement_timeout = '2s'", "score",
+        "SELECT current_setting('statement_timeout')", "SET LOCAL statement_timeout = '2000ms'", "score",
         "SELECT set_config('statement_timeout', :value, true)"]
     assert log[-1][1] == {"value": "30s"}
 
@@ -348,3 +349,16 @@ def test_a_scoring_timeout_rolls_back_and_the_upload_carries_on(monkeypatch, cap
     assert impact_service.score_upload(_FakeSession(log), 1, ["a.py"], "main", hours_ago(0)) is None
     assert log[-1][0] == "rollback"  # which also undoes SET LOCAL
     assert '"error": "QueryCanceled"' in capsys.readouterr().err
+
+
+def test_a_budget_used_up_between_statements_leaves_the_upload_without_a_suggestion(client, db, make_key, monkeypatch,
+                                                                                    capsys):
+    """One total budget: the clock passes 2 s after the first statements, so scoring gives up though no single
+    statement was slow. The upload still succeeds."""
+    ticks = iter([0.0, 0.0, 0.1] + [5.0] * 100)
+    monkeypatch.setattr(impact_service, "monotonic", lambda: next(ticks))
+    _, key = make_key(project_id=1)
+    run_id = upload(client, key, [("pays", "failed")])
+    assert db.get(Run, run_id) is not None
+    assert stored(db, run_id) is None
+    assert '"error": "ScoringTimeout"' in capsys.readouterr().err

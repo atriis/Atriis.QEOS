@@ -8,6 +8,7 @@ impact_test_base rows of those pairs' tests and of tests whose recorded file con
 first "no history yet" rows by name, as many as the label can list. Never the whole project's statistics."""
 import json
 import sys
+from time import monotonic
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Set, Tuple
@@ -28,8 +29,8 @@ from src.ingestion.service.impact_stats import live_excluded
 from src.ingestion.service.report_service import in_list
 
 NAMES_PER_QUERY = 200  # LIKE terms per query: SQLite's expression depth limit is 1,000
-SCORING_TIMEOUT = "2s"  # PostgreSQL statement_timeout while a change is scored (upload and POST /analytics/impact)
-SCORING_TIMEOUT_MESSAGE = ("Scoring this change took longer than 2 seconds and was stopped. Try again in a moment, or "
+SCORING_BUDGET = 2.0  # seconds: one total budget for scoring a change (upload and POST /analytics/impact)
+SCORING_TIMEOUT_MESSAGE = ("Scoring this change took longer than 2 seconds in total and was stopped. Try again in a moment, or "
                            "with fewer changed files.")
 PENDING_AFTER = timedelta(minutes=30)  # a suggestion with no outcome this long after scoring is evaluated nightly
 MAX_PENDING_PER_PASS = 500  # outcomes one nightly pass writes at most, oldest first; the rest wait for the next pass
@@ -92,7 +93,8 @@ def _by_name(db: Session, column):
 
 
 def load_statistics(db: Session, project_id: int, units: Set[str], changed_files: Optional[ChangedFiles] = None,
-                    failing: int = 0) -> Tuple[List[PairStat], Dict[str, BaseStat]]:
+                    failing: int = 0, deadline: Optional["Deadline"] = None
+                    ) -> Tuple[List[PairStat], Dict[str, BaseStat]]:
     """The rows one scoring reads: the pairs of the change's units (by unit hash, the key's leading columns), their
     tests' base rows, the base rows whose recorded file contains a changed file's name, and the first "no history yet"
     rows by (name, test_key). `failing` is the number of tests failing on the branch.
@@ -100,8 +102,13 @@ def load_statistics(db: Session, project_id: int, units: Set[str], changed_files
     "No history yet" lists at most MAX_PER_LABEL tests that no earlier label listed, by (name, test_key); at most
     `listed` tests come before it (statistical, test file changed, failing on this branch), so the first
     MAX_PER_LABEL + listed rows in that order hold every one it can list."""
+    def step() -> None:
+        if deadline is not None:
+            deadline.step(db)
+
     pairs: List[PairStat] = []
     if units:
+        step()
         hashes = sorted({unit_hash(unit) for unit in units})
         pairs = [PairStat(*row) for row in db.execute(
             select(ImpactPair.path_unit, ImpactPair.test_key, ImpactPair.changed_runs, ImpactPair.new_failures)
@@ -110,6 +117,7 @@ def load_statistics(db: Session, project_id: int, units: Set[str], changed_files
     bases: Dict[str, BaseStat] = {}
     keys = sorted({pair.test_key for pair in pairs})
     if keys:
+        step()
         for row in db.execute(select(*_BASE_COLUMNS).where(ImpactTestBase.project_id == project_id,
                                                            in_list(db, ImpactTestBase.test_key, keys))):
             bases[row[0]] = _base_stat(row)
@@ -117,10 +125,12 @@ def load_statistics(db: Session, project_id: int, units: Set[str], changed_files
     for start in range(0, len(names), NAMES_PER_QUERY):
         terms = [ImpactTestBase.file.like(_like_contains(name), escape="\\")
                  for name in names[start:start + NAMES_PER_QUERY]]
+        step()
         for row in db.execute(select(*_BASE_COLUMNS).where(ImpactTestBase.project_id == project_id, or_(*terms))):
             bases[row[0]] = _base_stat(row)
     touched = sum(1 for base in bases.values() if changed_files is not None and changed_files.touches(base.file))
     listed = min(MAX_STATISTICAL, len(keys)) + min(MAX_PER_LABEL, touched) + min(MAX_PER_LABEL, failing)
+    step()
     for row in db.execute(
             select(*_BASE_COLUMNS)
             .where(ImpactTestBase.project_id == project_id, ImpactTestBase.runs < NO_HISTORY_RUNS)
@@ -135,25 +145,51 @@ Statistics = Callable[[Set[str], ChangedFiles, int], Tuple[Sequence[PairStat], M
 
 
 def score_change(db: Session, project_id: int, changed_paths: Sequence[str], branch: Optional[str], *,
-                 now: datetime, statistics: Optional[Statistics] = None) -> dict:
+                 now: datetime, statistics: Optional[Statistics] = None, deadline: Optional["Deadline"] = None) -> dict:
     """The suggestion for a change as of `now` (spec §3.3), from the stored statistics, or from `statistics` (replay,
     whose statistics are those of the days before the run): one scoring for live and replay."""
     units = change_units(changed_paths)
     changed_files = ChangedFiles(changed_paths)
+    if deadline is not None:
+        deadline.step(db)
     failing = failing_on_branch(db, project_id, branch, now)
     if statistics is None:
-        pairs, bases = load_statistics(db, project_id, units, changed_files, failing=len(failing))
+        pairs, bases = load_statistics(db, project_id, units, changed_files, failing=len(failing), deadline=deadline)
     else:
         pairs, bases = statistics(units, changed_files, len(failing))
+    if deadline is not None:
+        deadline.step(db)
     return suggest(units, pairs, bases, history_runs=history_runs(db, project_id, now), changed_files=changed_files,
                    failing_on_branch=failing)
 
 
-def limit_scoring_time(db: Session) -> None:
-    """Every statement of this transaction is cancelled after SCORING_TIMEOUT (PostgreSQL only; SET LOCAL ends with the
-    transaction)."""
+class ScoringTimeout(Exception):
+    """The scoring's total budget is used up (the same outcome as PostgreSQL cancelling a statement)."""
+
+
+def limit_scoring_time(db: Session, remaining: float = SCORING_BUDGET) -> None:
+    """Every statement of this transaction is cancelled after `remaining` seconds, at least 1 ms (PostgreSQL only;
+    SET LOCAL ends with the transaction)."""
     if db.get_bind().dialect.name == "postgresql":
-        db.execute(text(f"SET LOCAL statement_timeout = '{SCORING_TIMEOUT}'"))
+        db.execute(text(f"SET LOCAL statement_timeout = '{max(1, int(remaining * 1000))}ms'"))
+
+
+class Deadline:
+    """One total budget for the whole scoring: `step` before each statement (or batch) raises ScoringTimeout once the
+    budget is used up, and otherwise caps the next statement's statement_timeout at what is left."""
+
+    def __init__(self, budget: float = SCORING_BUDGET):
+        self.budget = budget
+        self.started = monotonic()
+
+    def remaining(self) -> float:
+        return self.budget - (monotonic() - self.started)
+
+    def step(self, db: Session) -> None:
+        remaining = self.remaining()
+        if remaining <= 0:
+            raise ScoringTimeout()
+        limit_scoring_time(db, remaining)
 
 
 @dataclass(frozen=True)
@@ -171,7 +207,8 @@ def _failed(step: str, exc: Exception, **context) -> None:
 def score_upload(db: Session, project_id: int, changed_paths: Sequence[str], branch: Optional[str],
                  started_at: datetime) -> Optional[Scored]:
     """An upload's suggestion, scored before its run row or any of its results exists (spec §3.4), as of the run's
-    start. On PostgreSQL each statement gets SCORING_TIMEOUT, and the previous timeout is restored for the rest of the
+    start. One total budget of SCORING_BUDGET for the whole scoring (on PostgreSQL each statement is capped at what is
+    left), and the previous timeout is restored for the rest of the
     upload. Never raises: on failure (a timeout too) the upload carries on without one. The rollback (a failed
     statement aborts a PostgreSQL transaction; it also undoes SET LOCAL) loses nothing, because nothing of the upload is
     written yet."""
@@ -181,8 +218,9 @@ def score_upload(db: Session, project_id: int, changed_paths: Sequence[str], bra
         limited = db.get_bind().dialect.name == "postgresql"
         if limited:
             previous = db.execute(text("SELECT current_setting('statement_timeout')")).scalar_one()
-            limit_scoring_time(db)
-        suggestion = score_change(db, project_id, changed_paths, branch, now=as_utc(started_at))
+        deadline = Deadline()
+        deadline.step(db)
+        suggestion = score_change(db, project_id, changed_paths, branch, now=as_utc(started_at), deadline=deadline)
         if limited:
             db.execute(text("SELECT set_config('statement_timeout', :value, true)"), {"value": previous})
         return Scored(suggestion, datetime.now(timezone.utc))
