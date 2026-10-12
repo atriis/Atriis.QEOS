@@ -2,7 +2,7 @@ import type { QueryKey } from "@tanstack/react-query";
 import { useQuery } from "@tanstack/react-query";
 import { formatCount } from "../api/analytics";
 import { type AccuracyDays, type RunImpact, getImpactAccuracy, getRunImpact } from "../api/impact";
-import { REPORT_STALE_MS } from "../pages/report/useReportRequest";
+import { REPORT_STALE_MS } from "./reportCache";
 
 export const ACCURACY_DAYS: readonly AccuracyDays[] = [7, 14, 30];
 

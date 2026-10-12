@@ -170,7 +170,7 @@ export default function RunDetailPage() {
                 )}
               </div>
             )}
-            <ImpactCard projectId={Number(projectId)} runId={run.id} />
+            <ImpactCard projectId={Number(projectId)} runId={run.id} branch={run.branch} />
           </div>
 
           <FilterBar>

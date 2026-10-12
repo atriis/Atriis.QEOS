@@ -35,7 +35,9 @@ function Evidence({ test }: { test: SuggestedTest }) {
 
 /** "Suggested 12 tests · 3 newly failed · all 3 were suggested", or the missed ones by name (spec §2.1). The pills say
  *  it in a word and an icon as well as a colour (Never Alone). */
-function Outcome({ projectId, suggested, outcome }: { projectId: number; suggested: number; outcome: ImpactOutcome | null }) {
+function Outcome({ projectId, branch, suggested, outcome }: {
+  projectId: number; branch?: string | null; suggested: number; outcome: ImpactOutcome | null;
+}) {
   const lead = `Suggested ${plural(suggested, "test", "tests")}`;
   if (outcome === null) return <p className="muted impact-outcome">{`${lead} · outcome not recorded yet`}</p>;
   const failed = outcome.caught.length + outcome.missed.length;
@@ -56,13 +58,13 @@ function Outcome({ projectId, suggested, outcome }: { projectId: number; suggest
         <span>{`${lead} · ${newly} · ${formatCount(outcome.missed.length)} not suggested:`}</span>
       </p>
       <ul className="impact-list">
-        {outcome.missed.map((t) => <li key={t.test_key}><Link to={testHistoryPath(projectId, t.test_key)}>{t.name}</Link></li>)}
+        {outcome.missed.map((t) => <li key={t.test_key}><Link to={testHistoryPath(projectId, t.test_key, branch)}>{t.name}</Link></li>)}
       </ul>
     </div>
   );
 }
 
-function Body({ projectId, data }: { projectId: number; data: RunImpact }) {
+function Body({ projectId, branch, data }: { projectId: number; branch?: string | null; data: RunImpact }) {
   const [all, setAll] = useState(false);
   if (data.state === "no_change_data") return <p className="muted">No change data for this run</p>;
   const s = data.suggestion;
@@ -79,7 +81,7 @@ function Body({ projectId, data }: { projectId: number; data: RunImpact }) {
           {`Not enough history yet: ${plural(s.history_runs, "run", "runs")} with changed files, needs ${formatCount(s.needed_runs)}`}
         </p>
       )}
-      <Outcome projectId={projectId} suggested={s.tests.length} outcome={data.outcome} />
+      <Outcome projectId={projectId} branch={branch} suggested={s.tests.length} outcome={data.outcome} />
       {s.tests.length === 0 ? (
         <p className="muted">{s.state === "not_enough_history" ? "Nothing to suggest yet." : "No tests are likely affected by this change"}</p>
       ) : (
@@ -105,7 +107,7 @@ function Body({ projectId, data }: { projectId: number; data: RunImpact }) {
 
 /** "Likely affected tests" beside a run's Changes (spec 2026-10-12 §2.1): the suggestion stored at upload, each test's
  *  evidence or label, and the outcome once the run's results were compared. Loads and fails on its own. */
-export default function ImpactCard({ projectId, runId }: { projectId: number; runId: number }) {
+export default function ImpactCard({ projectId, runId, branch }: { projectId: number; runId: number; branch?: string | null }) {
   const titleId = useId();
   const query = useQuery(runImpactQuery(projectId, runId));
   return (
@@ -121,7 +123,7 @@ export default function ImpactCard({ projectId, runId }: { projectId: number; ru
         </SkeletonStatus>
       )}
       {query.error != null && <ErrorBanner error={query.error} onRetry={() => void query.refetch()} />}
-      {query.data && <Body projectId={projectId} data={query.data} />}
+      {query.data && <Body projectId={projectId} branch={branch} data={query.data} />}
     </section>
   );
 }

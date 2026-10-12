@@ -5,11 +5,9 @@ import { ApiError } from "../../api/http";
 import { type Report, type ReportRequest, type ReportSectionName, postReport } from "../../api/report";
 import { listRepositories } from "../../api/repositories";
 import { getRunUrls } from "../../api/runRequests";
+import { REPORT_STALE_MS } from "../../lib/reportCache";
 import { MAX_REPORT_KEYS, formatArea, resolveScope } from "../../lib/reportScope";
 import { ALL_BRANCHES, type ReportFilters, addDays } from "./useReportFilters";
-
-/** Report answers are reused for 5 minutes (spec: Caching). */
-export const REPORT_STALE_MS = 5 * 60_000;
 
 /** Whether the sections can be asked yet: they wait for the default branch, the case-areas join and the Play
  *  URLs they need, and are never sent unfiltered while one of those is missing. */

@@ -1149,7 +1149,7 @@ everything listed here.
 | **Flaky** | Tests that both pass and fail. **Confirmed**: passed and failed on the same commit in the same environment. **Suspected**: the result flips between consecutive runs on a branch. | Window 7/14/30/90 days, minimum runs, minimum flip rate, branch. **Quarantine** / **Release** (members and above). |
 | **Branches** | Per-branch runs, counts and pass rate. **Compare A / Compare B** charts two branches' daily pass rates. | 7 / 30 / 90 days. |
 | **Trends** | Runs, results, pass rate and duration over time. | 7 / 30 / 90 days, Daily / Weekly / Monthly, branch, environment. |
-| **Report** | Summary, pass rate by week, flaky tests, branches, the top failing and slowest tests, and **Test impact**: how often the likely affected tests stored with each run contained its new failures, how many tests they suggested per run, and the misses. | Period 7 / 30 / 90 days (Test impact uses the period when it is 7 or 30 days, else 30); **Save as PDF** (the browser's print dialog), **Download CSV**. |
+| **Report** | Summary, pass rate by week, flaky tests, branches, the top failing and slowest tests, and **Test impact**: how often the likely affected tests stored with each run contained its new failures, how many tests they suggested per run, and the misses. | Period 7 / 30 / 90 days (Test impact uses the Report's period when it is the last 7, 14 or 30 days up to today, and 30 days otherwise); **Save as PDF** (the browser's print dialog), **Download CSV**. |
 
 - **Pass rate** = passed ÷ (executions − skipped). Errored counts as not passed.
 - **Confirmed flaky needs environments.** Set `QEOS_ENVIRONMENT` (or `environment:` in the action)

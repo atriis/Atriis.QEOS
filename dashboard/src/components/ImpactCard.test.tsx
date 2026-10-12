@@ -29,15 +29,15 @@ function impact(extra: Partial<RunImpact> = {}): RunImpact {
   };
 }
 
-function mount() {
+function mount(branch?: string | null) {
   setAccessToken("acc");
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={qc}><MemoryRouter><ImpactCard projectId={42} runId={61} /></MemoryRouter></QueryClientProvider>);
+  render(<QueryClientProvider client={qc}><MemoryRouter><ImpactCard projectId={42} runId={61} branch={branch} /></MemoryRouter></QueryClientProvider>);
 }
 
-function renderCard(answer: RunImpact) {
+function renderCard(answer: RunImpact, branch?: string | null) {
   server.use(http.get(IMPACT_URL, () => HttpResponse.json(answer)));
-  mount();
+  mount(branch);
 }
 
 const card = () => screen.findByRole("region", { name: "Likely affected tests" });
@@ -75,6 +75,12 @@ test("a new failure that was not suggested is named as missed", async () => {
   expect(await screen.findByText("Suggested 4 tests · 2 newly failed · 1 not suggested:")).toBeInTheDocument();
   expect(screen.getByText("Missed")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "refunds" })).toHaveAttribute("href", `/projects/42/tests/${key("refunds")}`);
+});
+
+test("a missed test links its history on the run's branch", async () => {
+  renderCard(impact({ outcome: { evaluated_at: "2026-10-12T10:01:00Z", caught: [], missed: [ref("refunds")] } }), "release/1.2");
+  expect(await screen.findByRole("link", { name: "refunds" })).toHaveAttribute(
+    "href", `/projects/42/tests/${key("refunds")}?branch=release%2F1.2`);
 });
 
 test("not enough history still lists the tests that are always included; a pending outcome says so", async () => {
