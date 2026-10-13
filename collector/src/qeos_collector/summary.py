@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import math
 import re
-from decimal import ROUND_HALF_UP, Decimal
 from typing import Callable, List, Mapping, Sequence
 
 STAGES = {"suggested": "suggested tests", "rest": "the rest", "all": "full suite"}
@@ -14,17 +13,23 @@ LABELS = {"test_file_changed": "test file changed", "failing_on_branch": "failin
 SHOWN = 50
 
 
+def _round(value: float) -> int:
+    """JavaScript's Math.round: halves go up."""
+    return math.floor(value + 0.5)
+
+
 def duration(seconds: float) -> str:
-    """The dashboard's formatDuration (dashboard/src/api/analytics.ts), rule for rule, on whole milliseconds:
-    "400 ms", then toFixed(1) seconds (ties away from zero, on the double's exact value) below 60 s, then minutes and
-    Math.round of the remaining seconds. So 119.5 s reads "1m 60s" there and here: one figure, one wording."""
-    ms = math.floor(seconds * 1000 + 0.5)
+    """The dashboard's formatDuration (dashboard/src/api/analytics.ts), rule for rule, on whole milliseconds: "400 ms";
+    below 60 s once rounded to tenths, "42.5 s"; else whole seconds, rounded first and carried into the minutes,
+    "1m 05s" (119.5 s is "2m 00s"). One figure, one wording, there and here."""
+    ms = _round(seconds * 1000)
     if ms < 1000:
         return f"{ms} ms"
-    secs = ms / 1000
-    if secs < 60:
-        return f"{Decimal(secs).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)} s"
-    return f"{math.floor(secs / 60)}m {math.floor(math.fmod(secs, 60) + 0.5):02d}s"
+    tenths = _round(ms / 100)
+    if tenths < 600:
+        return f"{tenths // 10}.{tenths % 10} s"
+    total = _round(ms / 1000)
+    return f"{total // 60}m {total % 60:02d}s"
 
 
 def flat(value) -> str:

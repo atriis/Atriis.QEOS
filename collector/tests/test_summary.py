@@ -15,12 +15,13 @@ def stage(name, tests, failed, seconds):
 
 
 # The dashboard's formatDuration (dashboard/src/api/analytics.ts) on these milliseconds, as node 24 printed it from
-# that file's own source. The rounding boundaries are the point: toFixed(1) ties go up (2.25 -> "2.3", where Python's
-# "%.1f" says "2.2"); Math.round(59.5) is 60, so 119.5 s is "1m 60s"; 178.5 s is "2m 59s" (Python's round says 58).
+# that file's own source; its test (analytics.test.ts) pins the same table. The rounding boundaries are the point:
+# halves go up (2.25 s -> "2.3 s", where Python's "%.1f" says "2.2"; 178.5 s -> "2m 59s", where Python's round says
+# 58), and the rounded seconds carry into the minutes (59.95 s -> "1m 00s", 119.5 s -> "2m 00s", never "1m 60s").
 DASHBOARD = [(0, "0 ms"), (400, "400 ms"), (999, "999 ms"), (1000, "1.0 s"), (2250, "2.3 s"), (2350, "2.4 s"),
-             (3000, "3.0 s"), (42500, "42.5 s"), (59940, "59.9 s"), (59950, "60.0 s"), (59960, "60.0 s"),
-             (60000, "1m 00s"), (65000, "1m 05s"), (119400, "1m 59s"), (119499, "1m 59s"), (119500, "1m 60s"),
-             (119999, "1m 60s"), (120000, "2m 00s"), (178500, "2m 59s"), (915000, "15m 15s")]
+             (3000, "3.0 s"), (42500, "42.5 s"), (59940, "59.9 s"), (59950, "1m 00s"), (59960, "1m 00s"),
+             (59999, "1m 00s"), (60000, "1m 00s"), (65000, "1m 05s"), (119400, "1m 59s"), (119499, "1m 59s"),
+             (119500, "2m 00s"), (119999, "2m 00s"), (120000, "2m 00s"), (178500, "2m 59s"), (915000, "15m 15s")]
 
 
 @pytest.mark.parametrize("ms, text", DASHBOARD)

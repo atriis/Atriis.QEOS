@@ -233,9 +233,9 @@ export function formatPassRate(rate: number | null): string {
 export function formatDuration(ms: number | null): string {
   if (ms === null) return "—";
   if (ms < 1000) return `${ms} ms`;
-  const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)} s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = Math.round(seconds % 60);
-  return `${minutes}m ${String(rest).padStart(2, "0")}s`;
+  // Round first, then split: 59.95 s rounds to 60.0 s, which reads "1m 00s"; 119.5 s to 120 s, "2m 00s"
+  const tenths = Math.round(ms / 100);
+  if (tenths < 600) return `${(tenths / 10).toFixed(1)} s`;
+  const total = Math.round(ms / 1000);
+  return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, "0")}s`;
 }

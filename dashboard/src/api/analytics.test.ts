@@ -78,3 +78,12 @@ test("formatters", () => {
   expect(formatDuration(65000)).toBe("1m 05s");
   expect(formatDuration(null)).toBe("—");
 });
+
+// The collector's step summary (collector/tests/test_summary.py) pins the same table: one figure, one wording
+test.each([
+  [0, "0 ms"], [999, "999 ms"], [1000, "1.0 s"], [2250, "2.3 s"], [2350, "2.4 s"], [59940, "59.9 s"],
+  [59950, "1m 00s"], [59999, "1m 00s"], [60000, "1m 00s"], [119400, "1m 59s"], [119499, "1m 59s"],
+  [119500, "2m 00s"], [119999, "2m 00s"], [120000, "2m 00s"], [178500, "2m 59s"], [915000, "15m 15s"],
+])("formatDuration(%i) carries rounded seconds into minutes: %s", (ms, text) => {
+  expect(formatDuration(ms)).toBe(text);
+});
