@@ -285,6 +285,47 @@ XML
   COLLECTOR_RUN_ID="$(sed -n 's/.*uploaded run \([0-9][0-9]*\).*/\1/p' "$TMP/collector_err" | head -1)"
   check "read the collector's run" 200 GET "$BASE/api/v1/runs/${COLLECTOR_RUN_ID:-0}" "${AUTH[@]}"
   body_has "... with the collector's counts" '"total":3,"passed":1,"failed":1,"skipped":1,"errored":0'
+  # qeos-collector check says whether the key may read test suggestions (GET /collect/key can_read_impact)
+  if (cd collector/src && QEOS_URL="$BASE" QEOS_API_KEY="$API_KEY" "$PY" -m qeos_collector check \
+        --ca-file "$TMP/gateway.crt") 2>"$TMP/check_cli_err" \
+     && grep -qx "qeos: Test suggestions: allowed" "$TMP/check_cli_err"; then
+    pass "collector check says the key may read test suggestions"
+  else
+    fail "collector check: $(tail -c 400 "$TMP/check_cli_err")"
+  fi
+  # qeos-collector impact (spec 2026-10-13 §2.1): a commit's changed files, scored through the gateway with the API
+  # key. The commit is in a scratch repository, so the change exists even in a depth-1 or pull-request checkout
+  # (which would give "no change data" and never ask QEOS)
+  IMPACT_REPO="$TMP/impact-repo"
+  mkdir -p "$IMPACT_REPO/src/impact"
+  git -C "$IMPACT_REPO" init -q
+  echo "a = 1" > "$IMPACT_REPO/src/impact/smoke.py"
+  git -C "$IMPACT_REPO" add -A && git -C "$IMPACT_REPO" -c user.name=smoke -c user.email=smoke@acme.test \
+    commit -qm base
+  echo "a = 2" > "$IMPACT_REPO/src/impact/smoke.py"
+  git -C "$IMPACT_REPO" -c user.name=smoke -c user.email=smoke@acme.test commit -qam change
+  # Git Bash: the Windows form of the path, which a native git reads from GIT_DIR
+  IMPACT_GIT="$(cd "$IMPACT_REPO/.git" && { pwd -W 2>/dev/null || pwd; })"
+  collector_impact() {  # KEY ERRFILE [ARGS...]: qeos-collector impact on the scratch repository's last commit
+    local key="$1" err="$2"
+    shift 2
+    (cd collector/src && GIT_DIR="$IMPACT_GIT" GITHUB_BASE_REF="" CI_MERGE_REQUEST_TARGET_BRANCH_NAME="" \
+       QEOS_URL="$BASE" QEOS_API_KEY="$key" "$PY" -m qeos_collector impact --commit HEAD --branch smoke-collector \
+       --ca-file "$TMP/gateway.crt" "$@") 2>"$err"
+  }
+  # 0 (a suggestion) and 3 (nothing likely affected) both mean QEOS answered; 4 means it was not reached
+  impact_rc=0
+  collector_impact "$API_KEY" "$TMP/impact_cli_err" --format json --out "$TMP/impact.json" || impact_rc=$?
+  if { [ "$impact_rc" = 0 ] || [ "$impact_rc" = 3 ]; } && ! grep -qE "no change data|no changed files" "$TMP/impact_cli_err"; then
+    pass "collector impact scores a commit's change through the gateway (exit $impact_rc)"
+  else
+    fail "collector impact exited $impact_rc: $(tail -c 400 "$TMP/impact_cli_err")"
+  fi
+  if grep -qF -- "$API_KEY" "$TMP/impact_cli_err"; then
+    fail "collector impact output contains the API key"
+  else
+    pass "collector impact output never shows the API key"
+  fi
 fi
 
 # ---- masking: secrets in test output never reach the database ----
@@ -503,6 +544,17 @@ check "the collector's scoring with an upload-only key -> 403" 403 POST "$BASE/a
   -H "Authorization: Bearer $UPLOAD_ONLY_KEY" -H "Content-Type: application/json" \
   -d '{"changed_paths":["src/impact/smoke.py"]}'
 body_has "... with its code" '"code":"impact_not_allowed"'
+if [ -n "$PY" ]; then
+  # The collector turns that 403 into exit 2 and says who can allow it
+  upload_only_rc=0
+  collector_impact "$UPLOAD_ONLY_KEY" "$TMP/impact_403_err" >/dev/null || upload_only_rc=$?
+  if [ "$upload_only_rc" = 2 ] && grep -qF "Ask a project owner or admin to allow test suggestions" \
+       "$TMP/impact_403_err" && ! grep -qF -- "$UPLOAD_ONLY_KEY" "$TMP/impact_403_err"; then
+    pass "collector impact with an upload-only key exits 2 and says who can allow it"
+  else
+    fail "collector impact with an upload-only key exited $upload_only_rc: $(tail -c 400 "$TMP/impact_403_err")"
+  fi
+fi
 check "revoke the upload-only key" 204 DELETE "$BASE/api/v1/projects/$PROJECT_ID/api-keys/${UPLOAD_ONLY_ID:-0}" "${AUTH[@]}"
 check "impact accuracy -> ingestion-service (analytics route)" 200 GET \
   "$BASE/api/v1/projects/$PROJECT_ID/analytics/impact-accuracy?days=7" "${AUTH[@]}"

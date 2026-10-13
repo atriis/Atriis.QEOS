@@ -11,11 +11,13 @@ from __future__ import annotations
 
 import http.client
 import json
+import re
 import ssl
+import sys
 from dataclasses import dataclass, field
 from typing import Callable, List, Mapping, Optional
 
-from qeos_collector import __version__
+from qeos_collector import __version__, cucumber
 from qeos_collector.ci import detect
 from qeos_collector.config_file import load_config
 from qeos_collector.features import _code  # a 403 or 503 detail is {code, message}
@@ -27,6 +29,7 @@ from qeos_collector.upload import (
 IMPACT_PATH = "/api/v1/collect/impact"
 SUGGESTED, NOTHING, UNAVAILABLE = 0, 3, 4
 MAX_PATHS = 5000  # the endpoint's cap; the collector's own diff stops at 1,000 files
+FORMATS = ("cucumber", "list", "json")
 # 403 impact_not_allowed: the key is upload-only (per-key permission "can read test suggestions")
 NOT_ALLOWED = ("This API key may not read test suggestions. Ask a project owner or admin to allow test suggestions "
                "for this key.")
@@ -128,3 +131,66 @@ def fetch(target: Target, api_key: str, env: Mapping[str, str], *, collect: Opti
             return Suggestion(UNAVAILABLE, "QEOS ran out of time scoring the change (impact_timeout)", paths=paths)
         return Suggestion(UNAVAILABLE, f"the platform answered {status}", paths=paths)
     raise ConfigError(f"the platform refused the change ({status}): {_detail(raw)}")
+
+
+def _cell(value) -> str:
+    return re.sub(r"[\t\r\n]+", " ", str(value or ""))
+
+
+def render(data: dict, fmt: str, locate: Callable[[dict], List[str]]) -> str:
+    """The suggestion as `--format` says (spec 2026-10-13 §2.1): one entry per line, each line once."""
+    tests = list(data.get("tests") or [])
+    if fmt == "json":
+        return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+    if fmt == "list":
+        lines = ["\t".join(_cell(test.get(key)) for key in ("suite", "class_name", "name")) for test in tests]
+    else:
+        lines = [line for test in tests
+                 for line in (locate(test) or [cucumber.name_filter(str(test.get("name") or ""))])]
+    seen: set = set()
+    unique = [line for line in lines if not (line in seen or seen.add(line))]
+    return "".join(f"{line}\n" for line in unique)
+
+
+def _print(text: str) -> None:
+    try:
+        sys.stdout.write(text)
+    except UnicodeEncodeError:  # a console that cannot show the characters
+        sys.stdout.write(text.encode("ascii", "backslashreplace").decode("ascii"))
+    sys.stdout.flush()
+
+
+def _write(path: str, text: str) -> None:
+    # UTF-8 with LF line endings on every OS: the file feeds another tool
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+
+
+def run(args, env: Mapping[str, str], api_key: str, say: Callable[[str], None], cwd: str) -> int:
+    """qeos-collector impact: the suggestion on stdout (or --out), messages on stderr, the suggestion's code as the
+    exit code (plan Rulings 2, 15)."""
+    try:
+        target = resolve(args, env, api_key, cwd)
+        found = fetch(target, api_key, env)
+    except ConfigError:
+        if args.out:
+            try:  # a later step never reads a stale list, even after a configuration error
+                _write(args.out, "")
+            except OSError:
+                pass
+        raise
+    fmt = args.format or ("cucumber" if cucumber.has_feature_files(cwd) else "list")
+    text = ""
+    if found.code == SUGGESTED:
+        text = render(found.data or {}, fmt, lambda test: cucumber.locate(cwd, test))
+        say(f"{len(found.tests)} likely affected test(s) for {len(found.paths)} changed file(s)")
+    else:
+        say(f"no suggestion: {found.reason}")
+    if args.out:
+        try:
+            _write(args.out, text)  # emptied when there is no suggestion (exit 3 or 4)
+        except OSError as exc:
+            raise ConfigError(f"cannot write {args.out}: {exc.strerror or exc}") from None
+    else:
+        _print(text)
+    return found.code

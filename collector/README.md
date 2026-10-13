@@ -216,6 +216,10 @@ API key (a `GET /api/v1/collect/key` names the project it belongs to), and —
 when patterns are given — that report files match and parse. Exits 2 on the
 first failed check, 0 when everything passes.
 
+It also says whether the key may read test suggestions, which `qeos-collector impact` needs:
+`Test suggestions: allowed` or `Test suggestions: not allowed`. A platform older than suggested tests first
+prints neither.
+
 ## `qeos-collector import-features`
 
 Keeps the project's test cases in sync with the Gherkin `.feature` files in your repository.
@@ -271,6 +275,47 @@ jobs:
           QEOS_API_KEY: ${{ secrets.QEOS_API_KEY }}
 ```
 
+## `qeos-collector impact`
+
+New in 0.7.0. Prints the tests the current change likely affects (test impact analysis, ADR-029), to run them first
+or to feed another tool:
+- **The change** is the one an upload would send: the pull- or merge-request base, else the commit's parent. The
+  checkout needs that history: `fetch-depth: 0` on GitHub pull requests. A change with no changed files is never
+  sent.
+- **The scoring:** QEOS scores the change with the project API key (`POST /api/v1/collect/impact`).
+- **The key's permission:** API keys are upload-only by default. A project owner or admin allows **test
+  suggestions** for a key, when creating it or later in Project Settings > API keys. Without it QEOS answers 403
+  and the command exits 2: "This API key may not read test suggestions. Ask a project owner or admin to allow test
+  suggestions for this key." `qeos-collector check` says whether the key has it.
+
+```bash
+qeos-collector impact                     # Cucumber locations when the repository has .feature files
+qeos-collector impact --format list       # suite<TAB>class<TAB>name, one test per line
+qeos-collector impact --format json --out impact.json
+```
+
+- **`--format cucumber`:**
+  - one `path/to/x.feature:LINE` per line, with an outline's rows each on their own line;
+  - the lines come from the local `.feature` files (English keywords);
+  - a scenario whose line is unknown (a `classpath:` uri, another language) is printed as a name filter,
+    `--name "^Pays with card$"`. Characters special to a regular expression or to the shell become `.`. The
+    filters are printed for POSIX shells (bash, sh); `run-impact` (also 0.7.0) never passes names and is the
+    supported way to run the suggestion, on Windows too.
+- **`--format list`:** `suite<TAB>class<TAB>name`.
+- **`--format json`:** the whole suggestion, with each test's `kind` and `evidence`.
+- **`--out FILE`:** write there instead of stdout, as UTF-8 with LF line endings. When there is nothing to suggest,
+  or QEOS cannot answer, the file is emptied, never left with an earlier list.
+- **`--url`, `--ca-file`, `--client-cert`, `--client-key`, `--branch`, `--commit`:** as for `upload`.
+
+| Exit | Meaning |
+|---|---|
+| 0 | A suggestion was printed. Below 20 runs of history it holds only labelled tests: failing on this branch, test file changed, no history yet |
+| 3 | Nothing to suggest: no change data (or no changed files), or no test is likely affected |
+| 4 | QEOS could not be reached, was overloaded (429, 5xx), or ran out of time scoring (503 `impact_timeout`) |
+| 2 | A configuration error: no URL or key, TLS trust, an invalid key (401), a key without the test suggestions permission (403), a QEOS older than this command (404) |
+
+None of them means "tests failed": a pipeline branches on them.
+
 ## `.qeos.yml`
 
 Project defaults, read from the working directory — flags beat environment
@@ -307,6 +352,7 @@ a failing test names the team that owns it.
 | 2 | A usage or configuration error: no URL or key, no file matched, an `http://` URL that is not localhost, an unusable `--ca-file`, an invalid `--trigger` / `QEOS_TRIGGER` |
 
 By default an unreachable platform never turns a build red; a misconfigured collector always does.
+`impact` (and `run-impact`) have their own codes, 3 and 4 included: see their sections.
 
 ## Gating on quarantine (`--gate`)
 

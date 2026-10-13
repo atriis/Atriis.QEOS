@@ -626,7 +626,8 @@ qeos-collector upload "reports/**/*.xml" --ca-file ~/qeos-ca.crt
   GitHub Action and the Jenkins `ref` accept it). `--ca-file` is needed only for the local
   self-signed certificate or a private CA.
 - `check` tests, in order: the URL, TLS trust, the API key (it names the project), and that the
-  files match and parse. It exits 2 on the first failure.
+  files match and parse. It exits 2 on the first failure. It also prints whether the key may read
+  test suggestions (`Test suggestions: allowed` or `not allowed`, [4.1.1](#411-api-keys)).
 - `upload --dry-run` prints the JSON and sends nothing. It needs neither a URL nor a key.
 - Exit codes: `0` uploaded (or the platform was unreachable: by default, an outage never turns a
   build red); `1` the upload failed and `--fail-on-error` or `--gate` is set; `2` a
@@ -647,6 +648,28 @@ The API key is never read from that file. Full reference: [`collector/README.md`
 With a `CODEOWNERS` file (root, `.github/` or `docs/`), each result carries its owners, which
 are shown on the run page. For a list of changed files per run, check out at least two commits
 (`fetch-depth: 2` on GitHub).
+
+#### 4.1.3a Suggested tests from the command line (`impact`)
+
+From collector 0.7.0, `qeos-collector impact` prints the tests the current change likely affects
+([Test impact](#test-impact)), to run them first or to feed another tool. The change is the one an upload would send
+(the pull- or merge-request base, else the commit's parent), so the checkout needs that history (`fetch-depth: 0` on
+GitHub pull requests). The key needs the **test suggestions** permission ([4.1.1](#411-api-keys)).
+
+```bash
+qeos-collector impact                     # path/to/x.feature:LINE per line when the repository has .feature files
+qeos-collector impact --format list       # suite<TAB>class<TAB>name
+qeos-collector impact --format json --out impact.json
+```
+
+- `--out FILE` writes UTF-8 with LF line endings; it is emptied when there is nothing to suggest, so a later step
+  never reads an earlier list.
+- A scenario whose line is unknown is printed as a `--name "^…$"` filter, for POSIX shells. `run-impact` (also
+  0.7.0) is the supported way to run the suggestion, on Windows too.
+- Exit codes (none of them means tests failed): `0` a suggestion was printed; `3` nothing to suggest (no change
+  data, or no test likely affected); `4` QEOS unreachable, overloaded (429, 5xx) or out of time; `2` a configuration
+  error, including a key without the test suggestions permission (403). Full reference:
+  [`collector/README.md`](../collector/README.md#qeos-collector-impact).
 
 #### 4.1.4 GitHub Actions
 
@@ -1215,6 +1238,8 @@ every 24 hours.
   new failures in runs that had a stored suggestion, over 7, 14 or 30 days, with the average number of tests
   suggested per run beside it (suggesting everything catches everything), live and replayed apart, and the misses.
 - **Run likely affected** on **Test cases**: see [4.3](#43-run-from-qeos-play-and-stop).
+- **From CI or the command line:** `qeos-collector impact` prints the suggestion for the current change
+  ([4.1.3a](#413a-suggested-tests-from-the-command-line-impact)).
 - **Replay history:** to fill the figure from past runs, run once
   `docker compose run --rm impact-rollup python -m src.ingestion.jobs.impact_rollup --backfill-days 30`
   (1 to 90 days). Those runs are scored with statistics from earlier days only, marked *replayed* and counted
@@ -1688,6 +1713,7 @@ The gateway always joins a Docker network fixed at `172.30.1.0/24`, with monitor
 | 429 Too Many Requests | Per-IP rate limit (5/s on sign-in, 20/s API, 10/s uploads). Wait a second. Behind a proxy in production, check `GATEWAY_TRUSTED_PROXIES` (set by the prod file). |
 | SSO button shows, sign-in answers 503 | auth-service lacks `GOOGLE_CLIENT_ID` / `AZURE_CLIENT_ID` + `AZURE_ALLOWED_TENANTS`: use the override file ([3.8](#38-single-sign-on-google-and-microsoft)). |
 | Collector exits 2 | A configuration problem (URL, key, no matching files, `http://` URL, bad `--ca-file`, invalid `--trigger`). `qeos-collector check` names it. |
+| `impact` exits 2: "This API key may not read test suggestions" | The key is upload-only (403 `impact_not_allowed`). A project owner or admin turns on the key's **Test suggestions** switch in Settings → **API keys** ([4.1.1](#411-api-keys)); `qeos-collector check` then prints `Test suggestions: allowed`. |
 | My run doesn't appear in QEOS | Check Settings › Collection and the collector's `run not collected` line: the run looked manual and the project does not collect manual runs ([4.1.8a](#418a-manual-runs-and-the-run-trigger)). Pass `--trigger automatic` if it is not. |
 | `collector-action` fails with `has an empty revision (after @)` | collector-action 0.5.1 and earlier built its install URL from variables GitHub leaves empty inside reusable workflows. Use `@collector-v0.5.2` or later, or the floating `@collector-v0`. |
 | Collector: certificate verify failed | Local stack: `--ca-file` with the gateway certificate. Private CA: `--ca-file` with that CA. |

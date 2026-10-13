@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Callable, List, Mapping, Optional, Sequence
 
-from qeos_collector import __version__, features
+from qeos_collector import __version__, features, impact
 from qeos_collector.ci import detect, sanitize_key
 from qeos_collector.codeowners import load_codeowners
 from qeos_collector.config_file import FILE_NAME, LEGACY_FILE_NAME, load_config, uses_legacy_file
@@ -140,6 +140,26 @@ def build_parser() -> argparse.ArgumentParser:
     import_features.add_argument("--dry-run", action="store_true", help="print the plan; change nothing")
     import_features.add_argument("--url", help="platform URL (default: $QEOS_URL)")
     import_features.add_argument("--ca-file", help="trust exactly this CA certificate (default: $QEOS_CA_FILE)")
+    impact_cmd = commands.add_parser(
+        "impact",
+        help="print the tests the current change likely affects, from QEOS",
+        description="Ask QEOS which tests the change likely affects: the files an upload would send as changed (the "
+        "pull- or merge-request base, else the commit's parent). Exit codes: 0 a suggestion was printed, 3 nothing "
+        "to suggest, 4 QEOS unreachable or out of time, 2 a configuration error (including a key that may not "
+        "read test suggestions); none of them means tests failed. The API key is read from QEOS_API_KEY only.",
+    )
+    impact_cmd.add_argument("--format", choices=impact.FORMATS,
+                            help="cucumber: one path/to/x.feature:LINE per line (the default when the working "
+                                 "directory has .feature files); list: suite<TAB>class<TAB>name; json: the whole "
+                                 "suggestion")
+    impact_cmd.add_argument("--out", metavar="FILE",
+                            help="write the suggestion to FILE instead of stdout (emptied when there is none)")
+    impact_cmd.add_argument("--url", help="platform URL (default: $QEOS_URL)")
+    impact_cmd.add_argument("--ca-file", help="trust exactly this CA certificate (default: $QEOS_CA_FILE)")
+    impact_cmd.add_argument("--client-cert", help="client certificate for mTLS (default: $QEOS_CLIENT_CERT)")
+    impact_cmd.add_argument("--client-key", help="private key for --client-cert (default: $QEOS_CLIENT_KEY)")
+    impact_cmd.add_argument("--branch", help="default: $QEOS_BRANCH, else detected")
+    impact_cmd.add_argument("--commit", help="the commit whose change is scored (default: $QEOS_COMMIT, else detected)")
     return parser
 
 
@@ -177,7 +197,16 @@ def main(
             return 2
     if args.command == "import-features":
         try:
+            _usable_key(api_key)
             return features.run(args, env, api_key, say, os.getcwd())
+        except ConfigError as exc:
+            say(str(exc))
+            return 2
+    if args.command == "impact":
+        # Its own codes (0 a suggestion, 3 nothing, 4 unavailable); never softened like an upload's
+        try:
+            _usable_key(api_key)
+            return impact.run(args, env, api_key, say, os.getcwd())
         except ConfigError as exc:
             say(str(exc))
             return 2
@@ -222,6 +251,13 @@ def main_deprecated() -> int:
     return main()
 
 
+def _usable_key(api_key: str) -> None:
+    """Refused before any request: http.client would otherwise reject the header with an error that quotes the key
+    in a form the output scrubbing does not recognise. The one key check of every command that sends the key."""
+    if api_key and not _API_KEY.match(api_key):
+        raise ConfigError("QEOS_API_KEY must be printable ASCII without spaces; check the CI secret")
+
+
 def _gate(receipt: dict, say: _Output) -> int:
     """The run's verdict for CI: failures of quarantined tests do not count."""
     if "blocking" in receipt:
@@ -249,11 +285,12 @@ def _check(args, env: Mapping[str, str], api_key: str, say: _Output) -> int:
 
     if not api_key:
         raise ConfigError("QEOS_API_KEY is not set; the API key is read from the environment only")
-    if not _API_KEY.match(api_key):
-        raise ConfigError("QEOS_API_KEY must be printable ASCII without spaces; check the CI secret")
+    _usable_key(api_key)
     context = make_context(pick(args.ca_file, "QEOS_CA_FILE"))
     identity = check_key(url, api_key, context)
     say(f"key: ok (project {identity.get('project_id', '?')}, key {identity.get('name', '?')!r})")
+    if isinstance(identity.get("can_read_impact"), bool):  # absent on a platform older than suggested tests first
+        say(f"Test suggestions: {'allowed' if identity['can_read_impact'] else 'not allowed'}")
 
     if args.patterns:
         files = _expand(args.patterns)
@@ -289,10 +326,7 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
             raise ConfigError("QEOS_URL is not set (or pass --url, or url: in .qeos.yml)")
         if not api_key:
             raise ConfigError("QEOS_API_KEY is not set; the API key is read from the environment only")
-        if not _API_KEY.match(api_key):
-            # Checked here because http.client would otherwise reject the header with an error that
-            # quotes the key in a form the output scrubbing does not recognise
-            raise ConfigError("QEOS_API_KEY must be printable ASCII without spaces; check the CI secret")
+        _usable_key(api_key)
         endpoint = endpoint_for(url)
         context = make_context(
             pick(args.ca_file, "QEOS_CA_FILE", file_key="ca-file"),

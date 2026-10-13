@@ -327,6 +327,22 @@ def test_check_passes_and_uploads_nothing(platform, report, capsys):
     assert [r["path"] for r in platform.requests] == ["/api/v1/collect/key"]
 
 
+@pytest.mark.parametrize("allowed, line", [(True, "qeos: Test suggestions: allowed"),
+                                           (False, "qeos: Test suggestions: not allowed")])
+def test_check_says_whether_the_key_may_read_test_suggestions(platform, capsys, allowed, line):
+    platform.reply(200, {"project_id": 7, "name": "ci", "can_read_impact": allowed})
+
+    assert run(["check"], env_for(platform)) == 0
+    assert line in capsys.readouterr().err.splitlines()
+
+
+def test_check_against_an_older_platform_says_nothing_about_test_suggestions(platform, capsys):
+    platform.reply(200, {"project_id": 7, "name": "ci"})
+
+    assert run(["check"], env_for(platform)) == 0
+    assert "Test suggestions" not in capsys.readouterr().err
+
+
 def test_check_without_patterns_checks_config_only(platform, capsys):
     platform.reply(200, {"project_id": 7, "name": "ci"})
 
