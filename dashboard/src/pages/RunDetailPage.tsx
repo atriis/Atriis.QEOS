@@ -10,6 +10,8 @@ import FilterBar from "../components/FilterBar";
 import ImpactCard from "../components/ImpactCard";
 import Message from "../components/Message";
 import StatusDot from "../components/StatusDot";
+import StatusPill from "../components/StatusPill";
+import { isSubset, stagesLine } from "../lib/runScope";
 import { oneOf, useUrlState } from "../lib/useUrlState";
 import PageHeader from "../components/PageHeader";
 import { tableCardClass, useIsWide } from "../lib/useIsWide";
@@ -37,6 +39,7 @@ export default function RunDetailPage() {
   });
 
   const run = query.data;
+  const stagesText = run ? stagesLine(run) : null;
   const ordered = useMemo(
     () => [...(run?.results ?? [])].sort((a, b) => (RANK[a.status] ?? OTHER_RANK) - (RANK[b.status] ?? OTHER_RANK)),
     [run?.results],
@@ -107,6 +110,12 @@ export default function RunDetailPage() {
               {run.commit_message && <span> · {run.commit_message}</span>}
               {run.pr_number && <span> · PR #{run.pr_number}</span>}
               {run.base_branch && <span> · into {run.base_branch}</span>}
+            </p>
+          )}
+          {stagesText !== null && (
+            <p className="run-stages">
+              {isSubset(run) && <><StatusPill tone="neutral" label="Suggested only" />{" "}</>}
+              <span>{stagesText}</span>
             </p>
           )}
           {previousRun && (

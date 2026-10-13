@@ -1090,3 +1090,6 @@ button.switch[aria-busy="true"] { cursor: progress; }
 .likely-affected-form label { flex: 0 1 320px; min-width: min(100%, 240px); }
 .likely-affected-status:empty { margin: 0; }
 .likely-affected-heading { margin: var(--space-4) 0 var(--space-2); }
+
+/* run-impact's stages on the run page (spec 2026-10-13 §3.2): figures line up from run to run */
+.run-stages { font-variant-numeric: tabular-nums; }

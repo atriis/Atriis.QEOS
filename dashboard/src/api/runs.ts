@@ -2,6 +2,26 @@ import { apiFetch, buildQuery } from "./http";
 
 // Types mirror platforms/ingestion-service/src/ingestion/schemas/run.py
 
+/** A run's scope, as the ingestion's `SCOPES` (models/run.py). "impact-subset": only the suggested tests ran
+ *  (`run-impact --suggested-only`, or a `--fail-fast` stop). */
+export const SCOPES = ["full", "impact-subset"] as const;
+export type RunScope = (typeof SCOPES)[number];
+
+/** One stage of a `run-impact` run (spec 2026-10-13 §3.1). */
+export interface RunStage {
+  name: "suggested" | "rest" | "all";
+  duration_s: number;
+  tests: number;
+  failed: number;
+}
+
+export interface RunStages {
+  stages: RunStage[];
+  /** From the start of stage 1 to the end of the first failing scenario; null without a failure. */
+  time_to_first_failure_s: number | null;
+  stopped_after_stage: 1 | null;
+}
+
 export interface Run {
   id: number;
   project_id: number;
@@ -15,6 +35,10 @@ export interface Run {
   commit_message: string | null;
   pr_number: number | null;
   base_branch: string | null;
+  /** Older servers omit it: a full run. */
+  scope?: RunScope;
+  /** run-impact's stages; null (or absent) for an ordinary upload. */
+  stages?: RunStages | null;
   started_at: string;
   finished_at: string;
   duration_ms: number;
@@ -86,6 +110,8 @@ export interface RunFilters {
   author?: string;
   since?: string; // ISO instant, inclusive
   until?: string; // ISO instant, exclusive
+  /** "full" hides runs of only the suggested tests. */
+  scope?: RunScope;
 }
 
 export function listRuns(

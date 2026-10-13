@@ -454,6 +454,13 @@ Likely affected tests (spec `docs/superpowers/specs/2026-10-12-test-impact-analy
   - **Plain Graphite sentences** for "Not enough history yet: N runs with changed files, needs 20" (the labelled tests are still listed; with none, "Nothing to suggest yet."), "No change data for this run", and a run with changes but no stored suggestion ("uploaded before test impact analysis, or scoring failed").
   - **Replayed:** a neutral "Replayed" pill beside the heading, and a sentence that says so.
   - Lists past 15 fold behind a ghost "Show all n" button that becomes "Show fewer" (`aria-expanded`). Loading is a skeleton in the card's own status region; a failure is an Error Banner with Retry inside the card, so the rest of the run page stays usable.
+- **Suggested tests first** (spec `docs/superpowers/specs/2026-10-13-suggested-tests-first-design.md`):
+  - **Run page line** (`.run-stages`, tabular figures), under the run's metadata, only for a run uploaded by
+    `run-impact`. For example: "Suggested tests first: stage 1 (suggested) 12 tests in 1m 05s · stage 2 (the rest)
+    340 tests in 14m 10s · first failure after 42.5 s (full suite 15m 15s)".
+    - A run of only the suggested tests starts with a neutral "Suggested only" Status Pill and reads "Suggested
+      tests only", or "Suggested tests only, stopped after stage 1" after a `--fail-fast` stop.
+    - Durations use `formatDuration`, as everywhere else.
 - **Report section** "Test impact" (`#report-impact`, the Report's last section). It follows no Report filter but the period, and has no gate.
   - **Period:** the Report's when it is the last 7, 14 or 30 days up to today; otherwise the last 30 days, and the note says why ("the Report's period is not the last 7, 14 or 30 days").
   - **Two Stats side by side** (`.impact-figures`, `.stat-big`, tabular figures): the catch rate ("75.0%", then "Suggestions caught 9 of 12 new failures") and the tests suggested per run ("6.4", one decimal at most, then "tests suggested per run, on average"), so a high rate bought by suggesting everything shows (spec §9). Without new failures the rate is "—" with "No new failures in 4 runs with a stored suggestion", never 0%.

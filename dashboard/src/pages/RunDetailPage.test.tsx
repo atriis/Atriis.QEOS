@@ -357,3 +357,33 @@ test("a run that reported no changes says so in its likely affected tests card",
   expect(await within(region).findByText("No change data for this run")).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Changes" })).not.toBeInTheDocument();
 });
+
+test("a run-impact run says how its stages went", async () => {
+  server.use(http.get("/api/v1/runs/61", () => HttpResponse.json({
+    ...detail([]), scope: "full",
+    stages: { stages: [{ name: "suggested", duration_s: 65, tests: 12, failed: 1 }, { name: "rest", duration_s: 850, tests: 340, failed: 0 }],
+      time_to_first_failure_s: 42.5, stopped_after_stage: null },
+  })));
+  renderDetail();
+  expect(await screen.findByText("Suggested tests first: stage 1 (suggested) 12 tests in 1m 05s · stage 2 (the rest) 340 tests"
+    + " in 14m 10s · first failure after 42.5 s (full suite 15m 15s)")).toBeInTheDocument();
+  expect(screen.queryByText("Suggested only", { selector: ".pill" })).not.toBeInTheDocument();
+});
+
+test("a suggested-only run says so, with a word as well as the line", async () => {
+  server.use(http.get("/api/v1/runs/61", () => HttpResponse.json({
+    ...detail([]), scope: "impact-subset",
+    stages: { stages: [{ name: "suggested", duration_s: 65, tests: 12, failed: 1 }], time_to_first_failure_s: 30, stopped_after_stage: 1 },
+  })));
+  renderDetail();
+  expect(await screen.findByText(
+    "Suggested tests only, stopped after stage 1: stage 1 (suggested) 12 tests in 1m 05s · first failure after 30.0 s")).toBeInTheDocument();
+  expect(screen.getByText("Suggested only", { selector: ".pill" })).toBeInTheDocument();
+});
+
+test("an ordinary upload has no stages line", async () => {
+  server.use(http.get("/api/v1/runs/61", () => HttpResponse.json(detail([]))));
+  renderDetail();
+  await screen.findByText("abcdef1");
+  expect(screen.queryByText(/^Suggested tests/)).not.toBeInTheDocument();
+});
