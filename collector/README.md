@@ -345,9 +345,9 @@ answers that nothing is likely affected, or none of the suggested tests is among
 also runs as one stage.
 
 - **When the collector cannot reach QEOS as configured** (no URL or API key, as on a fork pull request without the
-  secret; a key that is not printable ASCII; an unusable `--ca-file`; a broken `.qeos.yml`), the command still runs
-  as one stage `all`. Nothing is uploaded, and the log says why (`warning: not uploaded: …`). The exit code is the
-  tests', or 1 with `--gate` or `--fail-on-error`.
+  secret; a key that is not printable ASCII; an unusable `--ca-file`; a broken or non-UTF-8 `.qeos.yml`), the command
+  still runs as one stage `all`. Nothing is uploaded, and the log says why (`warning: not uploaded: …`). The exit
+  code is the tests', or 1 with `--gate` or `--fail-on-error`.
 - **When the stages cannot be planned**, the command also runs as one stage `all`, with
   `warning: cannot plan the stages: …`. That is a dry run that writes no JSON report, a dry run listing a scenario
   without a line (which could go in no rerun file, so it would run in neither stage), or an error in run-impact
@@ -404,7 +404,8 @@ nothing and exits 2, saying why. Select features with tags instead.
 | 2 / 3 / 4 | `--suggested-only --no-fallback` with nothing to run: as `impact` (2 also when the collector cannot reach QEOS as configured, or the stages cannot be planned) |
 
 **Working files** live in `.qeos-impact/<random>/` and are removed at the end. On first use run-impact writes
-`.qeos-impact/.gitignore` (`*`), so git never lists them. The upload options are those of `upload` (`--url`,
+`.qeos-impact/.gitignore` (`*`), so git never lists them. When the working directory is read-only, they go in a
+temporary directory instead, with a warning. The upload options are those of `upload` (`--url`,
 `--environment`, `--component`, `--spool`, …).
 
 **The exit code** is the test command's, from the first failing stage, so the build fails when tests fail. When the

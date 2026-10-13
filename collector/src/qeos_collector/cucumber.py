@@ -236,7 +236,12 @@ def dry_run_arguments(flavour: str) -> List[str]:
 
 
 def _relative(path: PurePath, cwd: str) -> str:
-    return PurePath(os.path.relpath(str(path), cwd)).as_posix()
+    """Relative to the working directory, with "/". On another Windows drive there is no relative path: then the
+    absolute one (a rerun file cucumber-js cannot read, which run-impact's checks catch)."""
+    try:
+        return PurePath(os.path.relpath(str(path), cwd)).as_posix()
+    except ValueError:
+        return path.as_posix()
 
 
 def report_arguments(flavour: str, report: PurePath, cwd: str) -> List[str]:

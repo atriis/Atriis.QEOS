@@ -696,3 +696,40 @@ def test_fail_on_error_fails_a_passing_run_whose_upload_failed(platform, cucumbe
     platform.reply(200, suggested(PAYS_20))
     platform.reply(401, {"detail": "Invalid API key"})
     assert run(command("--suggested-only", "--fail-on-error"), env_for(platform)) == 1
+
+
+# --- the re-review's lows (fix round 2) --------------------------------------------------
+
+
+def test_a_qeos_yml_that_is_not_utf8_runs_the_tests(platform, cucumber, tmp_path, capsys):
+    """It used to escape resolve() as a UnicodeDecodeError: a traceback and no tests."""
+    (tmp_path / ".qeos.yml").write_bytes(b"url: http://\xff\xfe\n")
+    assert run([*command(), "--tags", "@smoke"], env_for(platform)) == 0
+    assert [c["dry_run"] for c in cucumber()] == [False] and platform.requests == []
+    err = capsys.readouterr().err
+    assert "it is not UTF-8 text" in err and "warning: not uploaded: " in err
+
+
+def test_any_error_while_resolving_runs_the_tests(platform, cucumber, monkeypatch, capsys):
+    def broken(*args, **kwargs):
+        raise LookupError("odd")
+
+    monkeypatch.setattr(impact, "resolve", broken)
+    assert run([*command(), "--tags", "@smoke"], env_for(platform)) == 0
+    assert len(cucumber()) == 1 and platform.requests == []
+    assert "warning: not uploaded: unexpected error: LookupError: odd" in capsys.readouterr().err
+
+
+def test_an_unwritable_working_directory_uses_a_temporary_one(platform, cucumber, tmp_path, capsys):
+    (tmp_path / ".qeos-impact").write_text("a file, not a folder", encoding="utf-8")  # mkdir fails, as read-only would
+    platform.reply(200, suggested(PAYS_10))
+    platform.reply(201, RECEIPT)
+    assert run(command(), env_for(platform)) == 1
+    calls = cucumber()
+    assert [c["dry_run"] for c in calls] == [True, True, False, False]
+    assert calls[2]["ran"] == ["features/pay.feature:12"]
+    rerun = next(arg for arg in calls[2]["argv"] if arg.endswith("@stage-1.txt"))
+    assert not rerun.startswith(".qeos-impact/")
+    assert not (tmp_path / Path(rerun)).parent.exists()  # removed at the end
+    assert len(uploads(platform)[0]["results"]) == 5
+    assert "warning: cannot create " in capsys.readouterr().err

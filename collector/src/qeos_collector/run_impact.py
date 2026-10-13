@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -286,18 +287,24 @@ def _finish(say, stages: List[Stage], scope: str, stopped: Optional[int], *, upl
     return tests
 
 
-def _workdir(cwd: str) -> Path:
-    """.qeos-impact/<random>/ for this invocation's files; .qeos-impact/.gitignore keeps git from listing them."""
+def _workdir(cwd: str, say: Callable[[str], None]) -> Path:
+    """.qeos-impact/<random>/ for this invocation's files; .qeos-impact/.gitignore keeps git from listing them. When
+    the working directory cannot take it (read-only), a temporary directory instead."""
     base = Path(cwd, cucumber.WORKDIR)
     workdir = base / uuid.uuid4().hex[:12]
     try:
         workdir.mkdir(parents=True)
+    except OSError as exc:
+        fallback = Path(tempfile.mkdtemp(prefix="qeos-impact-"))
+        say(f"warning: cannot create {workdir} ({exc.strerror or exc}); using {fallback} instead")
+        return fallback
+    try:
         ignore = base / ".gitignore"
         if not ignore.exists():
             with open(ignore, "w", encoding="utf-8", newline="\n") as handle:
                 handle.write("*\n")
-    except OSError as exc:
-        raise ConfigError(f"cannot create {workdir}: {exc.strerror or exc}") from None
+    except OSError:
+        pass  # only keeps git quiet; the run does not need it
     return workdir
 
 
@@ -320,6 +327,8 @@ def run(args, env: Mapping[str, str], api_key: str, say: Callable[[str], None], 
             target = impact.resolve(args, env, api_key, cwd)
         except ConfigError as exc:  # no URL or key, an unusable CA file or .qeos.yml
             problem = str(exc)
+        except Exception as exc:  # noqa: BLE001 - whatever it is, the tests still run
+            problem = f"unexpected error: {type(exc).__name__}: {exc}"
     if problem is None:
         found = _score(target, api_key, env)
     else:
@@ -328,8 +337,10 @@ def run(args, env: Mapping[str, str], api_key: str, say: Callable[[str], None], 
         def upload(reports, scope, stages):  # noqa: F811 - nothing can be sent as configured
             say(f"warning: not uploaded: {problem}")
             return None
-    workdir = _workdir(cwd)
+    workdir = _workdir(cwd, say)
     try:
+        if Path(cwd, cucumber.WORKDIR) not in workdir.parents:
+            check_paths(flavour, command, str(workdir))  # a temporary directory: its path reaches cmd.exe too
         steps = _Cucumber(flavour, workdir, cwd, runner, clock, say)
         stages, scope, stopped, _missing = _run_stages(args, say, command, flavour, cwd, found, steps)
         if not stages:  # --suggested-only --no-fallback: nothing ran, nothing to upload

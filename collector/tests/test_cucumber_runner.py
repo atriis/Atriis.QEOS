@@ -219,3 +219,13 @@ def test_a_long_name_matches_as_the_upload_stored_it():
     first, _rest, _missing = cucumber.split([{"class_name": "features/pay.feature", "name": long_name[:1000]}],
                                             scenarios)
     assert [s.line for s in first] == [4]
+
+
+def test_a_path_on_another_drive_stays_absolute(tmp_path, monkeypatch):
+    """Windows has no relative path between drives: os.path.relpath raises ValueError."""
+    def no_relative(path, start):
+        raise ValueError("path is on mount 'D:', start on mount 'C:'")
+
+    monkeypatch.setattr(cucumber.os.path, "relpath", no_relative)
+    report = PureWindowsPath(r"D:\tmp\qeos-impact-x\stage-1.json")
+    assert cucumber.report_arguments("js", report, "C:/work") == ["--format", "json:D:/tmp/qeos-impact-x/stage-1.json"]

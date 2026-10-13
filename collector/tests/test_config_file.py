@@ -51,3 +51,9 @@ def test_broken_yaml_is_a_config_error(tmp_path):
     (tmp_path / ".qeos.yml").write_text("url: a\n  dangling:\n", encoding="utf-8")
     with pytest.raises(ConfigError):
         load_config(str(tmp_path))
+
+
+def test_a_file_that_is_not_utf8_is_a_config_error(tmp_path):
+    (tmp_path / ".qeos.yml").write_bytes(b"url: https://q\xff\n")
+    with pytest.raises(ConfigError, match="not UTF-8 text"):
+        load_config(str(tmp_path))

@@ -41,6 +41,8 @@ def load_config(directory: str) -> Dict[str, Value]:
         return {}
     except OSError as exc:
         raise ConfigError(f"cannot read {path}: {exc}") from None
+    except UnicodeDecodeError as exc:
+        raise ConfigError(f"cannot read {path}: it is not UTF-8 text (byte {exc.start})") from None
 
     config: Dict[str, Value] = {}
     current_list: "List[str] | None" = None
