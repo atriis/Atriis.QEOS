@@ -19,6 +19,13 @@ interface Props {
 
 const CLOSE_DELAY_MS = 150;
 const TIP_GAP = 4;
+const TABBABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** The first tabbable element after `line` in document order that is not inside `skip` (the tip lives at the end of the body, so Tab cannot find it by itself). */
+function tabbableAfter(line: HTMLElement, skip: HTMLElement | null): HTMLElement | undefined {
+  return Array.from(document.querySelectorAll<HTMLElement>(TABBABLE)).find((el) =>
+    !line.contains(el) && !skip?.contains(el) && !!(line.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING));
+}
 
 /** The failed line: focusable, marked in words and an icon as well as red. Its tip is a portal (never clipped by the block's scroll area, never copied with the Gherkin), open while the pointer is over the line or the tip, or focus is in either. */
 function FailedLine({ numbered, n, tip, children, note, trailing }: { numbered: boolean; n: number; tip: ReactNode; children: ReactNode; note?: ReactNode; trailing?: string }) {
@@ -32,8 +39,11 @@ function FailedLine({ numbered, n, tip, children, note, trailing }: { numbered: 
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const open = (hover || focus) && !dismissed;
 
-  const enter = () => { clearTimeout(timer.current); setHover(true); };
-  const leave = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { setHover(false); setDismissed(false); }, CLOSE_DELAY_MS); };
+  const hovering = useRef(false);
+  const focused = useRef(false);
+  // Escape stays in force while the line has focus; a fresh hover (pointer away and back) only counts when focus is not on the line
+  const enter = () => { clearTimeout(timer.current); hovering.current = true; setHover(true); if (!focused.current) setDismissed(false); };
+  const leave = () => { clearTimeout(timer.current); timer.current = setTimeout(() => { hovering.current = false; setHover(false); }, CLOSE_DELAY_MS); };
   useEffect(() => () => clearTimeout(timer.current), []);
 
   useLayoutEffect(() => {
@@ -64,14 +74,31 @@ function FailedLine({ numbered, n, tip, children, note, trailing }: { numbered: 
       aria-describedby={open ? id : undefined}
       onMouseEnter={enter}
       onMouseLeave={leave}
-      onFocus={() => setFocus(true)}
-      onBlur={(e) => { if (!inside(e.relatedTarget as Node | null)) { setFocus(false); setDismissed(false); } }}
+      onFocus={() => { focused.current = true; setFocus(true); }}
+      onBlur={(e) => { if (!inside(e.relatedTarget as Node | null)) { focused.current = false; setFocus(false); if (!hovering.current) setDismissed(false); } }}
       onKeyDown={(e) => {
-        if (e.key !== "Escape" || !open) return;
-        e.stopPropagation();
-        // Focus inside the tip (its link) would drop to the page: bring it back to the line first
-        if (tipRef.current?.contains(document.activeElement)) lineRef.current?.focus();
-        setDismissed(true);
+        const line = lineRef.current, el = tipRef.current;
+        if (!open || !line) return;
+        if (e.key === "Escape") {
+          e.stopPropagation();
+          // Focus inside the tip (its link) would drop to the page: bring it back to the line first
+          if (el?.contains(document.activeElement)) line.focus();
+          setDismissed(true);
+          return;
+        }
+        if (e.key !== "Tab") return;
+        // The tip is a portal at the end of the body: carry Tab into it and back out by hand, in reading order
+        const inTip = Array.from(el?.querySelectorAll<HTMLElement>(TABBABLE) ?? []);
+        if (e.target === line) {
+          if (!e.shiftKey && inTip.length) { e.preventDefault(); inTip[0].focus(); }
+          return;
+        }
+        if (!inTip.length) return;
+        if (e.shiftKey && e.target === inTip[0]) { e.preventDefault(); line.focus(); }
+        else if (!e.shiftKey && e.target === inTip[inTip.length - 1]) {
+          const next = tabbableAfter(line, el);
+          if (next) { e.preventDefault(); next.focus(); }
+        }
       }}
     >
       <span className="sr-only">Failed step: </span>

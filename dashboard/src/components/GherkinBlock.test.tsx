@@ -80,3 +80,43 @@ test("numbered: a failed line keeps its annotation next to the marker, and is an
   expect(end).toHaveTextContent("case 7");
   expect(failedLine()).toHaveTextContent("Failed step:");
 });
+
+function withNeighbours() {
+  render(
+    <div>
+      <button>before</button>
+      <GherkinBlock text={"Scenario: s\n  When a"} failed={{ line: 2, tip: <a href="#run">Open run</a> }} />
+      <button>after</button>
+    </div>,
+  );
+}
+
+test("Tab goes from the failed line into the tip, Shift+Tab back, and out of the tip to the next element after the block", async () => {
+  withNeighbours();
+  const line = failedLine() as HTMLElement;
+  await userEvent.click(screen.getByRole("button", { name: "before" }));
+  await userEvent.tab(); // the block itself
+  await userEvent.tab(); // the failed line
+  expect(document.activeElement).toBe(line);
+  await userEvent.tab();
+  expect(document.activeElement).toBe(screen.getByRole("link", { name: "Open run" }));
+  await userEvent.tab({ shift: true });
+  expect(document.activeElement).toBe(line);
+  await userEvent.tab();
+  await userEvent.tab();
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "after" }));
+  expect(screen.queryByRole("tooltip")).toBeNull();
+});
+
+test("after Escape the tip stays closed when the pointer leaves and comes back while the line has focus", async () => {
+  render(<GherkinBlock text={"Scenario: s\n  When a"} failed={{ line: 2, tip: <span>boom</span> }} />);
+  const line = failedLine() as HTMLElement;
+  line.focus();
+  await screen.findByRole("tooltip");
+  await userEvent.keyboard("{Escape}");
+  await userEvent.hover(line);
+  await userEvent.unhover(line);
+  await new Promise((r) => setTimeout(r, 250));
+  await userEvent.hover(line);
+  expect(screen.queryByRole("tooltip")).toBeNull();
+});
