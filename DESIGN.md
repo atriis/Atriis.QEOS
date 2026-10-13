@@ -461,6 +461,8 @@ Likely affected tests (spec `docs/superpowers/specs/2026-10-12-test-impact-analy
     - A run of only the suggested tests starts with a neutral "Suggested only" Status Pill and reads "Suggested
       tests only", or "Suggested tests only, stopped after stage 1" after a `--fail-fast` stop.
     - Durations use `formatDuration`, as everywhere else.
+    - Each "·" is bound to the item before it by a no-break space, so a narrow screen wraps after a separator and
+      no line starts with one.
   - **Runs list:**
     - the same neutral pill beside the run number ("Suggested only · stopped after stage 1" for a stop);
     - the quick chip **Full runs only**;
@@ -468,7 +470,7 @@ Likely affected tests (spec `docs/superpowers/specs/2026-10-12-test-impact-analy
   - **Impact card of a subset run:**
     - a neutral "Not evaluated" pill beside the heading;
     - instead of the outcome, the sentence "Suggested tests only, not evaluated: only the suggested tests ran, so
-      this run cannot show what the suggestion missed.";
+      this run cannot show what the suggestion missed.", and only that: never also "Not enough history yet";
     - the suggestion is still listed, and the card never polls.
   - **API keys (Project Settings):**
     - a **Test suggestions** column reading On or Off as words;

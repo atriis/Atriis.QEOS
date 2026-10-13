@@ -76,7 +76,8 @@ function Body({ projectId, branch, data }: { projectId: number; branch?: string 
   return (
     <>
       {data.replayed && <p className="muted">Replayed: scored later from the runs before this one, not at upload.</p>}
-      {s.state === "not_enough_history" && (
+      {/* A subset run is not evaluated at all: that sentence alone, not also the history one */}
+      {s.state === "not_enough_history" && data.evaluation !== "not_evaluated" && (
         <p className="muted impact-outcome">
           {`Not enough history yet: ${plural(s.history_runs, "run", "runs")} with changed files, needs ${formatCount(s.needed_runs)}`}
         </p>

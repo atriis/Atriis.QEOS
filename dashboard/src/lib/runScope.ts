@@ -6,6 +6,9 @@ const STAGE: Record<RunStage["name"], string> = { suggested: "suggested", rest: 
 
 const seconds = (s: number): string => formatDuration(Math.round(s * 1000));
 
+/** A no-break space binds each "·" to the item before it, so a narrow screen wraps after a separator, never before. */
+const SEP = " · ";
+
 /** Only the suggested tests ran: `run-impact --suggested-only`, or a `--fail-fast` stop. */
 export function isSubset(run: Pick<Run, "scope">): boolean {
   return run.scope === "impact-subset";
@@ -28,5 +31,5 @@ export function stagesLine(run: Pick<Run, "scope" | "stages">): string | null {
   const failure = s.time_to_first_failure_s === null ? "no failures"
     : subset ? `first failure after ${seconds(s.time_to_first_failure_s)}`
     : `first failure after ${seconds(s.time_to_first_failure_s)} (full suite ${seconds(total)})`;
-  return `${head}: ${[...stages, failure].join(" · ")}`;
+  return `${head}: ${[...stages, failure].join(SEP)}`;
 }

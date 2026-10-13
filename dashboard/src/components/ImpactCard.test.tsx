@@ -203,6 +203,14 @@ test("a suggested-only run is not evaluated, and says why", async () => {
   expect(screen.getByRole("link", { name: "pays" })).toBeInTheDocument(); // the suggestion itself is still listed
 });
 
+test("a suggested-only run without enough history says only that it is not evaluated", async () => {
+  const base = impact();
+  renderCard(impact({ outcome: null, evaluation: "not_evaluated",
+    suggestion: { ...base.suggestion!, state: "not_enough_history", history_runs: 1, needed_runs: 20 } }));
+  expect(await screen.findByText(/^Suggested tests only, not evaluated/)).toBeInTheDocument();
+  expect(screen.queryByText(/Not enough history yet/)).not.toBeInTheDocument();
+});
+
 describe("a pending outcome", () => {
   beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
   afterEach(() => vi.useRealTimers());
