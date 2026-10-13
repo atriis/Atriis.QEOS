@@ -50,8 +50,9 @@ numbers in platforms/ingestion-service/README.md.
    operations"): customisable Overview (done 2026-10-11, ADR-028: 15 widgets as of now, three templates, a
    project default and personal layouts), then test impact analysis (done 2026-10-12, ADR-029:
    co-failure statistics, suggestions stored at upload with their outcome, accuracy in the Report and on
-   the Overview, Run likely affected). Next from that line: release B, a collector command that runs the
-   suggested tests first.
+   the Overview, Run likely affected). Release B followed (built 2026-10-13): suggested tests first in CI
+   with collector 0.7.0 (`impact`, `run-impact`). Next from that line: tuning on real data and other runner
+   formats.
 
 ## 3. Blocked on external input
 

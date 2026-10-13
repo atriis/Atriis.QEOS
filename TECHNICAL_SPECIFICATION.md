@@ -270,6 +270,18 @@ retry budget, `--spool` keeps failed parts for the next run, `--gate`,
 (`collector-action/`), a Jenkins library (`collector-jenkins/`), GitLab and
 Azure templates (`templates/`), and per release tag a zipapp and a GHCR image.
 
+From 0.7.0, `qeos-collector impact` prints the suggestion for the change (`POST /collect/impact`, which needs a key
+with the "test suggestions" permission; cucumber, list or json; exit 0 printed, 3 nothing to suggest, 4 QEOS
+unreachable or out of time, 2 a configuration error). `qeos-collector run-impact -- <cucumber command>`:
+- discovers the scenarios with a Cucumber dry run (cucumber-js, cucumber-jvm through Maven/Gradle system properties,
+  Ruby; `--cucumber` when the command hides the runner, `bash -c` command lines included);
+- checks with a second dry run that rerun files alone select them, and refuses (exit 2) when profile `paths` or
+  `--shard` would change that;
+- runs the suggested ones, then the rest, from two rerun files, and uploads one run with `scope` and `stages`
+  (`--fail-fast` and `--suggested-only` mark it `impact-subset`, stages go with the first part only);
+- runs the whole command as one stage whenever scoring, setup or planning fails, and exits with the tests' code;
+- writes a summary to the GitHub step summary, or to the log.
+
 ## 8. Verification
 
 - Per-service pytest suites + shared tests, collector (Python 3.9/3.12),

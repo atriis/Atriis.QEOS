@@ -60,7 +60,7 @@ pipeline already produces, and it starts runs only through workflows you own.
 - **Trends** by day, week or month, per branch, and run-to-run comparison.
 - **Flaky tests:** same-commit detection over up to 90 days, backed by daily rollups, with quarantine.
 - **Failure causes:** new, recurring and resolved failures, grouped by cause.
-- **Test impact:** for each change, a **Likely affected tests** card on the run page lists the tests it is likely to affect, from which tests newly failed after earlier changes to the same files (no coverage instrumentation, no AI). Each suggestion shows its evidence, and the card says which new failures it caught and missed once the results are in. Suggestions are stored at upload, before the results, so the accuracy is honest.
+- **Test impact:** for each change, a **Likely affected tests** card on the run page lists the tests it is likely to affect, from which tests newly failed after earlier changes to the same files (no coverage instrumentation, no AI). Each suggestion shows its evidence, and the card says which new failures it caught and missed once the results are in. Suggestions are stored at upload, before the results, so the accuracy is honest. In CI, collector 0.7.0 runs the likely affected Cucumber scenarios first and the rest after, as one run (`run-impact`, or the GitHub Action's `impact: first`); when QEOS cannot score a change, the whole suite still runs. Runs of only the suggested tests are marked as such and never count in the accuracy figure.
 - **Customisable Overview:** each person arranges their own Overview per project: move, resize, remove and add widgets and change their settings, then save. Owners and admins also set the project's default layout, which everyone without a personal layout sees. Start from a template (QA lead, Developer, Flaky hunt) or pick from fifteen widgets: the built-in four, plus Pass-rate trend, Failure causes, Regressions and flips, Slowest tests, Coverage, Recent runs, Branch health, Test cases, My suites, My recent failures and Impact accuracy (the test impact catch rate).
 
 ### Report
@@ -427,11 +427,12 @@ The threat model and operational guidance are in [`SECURITY.md`](SECURITY.md).
 - ingestion with the collector and its CI integrations;
 - analytics, the report, notifications and the customisable Overview;
 - test impact analysis (ADR-029): suggestions stored at upload with their outcome, accuracy in the Report and on the Overview, and Run likely affected;
+- suggested tests first in CI (test impact release B): `qeos-collector impact` and `run-impact` (Cucumber), the GitHub Action's and the Jenkins step's `impact` option, collector 0.7.0;
 - test management with Gherkin sync and Run from QEOS;
 - the optional monitoring stack;
 - the single-VM production package.
 
-**Next:** release B (a collector command that runs the suggested tests first), then tuning test impact on real data. The full plan is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
+**Next:** tuning test impact on real data, and `run-impact` formats beyond Cucumber (JUnit with Maven/Gradle, pytest, Playwright). The full plan is in [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
 
 The directories `execution/`, `automation/`, `marketplace/`, `collaboration/`, `intelligence/` and
 `platforms/qip-service` are **unwired prototypes**. They are not in Compose, CI or the gateway, and they

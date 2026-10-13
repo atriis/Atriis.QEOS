@@ -56,8 +56,8 @@ work begins" (blueprint banner).
   must beat `stats-v1` on the same catch rate, with the same average size beside it, before it replaces it.
 - **Code embeddings and semantic similarity** need Qdrant, a TARGET technology. The blueprint's adoption trigger is
   "Phase 6 AI engine work begins"; until it fires, nothing here adds a vector store.
-- **Release B**, a collector command that runs the suggested tests first (never instead of the full suite), is
-  not built. Skipping tests is considered only once the accuracy figure supports it.
+- **Release B**, running the suggested tests first in CI, is built for collector 0.7.0 (section below). Skipping
+  tests stays opt-in (`--suggested-only`), and such runs never feed the accuracy figure.
 
 ## Deviations from the first spec (spec §9)
 - Ingestion has no upload parts: the collector sends each part as its own run, so each part has its own
@@ -103,7 +103,52 @@ time is what met the budget. The figures are in the ingestion README "Budgets".
 - **Scoring only when someone looks:** it could see later data, so the accuracy would flatter it.
 - **Live statistics without a rollup:** the window over about 2 million results costs seconds, against a budget of
   200 ms per scoring.
-- **Skipping tests in CI:** only once the accuracy figure supports it. Release B runs the suggested tests first.
+- **Skipping tests in CI by default:** a team opts in (`--suggested-only`). Release B runs the suggested tests first
+  and the full suite every time otherwise.
+
+## Release B: suggested tests first in CI (2026-10-13)
+
+Spec `docs/superpowers/specs/2026-10-13-suggested-tests-first-design.md`, plan
+`docs/superpowers/plans/2026-10-13-suggested-tests-first.md`. Collector 0.7.0.
+
+- **Two stages, one run.** `run-impact` runs the suggested scenarios first and every other one after, and uploads
+  both as one run with its `stages` (names, sizes, failures, durations, the time to the first failure). A failure
+  in the changed area shows up in minutes, and the full suite still runs.
+- **The Cucumber mechanism:**
+  - a dry run with a JSON report discovers the scenarios, read by the upload's own Cucumber JSON parser;
+  - two rerun files hold the suggested scenarios and the rest (matched on the feature uri and the scenario name);
+  - a second dry run checks that the rerun file alone selects stage 1, because cucumber-js adds profile `paths` to
+    it and `--shard` drops scenarios. On a mismatch nothing runs (exit 2): a wrong subset run silently would be
+    worse. This keeps "no scenario runs twice, none is left out" true.
+
+  The same mechanism serves cucumber-js, cucumber-jvm (system properties) and Ruby. Other runners are follow-ups.
+- **The honest subset exclusion.** Runs record `scope` and `stages` (migration 020).
+  - A run of only the suggested tests (`--suggested-only`, a `--fail-fast` stop, or a stage that wrote no report)
+    is `impact-subset`.
+  - It stays out of the statistics, the history count, replay, the outcome evaluation and the accuracy figure. A
+    subset cannot show what the suggestion missed, so counting it would flatter the catch rate.
+  - Its suggestion is stored and answered as `not_evaluated`, a state derived from the scope.
+  - Its results count everywhere else: trends, flaky detection, the Report, and as history for later runs.
+- **The safety rule.** Scoring never costs a test run. When the change cannot be scored (no change data, 401, 403,
+  404, 422, 429, 5xx, a timeout, no answer), when the collector cannot reach QEOS as configured (no URL or key, as on
+  a fork pull request), or when the stages cannot be planned, the command runs as given, as one stage, and the log
+  says why. Only `--suggested-only --no-fallback` ends without tests (exit 2, 3 or 4, as `impact`).
+- **Never skipping by default.** `first` runs the full suite every time. `only` is opt-in, with the full suite as
+  fallback when there is no suggestion. Partial runs are labelled on the run page, in the runs list, in failure
+  alerts and in the weekly summary.
+- **The per-key permission (user decision).** `POST /api/v1/collect/impact` runs the same scoring, limits and 503
+  `impact_timeout` as `POST /analytics/impact`, for the key's project; the analytics route needs a user token, which
+  CI does not have. API keys are upload-only by default: only a key an owner or admin allowed (`can_read_impact`)
+  reads its project's suggestions (test names, path units, aggregate evidence, which named tests failed on the
+  branch); any other gets 403 `impact_not_allowed`, and `run-impact` then runs everything.
+- **Consequences:**
+  - a `run-impact` run costs two extra dry runs (discovery and the stage-1 check), seconds for cucumber-js and a
+    build start for Maven;
+  - Gradle users forward `cucumber.*` system properties to the test task;
+  - the request hash leaves `scope` and `stages` out at their defaults, so uploads stored before migration 020
+    still replay;
+  - CI integrations hand the test command over as `bash -c "$QEOS_TEST_COMMAND"` and never put input text into a
+    script.
 
 ## Consequences
 - **Upload cost:** each upload with changed files pays one scoring (32 ms p50 measured) and an evaluation after
@@ -118,7 +163,7 @@ time is what met the budget. The figures are in the ingestion README "Budgets".
   - replay uses the flaky and muted tests known at replay time;
   - a part after the first of a split upload may list the previous part's failures as *failing on this branch*;
   - the random-failure benchmark suggested about 76 tests per change, so thresholds need tuning on real data.
-- **Follow-ups in TODO.md:** release B, the learned model, Phase 6 embeddings, the accuracy figure in the weekly
-  summary, a repository prefix for path units, a narrow layout for Report tables, `impact_test_base.id` as a
-  BigInteger (or dropped for `(project_id, test_key)`) before real scale, and threshold tuning on real data while
-  watching `avg_suggested`.
+- **Follow-ups in TODO.md:** run-impact formats beyond Cucumber, the learned model, Phase 6 embeddings, the
+  accuracy figure in the weekly summary, a repository prefix for path units, a narrow layout for Report tables,
+  `impact_test_base.id` as a BigInteger (or dropped for `(project_id, test_key)`) before real scale, and threshold
+  tuning on real data while watching `avg_suggested`.

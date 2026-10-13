@@ -1,7 +1,9 @@
 # qeos-collector
 
 Uploads JUnit XML test results from a CI job to the QEOS platform. Standard library only,
-Python 3.9 or newer, nothing else to install.
+Python 3.9 or newer, nothing else to install. From 0.7.0 it also prints the tests a change likely affects
+([`impact`](#qeos-collector-impact)) and runs them first in CI ([`run-impact`](#qeos-collector-run-impact-cucumber),
+Cucumber).
 
 ## Install
 
@@ -335,9 +337,19 @@ qeos-collector run-impact --cucumber js -- npm test
 3. **Stage 1:** the suggested scenarios among them, through a rerun file. A suggested test matches a scenario on
    its feature file and name, so every row of an outline with that name goes with it.
 4. **Stage 2:** every other one, through a second rerun file, scenarios without a name included. No scenario runs
-   twice, and no stage runs with an empty rerun file. Suggested tests that the command does not run (left out by its filters, or not Cucumber) are
-   listed as skipped by the filter.
+   twice, and no stage runs with an empty rerun file. Suggested tests that the command does not run (left out by
+   its filters, or not Cucumber) are listed as skipped by the filter.
 5. Both stages' JSON reports are uploaded as one run.
+
+**What it needs:**
+- **The change.** The checkout needs the history the diff needs, as for `impact`: `fetch-depth: 0` on GitHub pull
+  requests, the target branch fetched on GitLab merge requests, at least 2 commits elsewhere. Without it the whole
+  command runs as one stage.
+- **The key's permission.** The API key needs the **test suggestions** permission, which a project owner or admin
+  turns on for the key (Project Settings > API keys). Without it the whole command runs as one stage too.
+- **History.** Suggestions need 20 runs with changed files. Before that, only the labelled tests (test file changed,
+  failing on this branch, no history yet) are suggested.
+- **Cucumber**, as below. Other runners (JUnit with Maven or Gradle, pytest, Playwright) are not supported yet.
 
 **Scoring never skips your tests.** When QEOS cannot score the change, for whatever reason (an invalid key, a key
 without the permission, a QEOS older than this command, a 422, 429 or 5xx, a timeout, no answer, no change data), the
@@ -417,6 +429,19 @@ nothing and exits 2, saying why. Select features with tags instead.
 - **Anywhere else, or when that file cannot be written:** the same lines in the log.
 - The API key never appears in it, even when a test name or path holds it.
 
+**In CI.**
+- **GitHub Actions:** the action's `impact: first` (or `only`) and `test-command` inputs run the tests through
+  run-impact (`docs/SETUP.md`, "Suggested tests first in CI").
+- **Jenkins:** `qeosCollectorUpload(impact: 'first', testCommand: '…')` (`collector-jenkins/README.md`).
+- **GitLab and Azure:** the commented examples at the end of the templates in `templates/`.
+- **Anywhere else:** `qeos-collector run-impact -- <your Cucumber command>` as the test step.
+
+**What QEOS shows.** The run page has a line "Suggested tests first: stage 1 (suggested) 12 tests in 1m 05s · stage 2
+(the rest) 340 tests in 14m 10s · first failure after 42.5 s (full suite 15m 15s)". A run of only the suggested
+tests (`--suggested-only`, a `--fail-fast` stop, or a stage that wrote no report) is marked **Suggested only** on the
+run page, in the runs list (the **Full runs only** chip hides such runs), in failure alerts and in the weekly
+summary. It never counts in the impact statistics or the accuracy figure.
+
 **Working files** live in `.qeos-impact/<random>/` and are removed at the end. On first use run-impact writes
 `.qeos-impact/.gitignore` (`*`), so git never lists them. When the working directory is read-only, they go in a
 temporary directory instead, with a warning. The upload options are those of `upload` (`--url`,
@@ -461,7 +486,8 @@ a failing test names the team that owns it.
 | 2 | A usage or configuration error: no URL or key, no file matched, an `http://` URL that is not localhost, an unusable `--ca-file`, an invalid `--trigger` / `QEOS_TRIGGER` |
 
 By default an unreachable platform never turns a build red; a misconfigured collector always does.
-`impact` has its own codes, 3 and 4 included: see its section (`run-impact`: from 0.7.0).
+`impact` and `run-impact` (0.7.0) have their own codes: see their sections. `run-impact` exits with the tests' code, and
+runs them even when the collector is misconfigured.
 
 ## Gating on quarantine (`--gate`)
 

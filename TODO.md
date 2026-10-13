@@ -140,6 +140,7 @@
 - [x] Collector 0.5.0: classify the run from the CI environment, `--trigger`, the 202 notice; tag `collector-v0.5.0`
 - [x] Collector 0.5.1 (2026-10-12, final review): `--gate` on a discarded run decides on the local results; spooled and partial-run discard messages; tag `collector-v0.5.1`
 - [x] Collector 0.5.2 (2026-10-13): collector-action installs from its own checkout (`$GITHUB_ACTION_PATH/../collector`); the old git URL came up empty inside reusable workflows ("empty revision"); CI now runs the action
+- [ ] Collector 0.7.0: `impact` and `run-impact` (suggested tests first, Cucumber); the action's `impact` and `test-command` inputs, the Jenkins step's `impact` and `testCommand`; release and tag `collector-v0.7.0` (plan Tasks 21-22)
 - [x] Dashboard (2026-10-12): the Collection card in Project Settings (switch, discard count)
 - [x] Docs (2026-10-12): SETUP 4.1.8a and troubleshooting, collector and ingestion READMEs, PRODUCT, README
 
@@ -285,7 +286,14 @@ Kubernetes stays out until its blueprint trigger fires (first multi-node deploym
 4. [x] Test impact analysis (done 2026-10-12, ADR-029, spec `docs/superpowers/specs/2026-10-12-test-impact-analysis-design.md`): co-failure statistics on PostgreSQL rebuilt by the `impact-rollup` job (ingestion migration 018, heartbeat `impact_rollup`); each upload with changed files stores its suggestion before its results and its outcome after; `GET /runs/{id}/impact`, `POST /analytics/impact`, `GET /analytics/impact-accuracy`; the run page card, the Report's Test impact section, the Overview widget Impact accuracy (15 widgets now), and Run likely affected on Test cases; `--backfill-days` replays history
    - [ ] Follow-up: `impact_test_base.id` is a 32-bit serial rebuilt nightly; make it BigInteger or drop it for `(project_id, test_key)` before real scale.
    - [ ] Follow-up: tune the thresholds with real data. The random-failure benchmark suggested about 76 tests per change; watch `avg_suggested`.
-   - [ ] Release B: a collector command that runs the suggested tests first (never instead of the full suite), from `POST /analytics/impact`
+   - [x] Release B, suggested tests first in CI (built 2026-10-13; spec `docs/superpowers/specs/2026-10-13-suggested-tests-first-design.md`, ADR-029 "Release B"):
+     - `qeos-collector impact` (cucumber, list, json; exit 0/3/4, 2 on configuration) and `run-impact` (Cucumber: two stages, one run, `--fail-fast`, `--suggested-only`, `--no-fallback`, the step summary);
+     - a scoring or setup problem always runs the whole command; only `--suggested-only --no-fallback` exits without tests;
+     - run scope and stages (ingestion migration 020); subset runs out of the statistics, outcomes and accuracy;
+     - `POST /collect/impact` with the per-key "test suggestions" permission (`can_read_impact`);
+     - the action's `impact` and `test-command` inputs, the Jenkins step's `impact` and `testCommand`, GitLab and Azure examples.
+   - [ ] Follow-up: run-impact formats beyond Cucumber, as small follow-ups: JUnit with Maven/Gradle (`-Dtest=`), pytest (node ids), Playwright/JS (`--grep` or file:line)
+   - [ ] Follow-up: verify run-impact on a real cucumber-jvm project with Maven and with Gradle (system-property forwarding), and on Ruby Cucumber; those adapters follow their documented options and are unit-tested with recorded command lines, and only cucumber-js 12.6.0 was run for real
    - [ ] Mark suggested-only runs on the Overview's Latest run / Failing in latest run / Recent runs widgets
    - [ ] A learned model on the same features once outcomes accumulate; it must beat `stats-v1` on the catch rate (with the average suggestion size beside it), with no new infrastructure
    - [ ] Phase 6 embeddings: code embeddings and semantic similarity (Qdrant) when "Phase 6 AI engine work begins"

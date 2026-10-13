@@ -126,7 +126,12 @@ yet.
 - Below 20 runs with changed files, QEOS says "Not enough history yet" rather than guessing; a run with no change
   data gets a compact one-line card, not an empty one.
 - Suggestions decide what to run **first**; runs never skip tests by default.
-  - In CI, the collector's `run-impact` runs them first and then the rest of the suite, as one run.
+  - In CI, the collector's `run-impact` (0.7.0, Cucumber) runs them first and then the rest of the suite, as one
+    run.
+  - When QEOS cannot score a change (no key, a key without the permission, no history of the change, QEOS out of
+    reach), the whole suite runs and the log says why: a suggestion never costs a test run.
+  - CI reads suggestions only with an API key a project owner or admin has allowed to (keys are upload-only by
+    default).
   - A team may opt into running only them (`--suggested-only`, with the full suite as fallback when there is no
     suggestion).
   - Such runs are marked "Suggested tests only" on the run page, the runs list, failure alerts and the weekly summary.

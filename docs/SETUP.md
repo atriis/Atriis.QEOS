@@ -691,29 +691,8 @@ qeos-collector impact --format json --out impact.json
    ```
    The action installs the collector at its own tag. It needs Python and git on the runner,
    which GitHub-hosted runners have.
-3. **Suggested tests first (Cucumber, from `collector-v0.7.0`).** Instead of uploading after the
-   test step, let the action run the tests, the scenarios the change likely affects first:
-   ```yaml
-   - uses: actions/checkout@v7
-     with:
-       fetch-depth: 0                  # the change is scored against the pull request's base
-   - uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.7.0
-     with:
-       url: ${{ vars.QEOS_URL }}
-       impact: first                   # or only: just the likely affected (full suite when none)
-       test-command: npx cucumber-js --tags "not @wip"
-       # extra-args: --cucumber js     # when the command hides the runner (npm test)
-     env:
-       QEOS_API_KEY: ${{ secrets.QEOS_API_KEY }}
-   ```
-   - `test-command` runs as `bash -c "$QEOS_TEST_COMMAND"`, as written, quotes included: the
-     same trust as a `run:` step you write. Every input reaches the action's scripts as an
-     environment variable, never as script text, and `extra-args` is split into words by the
-     collector, not by a shell.
-   - The key needs the **test suggestions** permission (Project Settings > API keys). Without it,
-     or when QEOS cannot be reached, the whole command still runs and the log says why.
-   - The step fails when a test fails. `patterns` is not used with `impact`. The job's summary
-     shows the stages and the suggested tests.
+3. **Suggested tests first (Cucumber, from `collector-v0.7.0`):** the action can run the tests itself, the
+   likely affected scenarios first ([4.1.10](#4110-suggested-tests-first-in-ci-cucumber)).
 
 #### 4.1.5 GitLab CI
 
@@ -870,6 +849,72 @@ uploads are limited to 10 requests per second per IP (burst 20). Retries are saf
 Idempotency-Key makes a repeated upload return the stored run instead of storing a duplicate.
 
 ---
+
+#### 4.1.10 Suggested tests first in CI (Cucumber)
+
+From collector 0.7.0, CI can run your Cucumber suite with the scenarios a change likely affects **first** and the
+rest after, as one run, so failures in the changed area show up in minutes ([Test impact](#test-impact)). The full
+suite still runs every time, unless you opt into running only the likely affected ones.
+
+**What it needs:**
+- runs with changed files, as for test impact, and 20 of them before suggestions go beyond the labelled tests;
+- a checkout with the history the diff needs: `fetch-depth: 0` on GitHub pull requests, the target branch fetched on
+  GitLab merge requests, at least 2 commits elsewhere;
+- an API key with the **test suggestions** permission ([4.1.1](#411-api-keys));
+- cucumber-js, cucumber-jvm (Maven or Gradle) or Ruby Cucumber. Other runners are not supported yet.
+
+**GitHub Actions:** the action runs the tests itself, in place of the test step:
+
+```yaml
+- uses: actions/checkout@v7
+  with:
+    fetch-depth: 0                      # the change is scored against the pull request's base
+- uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.7.0
+  with:
+    url: ${{ vars.QEOS_URL }}
+    impact: first                       # or only: the likely affected scenarios alone
+    test-command: npx cucumber-js --tags "not @wip"
+    # extra-args: --cucumber js         # when the command hides the runner (npm test)
+  env:
+    QEOS_API_KEY: ${{ secrets.QEOS_API_KEY }}
+```
+
+- `test-command` runs as `bash -c "$QEOS_TEST_COMMAND"`, as written, quotes included: the same trust as a `run:` step
+  you write. Every input reaches the action's scripts as an environment variable, never as script text.
+- `extra-args` must be flags. The collector splits them into words itself (`QEOS_ACTION_EXTRA_ARGS`), never through a
+  shell, and refuses a `--` or a word that is no flag's value.
+- `patterns` is not used with `impact`. The step fails when a test fails.
+- The job's summary shows the stages, the time to the first failure and the suggested tests with their evidence.
+
+**Jenkins:** `qeosCollectorUpload(impact: 'first', testCommand: '…')` in the test stage, not in `post`
+([collector-jenkins/README.md](../collector-jenkins/README.md)). **GitLab and Azure:** the commented examples at the
+end of the templates in `templates/`. **Any CI:** `qeos-collector run-impact -- <your Cucumber command>`. The
+collector README has the options, the modes and the exit codes.
+
+**When QEOS cannot help, the tests still run.** A key without the permission, a missing URL or key (a fork pull
+request without the secret), no change data, a QEOS that is unreachable or out of time, a dry run that cannot be
+read: in every case the whole command runs as one stage and the log says why (`warning: …`). The build fails only
+when tests fail (or with `--gate`, when the gate fails). Only `--suggested-only --no-fallback` ends without running
+tests.
+
+**What you see in QEOS:**
+- **The run page** says "Suggested tests first: stage 1 (suggested) 12 tests in 1m 05s · stage 2 (the rest) …
+  · first failure after 42.5 s (full suite 15m 15s)".
+- **With `impact: only`, or a `--fail-fast` stop,** the run is marked **Suggested only**, on the run page, in the
+  runs list (the **Full runs only** chip hides such runs), in failure alerts and in the weekly summary. It never
+  counts in the impact statistics or the accuracy figure: a run of only the suggested tests cannot show what the
+  suggestion missed. Its impact card says "Suggested tests only, not evaluated".
+
+**Cucumber setups.** run-impact reads the scenarios with a dry run and selects them with rerun files. Feature paths
+it can see in the command are left out of the stages. Paths it cannot see change what runs:
+- a cucumber-js profile or config with `paths`;
+- an npm script that names feature folders;
+- `--shard`.
+
+It checks this before any test runs and stops with exit 2, saying so: running a wrong subset silently would be worse
+than running nothing. Select features with tags instead, or call Cucumber directly. With Gradle, forward
+`cucumber.*` system properties to the test task (collector README). On Windows, cucumber-jvm and Ruby Cucumber
+through a `.cmd` or `.bat` need a working directory without `% ! & | < > ^ "` (cmd.exe would change them).
 
 ### 4.2 Test cases
 
@@ -1266,6 +1311,8 @@ every 24 hours.
 - **Run likely affected** on **Test cases**: see [4.3](#43-run-from-qeos-play-and-stop).
 - **From CI or the command line:** `qeos-collector impact` prints the suggestion for the current change
   ([4.1.3a](#413a-suggested-tests-from-the-command-line-impact)).
+- **In CI:** run the likely affected scenarios first with collector 0.7.0
+  ([4.1.10](#4110-suggested-tests-first-in-ci-cucumber)).
 - **Replay history:** to fill the figure from past runs, run once
   `docker compose run --rm impact-rollup python -m src.ingestion.jobs.impact_rollup --backfill-days 30`
   (1 to 90 days). Those runs are scored with statistics from earlier days only, marked *replayed* and counted
@@ -1748,6 +1795,12 @@ The gateway always joins a Docker network fixed at `172.30.1.0/24`, with monitor
 | CI build is green but no run arrives | `QEOS_URL` missing or unreachable (hosted runner → localhost, or a closed tunnel). By default the collector never fails the build; add `--fail-on-error` while you debug. |
 | Run arrives without branch or commit | CI not detected: pass `--branch` / `--commit`, or check out with git history. |
 | No changed files on runs | Check out at least 2 commits (`fetch-depth: 2`), or `--no-changes` is set. |
+| `impact` / `run-impact`: "no suggestion: no change data" | The diff has no base: on GitHub pull requests check out with `fetch-depth: 0`; on GitLab fetch the merge request's target branch; elsewhere check out at least 2 commits. `run-impact` then runs the full suite as one stage. |
+| `run-impact`: "warning: cannot score the change: This API key may not read test suggestions" | The key is upload-only (403 `impact_not_allowed`). The whole suite ran as one stage and was uploaded. To get suggestions, a project owner or admin turns on the key's **Test suggestions** switch in Settings → **API keys** ([4.1.1](#411-api-keys)). |
+| `run-impact`: "cannot narrow this command" (profile paths refused) | Something outside the command selects features: a cucumber-js profile or config with `paths`, an npm script naming folders, or `--shard`. Select features with tags, or call Cucumber directly ([4.1.10](#4110-suggested-tests-first-in-ci-cucumber)). Nothing ran (exit 2). |
+| `run-impact`: "cannot tell which Cucumber" | The command hides the runner (`npm test`, a script): pass `--cucumber js`, `jvm` or `ruby` (in the action: `extra-args: --cucumber js`). |
+| `run-impact`: "warning: not uploaded: …" | The tests ran, but the collector cannot reach QEOS as configured (no `QEOS_URL` or key, an unusable `--ca-file`, a broken `.qeos.yml`). Fix what it names; `qeos-collector check` helps. |
+| Action: "QEOS_ACTION_EXTRA_ARGS must hold flags only" | `extra-args` holds a word that is not a flag (or `--`). The test command goes in `test-command`. |
 | Every failing test shows as "confirmed flaky" | The matrix legs share one environment. Set `QEOS_ENVIRONMENT` per leg. |
 | `import-features` always "skipped" | The sync branch is the default branch, or `master` where the CI does not expose it. Set `QEOS_IMPORT_BRANCH`. |
 | Imported cases never link to results | Import paths differ from report paths (fix **Path prefix**), or the upload is JUnit instead of Cucumber JSON. |

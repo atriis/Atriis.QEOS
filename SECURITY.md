@@ -101,6 +101,14 @@ details.
   tests first; any other key gets `403 impact_not_allowed`. Owners and admins set
   it when creating a key or later (`PATCH /projects/{id}/api-keys/{key_id}`); a
   member can create keys, upload-only ones.
+- **The collector in CI.** The API key is read from the environment only and scrubbed from
+  every log line and from the GitHub step summary. The GitHub Action hands every input to its
+  scripts as an environment variable, never as script text; `test-command` runs as
+  `bash -c "$QEOS_TEST_COMMAND"`, the same trust as a `run:` step its author writes, and
+  `extra-args` is split into words by the collector (`QEOS_ACTION_EXTRA_ARGS`, flags only, not
+  passed on to the tests). `run-impact` selects scenarios through rerun files, never by name,
+  so no test name reaches a shell, and its own arguments reach a `bash -c` script as `"$@"`.
+  On Windows it refuses a working directory whose characters cmd.exe would expand.
 - **Collection of manual runs.** The project toggle that discards manual CI runs is a noise
   filter, not an access control. The collector reports `run.trigger`, so whoever holds the project's
   API key can label a manual run `automatic` and have it stored. API keys remain the boundary.
