@@ -74,18 +74,25 @@ class _Output:
             print(line.encode("ascii", "backslashreplace").decode("ascii"), file=sys.stderr)
 
 
-def _run_options(parser: argparse.ArgumentParser) -> None:
-    """What every uploading command takes: where to send the run, and what to say about it."""
+def _target_options(parser: argparse.ArgumentParser) -> None:
+    """Where QEOS is and which change it is about: every command that sends the key to /collect."""
     parser.add_argument("--url", help="platform URL (default: $QEOS_URL)")
-    parser.add_argument("--ci-provider", choices=CI_PROVIDERS, help="default: $QEOS_CI_PROVIDER, else detected")
-    parser.add_argument("--trigger", help="manual, automatic or qeos (default: $QEOS_TRIGGER, else detected; ADR-030)")
+    parser.add_argument("--ca-file", help="trust exactly this CA certificate, e.g. a private or self-signed one "
+                                          "(default: $QEOS_CA_FILE)")
+    parser.add_argument("--client-cert", help="client certificate for mTLS (default: $QEOS_CLIENT_CERT)")
+    parser.add_argument("--client-key", help="private key for --client-cert (default: $QEOS_CLIENT_KEY)")
     parser.add_argument("--branch", help="default: $QEOS_BRANCH, else detected")
     parser.add_argument("--commit", help="full or short SHA (default: $QEOS_COMMIT, else detected)")
+
+
+def _run_options(parser: argparse.ArgumentParser) -> None:
+    """What every uploading command takes: where to send the run, and what to say about it."""
+    _target_options(parser)
+    parser.add_argument("--ci-provider", choices=CI_PROVIDERS, help="default: $QEOS_CI_PROVIDER, else detected")
+    parser.add_argument("--trigger", help="manual, automatic or qeos (default: $QEOS_TRIGGER, else detected; ADR-030)")
     parser.add_argument("--ci-run-url", help="default: $QEOS_CI_RUN_URL, else detected")
     parser.add_argument("--environment", help="e.g. staging (default: $QEOS_ENVIRONMENT)")
     parser.add_argument("--idempotency-key", help="default: $QEOS_IDEMPOTENCY_KEY, else derived from the CI job")
-    parser.add_argument("--ca-file", help="trust exactly this CA certificate, e.g. a private or self-signed one "
-                                          "(default: $QEOS_CA_FILE)")
     parser.add_argument("--component", action="append", default=[], metavar="NAME@SHA",
                         help="a repo/version this run exercised, e.g. product-api@3f2a9c1; repeatable "
                              "(default: $QEOS_COMPONENTS, comma separated)")
@@ -94,8 +101,6 @@ def _run_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--gate", action="store_true",
                         help="exit 1 when the run has failures outside quarantine, or when it could not be "
                              "uploaded (default: $QEOS_GATE)")
-    parser.add_argument("--client-cert", help="client certificate for mTLS (default: $QEOS_CLIENT_CERT)")
-    parser.add_argument("--client-key", help="private key for --client-cert (default: $QEOS_CLIENT_KEY)")
     parser.add_argument("--spool", metavar="DIR",
                         help="keep parts a failed upload could not deliver in DIR and resend them on "
                              "the next invocation (default: $QEOS_SPOOL)")
@@ -160,12 +165,7 @@ def build_parser() -> argparse.ArgumentParser:
                                  "suggestion")
     impact_cmd.add_argument("--out", metavar="FILE",
                             help="write the suggestion to FILE instead of stdout (emptied when there is none)")
-    impact_cmd.add_argument("--url", help="platform URL (default: $QEOS_URL)")
-    impact_cmd.add_argument("--ca-file", help="trust exactly this CA certificate (default: $QEOS_CA_FILE)")
-    impact_cmd.add_argument("--client-cert", help="client certificate for mTLS (default: $QEOS_CLIENT_CERT)")
-    impact_cmd.add_argument("--client-key", help="private key for --client-cert (default: $QEOS_CLIENT_KEY)")
-    impact_cmd.add_argument("--branch", help="default: $QEOS_BRANCH, else detected")
-    impact_cmd.add_argument("--commit", help="the commit whose change is scored (default: $QEOS_COMMIT, else detected)")
+    _target_options(impact_cmd)
     run_impact_cmd = commands.add_parser(
         "run-impact",
         help="run a Cucumber command with the likely affected scenarios first, then the rest, and upload one run",
@@ -242,9 +242,14 @@ def main(
     fail_on_error, gate = _flags(args, env)
     if args.command == "run-impact":
         try:
-            _usable_key(api_key)
+            try:
+                _usable_key(api_key)
+                problem = None
+            except ConfigError as exc:  # the tests still run (run_impact.run); nothing is sent with this key
+                problem = str(exc)
             return run_impact.run(
                 args, env, api_key, say, os.getcwd(), gate=gate, fail_on_error=fail_on_error, clock=clock,
+                setup_problem=problem,
                 upload=lambda reports, scope, stages: _upload_reports(
                     args, env, api_key, say, reports, scope, stages, now=now, sleep=sleep, clock=clock),
                 judge=lambda receipt: _verdict(receipt, say),

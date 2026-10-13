@@ -126,6 +126,7 @@ def has_feature_files(cwd: str) -> bool:
 # --- run-impact (Phase 3) -------------------------------------------------------------
 
 FLAVOURS = ("js", "jvm", "ruby")
+_JVM_PLUGIN = "-Dcucumber.plugin="
 WORKDIR = ".qeos-impact"  # run-impact's files, under the working directory (plan Ruling 16)
 # Options that take a value, so their value is never read as a feature path
 _JS_VALUE_OPTIONS = frozenset({
@@ -245,7 +246,20 @@ def report_arguments(flavour: str, report: PurePath, cwd: str) -> List[str]:
         return ["--format", f"json:{_relative(report, cwd)}"]
     if flavour == "ruby":
         return ["--format", "json", "--out", report.as_posix()]
-    return [f"-Dcucumber.plugin=json:{report.as_posix()}"]
+    return [f"{_JVM_PLUGIN}json:{report.as_posix()}"]
+
+
+def with_report(flavour: str, argv: Sequence[str], report: PurePath, cwd: str) -> List[str]:
+    """argv with a Cucumber JSON report at `report`. A cucumber-jvm command that already sets cucumber.plugin keeps
+    its plugins: ours joins the last such property with a comma, since a second -D would replace it."""
+    if flavour == "jvm":
+        at = [i for i, arg in enumerate(argv) if arg.startswith(_JVM_PLUGIN)]
+        if at:
+            plugins = argv[at[-1]][len(_JVM_PLUGIN):].strip().rstrip(",")
+            merged = list(argv)
+            merged[at[-1]] = _JVM_PLUGIN + (f"{plugins}," if plugins else "") + f"json:{report.as_posix()}"
+            return merged
+    return [*argv, *report_arguments(flavour, report, cwd)]
 
 
 def rerun_argument(flavour: str, rerun: PurePath, cwd: str) -> str:
@@ -258,20 +272,31 @@ def rerun_argument(flavour: str, rerun: PurePath, cwd: str) -> str:
     return "-Dcucumber.features=@" + rerun.as_posix()
 
 
+class Incomplete(ValueError):
+    """A dry run listed scenarios that cannot be put in a rerun file (no line): run-impact cannot plan the stages."""
+
+
 def read_scenarios(path) -> List[Scenario]:
     """The scenarios of a Cucumber JSON report (a dry run's), in report order, read by the upload's own parser
-    (formats._cucumber_feature): a background is not one, and a scenario without a name or a line is left out.
-    Raises OSError or ValueError when there is no readable report."""
+    (formats._cucumber_feature): a background is not one, and a scenario without a name keeps an empty name. Raises
+    OSError or ValueError when there is no readable report, and Incomplete when Cucumber listed more scenarios than
+    could be read: one left out of both stages would never run."""
     with open(path, "rb") as handle:
         data = json.load(handle)
     scenarios: List[Scenario] = []
+    listed = 0
     for feature in data if isinstance(data, list) else []:
         if not isinstance(feature, dict) or "elements" not in feature:
             continue
+        elements = feature.get("elements")
+        listed += sum(1 for element in elements if isinstance(element, dict) and element.get("type") != "background"
+                      ) if isinstance(elements, list) else 0
         parsed, lines = ParsedFile(path=str(path)), []  # type: ParsedFile, List[Optional[int]]
         formats._cucumber_feature(feature, parsed, lines)
         scenarios.extend(Scenario(row["suite"], row["class_name"], row["name"], line)
                          for row, line in zip(parsed.results, lines) if line is not None)
+    if len(scenarios) != listed:
+        raise Incomplete(f"listed {listed} scenario(s), of which {listed - len(scenarios)} without a line")
     return scenarios
 
 
@@ -296,9 +321,10 @@ def _test_key(test: dict) -> Tuple[str, str]:
 def split(tests: Sequence[dict], scenarios: Sequence[Scenario]) -> Tuple[List[Scenario], List[Scenario], List[dict]]:
     """(stage 1, stage 2, suggested tests not among the scenarios). Every scenario lands in exactly one stage, in
     report order. A suggested test matches on (class_name, name): for Cucumber, the feature's uri and the scenario's
-    name, so the rows of an outline that share its name go with it."""
+    name, so the rows of an outline that share its name go with it. A scenario without a name is never suggested:
+    it runs in stage 2."""
     wanted = {_test_key(test) for test in tests}
-    first = [s for s in scenarios if s.key in wanted]
-    rest = [s for s in scenarios if s.key not in wanted]
+    first = [s for s in scenarios if s.name and s.key in wanted]
+    rest = [s for s in scenarios if not (s.name and s.key in wanted)]
     found = {s.key for s in first}
     return first, rest, [test for test in tests if _test_key(test) not in found]

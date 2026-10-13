@@ -90,8 +90,6 @@ DRY_RUN = [
         {"type": "scenario", "name": "Pays with card", "line": 4, "steps": []},
         {"type": "scenario", "name": "Pays 10", "line": 12, "steps": []},
         {"type": "scenario", "name": "Pays 20", "line": 13, "steps": []},
-        {"type": "scenario", "name": "No line", "steps": []},
-        {"type": "scenario", "name": "Bad line", "line": True, "steps": []},
         {"type": "scenario", "name": "", "line": 20, "steps": []}]},
     {"uri": "classpath:features/cart.feature", "name": "Cart", "elements": [
         {"type": "scenario", "name": " Adds ", "line": 3, "steps": []}]},
@@ -106,8 +104,52 @@ def test_a_dry_run_report_lists_scenarios_and_outline_rows_with_forward_slashes(
         Scenario("Pay", "features/pay.feature", "Pays with card", 4),
         Scenario("Pay", "features/pay.feature", "Pays 10", 12),
         Scenario("Pay", "features/pay.feature", "Pays 20", 13),
+        Scenario("Pay", "features/pay.feature", "", 20),  # unnamed: kept, so it still runs in a stage
         Scenario("Cart", "classpath:features/cart.feature", "Adds", 3),
     ]
+
+
+@pytest.mark.parametrize("element", [
+    {"type": "scenario", "name": "No line", "steps": []},
+    {"type": "scenario", "name": "Bad line", "line": True, "steps": []},
+    {"type": "scenario", "name": "Zero line", "line": 0, "steps": []},
+])
+def test_a_scenario_without_a_usable_line_makes_the_report_incomplete(tmp_path, element):
+    """It could go in no rerun file, so it would run in neither stage: run-impact must not plan with it."""
+    report = tmp_path / "discovery.json"
+    report.write_text(json.dumps([{**DRY_RUN[0], "elements": [*DRY_RUN[0]["elements"], element]}]), encoding="utf-8")
+    with pytest.raises(cucumber.Incomplete, match="listed 5 scenario.s., of which 1 without a line"):
+        cucumber.read_scenarios(report)
+
+
+def test_an_unnamed_scenario_stays_out_of_an_upload():
+    """The upload parser still skips it (no name, no test): only discovery keeps it."""
+    from qeos_collector import formats
+    from qeos_collector.junit import ParsedFile
+
+    parsed = ParsedFile(path="x")
+    formats._cucumber_feature(DRY_RUN[0], parsed)
+    assert [row["name"] for row in parsed.results] == ["Pays with card", "Pays 10", "Pays 20"]
+    assert parsed.unnamed == 1
+
+
+def test_an_unnamed_scenario_is_never_suggested():
+    scenarios = [Scenario("Pay", "features/pay.feature", "", 20), Scenario("Pay", "features/pay.feature", "Pays", 4)]
+    first, rest, _missing = cucumber.split([{"class_name": "features/pay.feature", "name": ""},
+                                            {"class_name": "features/pay.feature", "name": "Pays"}], scenarios)
+    assert ([s.line for s in first], [s.line for s in rest]) == ([4], [20])
+
+
+def test_a_jvm_command_keeps_its_own_plugins():
+    report = PureWindowsPath(r"C:\work\.qeos-impact\ab12\stage-1.json")
+    assert cucumber.with_report("jvm", ["mvn", "test", "-Dcucumber.plugin=pretty, html:out.html"], report, "C:/work") == [
+        "mvn", "test", "-Dcucumber.plugin=pretty, html:out.html,json:C:/work/.qeos-impact/ab12/stage-1.json"]
+    assert cucumber.with_report("jvm", ["mvn", "test", "-Dcucumber.plugin="], report, "C:/work") == [
+        "mvn", "test", "-Dcucumber.plugin=json:C:/work/.qeos-impact/ab12/stage-1.json"]
+    assert cucumber.with_report("jvm", ["mvn", "test"], report, "C:/work") == [
+        "mvn", "test", "-Dcucumber.plugin=json:C:/work/.qeos-impact/ab12/stage-1.json"]
+    assert cucumber.with_report("ruby", ["cucumber"], report, "C:/work") == [
+        "cucumber", "--format", "json", "--out", "C:/work/.qeos-impact/ab12/stage-1.json"]
 
 
 def test_scenarios_are_read_by_the_upload_parser(tmp_path, monkeypatch):

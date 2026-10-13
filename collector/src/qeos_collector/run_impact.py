@@ -2,8 +2,9 @@
 2026-10-13 §2.2; plan Rulings 6-13, 16, 21).
 
 1. QEOS scores the change (impact.fetch: the upload's changed files, POST /api/v1/collect/impact). Scoring never
-   keeps a test from running: when it fails for any reason (401, 403, 404, 422, 429, 5xx, a timeout, no answer, no
-   change data), the command runs as given, as one stage, and the log says why.
+   keeps a test from running: when it fails for any reason (no URL or key, an unusable key, CA file or .qeos.yml,
+   401, 403, 404, 422, 429, 5xx, a timeout, no answer, no change data), the command runs as given, as one stage, and
+   the log says why. So does a failure to plan the stages (a dry run without a usable report, a bug).
 2. Discovery: the test command as given, as a Cucumber dry run with a JSON report: the scenarios it would run.
 3. The plan:
    - the suggested scenarios among them go in stage 1's rerun file, every other one in stage 2's, so none runs twice;
@@ -32,8 +33,8 @@ REFUSED = 2  # QEOS refused to score (a configuration problem): `impact` would e
 FAILING = ("failed", "errored")
 SHOWN_MISSING = 5
 _WINDOWS = os.name == "nt"
-# cmd.exe expands % and splits on & | < > ^ even inside the quotes subprocess adds
-_CMD_SPECIAL = frozenset('%&|<>^"')
+# cmd.exe expands % (and ! with delayed expansion) and splits on & | < > ^ even inside the quotes subprocess adds
+_CMD_SPECIAL = frozenset('%!&|<>^"')
 
 # (stage reports, scope, stages) -> the last receipt, or None when nothing was stored
 Upload = Callable[[List[ParsedFile], str, dict], Optional[dict]]
@@ -55,10 +56,15 @@ class Stage:
         return sum(1 for row in self.report.results if row["status"] in FAILING)
 
     @property
+    def no_report(self) -> bool:
+        """The stage wrote no usable Cucumber JSON report (it crashed, or the command ignored the argument)."""
+        return self.report.skipped
+
+    @property
     def broke(self) -> bool:
         """A failed or errored scenario, or a command that exited non-zero without a report (it crashed): what
         --fail-fast stops on. A non-zero exit alone, with a report, is not (undefined steps, say)."""
-        return self.failed > 0 or (self.returncode != 0 and not self.report.results)
+        return self.failed > 0 or (self.returncode != 0 and self.no_report)
 
 
 def run_command(argv: Sequence[str]) -> int:
@@ -109,6 +115,10 @@ def stages_payload(stages: Sequence[Stage], stopped_after_stage: Optional[int] =
     return payload
 
 
+class _NoPlan(Exception):
+    """The stages cannot be planned (a dry run without a usable report): the command runs as given instead."""
+
+
 class _Cucumber:
     """The dry runs and stages of one invocation, their files in one working directory."""
 
@@ -130,23 +140,24 @@ class _Cucumber:
         extra = list(cucumber.dry_run_arguments(self.flavour))
         if plan is not None:
             extra.append(self._rerun(label, plan))
-        extra += cucumber.report_arguments(self.flavour, report, self.cwd)
-        code = self.runner([*command, *extra])
+        code = self.runner(cucumber.with_report(self.flavour, [*command, *extra], report, self.cwd))
         try:
             return cucumber.read_scenarios(report)
+        except cucumber.Incomplete as exc:
+            raise _NoPlan(f"the Cucumber dry run ({label}) {exc}") from None
         except (OSError, ValueError):
-            raise ConfigError(f"the Cucumber dry run ({label}) wrote no JSON report ({command[0]} exited {code}); "
-                              f"is --cucumber {self.flavour} right for this command?") from None
+            raise _NoPlan(f"the Cucumber dry run ({label}) wrote no JSON report ({command[0]} exited {code}); "
+                          f"is --cucumber {self.flavour} right for this command?") from None
 
     def stage(self, number: int, name: str, command: Sequence[str],
               scenarios: Optional[Sequence[cucumber.Scenario]] = None) -> Stage:
         report = self.workdir / f"stage-{number}.json"
         extra = [] if scenarios is None else [self._rerun(f"stage-{number}", scenarios)]
-        extra += cucumber.report_arguments(self.flavour, report, self.cwd)
+        argv = cucumber.with_report(self.flavour, [*command, *extra], report, self.cwd)
         self.say(f"stage {number} ({name}): "
                  + ("the command as given" if scenarios is None else f"{len(scenarios)} scenario(s)"))
         started = self.clock()
-        code = self.runner([*command, *extra])
+        code = self.runner(argv)
         return Stage(name, code, max(0.0, self.clock() - started), parse_file(str(report)))
 
 
@@ -199,14 +210,9 @@ def _without_suggestion(args, say: Callable[[str], None], command: Sequence[str]
     return [steps.stage(1, "all", command)]
 
 
-def _run_stages(args, say, command, flavour, cwd, found: impact.Suggestion,
-                steps: _Cucumber) -> Tuple[List[Stage], str, Optional[int], List[dict]]:
-    """(stages, scope, stopped_after_stage, suggested tests not discovered); no stages when nothing may run."""
-    if found.code != impact.SUGGESTED:
-        # QEOS answered "nothing" as a plain note; anything else is a problem worth a warning
-        say(f"no suggestion: {found.reason}" if found.data is not None
-            else f"warning: cannot score the change: {found.reason}")
-        return _without_suggestion(args, say, command, steps), FULL, None, []
+def _plan(say, command, flavour, cwd, found: impact.Suggestion, steps: _Cucumber):
+    """(stage 1, stage 2, suggested tests not discovered, the stage command). Raises _NoPlan, or ConfigError for an
+    explicit refusal (the stage-1 check)."""
     discovered = steps.dry_run(command, "discovery")
     first, rest, missing = cucumber.split(found.tests, discovered)
     say(f"{len(discovered)} scenario(s) in this command, {len(first)} of them suggested")
@@ -216,12 +222,36 @@ def _run_stages(args, say, command, flavour, cwd, found: impact.Suggestion,
         say(f"skipped by the filter: {len(missing)} suggested test(s) are not among this command's scenarios "
             f"(left out by its filters, or not Cucumber): {names}{more}")
     if not first:
-        say("no suggested scenario is among them")
-        return _without_suggestion(args, say, command, steps), FULL, None, missing
+        return first, rest, missing, list(command)
     narrowed, removed = cucumber.strip_paths(flavour, command, cwd)
     if removed:
         say(f"the stages leave out the command's own feature paths ({' '.join(removed)}): the rerun files choose")
     _check_selection(steps, narrowed, first)
+    return first, rest, missing, narrowed
+
+
+def _run_stages(args, say, command, flavour, cwd, found: impact.Suggestion,
+                steps: _Cucumber) -> Tuple[List[Stage], str, Optional[int], List[dict]]:
+    """(stages, scope, stopped_after_stage, suggested tests not discovered); no stages when nothing may run."""
+    if found.code != impact.SUGGESTED:
+        # QEOS answered "nothing" as a plain note; anything else is a problem worth a warning
+        say(f"no suggestion: {found.reason}" if found.data is not None
+            else f"warning: cannot score the change: {found.reason}")
+        return _without_suggestion(args, say, command, steps), FULL, None, []
+    try:
+        first, rest, missing, narrowed = _plan(say, command, flavour, cwd, found, steps)
+    except ConfigError:  # the stage-1 check's refusal, or a program that cannot run at all
+        raise
+    except Exception as exc:  # noqa: BLE001 - planning must never cost the test run
+        reason = str(exc) if isinstance(exc, _NoPlan) else f"unexpected error: {type(exc).__name__}: {exc}"
+        say(f"warning: cannot plan the stages: {reason}")
+        if args.suggested_only and args.no_fallback:
+            raise ConfigError(f"cannot plan the stages: {reason}") from None
+        say("running the full suite as one stage")
+        return [steps.stage(1, "all", command)], FULL, None, []
+    if not first:
+        say("no suggested scenario is among them")
+        return _without_suggestion(args, say, command, steps), FULL, None, missing
     stages = [steps.stage(1, "suggested", narrowed, first)]
     if args.suggested_only:
         return stages, SUBSET, None, missing
@@ -237,6 +267,12 @@ def _finish(say, stages: List[Stage], scope: str, stopped: Optional[int], *, upl
             judge: Callable[[dict], int], gate: bool, fail_on_error: bool) -> int:
     """Upload the stages as one run, then the exit code (plan Ruling 12): the gate's verdict with --gate (1 when
     nothing was uploaded), else the test command's own exit code (1 with --fail-on-error when the upload failed)."""
+    for number, stage in enumerate(stages, start=1):
+        if stage.no_report and scope == FULL:
+            # Its scenarios have no results: the run is not the full suite, and must not count as one
+            say(f"warning: stage {number} ({stage.name}) wrote no report (exit {stage.returncode}); the run is "
+                "uploaded as suggested tests only (impact-subset), so it does not count in the statistics")
+            scope = SUBSET
     payload = stages_payload(stages, stopped)
     receipt = upload([stage.report for stage in stages], scope, payload)
     tests = next((stage.returncode for stage in stages if stage.returncode != 0), 0)
@@ -267,7 +303,9 @@ def _workdir(cwd: str) -> Path:
 
 def run(args, env: Mapping[str, str], api_key: str, say: Callable[[str], None], cwd: str, *, upload: Upload,
         judge: Callable[[dict], int], gate: bool, fail_on_error: bool, clock: Callable[[], float],
-        runner: Callable[[Sequence[str]], int] = run_command) -> int:
+        runner: Callable[[Sequence[str]], int] = run_command, setup_problem: Optional[str] = None) -> int:
+    """setup_problem: why the collector cannot talk to QEOS as configured (the caller's key check). The tests still
+    run as given; nothing is uploaded."""
     command = _command(args)
     flavour = args.cucumber or cucumber.detect_flavour(command)
     if flavour is None:
@@ -275,9 +313,21 @@ def run(args, env: Mapping[str, str], api_key: str, say: Callable[[str], None], 
     if args.no_fallback and not args.suggested_only:
         raise ConfigError("--no-fallback only goes with --suggested-only")
     command = cucumber.with_separator(flavour, command)
-    target = impact.resolve(args, env, api_key, cwd)
     check_paths(flavour, command, cwd)
-    found = _score(target, api_key, env)
+    problem = setup_problem
+    if problem is None:
+        try:
+            target = impact.resolve(args, env, api_key, cwd)
+        except ConfigError as exc:  # no URL or key, an unusable CA file or .qeos.yml
+            problem = str(exc)
+    if problem is None:
+        found = _score(target, api_key, env)
+    else:
+        found = impact.Suggestion(REFUSED, problem)
+
+        def upload(reports, scope, stages):  # noqa: F811 - nothing can be sent as configured
+            say(f"warning: not uploaded: {problem}")
+            return None
     workdir = _workdir(cwd)
     try:
         steps = _Cucumber(flavour, workdir, cwd, runner, clock, say)

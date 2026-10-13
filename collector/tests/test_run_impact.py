@@ -48,6 +48,7 @@ def cucumber(tmp_path, monkeypatch):
     monkeypatch.delenv("FAKE_CUCUMBER_WINDOWS", raising=False)
     monkeypatch.delenv("FAKE_CUCUMBER_CRASH", raising=False)
     monkeypatch.delenv("FAKE_CUCUMBER_EXIT", raising=False)
+    monkeypatch.delenv("FAKE_CUCUMBER_NO_DRY_REPORT", raising=False)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(impact, "collect_changes", lambda env, commit: CHANGES)
     monkeypatch.setattr(cli, "collect_changes", lambda env, commit: CHANGES)
@@ -294,16 +295,185 @@ def test_an_undetectable_cucumber_needs_the_option(platform, cucumber, capsys):
     assert "pass --cucumber js, jvm or ruby" in capsys.readouterr().err
 
 
-def test_a_dry_run_that_writes_no_report_is_explained(platform, cucumber, capsys):
+def test_a_dry_run_that_writes_no_report_runs_the_command_as_given(platform, cucumber, monkeypatch, capsys):
+    """Fix round 1, item 5: a failed discovery is a planning problem, not a reason to run no tests."""
+    monkeypatch.setenv("FAKE_CUCUMBER_NO_DRY_REPORT", "1")
     platform.reply(200, suggested(PAYS_10))
-    assert run(["run-impact", "--cucumber", "js", "--", sys.executable, "-c", "pass"], env_for(platform)) == 2
-    assert "wrote no JSON report" in capsys.readouterr().err
+    platform.reply(201, RECEIPT)
+    assert run(command(), env_for(platform)) == 1
+    calls = cucumber()
+    assert [c["dry_run"] for c in calls] == [True, False] and sorted(calls[1]["ran"]) == ALL_FIVE
+    [body] = uploads(platform)
+    assert body["run"]["scope"] == "full" and [s["name"] for s in body["run"]["stages"]["stages"]] == ["all"]
+    err = capsys.readouterr().err
+    assert "warning: cannot plan the stages: the Cucumber dry run (discovery) wrote no JSON report" in err
 
 
-def test_a_key_that_cannot_be_sent_is_refused_before_anything_runs(platform, cucumber, capsys):
-    assert run(command(), env_for(platform, QEOS_API_KEY="bad key")) == 2
+def test_a_command_that_writes_no_report_at_all_still_runs(platform, cucumber, capsys):
+    platform.reply(200, suggested(PAYS_10))
+    assert run(["run-impact", "--cucumber", "js", "--", sys.executable, "-c", "pass"], env_for(platform)) == 0
+    err = capsys.readouterr().err
+    assert "wrote no JSON report" in err and "stage 1 (all): the command as given" in err
+
+
+def test_a_stage_1_check_without_a_report_runs_the_command_as_given(platform, cucumber, monkeypatch, capsys):
+    """Only the check's dry run fails: still a planning problem."""
+    real = run_impact._Cucumber.dry_run
+
+    def discovery_only(self, command, label, plan=None):
+        if label == "stage-1-check":
+            raise run_impact._NoPlan("the Cucumber dry run (stage-1-check) wrote no JSON report")
+        return real(self, command, label, plan)
+
+    monkeypatch.setattr(run_impact._Cucumber, "dry_run", discovery_only)
+    platform.reply(200, suggested(PAYS_10))
+    platform.reply(201, RECEIPT)
+    assert run(command(), env_for(platform)) == 1
+    assert [c["dry_run"] for c in cucumber()] == [True, False]
+    assert "cannot plan the stages: the Cucumber dry run (stage-1-check)" in capsys.readouterr().err
+
+
+def test_a_planning_failure_with_no_fallback_runs_nothing(platform, cucumber, monkeypatch):
+    monkeypatch.setenv("FAKE_CUCUMBER_NO_DRY_REPORT", "1")
+    platform.reply(200, suggested(PAYS_10))
+    assert run(command("--suggested-only", "--no-fallback"), env_for(platform)) == 2
+    assert [c["dry_run"] for c in cucumber()] == [True] and uploads(platform) == []
+
+
+def test_a_bug_while_planning_runs_the_command_as_given(platform, cucumber, monkeypatch, capsys):
+    """Fix round 1, item 4."""
+    def broken(tests, scenarios):
+        raise RuntimeError("planner bug")
+
+    monkeypatch.setattr(run_impact.cucumber, "split", broken)
+    platform.reply(200, suggested(PAYS_10))
+    platform.reply(201, RECEIPT)
+    assert run(command(), env_for(platform)) == 1
+    assert [c["dry_run"] for c in cucumber()] == [True, False]
+    assert [s["name"] for s in uploads(platform)[0]["run"]["stages"]["stages"]] == ["all"]
+    assert "warning: cannot plan the stages: unexpected error: RuntimeError: planner bug" in capsys.readouterr().err
+
+
+def write_spec(tmp_path, monkeypatch, **changes):
+    """The catalogue with some scenarios changed: {(uri, name): {...} or None to drop the key "line"}."""
+    spec = json.loads(SPEC.read_text(encoding="utf-8"))
+    for feature in spec["features"]:
+        for scenario in feature["scenarios"]:
+            for (uri, name), change in changes.get("scenarios", {}).items():
+                if (feature["uri"], scenario["name"]) == (uri, name):
+                    scenario.update(change)
+                    if "line" in change and change["line"] is None:
+                        scenario.pop("line", None)
+    custom = tmp_path / "spec.json"
+    custom.write_text(json.dumps(spec), encoding="utf-8")
+    monkeypatch.setenv("FAKE_CUCUMBER_SPEC", str(custom))
+
+
+def test_an_unnamed_scenario_runs_in_stage_2(platform, cucumber, tmp_path, monkeypatch):
+    """Fix round 1, item 2a: discovery used to drop it, so it ran in neither stage."""
+    write_spec(tmp_path, monkeypatch, scenarios={("features/cart.feature", "Removes"): {"name": ""}})
+    platform.reply(200, suggested(PAYS_10))
+    platform.reply(201, RECEIPT)
+    assert run(command(), env_for(platform)) == 1
+    calls = cucumber()
+    assert [c["dry_run"] for c in calls] == [True, True, False, False]
+    assert "features/cart.feature:7" in calls[3]["ran"]
+    assert sorted(calls[2]["ran"] + calls[3]["ran"]) == ALL_FIVE
+
+
+def test_a_scenario_without_a_line_runs_the_command_as_given(platform, cucumber, tmp_path, monkeypatch, capsys):
+    """Fix round 1, item 2b: the backstop. It could go in no rerun file, so the stages cannot be planned."""
+    write_spec(tmp_path, monkeypatch, scenarios={("features/cart.feature", "Removes"): {"line": None}})
+    platform.reply(200, suggested(PAYS_10))
+    platform.reply(201, RECEIPT)
+    assert run(command(), env_for(platform)) == 1
+    calls = cucumber()
+    assert [c["dry_run"] for c in calls] == [True, False] and len(calls[1]["ran"]) == 5
+    assert [s["name"] for s in uploads(platform)[0]["run"]["stages"]["stages"]] == ["all"]
+    assert "cannot plan the stages: the Cucumber dry run (discovery) listed 5 scenario(s), of which 1 without a line" \
+        in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("env_change, cause", [
+    ({"QEOS_URL": None}, "QEOS_URL is not set"),
+    ({"QEOS_API_KEY": None}, "QEOS_API_KEY is not set"),
+    ({"QEOS_API_KEY": "bad key"}, "printable ASCII"),
+    ({"QEOS_CA_FILE": "no-such-ca.pem"}, "cannot use --ca-file no-such-ca.pem"),
+    ({"QEOS_QEOS_YML": "broken"}, ".qeos.yml"),
+])
+def test_a_setup_problem_runs_the_tests_and_uploads_nothing(platform, cucumber, tmp_path, capsys, env_change,
+                                                            cause):
+    """Fix round 1, item 1: a fork pull request without the secret still runs its tests."""
+    env = env_for(platform)
+    for name, value in env_change.items():
+        if name == "QEOS_QEOS_YML":
+            (tmp_path / ".qeos.yml").write_text("this is not yaml we read\n", encoding="utf-8")
+        elif value is None:
+            env.pop(name)
+        else:
+            env[name] = value
+    assert run([*command(), "--tags", "@smoke"], env) == 0  # the tests' own exit code: the @smoke ones pass
+    calls = cucumber()
+    assert [c["dry_run"] for c in calls] == [False] and len(calls[0]["ran"]) == 2
+    assert platform.requests == []
+    err = capsys.readouterr().err
+    assert f"warning: cannot score the change: " in err and cause in err
+    assert "warning: not uploaded: " in err
+
+
+@pytest.mark.parametrize("option", ["--gate", "--fail-on-error"])
+def test_a_setup_problem_fails_a_gated_run(platform, cucumber, option):
+    env = env_for(platform)
+    env.pop("QEOS_URL")
+    assert run([*command(option), "--tags", "@smoke"], env) == 1
+    assert len(cucumber()) == 1
+
+
+def test_a_setup_problem_keeps_a_failing_exit_code(platform, cucumber):
+    env = env_for(platform)
+    env.pop("QEOS_API_KEY")
+    assert run(command(), env) == 1  # Pays 10 failed
+
+
+def test_a_setup_problem_with_no_fallback_runs_nothing(platform, cucumber, capsys):
+    env = env_for(platform)
+    env.pop("QEOS_URL")
+    assert run(command("--suggested-only", "--no-fallback"), env) == 2
     assert cucumber() == [] and platform.requests == []
-    assert "printable ASCII" in capsys.readouterr().err
+
+
+def test_a_crashed_stage_makes_the_run_a_subset(platform, cucumber, monkeypatch, capsys):
+    """Fix round 1, item 3: stage 1's scenarios have no results, so the run is not the full suite."""
+    monkeypatch.setenv("FAKE_CUCUMBER_CRASH", "features/pay.feature:13")
+    platform.reply(200, suggested(PAYS_20))
+    platform.reply(201, RECEIPT)
+    assert run(command(), env_for(platform)) == 3
+    assert [c["dry_run"] for c in cucumber()] == [True, True, False, False]
+    [body] = uploads(platform)
+    assert body["run"]["scope"] == "impact-subset" and len(body["results"]) == 4
+    stages = body["run"]["stages"]
+    assert [(s["name"], s["tests"]) for s in stages["stages"]] == [("suggested", 0), ("rest", 4)]
+    assert set(stages) == {"stages", "time_to_first_failure_s"}  # no new fields
+    assert "warning: stage 1 (suggested) wrote no report (exit 3)" in capsys.readouterr().err
+
+
+def test_a_jvm_command_with_its_own_plugin_keeps_it(platform, cucumber):
+    """Fix round 1, item 6: a second -Dcucumber.plugin would replace the user's."""
+    platform.reply(200, suggested(PAYS_10))
+    platform.reply(201, RECEIPT)
+    assert run([*command(flavour="jvm"), "-Dcucumber.plugin=pretty"], env_for(platform)) == 1
+    for call in cucumber():
+        plugins = [arg for arg in call["argv"] if arg.startswith("-Dcucumber.plugin=")]
+        assert len(plugins) == 1 and plugins[0].startswith("-Dcucumber.plugin=pretty,json:")
+    assert len(uploads(platform)[0]["results"]) == 5
+
+
+def test_impact_takes_the_shared_target_options():
+    """Fix round 1, item 8: one declaration of --url, --ca-file, --client-cert/key, --branch and --commit."""
+    args = cli.build_parser().parse_args(["impact", "--url", "https://q", "--ca-file", "ca.pem", "--client-cert", "c",
+                                          "--client-key", "k", "--branch", "b", "--commit", "abc1234"])
+    assert (args.url, args.ca_file, args.client_cert, args.client_key, args.branch, args.commit) == (
+        "https://q", "ca.pem", "c", "k", "b", "abc1234")
 
 
 def test_an_upload_configuration_error_after_the_tests_keeps_their_exit_code(platform, cucumber, capsys):
@@ -349,6 +519,7 @@ def test_a_missing_program_is_a_configuration_error():
 
 @pytest.mark.parametrize("folder, flavour, refused", [
     ("C:/ci/50%off", "jvm", True),
+    ("C:/ci/wow!", "jvm", True),
     ("C:/ci/a&b", "ruby", True),
     ("C:/ci/a&b", "js", False),   # cucumber-js gets relative paths: the folder never reaches cmd.exe
     ("C:/ci/plain", "jvm", False),

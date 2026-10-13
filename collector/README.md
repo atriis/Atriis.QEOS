@@ -333,8 +333,8 @@ qeos-collector run-impact --cucumber js -- npm test
    paths, to list the scenarios it would run.
 3. **Stage 1:** the suggested scenarios among them, through a rerun file. A suggested test matches a scenario on
    its feature file and name, so every row of an outline with that name goes with it.
-4. **Stage 2:** every other one, through a second rerun file. No scenario runs twice, and no stage runs with an
-   empty rerun file. Suggested tests that the command does not run (left out by its filters, or not Cucumber) are
+4. **Stage 2:** every other one, through a second rerun file, scenarios without a name included. No scenario runs
+   twice, and no stage runs with an empty rerun file. Suggested tests that the command does not run (left out by its filters, or not Cucumber) are
    listed as skipped by the filter.
 5. Both stages' JSON reports are uploaded as one run.
 
@@ -344,10 +344,21 @@ command runs as given, as one stage `all`, and the log says why (`warning: canno
 answers that nothing is likely affected, or none of the suggested tests is among the command's scenarios, the command
 also runs as one stage.
 
+- **When the collector cannot reach QEOS as configured** (no URL or API key, as on a fork pull request without the
+  secret; a key that is not printable ASCII; an unusable `--ca-file`; a broken `.qeos.yml`), the command still runs
+  as one stage `all`. Nothing is uploaded, and the log says why (`warning: not uploaded: …`). The exit code is the
+  tests', or 1 with `--gate` or `--fail-on-error`.
+- **When the stages cannot be planned**, the command also runs as one stage `all`, with
+  `warning: cannot plan the stages: …`. That is a dry run that writes no JSON report, a dry run listing a scenario
+  without a line (which could go in no rerun file, so it would run in neither stage), or an error in run-impact
+  itself.
+- **When a stage writes no report** (it crashed), its scenarios have no results. The run is then uploaded as
+  suggested tests only (`impact-subset`), with a warning, so it never counts as a full run in the statistics.
+
 | `--cucumber` | Detected from | What run-impact appends |
 |---|---|---|
 | `js` (cucumber-js) | `cucumber-js` or `@cucumber/cucumber` in the command | `--dry-run`, `--format json:FILE`, and a rerun file `.qeos-impact/…/@stage-1.txt`. Both paths are relative to the working directory: cucumber-js 12 reads a rerun file only from a relative path to a file whose name starts with `@` |
-| `jvm` (Maven, Gradle) | `mvn`, `mvnw`, `gradle` or `gradlew` first | `-Dcucumber.execution.dry-run=true`, `-Dcucumber.plugin=json:FILE`, `-Dcucumber.features=@FILE` |
+| `jvm` (Maven, Gradle) | `mvn`, `mvnw`, `gradle` or `gradlew` first | `-Dcucumber.execution.dry-run=true`, `-Dcucumber.plugin=json:FILE`, `-Dcucumber.features=@FILE`. When the command already sets `-Dcucumber.plugin=…`, `json:FILE` is added to it after a comma, so your plugins still run |
 | `ruby` | `cucumber` or `bundle exec cucumber` first | `--dry-run`, `--format json --out FILE`, `@FILE` |
 
 - **`--cucumber`:** pass it when the command hides the runner (`npm test`, a script). For `npm` and `pnpm`,
@@ -356,7 +367,7 @@ also runs as one stage.
   `test { systemProperties System.properties.findAll { it.key.startsWith("cucumber.") } }`.
 - **Windows:** programs are found as a shell would (`npx.cmd`, `mvn.cmd`), never run through a shell by
   run-impact, and every path it hands Cucumber uses `/`. A `.cmd` or `.bat` runs through cmd.exe, so for
-  cucumber-jvm and Ruby Cucumber the working directory must not contain `% & | < > ^ "`; run-impact refuses
+  cucumber-jvm and Ruby Cucumber the working directory must not contain `% ! & | < > ^ "`; run-impact refuses
   before running anything.
 
 **Feature paths.** Paths the command names (`npx cucumber-js features/checkout/`, `-Dcucumber.features=…`) are left
@@ -389,8 +400,8 @@ nothing and exits 2, saying why. Select features with tags instead.
 | The test command's | Without `--gate`: the first failing stage's exit code, else 0 |
 | 0 / 1 | With `--gate`: the gate's verdict on the uploaded run; 1 when nothing was uploaded |
 | 1 | `--fail-on-error`, the tests passed and the upload failed |
-| 2 | Before any test runs: no command, an unknown Cucumber (pass `--cucumber`), a command run-impact cannot narrow, a dry run without a JSON report, no URL or key, a working directory cmd.exe would change |
-| 2 / 3 / 4 | `--suggested-only --no-fallback` with nothing to run: as `impact` |
+| 2 | Before any test runs: no command, an unknown Cucumber (pass `--cucumber`), a command run-impact cannot narrow (profile `paths`, `--shard`), a working directory cmd.exe would change, a program that cannot be started. Running a wrong subset silently would be worse than running nothing; every other problem runs the command as given |
+| 2 / 3 / 4 | `--suggested-only --no-fallback` with nothing to run: as `impact` (2 also when the collector cannot reach QEOS as configured, or the stages cannot be planned) |
 
 **Working files** live in `.qeos-impact/<random>/` and are removed at the end. On first use run-impact writes
 `.qeos-impact/.gitignore` (`*`), so git never lists them. The upload options are those of `upload` (`--url`,

@@ -124,7 +124,8 @@ def _parse_cucumber_file(path: str, parsed: ParsedFile) -> ParsedFile:
 
 def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] = None) -> None:
     """The feature's scenarios (and outline rows) as results. With `lines`, each result's scenario line too (an int,
-    or None), in step with parsed.results: run-impact's discovery reads a dry run through this parser."""
+    or None), in step with parsed.results: run-impact's discovery reads a dry run through this parser, and then a
+    scenario without a name is kept too (an empty name), so that it still runs in a stage."""
     suite = str(feature.get("name") or "")
     # Windows runners report "tests\features\a.feature"; the key must not depend on the OS (ADR-023)
     uri = str(feature.get("uri") or "").replace("\\", "/")
@@ -140,7 +141,8 @@ def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] =
         name = str(element.get("name") or "").strip()
         if not name:
             parsed.unnamed += 1
-            continue
+            if lines is None:
+                continue
         steps = background + list(element.get("steps") or [])
         background = []
         stamp = _timestamp(element.get("start_timestamp"))

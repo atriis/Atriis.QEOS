@@ -8,6 +8,8 @@ More variables:
 - FAKE_CUCUMBER_EXTRA names a feature uri it always adds to a rerun selection, as a profile's `paths` would;
 - FAKE_CUCUMBER_WINDOWS=1 reports uris with backslashes, as a Windows runner does;
 - FAKE_CUCUMBER_CRASH=1 makes every real (not dry) run exit 3 without a report, as a crashed runner does;
+  FAKE_CUCUMBER_CRASH=<uri:line> only the real runs that select that scenario;
+- FAKE_CUCUMBER_NO_DRY_REPORT=1 makes dry runs write no report;
 - FAKE_CUCUMBER_EXIT=N makes every real run that has no failure exit N, with its report (undefined steps, say)."""
 import json
 import os
@@ -42,8 +44,10 @@ def main(argv):
         elif arg == "--out" and i + 1 < len(argv):
             i += 1
             report = argv[i]
-        elif arg.startswith("-Dcucumber.plugin=json:"):
-            report = arg[len("-Dcucumber.plugin=json:"):]
+        elif arg.startswith("-Dcucumber.plugin="):  # plugins, comma separated
+            for plugin in arg[len("-Dcucumber.plugin="):].split(","):
+                if plugin.startswith("json:"):
+                    report = plugin[len("json:"):]
         elif arg.startswith("-Dcucumber.features=@"):
             rerun, wanted = read_rerun(arg[len("-Dcucumber.features=@"):])
         elif arg in ("--tags", "-t") and i + 1 < len(argv):
@@ -54,7 +58,7 @@ def main(argv):
         elif os.path.basename(arg).startswith("@"):  # cucumber-js 12: a relative path to a file named @...
             rerun, wanted = read_rerun(os.path.join(os.getcwd(), arg))
         i += 1
-    crash = not dry_run and os.environ.get("FAKE_CUCUMBER_CRASH") == "1"
+    crash_at = os.environ.get("FAKE_CUCUMBER_CRASH")
     extra = os.environ.get("FAKE_CUCUMBER_EXTRA")
     windows = os.environ.get("FAKE_CUCUMBER_WINDOWS") == "1"
     ran, features, failed = [], [], False
@@ -63,19 +67,24 @@ def main(argv):
         for scenario in feature["scenarios"]:
             if any(tag not in scenario.get("tags", []) for tag in tags):
                 continue
-            if wanted is not None and (feature["uri"], scenario["line"]) not in wanted and feature["uri"] != extra:
+            if wanted is not None and (feature["uri"], scenario.get("line")) not in wanted and feature["uri"] != extra:
                 continue
             status = "skipped" if dry_run else scenario.get("status", "passed")
             failed = failed or status == "failed"
-            elements.append({"type": "scenario", "keyword": "Scenario", "name": scenario["name"],
-                             "line": scenario["line"],
+            element = {"type": "scenario", "keyword": "Scenario", "name": scenario["name"]}
+            if "line" in scenario:
+                element["line"] = scenario["line"]
+            elements.append({**element,
                              "steps": [{"keyword": "Given ", "name": "a step",
                                         "result": {"status": status,
                                                    "duration": int(scenario.get("seconds", 1) * 1e9)}}]})
-            ran.append(f"{feature['uri']}:{scenario['line']}")
+            ran.append(f"{feature['uri']}:{scenario.get('line')}")
         if elements:
             uri = feature["uri"].replace("/", "\\") if windows else feature["uri"]
             features.append({"uri": uri, "name": feature["name"], "keyword": "Feature", "elements": elements})
+    crash = not dry_run and crash_at is not None and (crash_at == "1" or crash_at in ran)
+    if dry_run and os.environ.get("FAKE_CUCUMBER_NO_DRY_REPORT") == "1":
+        report = None
     if report and not crash:
         with open(report, "w", encoding="utf-8") as handle:
             json.dump(features, handle)
