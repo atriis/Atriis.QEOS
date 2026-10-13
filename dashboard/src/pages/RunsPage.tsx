@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
-import { listRuns, RunFilters } from "../api/runs";
+import { listRuns, RunFilters, RunScope, SCOPES } from "../api/runs";
 import { RUNS_PAGE_SIZE } from "../lib/runQueries";
 import { formatDuration } from "../api/analytics";
 import ErrorBanner from "../components/ErrorBanner";
@@ -11,7 +11,7 @@ import FilterChips, { revealFilters, type AppliedFilter, type QuickChip } from "
 import FilterSelect from "../components/FilterSelect";
 import NarrowMeta from "../components/NarrowMeta";
 import { runVerdict } from "../components/RunStatusBadge";
-import { RunVerdictPill } from "../components/StatusPill";
+import StatusPill, { RunVerdictPill } from "../components/StatusPill";
 import SortableTh from "../components/SortableTh";
 import { nextSort, parseSort, sortRows, SortState } from "../lib/sort";
 import { LIVE_REFRESH_MS } from "../lib/live";
@@ -19,6 +19,7 @@ import { pageOffset, withOffset } from "../lib/useUrlState";
 import PageHeader from "../components/PageHeader";
 import { tableCardClass, useIsWide } from "../lib/useIsWide";
 import { CI_LABELS } from "../lib/ciProviders";
+import { isSubset, stoppedAfterStage1 } from "../lib/runScope";
 
 // Shared with the Overview's run widgets, so their first page is this view's answer
 const PAGE = RUNS_PAGE_SIZE;
@@ -29,27 +30,36 @@ const DEFAULT_SORT: SortState<SortKey> = { key: "started", dir: "desc" };
 
 // URL keys, in URL order. "from" and "to" are local calendar days
 // (YYYY-MM-DD); the rest go to the API unchanged.
-const KEYS = ["status", "branch", "environment", "ci_provider", "commit", "pr", "author", "from", "to"] as const;
-const ADVANCED = ["environment", "ci_provider", "commit", "pr", "author", "from", "to"] as const;
+const KEYS = ["status", "branch", "environment", "ci_provider", "commit", "pr", "author", "scope", "from", "to"] as const;
+const ADVANCED = ["environment", "ci_provider", "commit", "pr", "author", "scope", "from", "to"] as const;
 type Key = (typeof KEYS)[number];
 type Values = Record<Key, string>;
+
+/** run-impact's partial runs (spec 2026-10-13 §3.2): "full" hides them. */
+const SCOPE_LABELS: Record<RunScope, string> = { full: "Full suite only", "impact-subset": "Suggested tests only" };
+const asScope = (s: string): RunScope | undefined => SCOPES.find((scope) => scope === s);
 
 const QUICK: QuickChip[] = [
   { key: "status", value: "failing", label: "Failed" },
   { key: "status", value: "passing", label: "Passed" },
   { key: "branch", value: "main", label: "main" },
+  { key: "scope", value: "full", label: "Full runs only" },
 ];
 const FILTER_NAMES: Record<Key, string> = {
   status: "Status", branch: "Branch", environment: "Environment", ci_provider: "CI", commit: "Commit",
-  pr: "Pull request", author: "Author", from: "From", to: "To",
+  pr: "Pull request", author: "Author", scope: "Runs", from: "From", to: "To",
 };
 function appliedFilters(v: Values): AppliedFilter[] {
-  return KEYS.filter((k) => v[k] !== "").map((k) => ({
-    key: k,
-    name: FILTER_NAMES[k],
-    value: k === "status" ? (v[k] === "failing" ? "With failures" : v[k] === "passing" ? "All green" : v[k])
-      : k === "ci_provider" ? CI_LABELS[v[k]] ?? v[k] : k === "pr" ? `#${v[k]}` : v[k],
-  }));
+  return KEYS.filter((k) => v[k] !== "").map((k) => {
+    const scope = k === "scope" ? asScope(v[k]) : undefined;
+    return {
+      key: k,
+      name: FILTER_NAMES[k],
+      value: k === "status" ? (v[k] === "failing" ? "With failures" : v[k] === "passing" ? "All green" : v[k])
+        : k === "ci_provider" ? CI_LABELS[v[k]] ?? v[k] : k === "pr" ? `#${v[k]}`
+        : scope ? SCOPE_LABELS[scope] : v[k],
+    };
+  });
 }
 
 function readValues(params: URLSearchParams): Values {
@@ -72,6 +82,7 @@ function toFilters(v: Values): RunFilters {
     commit: v.commit || undefined,
     pr: v.pr ? Number(v.pr) : undefined,
     author: v.author || undefined,
+    scope: asScope(v.scope),
     since: dayStart(v.from),
     // People read "to" as inclusive, so the API gets the start of the next day
     until: dayStart(v.to, 1),
@@ -249,6 +260,8 @@ export default function RunsPage() {
               Author
               <input value={form.author} onChange={(e) => set("author", e.target.value)} maxLength={255} />
             </label>
+            <FilterSelect label="Runs" value={form.scope} emptyLabel="All" onChange={(v) => set("scope", v)}
+              options={SCOPES.map((value) => ({ value, label: SCOPE_LABELS[value] }))} />
             <label>
               From
               <input type="date" value={form.from} max={form.to || undefined} onChange={(e) => set("from", e.target.value)} />
@@ -299,6 +312,10 @@ export default function RunsPage() {
                 <tr key={r.id} className={fresh.has(r.id) ? "row-new" : undefined}>
                   <td>
                     <Link to={`${r.id}`}>#{r.id}</Link>
+                    {isSubset(r) && (
+                      <>{" "}<StatusPill tone="neutral" label="Suggested only"
+                        note={stoppedAfterStage1(r) ? "stopped after stage 1" : undefined} /></>
+                    )}
                     <NarrowMeta items={[
                       { label: "Status", value: <RunVerdictPill verdict={runVerdict(r)} /> },
                       { label: "Commit", value: r.commit_sha ? r.commit_sha.slice(0, 7) : "—" },

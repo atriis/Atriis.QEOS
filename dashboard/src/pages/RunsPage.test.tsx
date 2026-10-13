@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
@@ -263,4 +263,33 @@ test("a shared sorted link opens sorted", async () => {
   await screen.findByRole("link", { name: "#1" });
   expect(screen.getAllByRole("row").slice(1).map((r) => r.querySelector("a")?.textContent)).toEqual(["#1", "#2"]);
   expect(screen.getByRole("columnheader", { name: /duration/i })).toHaveAttribute("aria-sort", "ascending");
+});
+
+const subsetRun = (id: number) => ({
+  ...run(id), scope: "impact-subset",
+  stages: { stages: [{ name: "suggested", duration_s: 65, tests: 12, failed: 1 }], time_to_first_failure_s: 30, stopped_after_stage: 1 },
+});
+
+test("a suggested-only run carries a pill, and Full runs only asks the server to leave them out", async () => {
+  const scopes: (string | null)[] = [];
+  server.use(http.get("/api/v1/projects/42/runs", ({ request }) => {
+    const scope = new URL(request.url).searchParams.get("scope");
+    scopes.push(scope);
+    return HttpResponse.json(scope === "full" ? [run(61)] : [subsetRun(62), run(61)]);
+  }));
+  renderRuns();
+  const row = (await screen.findByRole("link", { name: "#62" })).closest("tr")!;
+  expect(within(row).getByText("Suggested only · stopped after stage 1")).toBeInTheDocument();
+  expect(within(screen.getByRole("link", { name: "#61" }).closest("tr")!).queryByText(/Suggested only/)).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Full runs only" }));
+  await waitFor(() => expect(screen.queryByRole("link", { name: "#62" })).not.toBeInTheDocument());
+  expect(scopes[scopes.length - 1]).toBe("full");
+  expect(screen.getByTestId("location")).toHaveTextContent("scope=full");
+});
+
+test("the Runs filter names the applied scope", async () => {
+  server.use(http.get("/api/v1/projects/42/runs", () => HttpResponse.json([])));
+  renderRuns("/projects/42/runs?scope=impact-subset");
+  expect(await screen.findByText("Runs: Suggested tests only")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Full runs only" })).toHaveAttribute("aria-pressed", "false");
 });

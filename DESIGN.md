@@ -461,6 +461,10 @@ Likely affected tests (spec `docs/superpowers/specs/2026-10-12-test-impact-analy
     - A run of only the suggested tests starts with a neutral "Suggested only" Status Pill and reads "Suggested
       tests only", or "Suggested tests only, stopped after stage 1" after a `--fail-fast` stop.
     - Durations use `formatDuration`, as everywhere else.
+  - **Runs list:**
+    - the same neutral pill beside the run number ("Suggested only · stopped after stage 1" for a stop);
+    - the quick chip **Full runs only**;
+    - the **Runs** filter under More filters: Full suite only, or Suggested tests only.
 - **Report section** "Test impact" (`#report-impact`, the Report's last section). It follows no Report filter but the period, and has no gate.
   - **Period:** the Report's when it is the last 7, 14 or 30 days up to today; otherwise the last 30 days, and the note says why ("the Report's period is not the last 7, 14 or 30 days").
   - **Two Stats side by side** (`.impact-figures`, `.stat-big`, tabular figures): the catch rate ("75.0%", then "Suggestions caught 9 of 12 new failures") and the tests suggested per run ("6.4", one decimal at most, then "tests suggested per run, on average"), so a high rate bought by suggesting everything shows (spec §9). Without new failures the rate is "—" with "No new failures in 4 runs with a stored suggestion", never 0%.
