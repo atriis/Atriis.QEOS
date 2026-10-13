@@ -229,3 +229,26 @@ def test_a_path_on_another_drive_stays_absolute(tmp_path, monkeypatch):
     monkeypatch.setattr(cucumber.os.path, "relpath", no_relative)
     report = PureWindowsPath(r"D:\tmp\qeos-impact-x\stage-1.json")
     assert cucumber.report_arguments("js", report, "C:/work") == ["--format", "json:D:/tmp/qeos-impact-x/stage-1.json"]
+
+
+def test_a_shell_command_is_detected_from_its_script():
+    assert cucumber.shell_script(["bash", "-c", "npx cucumber-js"]) == "npx cucumber-js"
+    assert cucumber.shell_script(["/usr/bin/sh", "-c", "x"]) == "x"
+    assert cucumber.shell_script(["bash", "-c", "x", "extra"]) is None  # not the form run-impact wraps
+    assert cucumber.shell_script(["bash", "script.sh"]) is None
+    assert cucumber.detect_flavour(["bash", "-c", 'npx cucumber-js --tags "not @wip"']) == "js"
+    assert cucumber.detect_flavour(["bash", "-c", "mvn -q test"]) == "jvm"
+    assert cucumber.detect_flavour(["bash", "-c", "npm test"]) is None
+    assert cucumber.detect_flavour(["bash", "-c", 'npx cucumber-js "unclosed']) is None
+
+
+def test_a_shell_commands_script_gets_the_arguments_as_words():
+    """run-impact appends its arguments after the script's $0: "$@" hands them over without shell parsing."""
+    assert cucumber.with_separator("js", ["bash", "-c", 'npx cucumber-js --tags "@a b"']) == [
+        "bash", "-c", 'npx cucumber-js --tags "@a b" "$@"', "qeos-run-impact"]
+    assert cucumber.with_separator("js", ["bash", "-c", "npm test"]) == [
+        "bash", "-c", 'npm test -- "$@"', "qeos-run-impact"]
+    assert cucumber.with_separator("js", ["bash", "-c", "npm test -- --tags @x"]) == [
+        "bash", "-c", 'npm test -- --tags @x "$@"', "qeos-run-impact"]
+    assert cucumber.with_separator("js", ["bash", "-c", "cd e2e && npm test"]) == [  # several commands: as written
+        "bash", "-c", 'cd e2e && npm test "$@"', "qeos-run-impact"]

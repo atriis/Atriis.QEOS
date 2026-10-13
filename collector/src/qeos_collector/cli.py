@@ -6,6 +6,7 @@ import glob
 import json
 import os
 import re
+import shlex
 import sys
 import time
 import uuid
@@ -200,6 +201,15 @@ def main(
     clock: Callable[[], float] = time.monotonic,
 ) -> int:
     env = os.environ if env is None else env
+    argv = list(sys.argv[1:] if argv is None else argv)
+    extra = env.get("QEOS_ACTION_EXTRA_ARGS", "").strip()
+    if extra and argv[:1] and not argv[0].startswith("-"):
+        # The GitHub Action's extra-args: one string, split as a POSIX shell would split words, never run by one
+        try:
+            argv = [argv[0], *shlex.split(extra), *argv[1:]]
+        except ValueError as exc:
+            print(f"qeos: QEOS_ACTION_EXTRA_ARGS cannot be split ({exc})", file=sys.stderr)
+            return 2
     parser = build_parser()
     try:
         args = parser.parse_args(argv)

@@ -629,3 +629,34 @@ def test_a_discarded_spooled_part_is_counted_apart_from_resent_ones(platform, re
 def test_the_trigger_error_names_flag_and_variable(platform, report, capsys):
     assert run(["upload", "--trigger", "cron", str(report)], env_for(platform)) == 2
     assert "--trigger / QEOS_TRIGGER must be one of" in capsys.readouterr().err
+
+
+
+def test_qeos_action_extra_args_are_split_as_words(tmp_path, monkeypatch, capsys):
+    """The GitHub Action hands extra-args over as one environment string (no shell): shlex splits it."""
+    import shutil as _shutil
+    from pathlib import Path as _Path
+
+    _shutil.copy(_Path(__file__).with_name("fixtures") / "pytest.xml", tmp_path / "r.xml")
+    monkeypatch.chdir(tmp_path)
+    env = {"QEOS_ACTION_EXTRA_ARGS": '--dry-run --environment "staging east" --no-changes'}
+    assert main(["upload", "r.xml"], env) == 0
+    body = json.loads(capsys.readouterr().out)
+    assert body["run"]["environment"] == "staging east"
+
+
+def test_qeos_action_extra_args_that_cannot_be_split_are_a_usage_error(capsys):
+    assert main(["upload", "r.xml"], {"QEOS_ACTION_EXTRA_ARGS": '--environment "open'}) == 2
+    assert "QEOS_ACTION_EXTRA_ARGS cannot be split" in capsys.readouterr().err
+
+
+def test_the_gitlab_templates_qeos_extra_args_is_not_read(tmp_path, monkeypatch, capsys):
+    """The GitLab template already passes QEOS_EXTRA_ARGS on the command line: reading it too would double flags."""
+    import shutil as _shutil
+    from pathlib import Path as _Path
+
+    _shutil.copy(_Path(__file__).with_name("fixtures") / "pytest.xml", tmp_path / "r.xml")
+    monkeypatch.chdir(tmp_path)
+    env = {"QEOS_ACTION_EXTRA_ARGS": "--dry-run --no-changes", "QEOS_EXTRA_ARGS": "--environment gitlab"}
+    assert main(["upload", "r.xml"], env) == 0
+    assert "environment" not in json.loads(capsys.readouterr().out)["run"]

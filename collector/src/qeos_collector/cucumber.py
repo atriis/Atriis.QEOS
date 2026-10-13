@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 from dataclasses import dataclass
 from pathlib import PurePath
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -172,8 +173,31 @@ def _is_cucumber_js(token: str) -> bool:
     return _program(token) == "cucumber-js" or "@cucumber/cucumber" in token.replace("\\", "/")
 
 
+_SHELLS = ("bash", "sh")
+SHELL_NAME = "qeos-run-impact"  # $0 of a shell command's script; run-impact's arguments follow as "$@"
+
+
+def shell_script(command: Sequence[str]) -> Optional[str]:
+    """The script of a shell command, `bash -c SCRIPT` (or sh): how CI integrations hand over a command line as its
+    author wrote it (the GitHub Action, the Jenkins step)."""
+    if len(command) == 3 and _program(command[0]) in _SHELLS and command[1] == "-c":
+        return command[2]
+    return None
+
+
+def _words(script: str) -> List[str]:
+    try:
+        return shlex.split(script)
+    except ValueError:  # an unclosed quote: bash will say so
+        return []
+
+
 def detect_flavour(command: Sequence[str]) -> Optional[str]:
-    """js, jvm or ruby from the command; None when it does not show (`npm test`, a script): --cucumber then says."""
+    """js, jvm or ruby from the command; None when it does not show (`npm test`, a script): --cucumber then says. In a
+    shell command, from the script's words."""
+    script = shell_script(command)
+    if script is not None:
+        return detect_flavour(_words(script))
     if any(_is_cucumber_js(token) for token in command):
         return "js"
     names = [_program(token) for token in command]
@@ -186,7 +210,15 @@ def detect_flavour(command: Sequence[str]) -> Optional[str]:
 
 
 def with_separator(flavour: str, command: Sequence[str]) -> List[str]:
-    """npm and pnpm hand arguments to the script only after "--"."""
+    """npm and pnpm hand arguments to the script only after "--". A shell command's script gets `"$@"` at its end,
+    so the arguments run-impact appends reach its last command as words of their own, never as shell text."""
+    script = shell_script(command)
+    if script is not None:
+        words = _words(script)
+        if (flavour == "js" and words and _program(words[0]) in ("npm", "pnpm") and "--" not in words[1:]
+                and not any(c in script for c in ";&|\n")):
+            script += " --"
+        return [command[0], "-c", f'{script} "$@"', SHELL_NAME]
     if flavour == "js" and command and _program(command[0]) in ("npm", "pnpm") and "--" not in command[1:]:
         return [*command, "--"]
     return list(command)

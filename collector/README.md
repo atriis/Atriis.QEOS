@@ -163,6 +163,7 @@ variable, and both win over what is detected from the CI system.
 | `--gate` | `QEOS_GATE=1` | Exit 1 if the run has failures outside quarantine, or could not be uploaded (see below) |
 | `--spool` | `QEOS_SPOOL` | Directory keeping parts a failed upload could not deliver; the next invocation resends them first, under their original Idempotency-Key (so nothing is ever stored twice). Capped at 100 files; rejected uploads (401/409) are never spooled. Point it at a persistent runner path — a wiped workspace wipes the spool |
 | `--dry-run` | — | Print the JSON; upload nothing |
+| — | `QEOS_ACTION_EXTRA_ARGS` | More flags as one string, split into words as a POSIX shell would (quotes group; nothing is expanded or run; a backslash escapes, so write paths with `/`). The GitHub Action passes its `extra-args` this way. GitLab's `QEOS_EXTRA_ARGS` is a different variable, which the template puts on the command line |
 
 ## Run trigger and manual runs
 
@@ -363,6 +364,11 @@ also runs as one stage.
 
 - **`--cucumber`:** pass it when the command hides the runner (`npm test`, a script). For `npm` and `pnpm`,
   run-impact adds the `--` the script needs.
+- **A shell command line:** `qeos-collector run-impact -- bash -c 'npx cucumber-js --tags "not @wip"'` (or
+  `sh -c`). The script runs as written, and Cucumber is detected from its words. run-impact appends `"$@"` to the
+  script and passes its own arguments as words, never as shell text, so they reach the script's last command. The
+  GitHub Action and the Jenkins step run `test-command` this way. Feature paths inside the script are not visible
+  to run-impact: when they add scenarios to a stage, the stage-1 check refuses the command.
 - **Gradle:** it hands `-D` properties to its own JVM, not the test JVM. Forward them in `build.gradle`:
   `test { systemProperties System.properties.findAll { it.key.startsWith("cucumber.") } }`.
 - **Windows:** programs are found as a shell would (`npx.cmd`, `mvn.cmd`), never run through a shell by

@@ -2,6 +2,7 @@
 §2.2; plan Rulings 6-13, 16, 21; the controller's safety ruling: scoring problems never skip tests)."""
 import itertools
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -788,3 +789,34 @@ def test_the_step_summary_never_holds_the_api_key(platform, cucumber, tmp_path, 
     text = step_summary.read_text(encoding="utf-8")
     assert "| 1 | suggested tests | 1 | 1 | 1m 00s |" in text  # it matched, so the name was in the table
     assert KEY not in text and "Pays with ***" in text and "`src/***/`" in text
+
+
+# --- a shell command, as the GitHub Action and the Jenkins step hand it over (Task 19) ----------------------------
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_a_bash_command_runs_two_stages_with_its_own_quoting(platform, cucumber):
+    """`bash -c "$QEOS_TEST_COMMAND"`: the author's quoting is bash's; run-impact's arguments arrive as "$@"."""
+    script = f'"{Path(sys.executable).as_posix()}" "{Path(FAKE).as_posix()}" --tags "@smoke"'
+    platform.reply(200, suggested(ADDS))
+    platform.reply(201, RECEIPT)
+    assert run(["run-impact", "--cucumber", "js", "--", "bash", "-c", script], env_for(platform)) == 0
+    calls = cucumber()
+    assert [c["dry_run"] for c in calls] == [True, True, False, False]
+    assert calls[2]["ran"] == ["features/cart.feature:3"] and calls[3]["ran"] == ["features/pay.feature:4"]
+    assert all(c["argv"][:2] == ["--tags", "@smoke"] for c in calls)  # the quotes were the shell's
+    assert [s["name"] for s in uploads(platform)[0]["run"]["stages"]["stages"]] == ["suggested", "rest"]
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_run_impacts_arguments_are_never_shell_text(platform, cucumber, tmp_path, monkeypatch):
+    """A working directory whose name is shell syntax reaches the script as a word, not as code."""
+    odd = tmp_path / "a;touch pwned$(touch pwned2)"
+    odd.mkdir()
+    monkeypatch.chdir(odd)
+    script = f'"{Path(sys.executable).as_posix()}" "{Path(FAKE).as_posix()}"'
+    platform.reply(200, suggested(ADDS))
+    platform.reply(201, RECEIPT)
+    run(["run-impact", "--cucumber", "jvm", "--", "bash", "-c", script], env_for(platform))  # absolute paths
+    assert len(cucumber()) == 4
+    assert not any(p.name.startswith("pwned") for p in tmp_path.rglob("*"))
