@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Mapping, Optional, Sequence, Tuple
 
-from qeos_collector import cucumber, impact
+from qeos_collector import cucumber, impact, summary
 from qeos_collector.formats import parse_file
 from qeos_collector.junit import ParsedFile
 from qeos_collector.payload import SCOPES
@@ -264,10 +264,12 @@ def _run_stages(args, say, command, flavour, cwd, found: impact.Suggestion,
     return stages, FULL, None, missing
 
 
-def _finish(say, stages: List[Stage], scope: str, stopped: Optional[int], *, upload: Upload,
-            judge: Callable[[dict], int], gate: bool, fail_on_error: bool) -> int:
-    """Upload the stages as one run, then the exit code (plan Ruling 12): the gate's verdict with --gate (1 when
-    nothing was uploaded), else the test command's own exit code (1 with --fail-on-error when the upload failed)."""
+def _finish(env: Mapping[str, str], say, found: impact.Suggestion, missing: List[dict], stages: List[Stage],
+            scope: str, stopped: Optional[int], *, upload: Upload, judge: Callable[[dict], int], gate: bool,
+            fail_on_error: bool, secret: str = "") -> int:
+    """Publish the summary, upload the stages as one run, then the exit code (plan Rulings 12, 20): the gate's
+    verdict with --gate (1 when nothing was uploaded), else the test command's own exit code (1 with --fail-on-error
+    when the upload failed)."""
     for number, stage in enumerate(stages, start=1):
         if stage.no_report and scope == FULL:
             # Its scenarios have no results: the run is not the full suite, and must not count as one
@@ -275,6 +277,7 @@ def _finish(say, stages: List[Stage], scope: str, stopped: Optional[int], *, upl
                 "uploaded as suggested tests only (impact-subset), so it does not count in the statistics")
             scope = SUBSET
     payload = stages_payload(stages, stopped)
+    summary.publish(env, say, found.tests, missing, stages, payload, scope, secret=secret)
     receipt = upload([stage.report for stage in stages], scope, payload)
     tests = next((stage.returncode for stage in stages if stage.returncode != 0), 0)
     if gate:
@@ -342,10 +345,10 @@ def run(args, env: Mapping[str, str], api_key: str, say: Callable[[str], None], 
         if Path(cwd, cucumber.WORKDIR) not in workdir.parents:
             check_paths(flavour, command, str(workdir))  # a temporary directory: its path reaches cmd.exe too
         steps = _Cucumber(flavour, workdir, cwd, runner, clock, say)
-        stages, scope, stopped, _missing = _run_stages(args, say, command, flavour, cwd, found, steps)
+        stages, scope, stopped, missing = _run_stages(args, say, command, flavour, cwd, found, steps)
         if not stages:  # --suggested-only --no-fallback: nothing ran, nothing to upload
             return found.code if found.code != impact.SUGGESTED else impact.NOTHING
-        return _finish(say, stages, scope, stopped, upload=upload, judge=judge, gate=gate,
-                       fail_on_error=fail_on_error)
+        return _finish(env, say, found, missing, stages, scope, stopped, upload=upload, judge=judge, gate=gate,
+                       fail_on_error=fail_on_error, secret=api_key)
     finally:
         shutil.rmtree(workdir, ignore_errors=True)

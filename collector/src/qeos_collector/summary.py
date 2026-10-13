@@ -1,0 +1,100 @@
+"""run-impact's summary (spec 2026-10-13 §2.2, plan Ruling 20): the suggested tests with their evidence, each stage's
+size, failures and duration, and the time to the first failure. A table in the GitHub Actions job's step summary;
+anywhere else, or when that file cannot be written, the same as lines in the log. Never the API key."""
+from __future__ import annotations
+
+import math
+import re
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Callable, List, Mapping, Sequence
+
+STAGES = {"suggested": "suggested tests", "rest": "the rest", "all": "full suite"}
+LABELS = {"test_file_changed": "test file changed", "failing_on_branch": "failing on this branch",
+          "no_history": "no history yet"}
+SHOWN = 50
+
+
+def duration(seconds: float) -> str:
+    """The dashboard's formatDuration (dashboard/src/api/analytics.ts), rule for rule, on whole milliseconds:
+    "400 ms", then toFixed(1) seconds (ties away from zero, on the double's exact value) below 60 s, then minutes and
+    Math.round of the remaining seconds. So 119.5 s reads "1m 60s" there and here: one figure, one wording."""
+    ms = math.floor(seconds * 1000 + 0.5)
+    if ms < 1000:
+        return f"{ms} ms"
+    secs = ms / 1000
+    if secs < 60:
+        return f"{Decimal(secs).quantize(Decimal('0.1'), rounding=ROUND_HALF_UP)} s"
+    return f"{math.floor(secs / 60)}m {math.floor(math.fmod(secs, 60) + 0.5):02d}s"
+
+
+def cell(value) -> str:
+    """Text for a Markdown table cell: pipes escaped, line breaks as one space."""
+    return re.sub(r"\s*[\r\n]+\s*", " ", str(value or "")).replace("|", "\\|")
+
+
+def why(test: dict, *, markdown: bool = False) -> str:
+    evidence = test.get("evidence")
+    if test.get("kind") == "statistical" and isinstance(evidence, dict):
+        unit = str(evidence.get("path_unit") or "")
+        return (f"newly failed in {evidence.get('new_failures')} of {evidence.get('changed_runs')} runs that changed "
+                + (f"`{unit}`" if markdown else unit))
+    return LABELS.get(str(test.get("kind")), str(test.get("kind") or ""))
+
+
+def outcome(stages: Sequence, payload: dict, scope: str) -> str:
+    first = payload.get("time_to_first_failure_s")
+    if scope == "impact-subset":
+        head = "suggested tests only" + (", stopped after stage 1" if payload.get("stopped_after_stage") == 1 else "")
+        return f"{head}: " + ("no failures" if first is None else f"first failure after {duration(first)}")
+    if first is None:
+        return "no failures"
+    return f"first failure after {duration(first)} (full suite {duration(sum(s.duration_s for s in stages))})"
+
+
+def text(tests: Sequence[dict], missing: Sequence[dict], stages: Sequence, payload: dict, scope: str) -> List[str]:
+    lines = [f"stage {i} ({STAGES.get(s.name, s.name)}): {s.tests} scenario(s), {s.failed} failed, "
+             f"{duration(s.duration_s)}" for i, s in enumerate(stages, start=1)]
+    lines.append(outcome(stages, payload, scope))
+    lines += [f"  {cell(test.get('name'))}: {why(test)}" for test in tests[:SHOWN]]
+    if len(tests) > SHOWN:
+        lines.append(f"  … and {len(tests) - SHOWN} more")
+    return lines
+
+
+def markdown(tests: Sequence[dict], missing: Sequence[dict], stages: Sequence, payload: dict, scope: str) -> str:
+    said = outcome(stages, payload, scope)
+    lines = ["### QEOS: suggested tests first", "", "| Stage | What | Scenarios | Failed | Duration |",
+             "|---:|---|---:|---:|---:|"]
+    lines += [f"| {i} | {STAGES.get(s.name, s.name)} | {s.tests} | {s.failed} | {duration(s.duration_s)} |"
+              for i, s in enumerate(stages, start=1)]
+    lines += ["", said[0].upper() + said[1:] + "."]
+    if tests:
+        lines += ["", f"<details><summary>Suggested tests ({len(tests)})</summary>", "", "| Test | Why |", "|---|---|"]
+        lines += [f"| {cell(test.get('name'))} | {cell(why(test, markdown=True))} |" for test in tests[:SHOWN]]
+        if len(tests) > SHOWN:
+            lines.append(f"| … and {len(tests) - SHOWN} more | |")
+        lines += ["", "</details>"]
+    if missing:
+        lines += ["", "Not among this command's scenarios (left out by its filters, or not Cucumber): "
+                  + ", ".join(cell(test.get("name")) for test in missing[:SHOWN]) + "."]
+    return "\n".join(lines) + "\n\n"
+
+
+def publish(env: Mapping[str, str], say: Callable[[str], None], tests: Sequence[dict], missing: Sequence[dict],
+            stages: Sequence, payload: dict, scope: str, *, secret: str = "") -> None:
+    """The step summary when GITHUB_ACTIONS and GITHUB_STEP_SUMMARY are both set; else, or when it cannot be
+    written, the log (`say` scrubs the key from each line). The file is written here, so it is scrubbed here."""
+    path = env.get("GITHUB_STEP_SUMMARY", "").strip() if env.get("GITHUB_ACTIONS", "").strip() else ""
+    if path:
+        table = markdown(tests, missing, stages, payload, scope)
+        if secret:
+            table = table.replace(secret, "***")
+        try:
+            with open(path, "a", encoding="utf-8", newline="\n") as handle:
+                handle.write(table)
+            say("summary written to the job's step summary")
+            return
+        except OSError as exc:
+            say(f"cannot write the step summary ({exc.strerror or exc}); here it is")
+    for line in text(tests, missing, stages, payload, scope):
+        say(line)

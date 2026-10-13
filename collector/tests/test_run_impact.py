@@ -733,3 +733,58 @@ def test_an_unwritable_working_directory_uses_a_temporary_one(platform, cucumber
     assert not (tmp_path / Path(rerun)).parent.exists()  # removed at the end
     assert len(uploads(platform)[0]["results"]) == 5
     assert "warning: cannot create " in capsys.readouterr().err
+
+
+# --- the summary (Task 18) -----------------------------------------------------------------
+
+
+def test_github_actions_gets_a_step_summary_table(platform, cucumber, tmp_path, capsys):
+    step_summary = tmp_path / "step-summary.md"
+    platform.reply(200, suggested(PAYS_10))
+    platform.reply(201, RECEIPT)
+    run(command(), env_for(platform, GITHUB_ACTIONS="true", GITHUB_STEP_SUMMARY=str(step_summary)))
+    text = step_summary.read_text(encoding="utf-8")
+    assert "| 1 | suggested tests | 1 | 1 | 1m 00s |" in text
+    assert "| 2 | the rest | 4 | 0 | 1m 00s |" in text
+    assert "First failure after 3.0 s (full suite 2m 00s)." in text
+    assert "| Pays 10 | newly failed in 4 of 6 runs that changed `src/pay/` |" in text
+    err = capsys.readouterr().err
+    assert "qeos: summary written to the job's step summary" in err
+    assert "qeos: first failure after" not in err  # the table, not both
+
+
+def test_elsewhere_the_summary_is_in_the_log(platform, cucumber, capsys):
+    platform.reply(200, suggested(PAYS_10))
+    platform.reply(201, RECEIPT)
+    run(command(), env_for(platform))
+    err = capsys.readouterr().err
+    assert "qeos: stage 1 (suggested tests): 1 scenario(s), 1 failed, 1m 00s" in err
+    assert "qeos: first failure after 3.0 s (full suite 2m 00s)" in err
+    assert "qeos:   Pays 10: newly failed in 4 of 6 runs that changed src/pay/" in err
+
+
+def test_an_unwritable_step_summary_falls_back_to_the_log(platform, cucumber, tmp_path, capsys):
+    platform.reply(200, suggested(PAYS_10))
+    platform.reply(201, RECEIPT)
+    run(command(), env_for(platform, GITHUB_ACTIONS="true", GITHUB_STEP_SUMMARY=str(tmp_path)))  # a directory
+    err = capsys.readouterr().err
+    assert "cannot write the step summary" in err
+    assert "qeos: first failure after 3.0 s (full suite 2m 00s)" in err
+
+
+def test_the_step_summary_never_holds_the_api_key(platform, cucumber, tmp_path, monkeypatch):
+    """The file is written outside the log's scrubbing: a test name (or path unit) holding the key is scrubbed too."""
+    spec = json.loads(SPEC.read_text(encoding="utf-8"))
+    spec["features"][0]["scenarios"][1]["name"] = f"Pays with {KEY}"
+    custom = tmp_path / "spec.json"
+    custom.write_text(json.dumps(spec), encoding="utf-8")
+    monkeypatch.setenv("FAKE_CUCUMBER_SPEC", str(custom))
+    answer = suggested(("Pay", "features/pay.feature", f"Pays with {KEY}"))
+    answer["tests"][0]["evidence"]["path_unit"] = f"src/{KEY}/"
+    step_summary = tmp_path / "step-summary.md"
+    platform.reply(200, answer)
+    platform.reply(201, RECEIPT)
+    run(command(), env_for(platform, GITHUB_ACTIONS="true", GITHUB_STEP_SUMMARY=str(step_summary)))
+    text = step_summary.read_text(encoding="utf-8")
+    assert "| 1 | suggested tests | 1 | 1 | 1m 00s |" in text  # it matched, so the name was in the table
+    assert KEY not in text and "Pays with ***" in text and "`src/***/`" in text

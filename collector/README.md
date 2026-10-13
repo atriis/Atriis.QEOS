@@ -403,6 +403,14 @@ nothing and exits 2, saying why. Select features with tags instead.
 | 2 | Before any test runs: no command, an unknown Cucumber (pass `--cucumber`), a command run-impact cannot narrow (profile `paths`, `--shard`), a working directory cmd.exe would change, a program that cannot be started. Running a wrong subset silently would be worse than running nothing; every other problem runs the command as given |
 | 2 / 3 / 4 | `--suggested-only --no-fallback` with nothing to run: as `impact` (2 also when the collector cannot reach QEOS as configured, or the stages cannot be planned) |
 
+**Summary.**
+- **What it holds:** the suggested tests with their evidence, each stage's scenarios, failures and duration, and the
+  time to the first failure ("first failure after 1m 02s (full suite 16m 15s)"). Durations read as the dashboard
+  shows them.
+- **In GitHub Actions** (both `GITHUB_ACTIONS` and `GITHUB_STEP_SUMMARY` set): a table in the job's step summary.
+- **Anywhere else, or when that file cannot be written:** the same lines in the log.
+- The API key never appears in it, even when a test name or path holds it.
+
 **Working files** live in `.qeos-impact/<random>/` and are removed at the end. On first use run-impact writes
 `.qeos-impact/.gitignore` (`*`), so git never lists them. When the working directory is read-only, they go in a
 temporary directory instead, with a warning. The upload options are those of `upload` (`--url`,
