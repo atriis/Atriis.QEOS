@@ -214,13 +214,13 @@ function CaseEditor() {
     enabled: key != null,
     queryFn: () => getLatestResults(id, [key!]).then((r) => r.results[key!.toLowerCase()] ?? null),
   });
-  const feature = useQuery({
-    ...featureDetailQuery(id, c?.source_path ?? ""),
-    enabled: !!c?.source_path && latest.data?.failed_step != null,
-  });
+  const wantsFeature = !!c?.source_path && latest.data?.failed_step != null;
+  const feature = useQuery({ ...featureDetailQuery(id, c?.source_path ?? ""), enabled: wantsFeature });
   const failedLine = useMemo(() => {
     const step = latest.data?.failed_step;
     if (!c?.gherkin || !step) return null;
+    // Wait for the file rather than mark a provisional line that then jumps
+    if (wantsFeature && feature.isPending) return null;
     const shown = stepLines(c.gherkin);
     const source = feature.data?.content;
     const scenarioLine = feature.data?.cases.find((fc) => fc.number === c.number)?.line ?? null;
@@ -230,7 +230,7 @@ function CaseEditor() {
       ? mapped
       : locateFailedStep(shown, { text: step.text });
     return index != null && shown[index] ? shown[index].line : null;
-  }, [c, latest.data, feature.data]);
+  }, [c, latest.data, feature.data, feature.isPending, wantsFeature]);
 
   if (number !== null && existing.error != null) {
     return (
@@ -305,6 +305,7 @@ function CaseEditor() {
             </>
           ) : (
             <>
+          {key != null && latest.isSuccess && <LastResultPill result={latest.data} />}
           <h2 id={`${ids}-steps`}>Steps</h2>
           <ol className="steps" aria-labelledby={`${ids}-steps`}>
             {draft.steps.map((s, i) => (

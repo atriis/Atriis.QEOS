@@ -1626,6 +1626,7 @@ qeos up -d --build --wait edge
   with "This is my complete features folder", or `import-features` from CI). After new masking
   rules, run the `remask` job ([4.6](#46-masking)).
 - **Collector:** CI pins a tag (`collector-v0.6.0`). Upgrading the platform does not change it.
+  collector 0.6.0 sends `failed_step`; it needs a platform with ingestion migration 021, so upgrade the platform first (an older platform answers 422 and the run is not stored).
   Move pipelines to a new tag when the release notes ask for it.
 - **Compose project renamed to `qeos` (2026-10-11).** Containers are now `qeos-*` and local images
   `qeos/*`. Once, before the first `up` after pulling this change, stop the old project:

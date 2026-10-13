@@ -278,3 +278,21 @@ test("an unknown or archived file says it is not found", async () => {
   expect(screen.getByRole("heading", { level: 1, name: "gone" })).toBeInTheDocument();
   expect(await screen.findByText(/Feature not found/)).toBeInTheDocument();
 });
+
+test("a rebuilt file with a Background in the case's Gherkin still reddens the failed scenario step", async () => {
+  server.use(
+    http.get(`${P}/features/detail`, () => HttpResponse.json({ ...DETAIL, content: null, imported_at: null,
+      cases: [detailCase(12, { scenario_name: "Good password", line: null, automated_test_key: KEY })] })),
+    http.get(`${P}/cases`, () => HttpResponse.json({ total: 1, items: [
+      kase(12, { automated_test_key: KEY, gherkin: ["Background:", "  Given bg", "Scenario: Good password", "  When a", "  Then b"].join("\n") }),
+    ] })),
+    http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
+      [KEY]: result("failed", { failed_step: { text: "Then b" } }),
+    } })),
+  );
+  renderAt();
+  await screen.findAllByRole("article");
+  await waitFor(() => expect(document.querySelector(".gk-failed")).not.toBeNull());
+  expect(document.querySelector(".gk-failed")).toHaveTextContent("Then b");
+  expect(screen.queryByText(/Failed in Background/)).not.toBeInTheDocument();
+});

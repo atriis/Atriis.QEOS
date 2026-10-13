@@ -63,3 +63,16 @@ def test_two_rows_of_one_test_in_a_run_rank_by_id(client, auth, project_role, se
     seed_run(T0, results=(("search", "failed", 5), ("search", "passed", 5)))
     got = client.post(URL, json={"keys": [report_key("search")]}, headers=auth()).json()["results"]
     assert got[report_key("search")]["status"] == "passed"
+
+
+def test_the_message_is_cut_to_the_excerpt(client, auth, project_role, seed_run, db):
+    from src.ingestion.service.analytics_service import MESSAGE_EXCERPT
+
+    project_role("viewer")
+    run = seed_run(T0, results=(("search", "failed", 5),))
+    row = db.query(RunResult).filter_by(run_id=run.id).one()
+    row.message = "x" * 5000
+    db.commit()
+    key = report_key("search")
+    got = client.post(URL, json={"keys": [key]}, headers=auth()).json()["results"][key]
+    assert len(got["message"]) == MESSAGE_EXCERPT

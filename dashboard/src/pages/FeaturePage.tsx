@@ -15,7 +15,7 @@ import LastResultPill from "../components/LastResultPill";
 import PageHeader from "../components/PageHeader";
 import RunControl from "../components/RunControl";
 import { type Block, splitFeature } from "../lib/featureBlocks";
-import { locateFailedStep, scenarioSteps } from "../lib/failedStep";
+import { locateFailedStep, scenarioSteps, stepLines } from "../lib/failedStep";
 import { GROUP_CASES_MAX, featureDetailQuery, fileLabel } from "../lib/featureQueries";
 import { useCanEdit } from "../lib/useCanEdit";
 
@@ -115,7 +115,8 @@ export default function FeaturePage() {
     const step = result?.failed_step;
     const heading = source?.lines.get(c.number);
     if (!result || !step || !source || heading == null) return null;
-    const steps = scenarioSteps(source.text, heading);
+    // A rebuilt file holds each case's own Gherkin, Background included: read the block itself
+    const steps = stored ? scenarioSteps(source.text, heading) : stepLines(source.text, block.start, block.end);
     // A file rebuilt from the cases has its own line numbers: only the text can be trusted
     const at = locateFailedStep(steps, stored ? step : { text: step.text });
     if (at == null) return null;

@@ -81,3 +81,12 @@ test("a doc string's @tags and headings do not end the scenario", () => {
   const src = ["Feature: F", "Scenario: s", "Given x:", '"""', "@foo", "Rule: z", '"""', "Then y"].join("\n");
   expect(scenarioSteps(src, 2).map((x) => x.line)).toEqual([3, 8]);
 });
+
+test("a masked step in the report still matches its line by the [REDACTED] segment", () => {
+  const steps = [{ line: 3, text: 'Given I log in as "bob"' }, { line: 4, text: 'Given I log in as "alice"' }];
+  expect(locateFailedStep(steps, { text: "Given I log in as \"[REDACTED:email]\"", line: 4 })).toBe(1);
+  expect(locateFailedStep([{ line: 1, text: "Given a [x]" }], { text: "Given a [REDACTED:k]", line: 1 })).toBe(0);
+  expect(locateFailedStep([{ line: 1, text: "Then other" }], { text: "Given a [REDACTED:k]", line: 1 })).toBeNull();
+  // Without a line only the exact text is trusted
+  expect(locateFailedStep([{ line: 1, text: "Given a [x]" }], { text: "Given a [REDACTED:k]" })).toBeNull();
+});

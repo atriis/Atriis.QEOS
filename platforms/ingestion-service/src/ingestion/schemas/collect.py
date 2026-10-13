@@ -103,7 +103,8 @@ class FailedStepIn(BaseModel):
     text: Annotated[str, StringConstraints(min_length=1, max_length=1000)]
     line: Optional[int] = Field(None, ge=1, le=1_000_000)
 
-    _no_unstorable = field_validator("text", mode="before")(_reject_unstorable)
+    # Free text like message/details: replaced, never rejected
+    _clean_text = field_validator("text", mode="after")(_replace_unstorable)
 
 
 class ResultIn(BaseModel):

@@ -382,6 +382,7 @@ showing up, but its failures stop counting. With `--gate`, the collector decides
   scenario, a failed step fails the scenario, and undefined/pending steps leave it skipped.
   A failed scenario also carries `failed_step` (`{"text": "When I search", "line": 5}`, text cut to
   1000 characters, `line` omitted when the report has none); the other formats send none.
+  collector 0.6.0 sends `failed_step`; it needs a platform with ingestion migration 021, so upgrade the platform first (an older platform answers 422 and the run is not stored).
 - Playwright's JSON reporter (`--reporter=json`): every retry attempt is kept as its own
   result (a flaky spec shows as fail+pass in one run), project name as suite, spec file as
   class, `timedOut` counts as failed and `interrupted` as errored.

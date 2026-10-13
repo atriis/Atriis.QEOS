@@ -330,7 +330,8 @@ def latest_results(db: Session, project_id: int, keys: List[str]) -> dict:
     out = {}
     for r in db.execute(select(ranked).where(ranked.c.position == 1)).mappings():
         entry = {"status": r["status"], "run_id": r["run_id"], "branch": r["branch"],
-                 "environment": r["environment"], "started_at": as_utc(r["started_at"]), "message": r["message"]}
+                 "environment": r["environment"], "started_at": as_utc(r["started_at"]),
+                 "message": r["message"][:MESSAGE_EXCERPT] if r["message"] is not None else None}
         step = failed_step_of(r["status"], r["message"], r["details"], r["failed_step_text"], r["failed_step_line"])
         if step:
             entry["failed_step"] = step

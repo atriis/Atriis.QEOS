@@ -53,3 +53,12 @@ def test_the_failed_step_text_is_part_of_the_request_hash(client, make_key):
 
     assert client.post(URL, json=with_step("When a"), headers=key_headers(key, idem="k-step")).status_code == 201
     assert client.post(URL, json=with_step("When b"), headers=key_headers(key, idem="k-step")).status_code == 409
+
+
+def test_a_nul_in_the_step_text_is_replaced_not_rejected(client, make_key, db):
+    _, key = make_key(project_id=1)
+    body = upload_body(results=[{"name": "nul", "status": "failed",
+                                 "failed_step": {"text": "When I send a\x00b", "line": 2}}])
+    assert client.post(URL, json=body, headers=key_headers(key)).status_code == 201
+    row = db.query(RunResult).one()
+    assert "\x00" not in row.failed_step_text and row.failed_step_text.startswith("When I send a")

@@ -62,10 +62,19 @@ export function matchesStep(template: string, actual: string): boolean {
   return new RegExp(`^${pattern}$`).test(actual.trim());
 }
 
+const REDACTED = /\[REDACTED:[^\]]*\]/;
+
+/** Like matchesStep, but a [REDACTED:kind] segment of the actual text matches whatever the step holds there. */
+function matchesMasked(template: string, actual: string): boolean {
+  if (!REDACTED.test(actual)) return matchesStep(template, actual);
+  const pattern = actual.trim().split(new RegExp(REDACTED.source, "g")).map(escape).join(".+");
+  return new RegExp(`^${pattern}$`).test(template.trim());
+}
+
 export function locateFailedStep(steps: StepLine[], failed: FailedStep): number | null {
   if (failed.line != null) {
     const at = steps.findIndex((s) => s.line === failed.line);
-    if (at >= 0 && matchesStep(steps[at].text, failed.text)) return at;
+    if (at >= 0 && matchesMasked(steps[at].text, failed.text)) return at;
   }
   const byText = steps.findIndex((s) => matchesStep(s.text, failed.text));
   return byText >= 0 ? byText : null;

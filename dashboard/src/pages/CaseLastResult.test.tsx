@@ -113,3 +113,24 @@ test("a failed latest-results request still shows the Gherkin, with no pill", as
   expect(screen.queryByText(/No runs yet/)).toBeNull();
   expect(document.querySelector(".badge")).toBeNull();
 });
+
+test("a hand-written case linked to a test shows the last-result pill, with no failed line", async () => {
+  setup(kase({ source_path: null, gherkin: null, steps: [{ action: "Open", expected: "It opens" }] }), result({ failed_step: { text: "When I search Lisbon" } }));
+  renderCase();
+  expect(await screen.findByText(/failed/i, { selector: ".badge *, .badge" })).toBeInTheDocument();
+  expect(document.querySelector(".gk-failed")).toBeNull();
+});
+
+test("the red line waits for the feature file instead of jumping from a provisional match", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const twice = ["Background:", "  Given I am logged in", "Scenario Outline: by city", "  Then ok", "  Then ok"].join("\n");
+  setup(kase({ gherkin: twice }), result({ failed_step: { text: "Then ok", line: 9 } }), DETAIL);
+  server.use(http.get(`${P}/features/detail`, async () => { await gate; return HttpResponse.json({ ...DETAIL, content: ["Feature: F", "Scenario: s", "  Given x", "  Then ok", "  Then ok", "", "", "", "  Then ok"].join("\n"), cases: [{ ...DETAIL.cases[0], line: 2 }] }); }));
+  renderCase();
+  await screen.findByText(/failed/i, { selector: ".badge *, .badge" });
+  await new Promise((r) => setTimeout(r, 50));
+  expect(document.querySelector(".gk-failed")).toBeNull();
+  release();
+  await waitFor(() => expect(document.querySelector(".gk-failed")).not.toBeNull());
+});
