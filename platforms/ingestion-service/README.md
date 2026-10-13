@@ -88,6 +88,7 @@ can sync cases without a user login. See ADR-024.
 
 - Up to 20,000 results per run (`422` beyond: split the run).
 - `message` and `details` over 64 KB are truncated (the result's `truncated` is true), never rejected.
+- A result may carry `failed_step` `{"text": 1-1000 characters, "line": 1-1,000,000}` (the Gherkin step that failed, sent by collector 0.6.0 and later); `text` is stored in `failed_step_text` and `line` in `failed_step_line` (migration 021), both after masking. Out-of-range values are `422`; omitting it is fine.
 - `status`: `passed`, `failed`, `skipped`, `errored` (`error` is accepted as `errored`).
 - `finished_at` may be at most 1 hour ahead of the server clock.
 - Through the gateway, uploads are limited to 10 per second per IP (burst 20).
@@ -123,7 +124,7 @@ Every project role can read; roles come from project-service.
 
 ## Masking
 
-Before a result is stored, its `message` and `details` are masked, and so are the run's commit
+Before a result is stored, its `message`, `details` and `failed_step.text` are masked, and so are the run's commit
 subject (`commit_message`) and a password inside its `ci_run_url`. Each masked value becomes `[REDACTED:<kind>]`; the text around it stays
 readable. Test names, suites, classes, files and branches are never changed.
 
@@ -150,7 +151,7 @@ readable. Test names, suites, classes, files and branches are never changed.
 - Results stored before masking existed (or before a new rule) are re-masked on demand:
   `python -m src.ingestion.jobs.remask [--dry-run] [--project ID] [--batch-size N]`
   (`docker compose exec ingestion-service python -m src.ingestion.jobs.remask --dry-run`). It
-  walks results by id in committed batches (then run CI URLs and commit subjects), prints a JSON summary (`results_scanned`,
+  walks results by id in committed batches (message, details and the failed step text; then run CI URLs and commit subjects), prints a JSON summary (`results_scanned`,
   `results_changed`, `runs_changed`, `kinds`), and is safe to repeat: masked text is skipped.
   Text that masking makes longer than 64 KB is cut back and marked `truncated`.
 
@@ -234,7 +235,7 @@ labelled so it is never read as a full verdict:
 `GET /api/v1/projects/{id}/export` (owners and admins) streams everything stored for a project
 as NDJSON (`application/x-ndjson`, `attachment`): an `export` header line (`format: 1`), then each
 run (`type: run`, with its `changed_files` and `components`) followed by its results
-(`type: result`). Text is exported as stored, masked. For a legal request, or before deleting
+(`type: result`, with `failed_step_text` and `failed_step_line`). Text is exported as stored, masked. For a legal request, or before deleting
 a project. The dashboard's Settings → Data has a download button.
 - `RETENTION_INTERVAL_HOURS` (default 24) between passes with `--loop`; `RETENTION_BATCH_SIZE`
   (default 500) runs per transaction. One pass at a time (PostgreSQL advisory lock).
@@ -251,6 +252,7 @@ Read-only, under `/api/v1/projects/{project_id}/analytics/`, for every role that
 | `GET /tests/{test_key}/history?days=30&branch=&limit=100` | One test: a summary over the window and its executions, newest first, with the message cut to 500 characters. 404 if the test was never seen in this project |
 | `GET /flaky?window_days=14&min_runs=5&min_flip_rate=0.3&branch=` | At most 100 flaky tests (`window_days` 1–90) |
 | `GET /latest-keys?status=any&branch=` | `{"keys": [...]}`: the `test_key`s whose latest result has that status (`passed`, `failed` including errored, `skipped`, or `any` for at least one result). Latest is the most recent run (`started_at`, then run id); `branch` narrows it. Test Management uses it for the "result" filter on All Cases |
+| `POST /latest-results` | `{"results": {key: {status, run_id, branch, environment, started_at, message, failed_step?}}}`: each test's latest result on any branch (run start, run id, then row id; a retry's later row wins), for the Test cases list. Body `{keys: 1-500 x 64-hex}` (lowercased, deduplicated; unknown fields 422); a key with no result in this project is absent. `started_at` always has a UTC offset. `failed_step` (`{text, line?}`) is only for a failed or errored result: from the stored columns or, for a row stored before collector 0.6.0, the first line of `details` when it differs from the first line of `message` (no `line` then). Every project role |
 | `POST /run-strip` | `{"runs": [{...}], "statuses": {key: [status\|null, ...]}}`: each test's status (passed, failed, rerun, skipped, or null) in the project's last `limit` runs (1–20, default 10). Request body: `{test_keys: 1–200 × 64-hex, limit?, branch?}`; unknown body fields are rejected with 422. The `statuses` keys are the lowercased, deduplicated request keys. Statuses: single result → `passed/failed/skipped`; multiple rows → `rerun`; errored → `failed`; no row → `null`. Runs are sorted oldest to newest |
 | `POST /duration-estimate` | `{estimate_ms, upper_ms, tests_with_history, tests_without_history, environment_used, model: {overhead_ms, factor, runs, fitted}}`: how long a Play of these tests should take. Body: `{test_keys: 1–200 × 64-hex (lowercased, deduplicated), environment?}` (unknown fields 422). Over the last 30 days, per test: typical = median of its passed executions (else of its non-skipped ones), upper = p90 of every non-skipped execution (never below typical). With an `environment`, a test with at least 3 non-skipped executions there uses only those (`environment_used` counts them). The project's last 20 runs with a result (every branch) fit `wall ≈ overhead + factor × serial` by least squares from 5 runs (factor clamped to 0.05–1, overhead to 0–30 min); otherwise, or on a negative slope, overhead 0 and factor = median wall ÷ serial (1 with no runs). `estimate_ms` = overhead + factor × Σ typical, `upper_ms` likewise with Σ upper; both `null` when no test has history. Test Management stores them on the run request the dashboard creates. Known limit: a retried test counts each attempt as a separate execution |
 | `POST /report` | The Report page's sections in one filtered, previous-period-compared request; see "Report" below (ADR-026) |
