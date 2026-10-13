@@ -109,3 +109,51 @@ def test_a_windows_uri_is_reported_with_forward_slashes(tmp_path):
     feature = {**CUCUMBER[0], "uri": "tests\\features\\a.feature"}
     parsed = parse_file(write(tmp_path, [feature]))
     assert {r["class_name"] for r in parsed.results} == {"tests/features/a.feature"}
+
+
+# --- failed_step ---------------------------------------------------------------
+
+def step(keyword, name, line, status, error=None):
+    result = {"status": status}
+    if error is not None:
+        result["error_message"] = error
+    entry = {"keyword": keyword, "name": name, "result": result}
+    if line is not None:
+        entry["line"] = line
+    return entry
+
+
+def parse_cucumber(tmp_path, steps, background=None):
+    elements = []
+    if background is not None:
+        elements.append({"type": "background", "steps": background})
+    elements.append({"type": "scenario", "name": "S", "steps": steps})
+    return parse_file(write(tmp_path, [{"uri": "f.feature", "name": "F", "elements": elements}])).results
+
+
+def test_failed_step_carries_text_and_line(tmp_path):
+    rows = parse_cucumber(tmp_path, steps=[step("Given ", "a user", 4, "passed"),
+                                           step("When ", "I search Lisbon", 5, "failed", "boom")])
+    assert rows[0]["failed_step"] == {"text": "When I search Lisbon", "line": 5}
+
+
+def test_background_step_failure_keeps_its_own_line(tmp_path):
+    rows = parse_cucumber(tmp_path, background=[step("Given ", "logged in", 3, "failed", "nope")],
+                          steps=[step("When ", "x", 7, "skipped")])
+    assert rows[0]["failed_step"] == {"text": "Given logged in", "line": 3}
+
+
+def test_passed_and_skipped_scenarios_have_no_failed_step(tmp_path):
+    assert "failed_step" not in parse_cucumber(tmp_path, steps=[step("Given ", "a", 1, "passed")])[0]
+    assert "failed_step" not in parse_cucumber(tmp_path, steps=[step("Given ", "a", 1, "pending")])[0]
+
+
+def test_missing_line_keeps_the_text_and_long_text_is_cut(tmp_path):
+    rows = parse_cucumber(tmp_path, steps=[step("When ", "y" * 2000, None, "failed", "e")])
+    assert rows[0]["failed_step"]["text"] == ("When " + "y" * 2000)[:1000] and "line" not in rows[0]["failed_step"]
+
+
+def test_junit_results_have_no_failed_step():
+    from pathlib import Path
+    parsed = parse_file(str(Path(__file__).parent / "fixtures" / "pytest.xml"))
+    assert parsed.results and all("failed_step" not in r for r in parsed.results)

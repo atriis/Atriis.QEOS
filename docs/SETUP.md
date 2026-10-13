@@ -605,7 +605,7 @@ are skipped with a warning.
 
 PowerShell:
 ```powershell
-pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.2#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.6.0#subdirectory=collector"
 $env:QEOS_URL = "https://localhost:8443"
 $env:QEOS_API_KEY = "<your key>"
 qeos-collector check "reports/**/*.xml" --ca-file $HOME\qeos-ca.crt     # verifies everything, uploads nothing
@@ -613,14 +613,14 @@ qeos-collector upload "reports/**/*.xml" --ca-file $HOME\qeos-ca.crt
 ```
 bash:
 ```bash
-pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.2#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.6.0#subdirectory=collector"
 export QEOS_URL=https://localhost:8443
 export QEOS_API_KEY=<your key>
 qeos-collector check "reports/**/*.xml" --ca-file ~/qeos-ca.crt
 qeos-collector upload "reports/**/*.xml" --ca-file ~/qeos-ca.crt
 ```
 
-- Pin the tag (`collector-v0.5.2`) for strict reproducibility, or use the floating `collector-v0` (the latest
+- Pin the tag (`collector-v0.6.0`) for strict reproducibility, or use the floating `collector-v0` (the latest
   0.x release; it moves on every stable release, so a new collector reaches your CI without an edit; the
   GitHub Action and the Jenkins `ref` accept it). `--ca-file` is needed only for the local
   self-signed certificate or a private CA.
@@ -654,7 +654,7 @@ are shown on the run page. For a list of changed files per run, check out at lea
    - **Variable** `QEOS_URL` = `https://qeos.example.com` (no trailing slash)
 2. After the test step (the tests must write a report), add:
    ```yaml
-   - uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.5.2
+   - uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.6.0
      if: always()                      # report failing builds too
      with:
        url: ${{ vars.QEOS_URL }}
@@ -673,7 +673,7 @@ are shown on the run page. For a list of changed files per run, check out at lea
 2. In `.gitlab-ci.yml`:
    ```yaml
    include:
-     - remote: https://raw.githubusercontent.com/carneiru/QA-Vision-Platform/collector-v0.5.2/templates/qeos-collector.gitlab-ci.yml
+     - remote: https://raw.githubusercontent.com/carneiru/QA-Vision-Platform/collector-v0.6.0/templates/qeos-collector.gitlab-ci.yml
 
    qeos-collector-upload:
      variables:
@@ -719,7 +719,7 @@ are shown on the run page. For a list of changed files per run, check out at lea
      always {
        withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')]) {
          withEnv(['QEOS_URL=https://qeos.example.com']) {
-           qeosCollectorUpload(patterns: 'reports/**/*.xml', ref: 'collector-v0.5.2')
+           qeosCollectorUpload(patterns: 'reports/**/*.xml', ref: 'collector-v0.6.0')
          }
        }
      }
@@ -945,7 +945,7 @@ picked, such as `MyRepo/tests/features/...`).
          - uses: actions/checkout@v4
          - uses: actions/setup-python@v5
            with: { python-version: "3.12" }
-         - run: pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.2#subdirectory=collector"
+         - run: pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.6.0#subdirectory=collector"
          - run: qeos-collector import-features "tests/features/**/*.feature" ${{ inputs.first_sync && '--allow-mass-archive' || '' }}
            env:
              QEOS_URL: ${{ vars.QEOS_URL }}
@@ -1475,7 +1475,7 @@ workflow that runs the suite (scheduled, per area, nightly…):
 ```yaml
       - name: Upload results to QEOS
         if: always() && vars.QEOS_URL != ''      # skipped cleanly where QEOS is not set up
-        uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.5.2
+        uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.6.0
         with:
           url: ${{ vars.QEOS_URL }}
           patterns: test-results/cucumber-report.json
@@ -1556,7 +1556,7 @@ restore it on the VM (`deploy/README.md` §7), and copy the local `TM_SECRETS_KE
   unset.
 - CI keeps working: `QAV_URL` / `QAV_API_KEY`, the `qav-collector` command, `qav_` keys, the
   `qavCollectorUpload` Jenkins step and old GitLab template variables all still work, with a
-  deprecation warning. Move to `QEOS_*` and `collector-v0.5.2` when convenient. On Azure, a
+  deprecation warning. Move to `QEOS_*` and `collector-v0.6.0` when convenient. On Azure, a
   secret still named `QAV_API_KEY` must be renamed, or mapped as `QEOS_API_KEY: $(QAV_API_KEY)`.
 - Data does not move: the volumes keep their `qa-vision_qav_*` names, pinned in the compose files. If Compose asks to
   recreate a volume, answer **N**.
@@ -1589,7 +1589,7 @@ qeos up -d --build --wait edge
   and 004 (scenario names for Play), run one **full** Gherkin import per project (dashboard
   with "This is my complete features folder", or `import-features` from CI). After new masking
   rules, run the `remask` job ([4.6](#46-masking)).
-- **Collector:** CI pins a tag (`collector-v0.5.2`). Upgrading the platform does not change it.
+- **Collector:** CI pins a tag (`collector-v0.6.0`). Upgrading the platform does not change it.
   Move pipelines to a new tag when the release notes ask for it.
 - **Compose project renamed to `qeos` (2026-10-11).** Containers are now `qeos-*` and local images
   `qeos/*`. Once, before the first `up` after pulling this change, stop the old project:
@@ -1681,7 +1681,7 @@ The gateway always joins a Docker network fixed at `172.30.1.0/24`, with monitor
 | SSO button shows, sign-in answers 503 | auth-service lacks `GOOGLE_CLIENT_ID` / `AZURE_CLIENT_ID` + `AZURE_ALLOWED_TENANTS`: use the override file ([3.8](#38-single-sign-on-google-and-microsoft)). |
 | Collector exits 2 | A configuration problem (URL, key, no matching files, `http://` URL, bad `--ca-file`, invalid `--trigger`). `qeos-collector check` names it. |
 | My run doesn't appear in QEOS | Check Settings › Collection and the collector's `run not collected` line: the run looked manual and the project does not collect manual runs ([4.1.8a](#418a-manual-runs-and-the-run-trigger)). Pass `--trigger automatic` if it is not. |
-| `collector-action` fails with `has an empty revision (after @)` | collector-action 0.5.1 and earlier built its install URL from variables GitHub leaves empty inside reusable workflows. Use `@collector-v0.5.2` or later, or the floating `@collector-v0`. |
+| `collector-action` fails with `has an empty revision (after @)` | collector-action 0.5.1 and earlier built its install URL from variables GitHub leaves empty inside reusable workflows. Use `@collector-v0.6.0` or later, or the floating `@collector-v0`. |
 | Collector: certificate verify failed | Local stack: `--ca-file` with the gateway certificate. Private CA: `--ca-file` with that CA. |
 | Upload 401 | Wrong, revoked or missing key. On Azure, the secret is not mapped in `env:` (you see the literal `$(QEOS_API_KEY)`). |
 | CI build is green but no run arrives | `QEOS_URL` missing or unreachable (hosted runner → localhost, or a closed tunnel). By default the collector never fails the build; add `--fail-on-error` while you debug. |

@@ -303,7 +303,7 @@ see [SETUP §2.7](docs/SETUP.md#27-trust-the-local-https-certificate). Then:
 2. Run your tests, then upload the reports from the same folder:
 
 ```bash
-pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.2#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.6.0#subdirectory=collector"
 export QEOS_URL=https://localhost:8443 QEOS_API_KEY=<your key>
 qeos-collector upload "reports/**/*.xml"
 ```

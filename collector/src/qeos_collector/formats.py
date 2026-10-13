@@ -170,6 +170,12 @@ def _cucumber_feature(feature: dict, parsed: ParsedFile) -> None:
             message = str(result.get("error_message") or "")
             step_name = f"{failed_step.get('keyword', '')}{failed_step.get('name', '')}".strip()
             _attach(row, _first_line(message), "\n".join(part for part in (step_name, message.strip()) if part))
+            if step_name:
+                entry = {"text": step_name[:1000]}
+                line = failed_step.get("line")
+                if isinstance(line, int) and not isinstance(line, bool) and 1 <= line <= 1_000_000:
+                    entry["line"] = line
+                row["failed_step"] = entry
         parsed.results.append(row)
 
 
