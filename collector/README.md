@@ -8,7 +8,7 @@ Cucumber).
 ## Install
 
 ```bash
-pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.6.0#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.7.0#subdirectory=collector"
 ```
 
 ### Renamed from `qav-collector` (0.4.0)
@@ -69,7 +69,7 @@ instead of storing it twice.
           QEOS_URL: https://qeos.example.com
           QEOS_API_KEY: ${{ secrets.QEOS_API_KEY }}
         run: |
-          pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.6.0#subdirectory=collector"
+          pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.7.0#subdirectory=collector"
           qeos-collector upload "reports/**/*.xml"
 ```
 
@@ -80,7 +80,7 @@ test:
   script:
     - pytest --junitxml=reports/junit.xml
   after_script:
-    - pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.6.0#subdirectory=collector"
+    - pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.7.0#subdirectory=collector"
     - qeos-collector upload "reports/**/*.xml"
   variables:
     QEOS_URL: https://qeos.example.com
@@ -98,7 +98,7 @@ post {
   always {
     withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')]) {
       sh '''
-        pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.6.0#subdirectory=collector"
+        pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.7.0#subdirectory=collector"
         QEOS_URL=https://qeos.example.com qeos-collector upload "target/surefire-reports/*.xml"
       '''
     }
@@ -117,7 +117,7 @@ mass-archive guard is the backstop.
 steps:
   - script: mvn test   # or pytest --junitxml=reports/junit.xml, dotnet test --logger trx, …
   - script: |
-      pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.6.0#subdirectory=collector"
+      pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.7.0#subdirectory=collector"
       qeos-collector upload "**/TEST-*.xml"
     displayName: Upload test results to QEOS
     condition: always()        # report results even when the tests failed
@@ -271,7 +271,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.6.0#subdirectory=collector"
+      - run: pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.7.0#subdirectory=collector"
       - run: qeos-collector import-features
         env:
           QEOS_URL: ${{ vars.QEOS_URL }}
@@ -386,7 +386,8 @@ also runs as one stage.
 - **Windows:** programs are found as a shell would (`npx.cmd`, `mvn.cmd`), never run through a shell by
   run-impact, and every path it hands Cucumber uses `/`. A `.cmd` or `.bat` runs through cmd.exe, so for
   cucumber-jvm and Ruby Cucumber the working directory must not contain `% ! & | < > ^ "`; run-impact refuses
-  before running anything.
+  before running anything. The check looks at the top-level program only: a `bash -c "mvn …"` command line on a
+  Windows agent whose path holds those characters is the author's responsibility.
 
 **Feature paths.** Paths the command names (`npx cucumber-js features/checkout/`, `-Dcucumber.features=…`) are left
 out of the stages: the rerun files choose the scenarios.
@@ -403,21 +404,21 @@ nothing and exits 2, saying why. Select features with tags instead.
 **Modes.**
 - **`--fail-fast`:** when stage 1 fails, stop before stage 2. Stage 1 fails when a suggested scenario fails, or when
   the command exits non-zero without writing a report (it crashed). The run is uploaded as suggested tests only,
-  stopped after stage 1.
+  stopped after stage 1. When every scenario was suggested, stage 1 was the whole suite: the run is a full run.
 - **`--suggested-only`:** run stage 1 only. The run is uploaded as suggested tests only, and it never counts in the
   impact statistics or the accuracy figure. When there is no suggestion (nothing suggested, not enough history, none
   of the suggested tests among the command's scenarios, or QEOS cannot score the change), the full suite runs
   instead and the log says why.
 - **`--no-fallback`** (with `--suggested-only`): in that case run nothing, upload nothing, and exit 2, 3 or 4 as
   `impact` would. It is the only way run-impact ends without running tests because of scoring.
-- **`--gate`:** judges the uploaded run, as for `upload`. It exits 1 on failures outside quarantine, and 1 when
-  nothing could be uploaded.
+- **`--gate`:** judges the uploaded run, as for `upload`. It exits 1 on failures outside quarantine, 1 when
+  nothing could be uploaded, and 1 when a stage crashed without a report (its scenarios have no results to judge).
 
 | Exit | When |
 |---|---|
 | The test command's | Without `--gate`: the first failing stage's exit code, else 0 |
-| 0 / 1 | With `--gate`: the gate's verdict on the uploaded run; 1 when nothing was uploaded |
-| 1 | `--fail-on-error`, the tests passed and the upload failed |
+| 0 / 1 | With `--gate`: the gate's verdict on the uploaded run; 1 when nothing was uploaded, or when a stage crashed without a report |
+| 1 | `--fail-on-error`: the tests passed and the upload failed, or a stage crashed without a report |
 | 2 | Before any test runs: no command, an unknown Cucumber (pass `--cucumber`), a command run-impact cannot narrow (profile `paths`, `--shard`), a working directory cmd.exe would change, a program that cannot be started. Running a wrong subset silently would be worse than running nothing; every other problem runs the command as given |
 | 2 / 3 / 4 | `--suggested-only --no-fallback` with nothing to run: as `impact` (2 also when the collector cannot reach QEOS as configured, or the stages cannot be planned) |
 
@@ -441,6 +442,9 @@ nothing and exits 2, saying why. Select features with tags instead.
 tests (`--suggested-only`, a `--fail-fast` stop, or a stage that wrote no report) is marked **Suggested only** on the
 run page, in the runs list (the **Full runs only** chip hides such runs), in failure alerts and in the weekly
 summary. It never counts in the impact statistics or the accuracy figure.
+
+**The test command never sees the key.** `QEOS_API_KEY`, `QAV_API_KEY` and `QEOS_ACTION_EXTRA_ARGS` are removed from
+its environment: the tests have no use for them, and their logs are not scrubbed.
 
 **Working files** live in `.qeos-impact/<random>/` and are removed at the end. On first use run-impact writes
 `.qeos-impact/.gitignore` (`*`), so git never lists them. When the working directory is read-only, they go in a

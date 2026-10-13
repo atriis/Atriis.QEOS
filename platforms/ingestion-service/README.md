@@ -40,7 +40,7 @@ Receives test results from CI. Design: `docs/superpowers/specs/2026-09-29-ingest
    includes it (`null` when absent), so a retry that spans the deploy of this field, of a run stored earlier
    under the same `Idempotency-Key`, gets `409`; this is accepted (ADR-030).
 
-   A run uploaded by `qeos-collector run-impact` (collector 0.6.0, migration 020) also carries:
+   A run uploaded by `qeos-collector run-impact` (collector 0.7.0, migration 020) also carries:
    - `"scope": "full" | "impact-subset"`: default `full`; `impact-subset` when only the suggested tests ran;
    - `"stages"`:
      - `stages`: 1 or 2 items of `{"name": "suggested" | "rest" | "all", "duration_s", "tests", "failed"}`;

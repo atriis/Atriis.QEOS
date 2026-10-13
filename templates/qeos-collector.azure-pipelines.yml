@@ -41,7 +41,7 @@ parameters:
     default: ""
   - name: ref
     type: string
-    default: collector-v0.6.0
+    default: collector-v0.7.0
   # Reporting is a side effect: by default a failed upload does not fail the pipeline
   - name: failOnError
     type: boolean

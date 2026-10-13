@@ -126,4 +126,5 @@ where they differ. The main ones:
   must select exactly the plan before any test runs. No stage runs with an empty rerun file.
 - The request hash leaves out `scope` and `stages` at their defaults, so older uploads still replay.
 - The weekly summary gains a count line for subset runs (it lists no individual runs).
+- Release B ships as collector 0.7.0 (0.6.0 was taken by the failed-step release).
 

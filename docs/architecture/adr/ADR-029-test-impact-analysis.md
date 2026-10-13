@@ -132,7 +132,9 @@ Spec `docs/superpowers/specs/2026-10-13-suggested-tests-first-design.md`, plan
 - **The safety rule.** Scoring never costs a test run. When the change cannot be scored (no change data, 401, 403,
   404, 422, 429, 5xx, a timeout, no answer), when the collector cannot reach QEOS as configured (no URL or key, as on
   a fork pull request), or when the stages cannot be planned, the command runs as given, as one stage, and the log
-  says why. Only `--suggested-only --no-fallback` ends without tests (exit 2, 3 or 4, as `impact`).
+  says why: tests are never skipped because of scoring. The explicit refusals exit before any test runs: the
+  stage-1 check, the cmd.exe guard and an undetectable Cucumber (exit 2), and `--suggested-only --no-fallback`
+  (2, 3 or 4, as `impact`).
 - **Never skipping by default.** `first` runs the full suite every time. `only` is opt-in, with the full suite as
   fallback when there is no suggestion. Partial runs are labelled on the run page, in the runs list, in failure
   alerts and in the weekly summary.

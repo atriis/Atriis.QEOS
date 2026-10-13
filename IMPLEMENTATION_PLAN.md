@@ -30,7 +30,7 @@ numbers in platforms/ingestion-service/README.md.
    rewrite (3.8 s, identical result sets). The confirmed pass is a minority
    of the 90-day total; revisit only if real data shows otherwise.
 4. ~~Collector distribution~~ — mostly done (full list in TODO.md
-   "Collector — nice to have"): release tags `collector-v0.1.0`…`v0.5.1`
+   "Collector — nice to have"): release tags `collector-v0.1.0`…`v0.7.0`
    with zipapp and GHCR image (PyPI trusted publishing is in the release
    workflow, switched on by `PYPI_PUBLISH`); GitHub Action, Jenkins library, GitLab/Azure templates; Cucumber
    JSON, Playwright JSON, TestNG/NUnit/xUnit/TRX; `qeos-collector check`;

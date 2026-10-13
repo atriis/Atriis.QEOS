@@ -108,7 +108,9 @@ details.
   `extra-args` is split into words by the collector (`QEOS_ACTION_EXTRA_ARGS`, flags only, not
   passed on to the tests). `run-impact` selects scenarios through rerun files, never by name,
   so no test name reaches a shell, and its own arguments reach a `bash -c` script as `"$@"`.
-  On Windows it refuses a working directory whose characters cmd.exe would expand.
+  On Windows it refuses a working directory whose characters cmd.exe would expand. The test
+  command never sees the key: `QEOS_API_KEY`, `QAV_API_KEY` and `QEOS_ACTION_EXTRA_ARGS` are
+  removed from its environment.
 - **Collection of manual runs.** The project toggle that discards manual CI runs is a noise
   filter, not an access control. The collector reports `run.trigger`, so whoever holds the project's
   API key can label a manual run `automatic` and have it stored. API keys remain the boundary.
