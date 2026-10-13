@@ -37,6 +37,13 @@ def test_a_scenario_template_with_scenarios():
     assert scan_feature(text) == [("T a", 5)]
 
 
+def test_a_scenario_with_examples_is_an_outline():
+    """Gherkin 6+: Scenario (or Example) followed by Examples runs once per row, and has no line of its own."""
+    text = ("Feature: F\n  Scenario: Pays <amount>\n    Given <amount>\n\n    Examples:\n      | amount |\n"
+            "      | 10     |\n  Example: Plain\n    Given x\n")
+    assert scan_feature(text) == [("Pays 10", 7), ("Plain", 8)]
+
+
 def test_doc_strings_are_text_not_scenarios():
     text = ('Feature: F\n  Scenario: Real\n    Given a note\n      """\n      Scenario: Not one\n      """\n'
             "    And code\n      ```\n      Scenario: Nor this\n      ```\n  Scenario: Next\n")

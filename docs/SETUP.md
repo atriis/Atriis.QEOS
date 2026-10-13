@@ -653,8 +653,9 @@ are shown on the run page. For a list of changed files per run, check out at lea
 
 From collector 0.7.0, `qeos-collector impact` prints the tests the current change likely affects
 ([Test impact](#test-impact)), to run them first or to feed another tool. The change is the one an upload would send
-(the pull- or merge-request base, else the commit's parent), so the checkout needs that history (`fetch-depth: 0` on
-GitHub pull requests). The key needs the **test suggestions** permission ([4.1.1](#411-api-keys)).
+(the pull- or merge-request base, else the commit's parent), so the checkout needs that history: `fetch-depth: 0` on
+pull requests, `fetch-depth: 2` or more on pushes. Without it there is no change data and the command exits 3. The
+key needs the **test suggestions** permission ([4.1.1](#411-api-keys)).
 
 ```bash
 qeos-collector impact                     # path/to/x.feature:LINE per line when the repository has .feature files

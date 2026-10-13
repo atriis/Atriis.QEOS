@@ -64,11 +64,15 @@ def scan_feature(text: str) -> List[Tuple[str, int]]:
             continue
         keyword = keyword.strip()
         if keyword in _SCENARIO:
-            outline = None
+            # Gherkin 6+: Examples after a plain Scenario make it an outline; until then it is one scenario
             found.append((rest.strip(), number))
+            outline = {"name": rest.strip(), "examples": False, "header": None, "plain": True}
         elif keyword in _OUTLINE:
-            outline = {"name": rest.strip(), "examples": False, "header": None}
+            outline = {"name": rest.strip(), "examples": False, "header": None, "plain": False}
         elif keyword in _EXAMPLES and outline is not None:
+            if outline["plain"]:  # its own line is not run: only its rows are
+                found.pop()
+                outline["plain"] = False
             outline["examples"], outline["header"] = True, None
         elif keyword in _BLOCKS:
             outline = None

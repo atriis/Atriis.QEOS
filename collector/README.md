@@ -280,8 +280,8 @@ jobs:
 New in 0.7.0. Prints the tests the current change likely affects (test impact analysis, ADR-029), to run them first
 or to feed another tool:
 - **The change** is the one an upload would send: the pull- or merge-request base, else the commit's parent. The
-  checkout needs that history: `fetch-depth: 0` on GitHub pull requests. A change with no changed files is never
-  sent.
+  checkout needs that history: `fetch-depth: 0` on pull requests, `fetch-depth: 2` or more on pushes. Without it
+  there is no change data and the command exits 3. A change with no changed files is never sent.
 - **The scoring:** QEOS scores the change with the project API key (`POST /api/v1/collect/impact`).
 - **The key's permission:** API keys are upload-only by default. A project owner or admin allows **test
   suggestions** for a key, when creating it or later in Project Settings > API keys. Without it QEOS answers 403
@@ -352,7 +352,7 @@ a failing test names the team that owns it.
 | 2 | A usage or configuration error: no URL or key, no file matched, an `http://` URL that is not localhost, an unusable `--ca-file`, an invalid `--trigger` / `QEOS_TRIGGER` |
 
 By default an unreachable platform never turns a build red; a misconfigured collector always does.
-`impact` (and `run-impact`) have their own codes, 3 and 4 included: see their sections.
+`impact` has its own codes, 3 and 4 included: see its section (`run-impact`: from 0.7.0).
 
 ## Gating on quarantine (`--gate`)
 

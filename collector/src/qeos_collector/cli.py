@@ -208,6 +208,7 @@ def main(
             _usable_key(api_key)
             return impact.run(args, env, api_key, say, os.getcwd())
         except ConfigError as exc:
+            impact.empty_out(args.out)
             say(str(exc))
             return 2
     fail_on_error = args.fail_on_error or env.get("QEOS_FAIL_ON_ERROR", "").strip().lower() in _TRUE

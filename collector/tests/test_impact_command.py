@@ -128,11 +128,33 @@ def test_a_key_without_the_permission_exits_2_and_says_who_can_allow_it(platform
             "suggestions for this key.") in capsys.readouterr().err.splitlines()
 
 
-def test_out_is_emptied_on_a_configuration_error_too(platform, repo):
+@pytest.mark.parametrize("key, replies", [
+    (KEY, [(403, {"detail": {"code": "impact_not_allowed", "message": "not allowed"}})]),
+    ("qeos_has space", []),  # refused before any request
+])
+def test_out_is_emptied_on_a_configuration_error_too(platform, repo, key, replies):
     (repo / "suggested.txt").write_text("features/old.feature:3\n", encoding="utf-8")
-    platform.reply(403, {"detail": {"code": "impact_not_allowed", "message": "not allowed"}})
-    assert main(["impact", "--out", "suggested.txt"], env_for(platform)) == 2
+    for status, body in replies:
+        platform.reply(status, body)
+    assert main(["impact", "--out", "suggested.txt"], env_for(platform, QEOS_API_KEY=key)) == 2
     assert (repo / "suggested.txt").read_text(encoding="utf-8") == ""
+
+
+@pytest.mark.parametrize("tests", [["not a test"], [None], [SUGGESTION["tests"][0], 7]])
+def test_a_tests_list_that_is_not_tests_is_an_unexpected_answer(platform, repo, capsys, tests):
+    (repo / "suggested.txt").write_text("features/old.feature:3\n", encoding="utf-8")
+    platform.reply(200, {**SUGGESTION, "tests": tests})
+    assert main(["impact", "--out", "suggested.txt"], env_for(platform)) == 4
+    assert (repo / "suggested.txt").read_text(encoding="utf-8") == ""
+    assert "unexpected answer" in capsys.readouterr().err
+
+
+def test_feature_files_are_looked_for_only_for_a_suggestion(platform, repo, monkeypatch):
+    def walked(cwd):
+        raise AssertionError("has_feature_files ran without a suggestion")
+    monkeypatch.setattr(impact.cucumber, "has_feature_files", walked)
+    platform.reply(200, {**SUGGESTION, "tests": []})
+    assert main(["impact"], env_for(platform)) == 3
 
 
 def test_an_empty_change_is_never_sent(platform, repo, monkeypatch, capsys):
@@ -146,7 +168,11 @@ def test_an_unknown_format_is_a_usage_error(repo):
 
 
 def test_the_key_never_appears_in_the_output(platform, repo, capsys):
-    platform.reply(200, {**SUGGESTION, "tests": [{**SUGGESTION["tests"][1], "name": f"leak {KEY}"}]})
-    main(["impact", "--format", "list"], env_for(platform))
+    """A platform that echoes the key in a refusal: stderr is scrubbed, nothing reaches stdout or --out."""
+    (repo / "suggested.txt").write_text("features/old.feature:3\n", encoding="utf-8")
+    platform.reply(422, {"detail": [{"loc": ["header"], "msg": f"bad key {KEY}", "type": "value_error"}]})
+    assert main(["impact", "--out", "suggested.txt"], env_for(platform)) == 2
     out, err = capsys.readouterr()
-    assert KEY not in err  # stderr is scrubbed; stdout is the suggestion itself, as QEOS sent it
+    assert "refused the change (422)" in err and "***" in err
+    assert KEY not in out and KEY not in err
+    assert KEY not in (repo / "suggested.txt").read_text(encoding="utf-8")

@@ -109,6 +109,9 @@ def fetch(target: Target, api_key: str, env: Mapping[str, str], *, collect: Opti
         data = _json(raw)
         if not isinstance(data.get("tests"), list):
             return Suggestion(UNAVAILABLE, "the platform sent an unexpected answer (no tests list)", paths=paths)
+        if not all(isinstance(test, dict) for test in data["tests"]):
+            return Suggestion(UNAVAILABLE, "the platform sent an unexpected answer (a test that is not an object)",
+                              paths=paths)
         if data["tests"]:
             return Suggestion(SUGGESTED, data=data, paths=paths)
         if data.get("state") == "not_enough_history":
@@ -166,22 +169,22 @@ def _write(path: str, text: str) -> None:
         handle.write(text)
 
 
+def empty_out(path: Optional[str]) -> None:
+    """After a configuration error (exit 2): a later step never reads a stale list. Best effort."""
+    if path:
+        try:
+            _write(path, "")
+        except OSError:
+            pass
+
+
 def run(args, env: Mapping[str, str], api_key: str, say: Callable[[str], None], cwd: str) -> int:
     """qeos-collector impact: the suggestion on stdout (or --out), messages on stderr, the suggestion's code as the
-    exit code (plan Rulings 2, 15)."""
-    try:
-        target = resolve(args, env, api_key, cwd)
-        found = fetch(target, api_key, env)
-    except ConfigError:
-        if args.out:
-            try:  # a later step never reads a stale list, even after a configuration error
-                _write(args.out, "")
-            except OSError:
-                pass
-        raise
-    fmt = args.format or ("cucumber" if cucumber.has_feature_files(cwd) else "list")
+    exit code (plan Rulings 2, 15). On a ConfigError the caller empties --out (empty_out)."""
+    found = fetch(resolve(args, env, api_key, cwd), api_key, env)
     text = ""
     if found.code == SUGGESTED:
+        fmt = args.format or ("cucumber" if cucumber.has_feature_files(cwd) else "list")
         text = render(found.data or {}, fmt, lambda test: cucumber.locate(cwd, test))
         say(f"{len(found.tests)} likely affected test(s) for {len(found.paths)} changed file(s)")
     else:

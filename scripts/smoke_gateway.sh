@@ -301,9 +301,10 @@ XML
   git -C "$IMPACT_REPO" init -q
   echo "a = 1" > "$IMPACT_REPO/src/impact/smoke.py"
   git -C "$IMPACT_REPO" add -A && git -C "$IMPACT_REPO" -c user.name=smoke -c user.email=smoke@acme.test \
-    commit -qm base
+    -c commit.gpgsign=false commit -qm base
   echo "a = 2" > "$IMPACT_REPO/src/impact/smoke.py"
-  git -C "$IMPACT_REPO" -c user.name=smoke -c user.email=smoke@acme.test commit -qam change
+  git -C "$IMPACT_REPO" -c user.name=smoke -c user.email=smoke@acme.test -c commit.gpgsign=false \
+    commit -qam change
   # Git Bash: the Windows form of the path, which a native git reads from GIT_DIR
   IMPACT_GIT="$(cd "$IMPACT_REPO/.git" && { pwd -W 2>/dev/null || pwd; })"
   collector_impact() {  # KEY ERRFILE [ARGS...]: qeos-collector impact on the scratch repository's last commit
