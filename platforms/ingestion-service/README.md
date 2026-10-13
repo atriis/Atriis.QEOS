@@ -183,6 +183,16 @@ has the counts, branch and commit, the first 5 failing tests (masked as stored) 
 `{DASHBOARD_URL}/projects/{id}/runs/{run_id}`. Design:
 `docs/superpowers/specs/2026-10-05-failure-notifications-design.md`.
 
+A run of only the suggested tests (`scope = impact-subset`, collector `run-impact`) is labelled so it is never read as
+a full verdict:
+- **Failure alerts:**
+  - the headline (and so the e-mail subject) ends " · Suggested tests only", or " · Suggested tests only, stopped
+    after stage 1" for a `--fail-fast` stop;
+  - the webhook carries `run.scope` and `run.stopped_after_stage` (`1` or null).
+- **Weekly summary:**
+  - a line says "Suggested tests only: N of M runs (K stopped after stage 1)";
+  - its webhook carries `suggested_only_runs` and `stopped_after_stage_1_runs`.
+
 - **Kinds:**
   - `slack`: an incoming webhook on `hooks.slack.com`.
   - `teams`: a Workflows (Power Automate) webhook on `*.logic.azure.com` or `*.powerplatform.com`,

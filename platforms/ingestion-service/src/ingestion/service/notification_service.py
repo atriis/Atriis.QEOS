@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from src.ingestion.core.config import settings
 from src.ingestion.models import Run, RunResult
 from src.ingestion.models.notification_channel import NotificationChannel
+from src.ingestion.models.run import FULL_SCOPE, SUBSET_SCOPE
 from src.ingestion.service import run_service
 from src.ingestion.utils import notify_targets
 
@@ -67,6 +68,21 @@ def delete_channel(db: Session, row: NotificationChannel) -> None:
 
 # --- messages ----------------------------------------------------------------------------
 
+def stopped_after_stage_1(stages: Optional[dict]) -> bool:
+    """run-impact's --fail-fast stopped the run after a failing stage 1 (spec 2026-10-13 §3.1)."""
+    return isinstance(stages, dict) and stages.get("stopped_after_stage") == 1
+
+
+def scope_label(scope: Optional[str], stages: Optional[dict]) -> Optional[str]:
+    """How a run that ran only part of its suite is named in messages (spec 2026-10-13 §3.3), so it is never read as a
+    full verdict; None for a full run."""
+    if scope != SUBSET_SCOPE:
+        return None
+    if stopped_after_stage_1(stages):
+        return "Suggested tests only, stopped after stage 1"
+    return "Suggested tests only"
+
+
 @dataclass
 class RunSummary:
     project_id: int
@@ -81,6 +97,12 @@ class RunSummary:
     failures: List[dict] = field(default_factory=list)
     test: bool = False
     quarantined: int = 0  # failures of quarantined tests: mentioned, not counted
+    scope: str = FULL_SCOPE
+    stages: Optional[dict] = None
+
+    @property
+    def partial(self) -> Optional[str]:
+        return scope_label(self.scope, self.stages)
 
     @property
     def broken(self) -> int:
@@ -100,7 +122,8 @@ def _test_label(failure: dict) -> str:
 def _headline(channel_name: str, s: RunSummary) -> str:
     if s.test:
         return f"{channel_name}: QEOS test message. This channel is set up correctly."
-    return f"{channel_name}: {s.broken} of {s.total} tests failed"
+    headline = f"{channel_name}: {s.broken} of {s.total} tests failed"
+    return f"{headline} · {s.partial}" if s.partial else headline
 
 
 def _context(s: RunSummary) -> str:
@@ -155,7 +178,8 @@ def webhook_payload(channel_name: str, s: RunSummary) -> dict:
         "project_id": s.project_id,
         "run": {"id": s.run_id, "total": s.total, "failed": s.failed, "errored": s.errored,
                 "branch": s.branch, "commit_sha": s.commit_sha, "commit_message": s.commit_message,
-                "ci_run_url": s.ci_run_url, "url": s.link},
+                "ci_run_url": s.ci_run_url, "url": s.link,
+                "scope": s.scope, "stopped_after_stage": 1 if stopped_after_stage_1(s.stages) else None},
         "failures": s.failures,
     }
 
@@ -225,7 +249,7 @@ def _summary(db: Session, run: Run, held: set, quarantined: int) -> RunSummary:
         branch=run.branch, commit_sha=run.commit_sha, commit_message=run.commit_message, ci_run_url=run.ci_run_url,
         failures=[{"suite": f.suite, "class_name": f.class_name, "name": f.name, "status": f.status,
                    "message": (f.message or "")[:300] or None} for f in failures],
-        quarantined=quarantined,
+        quarantined=quarantined, scope=run.scope, stages=run.stages,
     )
 
 

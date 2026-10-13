@@ -10,6 +10,7 @@ from src.ingestion.core.config import settings
 from src.ingestion.jobs import weekly_summary as job
 from src.ingestion.models import Run, RunResult
 from src.ingestion.models.notification_channel import NotificationChannel
+from src.ingestion.models.run import FULL_SCOPE, SUBSET_SCOPE
 from src.ingestion.service import notification_service, weekly_summary
 from src.ingestion.utils import notify_targets
 
@@ -38,10 +39,10 @@ def session_factory(db):
 def add_run(db, make_key):
     key_row, _ = make_key(project_id=1)
 
-    def _add(when, results, project_id=1, branch="main"):
+    def _add(when, results, project_id=1, branch="main", scope=FULL_SCOPE, stages=None):
         statuses = [s for _, s in results]
         run = Run(project_id=project_id, api_key_id=key_row.id, request_hash="h", ci_provider="local",
-                  branch=branch, started_at=when, finished_at=when + timedelta(minutes=1), duration_ms=60000,
+                  branch=branch, scope=scope, stages=stages, started_at=when, finished_at=when + timedelta(minutes=1), duration_ms=60000,
                   total=len(statuses), passed=statuses.count("passed"), failed=statuses.count("failed"),
                   skipped=statuses.count("skipped"), errored=statuses.count("errored"), created_at=when)
         db.add(run)
@@ -204,3 +205,27 @@ def test_unknown_test_message_is_422(client, auth, project_role, db):
     project_role(role="member", project_id=1)
     row = channel(db)
     assert client.post(f"{URL}/{row.id}/test?message=daily", headers=auth()).status_code == 422
+
+
+def test_runs_that_ran_only_suggested_tests_are_labelled(db, add_run):
+    one_stage = {"stages": [{"name": "suggested", "duration_s": 60.0, "tests": 1, "failed": 1}],
+                 "time_to_first_failure_s": 5.0}
+    add_run(LAST_WEEK, [("a", "passed")])
+    add_run(LAST_WEEK, [("b", "failed")], scope=SUBSET_SCOPE, stages={**one_stage, "stopped_after_stage": 1})
+    add_run(LAST_WEEK, [("c", "passed")], scope=SUBSET_SCOPE, stages={**one_stage, "time_to_first_failure_s": None})
+    add_run(LAST_WEEK, [("d", "passed")], branch="other", scope=SUBSET_SCOPE, stages=one_stage)
+    s = weekly_summary.build(db, 1, MONDAY, branch="main")
+    assert (s.runs, s.subset_runs, s.stopped_runs) == (3, 2, 1)  # the other branch's run is not this summary's
+    assert s.pass_rate == pytest.approx(2 / 3)  # subset runs still count in the pass rate (spec §3.1)
+    slack = json.dumps(weekly_summary.PAYLOADS["slack"]("QA", s), ensure_ascii=False)
+    assert "Suggested tests only: 2 of 3 runs (1 stopped after stage 1)" in slack
+    hook = weekly_summary.PAYLOADS["webhook"]("QA", s)
+    assert (hook["suggested_only_runs"], hook["stopped_after_stage_1_runs"]) == (2, 1)
+
+
+def test_a_week_of_full_runs_has_no_label(db, add_run):
+    add_run(LAST_WEEK, [("a", "passed")])
+    s = weekly_summary.build(db, 1, MONDAY, branch=None)
+    assert s.subset_runs == 0
+    assert "Suggested tests only" not in "\n".join(weekly_summary._lines(s))
+    assert weekly_summary.PAYLOADS["webhook"]("QA", s)["suggested_only_runs"] == 0

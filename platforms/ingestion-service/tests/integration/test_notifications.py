@@ -7,6 +7,8 @@ import pytest
 
 from src.ingestion.core.config import settings
 from src.ingestion.models.notification_channel import NotificationChannel
+from src.ingestion.models.run import SUBSET_SCOPE
+from src.ingestion.service import notification_service
 from src.ingestion.utils import notify_targets
 
 URL = "/api/v1/projects/1/notification-channels"
@@ -227,3 +229,47 @@ def test_an_email_channel_shows_its_addresses(client, auth, member):
     created = add(client, auth, kind="email", url="qa@example.com")
     assert created.status_code == 201, created.text
     assert created.json()["target"] == "qa@example.com"
+
+
+# ---- runs of only the suggested tests (spec 2026-10-13 §3.3; plan Ruling 17) ----
+SUBSET_STAGES = {"stages": [{"name": "suggested", "duration_s": 60.0, "tests": 3, "failed": 2}],
+                 "time_to_first_failure_s": 12.0}
+
+
+def test_a_subset_run_is_announced_as_suggested_tests_only(client, db, make_key, http):
+    _, key = make_key(project_id=1)
+    channel(db)
+    route = http.post(SLACK).mock(return_value=httpx.Response(200, text="ok"))
+    assert send(client, key, upload(failed=2, scope=SUBSET_SCOPE, stages=SUBSET_STAGES)).status_code == 201
+    payload = json.loads(route.calls.last.request.content)
+    assert payload["text"] == "QA: 2 of 3 tests failed · Suggested tests only"
+
+
+def test_a_fail_fast_stop_says_it_stopped_after_stage_1(client, db, make_key, http):
+    _, key = make_key(project_id=1)
+    channel(db, kind="webhook", url=HOOK)
+    route = http.post(HOOK).mock(return_value=httpx.Response(204))
+    stopped = {**SUBSET_STAGES, "stopped_after_stage": 1}
+    assert send(client, key, upload(failed=2, scope=SUBSET_SCOPE, stages=stopped)).status_code == 201
+    body = json.loads(route.calls.last.request.content)
+    assert (body["run"]["scope"], body["run"]["stopped_after_stage"]) == (SUBSET_SCOPE, 1)
+
+
+def test_a_full_run_keeps_its_headline_and_says_it_is_full(client, db, make_key, http):
+    _, key = make_key(project_id=1)
+    channel(db)
+    route = http.post(SLACK).mock(return_value=httpx.Response(200, text="ok"))
+    send(client, key, upload(failed=2))
+    assert json.loads(route.calls.last.request.content)["text"] == "QA: 2 of 3 tests failed"
+    hook = notification_service.webhook_payload("QA", notification_service.RunSummary(
+        project_id=1, run_id=5, total=3, failed=2, errored=0, branch="main", commit_sha=None, commit_message=None,
+        ci_run_url=None))
+    assert (hook["run"]["scope"], hook["run"]["stopped_after_stage"]) == ("full", None)
+
+
+def test_the_email_subject_carries_the_label():
+    summary = notification_service.RunSummary(
+        project_id=1, run_id=5, total=3, failed=2, errored=0, branch="main", commit_sha=None, commit_message=None,
+        ci_run_url=None, scope=SUBSET_SCOPE, stages={**SUBSET_STAGES, "stopped_after_stage": 1})
+    assert notification_service.email_payload("QA", summary)["subject"] == (
+        "QA: 2 of 3 tests failed · Suggested tests only, stopped after stage 1")

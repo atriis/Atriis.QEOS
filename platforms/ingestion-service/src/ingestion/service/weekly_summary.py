@@ -14,7 +14,8 @@ from sqlalchemy.orm import Session
 from src.ingestion.core.config import settings
 from src.ingestion.models import Run, RunResult
 from src.ingestion.models.notification_channel import NotificationChannel
-from src.ingestion.service.notification_service import FAILING, _test_label, deliver, record
+from src.ingestion.models.run import SUBSET_SCOPE
+from src.ingestion.service.notification_service import FAILING, _test_label, deliver, record, stopped_after_stage_1
 
 TOP_FAILING = 5
 
@@ -43,6 +44,8 @@ class WeeklySummary:
     skipped: int = 0
     previous_pass_rate: Optional[float] = None
     top_failing: List[dict] = field(default_factory=list)
+    subset_runs: int = 0   # runs of only the suggested tests (spec 2026-10-13 §3.3; plan Ruling 17)
+    stopped_runs: int = 0  # of those, the ones a failing stage 1 stopped
 
     @property
     def pass_rate(self) -> Optional[float]:
@@ -70,6 +73,17 @@ def _totals(db: Session, project_id: int, start: datetime, end: datetime, branch
     return query.one()
 
 
+def _subset_runs(db: Session, project_id: int, start: datetime, end: datetime,
+                 branch: Optional[str]) -> Tuple[int, int]:
+    """The week's runs of only the suggested tests, and how many of them a failing stage 1 stopped."""
+    query = db.query(Run.stages).filter(Run.project_id == project_id, Run.started_at >= start, Run.started_at < end,
+                                        Run.scope == SUBSET_SCOPE)
+    if branch is not None:
+        query = query.filter(Run.branch == branch)
+    stages = [row[0] for row in query.all()]
+    return len(stages), sum(1 for s in stages if stopped_after_stage_1(s))
+
+
 def build(db: Session, project_id: int, now: datetime, branch: Optional[str]) -> WeeklySummary:
     start, end, label = previous_week(now)
     runs, total, passed, failed, errored, skipped = _totals(db, project_id, start, end, branch)
@@ -77,6 +91,7 @@ def build(db: Session, project_id: int, now: datetime, branch: Optional[str]) ->
                       executions=total, passed=passed, failed=failed, errored=errored, skipped=skipped)
     _, p_total, p_passed, _, _, p_skipped = _totals(db, project_id, start - timedelta(days=7), start, branch)
     s.previous_pass_rate = _rate(p_passed, p_total - p_skipped)
+    s.subset_runs, s.stopped_runs = _subset_runs(db, project_id, start, end, branch)
 
     failures = func.count(RunResult.id).label("failures")
     query = (
@@ -114,6 +129,11 @@ def _lines(s: WeeklySummary) -> List[str]:
     lines = [
         f"{days}{scope}",
         f"Runs: {s.runs} · Test executions: {s.executions}",
+    ]
+    if s.subset_runs:
+        stopped = f" ({s.stopped_runs} stopped after stage 1)" if s.stopped_runs else ""
+        lines.append(f"Suggested tests only: {s.subset_runs} of {s.runs} runs{stopped}")
+    lines += [
         f"Pass rate: {_pct(s.pass_rate)} (week before: {_pct(s.previous_pass_rate)})",
         f"Failed: {s.failed} · Errored: {s.errored} · Skipped: {s.skipped}",
     ]
@@ -147,7 +167,8 @@ def webhook_payload(channel_name: str, s: WeeklySummary) -> dict:
         "start": s.start.isoformat(), "end": s.end.isoformat(), "branch": s.branch, "runs": s.runs,
         "executions": s.executions, "passed": s.passed, "failed": s.failed, "errored": s.errored,
         "skipped": s.skipped, "pass_rate": s.pass_rate, "previous_pass_rate": s.previous_pass_rate,
-        "top_failing": s.top_failing, "url": s.link,
+        "top_failing": s.top_failing, "suggested_only_runs": s.subset_runs,
+        "stopped_after_stage_1_runs": s.stopped_runs, "url": s.link,
     }
 
 
