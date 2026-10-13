@@ -1,9 +1,13 @@
-import { FormEvent, useEffect, useId, useState } from "react";
+import { FormEvent, useEffect, useId, useMemo, useState } from "react";
 import { ArrowDown, ArrowLeft, ArrowUp, Bot, FileCode, Plus, Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Case, CaseInput, PRIORITIES, Priority, STATUSES, CaseStatus, Step, createCase, getCase, parseLabels, updateCase } from "../api/cases";
-import { getHistory, getTests } from "../api/analytics";
+import { getHistory, getLatestResults, getTests } from "../api/analytics";
+import FailedStepTip from "../components/FailedStepTip";
+import LastResultPill from "../components/LastResultPill";
+import { featureDetailQuery } from "../lib/featureQueries";
+import { locateFailedStep, scenarioSteps, stepLines } from "../lib/failedStep";
 import ConfirmButton from "../components/ConfirmButton";
 import ErrorBanner from "../components/ErrorBanner";
 import GherkinBlock from "../components/GherkinBlock";
@@ -203,6 +207,29 @@ function CaseEditor() {
     save.mutate(existing.data?.source_path ? toOwnedInput(draft) : toInput(draft));
   }
 
+  const c = existing.data;
+  const key = c?.automated_test_key ?? null;
+  const latest = useQuery({
+    queryKey: ["latest-results", id, key],
+    enabled: key != null,
+    queryFn: () => getLatestResults(id, [key!]).then((r) => r.results[key!.toLowerCase()] ?? null),
+  });
+  const feature = useQuery({
+    ...featureDetailQuery(id, c?.source_path ?? ""),
+    enabled: !!c?.source_path && latest.data?.failed_step != null,
+  });
+  const failedLine = useMemo(() => {
+    const step = latest.data?.failed_step;
+    if (!c?.gherkin || !step) return null;
+    const shown = stepLines(c.gherkin);
+    const source = feature.data?.content;
+    const scenarioLine = feature.data?.cases.find((fc) => fc.number === c.number)?.line ?? null;
+    const index = source && scenarioLine
+      ? locateFailedStep(scenarioSteps(source, scenarioLine), step)
+      : locateFailedStep(shown, { text: step.text });
+    return index != null && shown[index] ? shown[index].line : null;
+  }, [c, latest.data, feature.data]);
+
   if (number !== null && existing.error != null) {
     return (
       <>
@@ -219,7 +246,6 @@ function CaseEditor() {
       </>
     );
   }
-  const c = existing.data;
   const readOnly = !canEdit;
   const imported = c?.source_path != null;
 
@@ -267,7 +293,13 @@ function CaseEditor() {
           {imported ? (
             <>
               <h2>Gherkin</h2>
-              <GherkinBlock text={c?.gherkin ?? ""} />
+              {key != null && <LastResultPill result={latest.data} />}
+              <GherkinBlock
+                text={c?.gherkin ?? ""}
+                failed={failedLine != null && latest.data
+                  ? { line: failedLine, tip: <FailedStepTip projectId={id} result={latest.data} /> }
+                  : undefined}
+              />
             </>
           ) : (
             <>
