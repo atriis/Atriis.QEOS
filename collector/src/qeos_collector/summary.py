@@ -27,18 +27,38 @@ def duration(seconds: float) -> str:
     return f"{math.floor(secs / 60)}m {math.floor(math.fmod(secs, 60) + 0.5):02d}s"
 
 
+def flat(value) -> str:
+    """One line: line breaks as one space."""
+    return re.sub(r"\s*[\r\n]+\s*", " ", str(value or ""))
+
+
 def cell(value) -> str:
-    """Text for a Markdown table cell: pipes escaped, line breaks as one space."""
-    return re.sub(r"\s*[\r\n]+\s*", " ", str(value or "")).replace("|", "\\|")
+    """Text for a Markdown table cell, shown as written: & < > as entities (no HTML gets through), backticks
+    escaped (no code span opens), pipes escaped, line breaks as one space."""
+    text = flat(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return text.replace("`", "\\`").replace("|", "\\|")
+
+
+def code(value) -> str:
+    """A code span in a table cell, whatever backticks the text holds: a fence one backtick longer than its longest
+    run, padded when the text starts or ends with one. Inside it nothing is HTML; only pipes need escaping."""
+    text = flat(value).replace("|", "\\|")
+    fence = "`" * (max((len(run) for run in re.findall(r"`+", text)), default=0) + 1)
+    pad = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
 
 
 def why(test: dict, *, markdown: bool = False) -> str:
+    """Why the test is suggested. With markdown, ready for a table cell (cell- and code-escaped)."""
     evidence = test.get("evidence")
     if test.get("kind") == "statistical" and isinstance(evidence, dict):
         unit = str(evidence.get("path_unit") or "")
-        return (f"newly failed in {evidence.get('new_failures')} of {evidence.get('changed_runs')} runs that changed "
-                + (f"`{unit}`" if markdown else unit))
-    return LABELS.get(str(test.get("kind")), str(test.get("kind") or ""))
+        failures, runs = evidence.get("new_failures"), evidence.get("changed_runs")
+        if markdown:
+            return f"newly failed in {cell(failures)} of {cell(runs)} runs that changed {code(unit)}"
+        return f"newly failed in {failures} of {runs} runs that changed {flat(unit)}"
+    label = LABELS.get(str(test.get("kind")), str(test.get("kind") or ""))
+    return cell(label) if markdown else flat(label)
 
 
 def outcome(stages: Sequence, payload: dict, scope: str) -> str:
@@ -55,7 +75,7 @@ def text(tests: Sequence[dict], missing: Sequence[dict], stages: Sequence, paylo
     lines = [f"stage {i} ({STAGES.get(s.name, s.name)}): {s.tests} scenario(s), {s.failed} failed, "
              f"{duration(s.duration_s)}" for i, s in enumerate(stages, start=1)]
     lines.append(outcome(stages, payload, scope))
-    lines += [f"  {cell(test.get('name'))}: {why(test)}" for test in tests[:SHOWN]]
+    lines += [f"  {flat(test.get('name'))}: {why(test)}" for test in tests[:SHOWN]]
     if len(tests) > SHOWN:
         lines.append(f"  … and {len(tests) - SHOWN} more")
     return lines
@@ -70,7 +90,7 @@ def markdown(tests: Sequence[dict], missing: Sequence[dict], stages: Sequence, p
     lines += ["", said[0].upper() + said[1:] + "."]
     if tests:
         lines += ["", f"<details><summary>Suggested tests ({len(tests)})</summary>", "", "| Test | Why |", "|---|---|"]
-        lines += [f"| {cell(test.get('name'))} | {cell(why(test, markdown=True))} |" for test in tests[:SHOWN]]
+        lines += [f"| {cell(test.get('name'))} | {why(test, markdown=True)} |" for test in tests[:SHOWN]]
         if len(tests) > SHOWN:
             lines.append(f"| … and {len(tests) - SHOWN} more | |")
         lines += ["", "</details>"]

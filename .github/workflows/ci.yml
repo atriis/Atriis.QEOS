@@ -291,6 +291,15 @@ jobs:
           print("impact first: 2 stages, 1 upload")
           PY
 
+      - name: Logs of the impact first check
+        if: failure()
+        run: |
+          for log in fake-cucumber.log qeos-uploads.jsonl fake-qeos.log; do
+            echo "::group::$log"
+            cat "$RUNNER_TEMP/$log" 2>/dev/null || echo "(no $log)"
+            echo "::endgroup::"
+          done
+
       - name: The installed collector is this commit's version
         run: |
           expected=$(python -c "import re,pathlib; print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('collector/src/qeos_collector/__init__.py').read_text()).group(1))")

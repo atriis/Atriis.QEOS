@@ -34,6 +34,7 @@ REFUSED = 2  # QEOS refused to score (a configuration problem): `impact` would e
 FAILING = ("failed", "errored")
 SHOWN_MISSING = 5
 _WINDOWS = os.name == "nt"
+EXTRA_ARGS = "QEOS_ACTION_EXTRA_ARGS"  # the GitHub Action's extra-args, for the collector only
 # cmd.exe expands % (and ! with delayed expansion) and splits on & | < > ^ even inside the quotes subprocess adds
 _CMD_SPECIAL = frozenset('%!&|<>^"')
 
@@ -72,8 +73,9 @@ def run_command(argv: Sequence[str]) -> int:
     """The command's exit code. The program is looked up with shutil.which, so a Windows runner finds npx.cmd or
     mvn.cmd through PATHEXT, which a bare CreateProcess does not (plan Ruling 21). Never through a shell."""
     program = shutil.which(argv[0]) or argv[0]
+    child = {name: value for name, value in os.environ.items() if name != EXTRA_ARGS}  # the collector's, not theirs
     try:
-        return subprocess.run([program, *argv[1:]], check=False).returncode
+        return subprocess.run([program, *argv[1:]], check=False, env=child).returncode
     except OSError as exc:
         raise ConfigError(f"cannot run {argv[0]}: {exc.strerror or exc}") from None
 

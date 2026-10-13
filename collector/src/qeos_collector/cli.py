@@ -29,6 +29,7 @@ from qeos_collector.upload import (
 
 CI_PROVIDERS = ("github_actions", "gitlab_ci", "jenkins", "azure_pipelines", "other", "local")
 _TRUE = ("1", "true", "yes")
+EXTRA_ARGS = run_impact.EXTRA_ARGS
 _API_KEY = re.compile(r"^[\x21-\x7e]+$")
 
 
@@ -202,14 +203,13 @@ def main(
 ) -> int:
     env = os.environ if env is None else env
     argv = list(sys.argv[1:] if argv is None else argv)
-    extra = env.get("QEOS_ACTION_EXTRA_ARGS", "").strip()
+    extra = env.get(EXTRA_ARGS, "").strip()
     if extra and argv[:1] and not argv[0].startswith("-"):
         # The GitHub Action's extra-args: one string, split as a POSIX shell would split words, never run by one
-        try:
-            argv = [argv[0], *shlex.split(extra), *argv[1:]]
-        except ValueError as exc:
-            print(f"qeos: QEOS_ACTION_EXTRA_ARGS cannot be split ({exc})", file=sys.stderr)
+        words = _extra_words(argv[0], extra)
+        if words is None:
             return 2
+        argv = [argv[0], *words, *argv[1:]]
     parser = build_parser()
     try:
         args = parser.parse_args(argv)
@@ -286,6 +286,30 @@ def main(
         return 1
     say("not failing the build (pass --fail-on-error to change that)")
     return 0
+
+
+def _extra_words(command: str, extra: str) -> Optional[List[str]]:
+    """QEOS_ACTION_EXTRA_ARGS as words, or None (said) when they cannot go in front of the command's own arguments:
+    they must be flags. For run-impact a "--", or a word that is not a flag's value, would start the test command
+    and swallow the arguments the action adds after them (--url, the command itself)."""
+    try:
+        words = shlex.split(extra)
+    except ValueError as exc:
+        print(f"qeos: {EXTRA_ARGS} cannot be split ({exc})", file=sys.stderr)
+        return None
+    problem = "it holds --" if "--" in words else ""
+    if not problem:
+        try:
+            alone = build_parser().parse_args([command, *words])
+        except SystemExit:  # a usage error (argparse said it), or --help: never a reason to go on
+            return None
+        if getattr(alone, "test_command", None):
+            problem = f"{' '.join(alone.test_command)!r} is not a flag"
+    if problem:
+        print(f"qeos: {EXTRA_ARGS} must hold flags only ({problem}); the test command goes in test-command",
+              file=sys.stderr)
+        return None
+    return words
 
 
 def main_deprecated() -> int:

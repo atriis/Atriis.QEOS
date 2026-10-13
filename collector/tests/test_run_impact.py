@@ -508,7 +508,7 @@ def test_the_program_is_looked_up_as_a_shell_would(monkeypatch):
     seen = []
     monkeypatch.setattr(run_impact.shutil, "which", lambda name: "C:/tools/npx.cmd" if name == "npx" else None)
     monkeypatch.setattr(run_impact.subprocess, "run",
-                        lambda argv, check: seen.append(argv) or subprocess.CompletedProcess(argv, 1))
+                        lambda argv, check, env: seen.append(argv) or subprocess.CompletedProcess(argv, 1))
     assert run_impact.run_command(["npx", "cucumber-js", "--dry-run"]) == 1
     assert seen == [["C:/tools/npx.cmd", "cucumber-js", "--dry-run"]]
 
@@ -820,3 +820,37 @@ def test_run_impacts_arguments_are_never_shell_text(platform, cucumber, tmp_path
     run(["run-impact", "--cucumber", "jvm", "--", "bash", "-c", script], env_for(platform))  # absolute paths
     assert len(cucumber()) == 4
     assert not any(p.name.startswith("pwned") for p in tmp_path.rglob("*"))
+
+
+# --- Tasks 18-19 review, fix round 1 ------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("extra, said", [
+    ("--cucumber js $(touch x)", "'$(touch x)' is not a flag"),
+    ("--cucumber js -- python evil.py", "it holds --"),
+    ("--cucumber", "expected one argument"),
+])
+def test_extra_args_never_start_the_test_command(platform, cucumber, tmp_path, capsys, extra, said):
+    """Words that are not flags would open run-impact's test command and swallow the action's own arguments."""
+    marker = tmp_path / "ran"
+    argv = ["run-impact", "--url", platform.url, "--", sys.executable, "-c", f"open({str(marker)!r}, 'w')"]
+    assert main(argv, env_for(platform, QEOS_ACTION_EXTRA_ARGS=extra)) == 2
+    assert not marker.exists() and platform.requests == []
+    assert said in capsys.readouterr().err
+
+
+def test_extra_args_that_are_flags_go_in_front(platform, cucumber):
+    platform.reply(200, suggested(PAYS_10))
+    platform.reply(201, RECEIPT)
+    argv = ["run-impact", "--url", platform.url, "--", sys.executable, FAKE]
+    assert run(argv, env_for(platform, QEOS_ACTION_EXTRA_ARGS="--cucumber js --fail-fast")) == 1
+    assert [c["dry_run"] for c in cucumber()] == [True, True, False]  # --fail-fast took effect
+
+
+def test_the_test_command_does_not_see_the_actions_extra_args(monkeypatch):
+    """They are the collector's flags; a nested qeos-collector (or the tests) must not pick them up."""
+    monkeypatch.setenv("QEOS_ACTION_EXTRA_ARGS", "--cucumber js")
+    monkeypatch.setenv("QEOS_SOMETHING_ELSE", "kept")
+    check = "import os, sys; sys.exit(3 if 'QEOS_ACTION_EXTRA_ARGS' in os.environ else 0 if 'QEOS_SOMETHING_ELSE' " \
+            "in os.environ else 4)"
+    assert run_impact.run_command([sys.executable, "-c", check]) == 0

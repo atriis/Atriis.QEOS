@@ -93,3 +93,18 @@ def test_the_step_summary_never_holds_the_key(tmp_path):
     written = target.read_text(encoding="utf-8")
     assert key not in written and "logs in with ***" in written and "`src/***/`" in written
     assert said == ["summary written to the job's step summary"]
+
+
+
+def test_names_and_paths_cannot_inject_markup():
+    """A test name is shown as written: no HTML, no code span, no extra column. A path unit stays one code span,
+    whatever backticks it holds."""
+    test = {"name": "<img src=x onerror=alert(1)> A & B `x` | y", "kind": "statistical",
+            "evidence": {"path_unit": "src/`odd``|dir/", "changed_runs": 6, "new_failures": 4}}
+    md = summary.markdown([test], [{"name": "<b>gone</b>"}], [stage("all", 1, 0, 1)], {}, "full")
+    assert "| &lt;img src=x onerror=alert(1)&gt; A &amp; B \\`x\\` \\| y | newly failed in 4 of 6 runs that changed " \
+           "```src/`odd``\\|dir/``` |" in md
+    assert "<img" not in md and "<b>" not in md and "&lt;b&gt;gone&lt;/b&gt;" in md
+    assert summary.code("`edge`") == "`` `edge` ``"
+    assert summary.text([test], [], [stage("all", 1, 0, 1)], {}, "full")[-1] == (
+        "  <img src=x onerror=alert(1)> A & B `x` | y: newly failed in 4 of 6 runs that changed src/`odd``|dir/")
