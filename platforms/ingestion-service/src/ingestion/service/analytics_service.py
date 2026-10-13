@@ -297,6 +297,47 @@ def mixed_commits(db: Session, project_id: int, since: datetime, branch: Optiona
     return mixed
 
 
+def _latest_ranked(filters, *columns):
+    """Each test's results ranked newest first (run start, then run id): position 1 is its latest."""
+    return (
+        select(RunResult.test_key, *columns,
+               func.row_number().over(partition_by=RunResult.test_key,
+                                      order_by=(Run.started_at.desc(), Run.id.desc())).label("position"))
+        .join(Run, Run.id == RunResult.run_id).where(*filters)
+    ).subquery()
+
+
+def failed_step_of(status, message, details, step_text, step_line) -> Optional[dict]:
+    """The failed step for a failed/errored result (spec 2026-10-13 §3.3). Rows stored before the collector
+    sent `failed_step` hold the step on details' first line, unless that line is just the message."""
+    if status not in ("failed", "errored"):
+        return None
+    if step_text:
+        return {"text": step_text, **({"line": step_line} if step_line else {})}
+    first = (details or "").split("\n", 1)[0].strip()
+    if first and first != (message or "").split("\n", 1)[0].strip():
+        return {"text": first}
+    return None
+
+
+def latest_results(db: Session, project_id: int, keys: List[str]) -> dict:
+    keys = sorted({k.lower() for k in keys})
+    ranked = _latest_ranked(
+        [Run.project_id == project_id, RunResult.test_key.in_(keys)],
+        RunResult.status, RunResult.message, RunResult.details, RunResult.failed_step_text,
+        RunResult.failed_step_line, Run.id.label("run_id"), Run.branch, Run.environment, Run.started_at,
+    )
+    out = {}
+    for r in db.execute(select(ranked).where(ranked.c.position == 1)).mappings():
+        entry = {"status": r["status"], "run_id": r["run_id"], "branch": r["branch"],
+                 "environment": r["environment"], "started_at": r["started_at"], "message": r["message"]}
+        step = failed_step_of(r["status"], r["message"], r["details"], r["failed_step_text"], r["failed_step_line"])
+        if step:
+            entry["failed_step"] = step
+        out[r["test_key"]] = entry
+    return out
+
+
 def latest_keys(db: Session, project_id: int, status: str, branch: Optional[str] = None) -> List[str]:
     """Test keys whose most recent result (by run start) has `status`; failed includes errored.
     `any`: every test with at least one result. Used by the dashboard's latest-result case filter."""
@@ -306,12 +347,7 @@ def latest_keys(db: Session, project_id: int, status: str, branch: Optional[str]
     if status == "any":
         rows = db.execute(select(RunResult.test_key).distinct().join(Run, Run.id == RunResult.run_id).where(*filters))
         return sorted(k for (k,) in rows)
-    ranked = (
-        select(RunResult.test_key, RunResult.status,
-               func.row_number().over(partition_by=RunResult.test_key,
-                                      order_by=(Run.started_at.desc(), Run.id.desc())).label("position"))
-        .join(Run, Run.id == RunResult.run_id).where(*filters)
-    ).subquery()
+    ranked = _latest_ranked(filters, RunResult.status)
     wanted = ("failed", "errored") if status == "failed" else (status,)
     rows = db.execute(select(ranked.c.test_key).where(ranked.c.position == 1, ranked.c.status.in_(wanted)))
     return sorted(k for (k,) in rows)

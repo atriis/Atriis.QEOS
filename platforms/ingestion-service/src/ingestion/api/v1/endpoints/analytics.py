@@ -174,6 +174,21 @@ def run_strip(
     return analytics_service.run_strip(db, access.project_id, body.test_keys, body.limit, body.branch)
 
 
+class LatestResultsIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    keys: List[Annotated[str, StringConstraints(pattern=r"^[0-9a-fA-F]{64}$")]] = Field(min_length=1, max_length=500)
+
+
+@router.post("/latest-results")
+def latest_results(
+    body: LatestResultsIn,
+    db: Session = Depends(get_db),
+    access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
+):
+    """Each test's latest result on any branch, with the failed step (scenario and feature pages)."""
+    return {"results": analytics_service.latest_results(db, access.project_id, body.keys)}
+
+
 ESTIMATE_WINDOW_DAYS = 30
 
 
