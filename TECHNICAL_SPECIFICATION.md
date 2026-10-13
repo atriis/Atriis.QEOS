@@ -102,6 +102,9 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   `quarantined`/`blocking` failures for `qeos-collector upload --gate`.
   `GET /collect/key` checks a key; `POST /collect/token` trades it for a
   5-minute service token that only test-management's import accepts (ADR-024).
+  `POST /collect/impact` scores a change for the key's project with the analytics route's scoring, limits and
+  503 `impact_timeout`, for the collector's `impact` and `run-impact`; only keys with `can_read_impact`
+  (403 `impact_not_allowed` otherwise).
   Optional `run.trigger` (`manual`, `automatic` or `qeos`; anything else is a 422), reported by the
   collector and stored on the run. When the project has switched off collection of manual runs
   and `trigger` is `manual`, the answer is `202 {"discarded": true, "reason": "manual runs are

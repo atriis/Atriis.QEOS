@@ -131,12 +131,12 @@ def make_key(db):
 
     from src.ingestion.utils.keys import display_prefix, generate_key, hash_key
 
-    def _make(project_id=1, organization_id=10, name="ci", revoked=False):
+    def _make(project_id=1, organization_id=10, name="ci", revoked=False, can_read_impact=False):
         key = generate_key()
         row = ApiKey(
             project_id=project_id, organization_id=organization_id, name=name,
             key_prefix=display_prefix(key), key_hash=hash_key(key), created_by=1,
-            revoked_at=datetime.now(timezone.utc) if revoked else None,
+            revoked_at=datetime.now(timezone.utc) if revoked else None, can_read_impact=can_read_impact,
         )
         db.add(row)
         db.commit()

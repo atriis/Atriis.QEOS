@@ -204,6 +204,30 @@ class ImpactIn(BaseModel):
     branch: Optional[Annotated[str, StringConstraints(max_length=255, pattern=NO_NUL)]] = None
 
 
+def _impact_timeout() -> HTTPException:
+    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                         detail={"code": "impact_timeout", "message": impact_service.SCORING_TIMEOUT_MESSAGE})
+
+
+def score_or_503(db: Session, project_id: int, body: ImpactIn) -> dict:
+    """The scoring POST /analytics/impact and POST /collect/impact both answer with (spec 2026-10-13 §2.1): one total
+    2 s budget, a timeout a 503 `impact_timeout`, the read-only transaction ended before the response."""
+    try:
+        deadline = impact_service.Deadline()
+        deadline.step(db)
+        suggestion = impact_service.score_change(db, project_id, body.changed_paths, body.branch, now=_now(),
+                                                 deadline=deadline)
+    except impact_service.ScoringTimeout:
+        raise _impact_timeout()
+    except OperationalError as exc:
+        if report_service.is_timeout(exc):
+            raise _impact_timeout()
+        raise
+    finally:
+        db.rollback()  # read-only: end the transaction (and its SET LOCAL) before the response
+    return {**suggestion, "model_version": MODEL_VERSION}
+
+
 @router.post("/impact", response_model=SuggestionOut)
 def impact(
     body: ImpactIn,
@@ -212,22 +236,7 @@ def impact(
 ):
     """Likely affected tests for any change, as of now (spec 2026-10-12 §3.5): the upload's scoring, within one total 2 s
     budget (each PostgreSQL statement capped at what is left); a timeout is a 503 with a message, not a 500."""
-    try:
-        deadline = impact_service.Deadline()
-        deadline.step(db)
-        suggestion = impact_service.score_change(db, access.project_id, body.changed_paths, body.branch, now=_now(),
-                                                 deadline=deadline)
-    except impact_service.ScoringTimeout:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                            detail={"code": "impact_timeout", "message": impact_service.SCORING_TIMEOUT_MESSAGE})
-    except OperationalError as exc:
-        if report_service.is_timeout(exc):
-            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                                detail={"code": "impact_timeout", "message": impact_service.SCORING_TIMEOUT_MESSAGE})
-        raise
-    finally:
-        db.rollback()  # read-only: end the transaction (and its SET LOCAL) before the response
-    return {**suggestion, "model_version": MODEL_VERSION}
+    return score_or_503(db, access.project_id, body)
 
 
 ACCURACY_DAYS = (7, 14, 30)

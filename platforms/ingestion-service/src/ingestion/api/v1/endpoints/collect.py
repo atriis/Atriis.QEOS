@@ -9,9 +9,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.ingestion.api.deps import get_db
 from src.ingestion.api.key_auth import get_api_key
+from src.ingestion.api.v1.endpoints.analytics import ImpactIn, score_or_503
 from src.ingestion.core.config import settings
 from src.ingestion.models import ApiKey
 from src.ingestion.schemas.collect import KeyCheck, RunReceipt, RunUpload
+from src.ingestion.schemas.impact import SuggestionOut
 from src.ingestion.service import impact_service, ingest_service, notification_service, run_service
 from src.ingestion.utils import metrics
 
@@ -20,6 +22,11 @@ router = APIRouter()  # mounted at /collect
 
 SERVICE_TOKEN_SECONDS = 300
 IMPORT_SCOPE = "cases:import"
+IMPACT_NOT_ALLOWED = {
+    "code": "impact_not_allowed",
+    "message": "This API key may not read test suggestions. Ask a project owner or admin to allow test suggestions "
+               "for this key.",
+}
 
 
 @router.get("/key", response_model=KeyCheck)
@@ -44,6 +51,22 @@ def import_token(db: Session = Depends(get_db), key: ApiKey = Depends(get_api_ke
         "token": jwt.encode(claims, settings.SECRET_KEY, algorithm=settings.ALGORITHM),
         "expires_in": SERVICE_TOKEN_SECONDS, "project_id": key.project_id,
     }
+
+
+def get_impact_key(key: ApiKey = Depends(get_api_key)) -> ApiKey:
+    """A key an owner or admin allowed to read test suggestions (can_read_impact, spec 2026-10-13 §9). Resolved before
+    the body is validated, so a key without the permission learns nothing more than the 403."""
+    if not key.can_read_impact:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=IMPACT_NOT_ALLOWED)
+    return key
+
+
+@router.post("/impact", response_model=SuggestionOut)
+def collect_impact(body: ImpactIn, db: Session = Depends(get_db), key: ApiKey = Depends(get_impact_key)):
+    """Likely affected tests for a change, for `qeos-collector impact` and `run-impact` (spec 2026-10-13 §2): the
+    scoring of POST /projects/{id}/analytics/impact for the key's own project, with the key instead of a user's token.
+    Reads only; stores nothing."""
+    return score_or_503(db, key.project_id, body)
 
 
 @router.post(

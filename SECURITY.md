@@ -94,8 +94,10 @@ details.
   A key can also be traded for a 5-minute service token that only the Gherkin
   import accepts. Keys are upload-only unless an owner or admin allows test
   suggestions for that key (`can_read_impact`, off by default and for every key
-  that existed before migration 020): only such a key may read its project's
-  suggestions (test names and path units) for the collector. Owners and admins set
+  that existed before migration 020): only such a key may read its own project's
+  suggestions (`POST /api/v1/collect/impact`: test names and changed-path units,
+  never results or messages), which the collector needs to run the likely affected
+  tests first; any other key gets `403 impact_not_allowed`. Owners and admins set
   it when creating a key or later (`PATCH /projects/{id}/api-keys/{key_id}`); a
   member can create keys, upload-only ones.
 - **Collection of manual runs.** The project toggle that discards manual CI runs is a noise
