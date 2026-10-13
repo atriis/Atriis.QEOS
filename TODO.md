@@ -347,6 +347,8 @@ requested ones. Each group needs its own design spec before implementation.
 - [ ] A GitHub App instead of the personal token (short-lived installation tokens owned by no single person)
 - [ ] Run parameters (target environment, browser/device matrix), scheduled runs (nightly, per branch) and more CI providers (GitLab, Azure Pipelines) for runs from QEOS *(suggested)*
 - [ ] A dedicated `execution-service` once execution outgrows test-management
+- [ ] Team run queue (requested 2026-10-13): many people press Play; requests wait in a per-project queue instead of being refused by the one-active-run rule, with position, who started each, cancel-your-own, and fair ordering *(v2)*
+- [ ] Local execution through a QEOS runner (requested 2026-10-13): a small agent on a machine the team controls (a laptop, a test server, a lab PC) takes requests from the queue, runs the tests with the team's own environment and secrets, and uploads results with the collector. QEOS servers still never run customer code (ADR-025 kept, like a GitHub self-hosted runner). Open questions for the design: personal runners (only my own requests) vs shared team runners vs both; runner registration and token; labels to route a request to a runner (OS, browser, environment); heartbeats and a stuck-run timeout; Stop on a local run. Probably together with the dedicated `execution-service` above *(v2)*
 - [x] Flaky-test quarantine. Quarantining a test (Flaky view, the former Mute) keeps it running and
   shown, but its failures stop counting:
   - a run failing only in quarantine reads "Passed · N quarantined";

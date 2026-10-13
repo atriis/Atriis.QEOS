@@ -72,6 +72,7 @@ numbers in platforms/ingestion-service/README.md.
 | ~~Test Management service (blueprint capability)~~ | started 2026-10-06 on product pull (ADR-022): cases, suites, link to automated tests, Gherkin import (ADR-023) and sync (`qeos-collector import-features`, ADR-024), Run from QEOS (ADR-025). Next slices: versioning, dynamic suites, ticket links |
 | Workspaces: group QA projects with the product repos they test (Phase 4) | product pull, after Phase 2 exit; components-under-test data (ADR-018) is already being captured |
 | GitHub App "connect repository" (commits/PRs of product repos via API + webhooks) | cross-repo correlation work begins (Phase 6); ingestion stays push-based regardless |
+| Team run queue and local execution through a QEOS runner on the team's machines (TODO v2 B, requested 2026-10-13); likely with a dedicated `execution-service` | next version (v2); QEOS servers still never run customer code (ADR-025) |
 | Phase 6 AI engine, QIP services, vector/graph stores | AI work begins; revive or replace the `intelligence/` prototype deliberately — failure↔product-commit correlation feeds on run components (ADR-018) |
 
 ## 5. Prototype directories
