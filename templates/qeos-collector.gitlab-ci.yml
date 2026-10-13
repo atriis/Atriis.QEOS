@@ -24,3 +24,21 @@ qeos-collector-upload:
   stage: .post
   rules:
     - when: always  # report results even when the test job failed
+
+# Suggested tests first (Cucumber, collector 0.7.0): run the test command through run-impact instead of
+# uploading reports afterwards. The likely affected scenarios run first, then the rest, as one run; add
+# --suggested-only to run only them (the full suite runs when there is no suggestion, and whenever QEOS
+# cannot score the change). The merge request's target branch must be in the clone, or there is no
+# change to score. The key needs the "test suggestions" permission (Project Settings > API keys).
+#
+# e2e:
+#   image: node:22
+#   variables:
+#     GIT_DEPTH: "0"
+#   script:
+#     - git fetch --quiet origin "+refs/heads/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME:refs/remotes/origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+#     - apt-get update -qq && apt-get install -y -qq python3-pip > /dev/null
+#     - pip install --quiet --break-system-packages "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.7.0#subdirectory=collector"
+#     - qeos-collector run-impact --url "$QEOS_URL" -- npx cucumber-js --tags "not @wip"
+#   rules:
+#     - if: $CI_PIPELINE_SOURCE == "merge_request_event"

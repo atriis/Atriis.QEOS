@@ -1,0 +1,6 @@
+{"features": [
+  {"uri": "features/smoke.feature", "name": "Smoke", "scenarios": [
+    {"name": "Opens the shop", "line": 3, "tags": ["@smoke"], "status": "passed", "seconds": 1},
+    {"name": "Finds a product", "line": 6, "tags": ["@smoke"], "status": "passed", "seconds": 1},
+    {"name": "Not tagged", "line": 9, "status": "passed", "seconds": 1}]}
+]}

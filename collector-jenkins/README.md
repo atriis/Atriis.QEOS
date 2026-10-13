@@ -45,6 +45,35 @@ environment variable, so it stays out of the build log; Jenkins `BUILD_URL`,
 `GIT_COMMIT` and `GIT_BRANCH` are picked up automatically by the collector's
 CI detection.
 
+### Suggested tests first (Cucumber)
+
+From collector 0.7.0, the step can run the tests itself, the scenarios a change likely affects first:
+
+```groovy
+stage('Test') {
+  steps {
+    withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')]) {
+      withEnv(['QEOS_URL=https://qeos.example.com']) {
+        qeosCollectorUpload(impact: 'first', testCommand: 'npx cucumber-js --tags "not @wip"')
+      }
+    }
+  }
+}
+```
+
+- **`impact`:**
+  - `first`: the likely affected scenarios run first, then the rest, as one run;
+  - `only`: only the likely affected ones (the full suite when there is no suggestion);
+  - `off` (the default): upload `patterns` as before.
+- **`testCommand`:** the Cucumber command (`npx cucumber-js …`, `mvn -q test …`, `bundle exec cucumber …`). It
+  runs as `bash -c "$QEOS_TEST_COMMAND"`, as written, quotes included: the same trust as an `sh` step of the
+  Jenkinsfile. The agent needs bash. Add `extraArgs: '--cucumber js'` when the command hides the runner
+  (`npm test`).
+- **Where to call it:** in the test stage, not in `post`. A failing test fails the build, as the test command
+  would.
+- **When QEOS cannot score the change** (no key, no permission, unreachable), the whole command still runs. See
+  the collector README, `run-impact`.
+
 ## Renamed from `qavCollectorUpload`
 
 The step was `qavCollectorUpload` before QEOS got its name, and the docs used the

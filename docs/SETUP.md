@@ -691,6 +691,29 @@ qeos-collector impact --format json --out impact.json
    ```
    The action installs the collector at its own tag. It needs Python and git on the runner,
    which GitHub-hosted runners have.
+3. **Suggested tests first (Cucumber, from `collector-v0.7.0`).** Instead of uploading after the
+   test step, let the action run the tests, the scenarios the change likely affects first:
+   ```yaml
+   - uses: actions/checkout@v7
+     with:
+       fetch-depth: 0                  # the change is scored against the pull request's base
+   - uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.7.0
+     with:
+       url: ${{ vars.QEOS_URL }}
+       impact: first                   # or only: just the likely affected (full suite when none)
+       test-command: npx cucumber-js --tags "not @wip"
+       # extra-args: --cucumber js     # when the command hides the runner (npm test)
+     env:
+       QEOS_API_KEY: ${{ secrets.QEOS_API_KEY }}
+   ```
+   - `test-command` runs as `bash -c "$QEOS_TEST_COMMAND"`, as written, quotes included: the
+     same trust as a `run:` step you write. Every input reaches the action's scripts as an
+     environment variable, never as script text, and `extra-args` is split into words by the
+     collector, not by a shell.
+   - The key needs the **test suggestions** permission (Project Settings > API keys). Without it,
+     or when QEOS cannot be reached, the whole command still runs and the log says why.
+   - The step fails when a test fails. `patterns` is not used with `impact`. The job's summary
+     shows the stages and the suggested tests.
 
 #### 4.1.5 GitLab CI
 

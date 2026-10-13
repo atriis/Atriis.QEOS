@@ -235,6 +235,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # impact first scores the change: the pull request's base, or the commit's parent
 
       - uses: actions/setup-python@v7
         with:
@@ -248,6 +250,46 @@ jobs:
           url: https://qeos.example.invalid
           patterns: collector/tests/fixtures/pytest.xml
           extra-args: --dry-run
+
+      # impact: first, as consumers use it: a stand-in QEOS suggests "Finds a product", a stand-in Cucumber runs it in
+      # stage 1 and "Opens the shop" in stage 2 (the quoted --tags keeps "Not tagged" out), and one run is uploaded
+      - name: Start a stand-in QEOS
+        run: |
+          nohup python collector/tests/fake_qeos.py 18080 collector/tests/fixtures/fake-qeos-suggestion.json \
+            "$RUNNER_TEMP/qeos-uploads.jsonl" > "$RUNNER_TEMP/fake-qeos.log" 2>&1 &
+          for _ in $(seq 50); do
+            python -c "import socket; socket.create_connection(('127.0.0.1', 18080), 1)" 2>/dev/null && exit 0
+            sleep 0.2
+          done
+          echo "::error::the stand-in QEOS did not start"; cat "$RUNNER_TEMP/fake-qeos.log"; exit 1
+
+      - name: Run the action with impact first
+        uses: ./collector-action
+        env:
+          QEOS_API_KEY: qeos_ci_placeholder_key
+          FAKE_CUCUMBER_SPEC: collector/tests/fixtures/fake-cucumber-green.json
+          FAKE_CUCUMBER_LOG: ${{ runner.temp }}/fake-cucumber.log
+        with:
+          url: http://127.0.0.1:18080
+          impact: first
+          test-command: python collector/tests/fake_cucumber.py --tags "@smoke"
+          extra-args: --cucumber js --fail-on-error
+
+      - name: The two stages ran and were uploaded as one run
+        run: |
+          python - <<'PY'
+          import json, os
+          temp = os.environ["RUNNER_TEMP"]
+          calls = [json.loads(line) for line in open(f"{temp}/fake-cucumber.log", encoding="utf-8")]
+          real = [call["ran"] for call in calls if not call["dry_run"]]
+          assert real == [["features/smoke.feature:6"], ["features/smoke.feature:3"]], real
+          assert all(call["argv"][:2] == ["--tags", "@smoke"] for call in calls), calls
+          [body] = [json.loads(line) for line in open(f"{temp}/qeos-uploads.jsonl", encoding="utf-8")]
+          assert body["run"]["scope"] == "full", body["run"]
+          assert [s["name"] for s in body["run"]["stages"]["stages"]] == ["suggested", "rest"], body["run"]
+          assert sorted(r["name"] for r in body["results"]) == ["Finds a product", "Opens the shop"]
+          print("impact first: 2 stages, 1 upload")
+          PY
 
       - name: The installed collector is this commit's version
         run: |

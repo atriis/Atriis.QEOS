@@ -14,6 +14,21 @@
 # A pipeline set up before the QEOS rename has the secret named QAV_API_KEY: rename it to
 # QEOS_API_KEY, or change the mapping below to `QEOS_API_KEY: $(QAV_API_KEY)`. An undefined
 # secret reaches the collector as the literal text "$(QEOS_API_KEY)" and the upload fails with 401.
+#
+# Suggested tests first (Cucumber, collector 0.7.0): instead of this template after the tests, run the
+# tests through run-impact, the likely affected scenarios first, then the rest, as one run (add
+# --suggested-only to run only them). The whole command still runs when QEOS cannot score the change.
+# The commit's parent must be in the clone, and the key needs the "test suggestions" permission:
+#
+#   steps:
+#     - checkout: self
+#       fetchDepth: 2
+#     - script: |
+#         python -m pip install --quiet "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.7.0#subdirectory=collector"
+#         qeos-collector run-impact --url https://qeos.example.com -- npx cucumber-js --tags "not @wip"
+#       displayName: Tests, the likely affected first
+#       env:
+#         QEOS_API_KEY: $(QEOS_API_KEY)
 
 parameters:
   - name: url

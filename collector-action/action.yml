@@ -1,8 +1,9 @@
 name: QEOS collector
 description: >-
-  Parse JUnit XML test reports and upload them as one run to a QEOS
-  platform. Provide the project API key as the QEOS_API_KEY environment
-  variable on the step - never as an input, so it stays out of the action log.
+  Upload test reports as one run to a QEOS platform, or run a Cucumber test
+  command with the scenarios a change likely affects first (impact: first or only).
+  Provide the project API key as the QEOS_API_KEY environment variable on the
+  step - never as an input, so it stays out of the action log.
   QAV_API_KEY, the name before the QEOS rename, still works with a deprecation warning.
 
 inputs:
@@ -10,14 +11,33 @@ inputs:
     description: Platform URL (e.g. https://qeos.example.com)
     required: true
   patterns:
-    description: JUnit XML glob patterns, space separated (** matches directories)
-    required: true
+    description: >-
+      Report glob patterns, space separated (** matches directories), uploaded when
+      impact is off. Default: the patterns list in .qeos.yml. Not used with impact.
+    required: false
+    default: ""
   environment:
     description: Environment label stored on the run (e.g. staging)
     required: false
     default: ""
   extra-args:
-    description: Extra qeos-collector flags (e.g. --fail-on-error --no-changes)
+    description: >-
+      Extra qeos-collector flags, split into words as a POSIX shell would (quotes
+      group, no expansion), e.g. --fail-on-error --no-changes, or --cucumber js with impact
+    required: false
+    default: ""
+  impact:
+    description: >-
+      off (default): upload the reports in patterns. first: run test-command with the
+      likely affected scenarios first, then the rest, and upload both as one run. only:
+      run only the likely affected scenarios (the full suite when there is no
+      suggestion). Cucumber only; collector 0.7.0 or later.
+    required: false
+    default: "off"
+  test-command:
+    description: >-
+      The Cucumber command to run with impact first or only, run by bash as written
+      (quotes included), e.g. npx cucumber-js --tags "not @wip"
     required: false
     default: ""
 
@@ -31,10 +51,42 @@ runs:
       # GITHUB_ACTION_REF are not reliable here (empty when the action runs inside a reusable
       # workflow), which made the old git+https install fail with "empty revision".
       run: python -m pip install --quiet "$GITHUB_ACTION_PATH/../collector"
+    # Inputs reach the scripts only as environment variables, never as ${{ }} text inside them, so no input is ever
+    # parsed as shell code; extra-args goes to the collector as one string (QEOS_ACTION_EXTRA_ARGS), which it splits itself
     - name: Upload test results
+      if: inputs.impact == 'off'
       shell: bash
+      env:
+        QEOS_ACTION_URL: ${{ inputs.url }}
+        QEOS_ACTION_PATTERNS: ${{ inputs.patterns }}
+        QEOS_ACTION_ENVIRONMENT: ${{ inputs.environment }}
+        QEOS_ACTION_EXTRA_ARGS: ${{ inputs.extra-args }}
       run: |
-        qeos-collector upload ${{ inputs.patterns }} \
-          --url "${{ inputs.url }}" \
-          ${{ inputs.environment && format('--environment "{0}"', inputs.environment) || '' }} \
-          ${{ inputs.extra-args }}
+        set -f  # the patterns are split on spaces, never expanded by the shell: the collector expands them
+        # shellcheck disable=SC2086
+        qeos-collector upload $QEOS_ACTION_PATTERNS --url "$QEOS_ACTION_URL" \
+          ${QEOS_ACTION_ENVIRONMENT:+--environment "$QEOS_ACTION_ENVIRONMENT"}
+    - name: Run the tests, the likely affected ones first
+      if: inputs.impact != 'off'
+      shell: bash
+      env:
+        QEOS_IMPACT_MODE: ${{ inputs.impact }}
+        QEOS_TEST_COMMAND: ${{ inputs.test-command }}
+        QEOS_ACTION_URL: ${{ inputs.url }}
+        QEOS_ACTION_ENVIRONMENT: ${{ inputs.environment }}
+        QEOS_ACTION_EXTRA_ARGS: ${{ inputs.extra-args }}
+      run: |
+        case "$QEOS_IMPACT_MODE" in
+          first) set -- ;;
+          only) set -- --suggested-only ;;
+          *) echo "::error::the impact input must be off, first or only"; exit 2 ;;
+        esac
+        if [ -z "$QEOS_TEST_COMMAND" ]; then
+          echo "::error::impact first or only needs the test-command input"
+          exit 2
+        fi
+        # The test command runs as bash -c "$QEOS_TEST_COMMAND": the same trust as a run: step its author wrote.
+        # run-impact hands its own arguments to it as "$@", never as shell text
+        qeos-collector run-impact --url "$QEOS_ACTION_URL" \
+          ${QEOS_ACTION_ENVIRONMENT:+--environment "$QEOS_ACTION_ENVIRONMENT"} \
+          "$@" -- bash -c "$QEOS_TEST_COMMAND"
