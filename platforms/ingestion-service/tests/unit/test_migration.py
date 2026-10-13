@@ -379,3 +379,17 @@ def test_run_scope_downgrade_drops_the_columns(tmp_path):
         assert "can_read_impact" not in {column["name"] for column in inspect(engine).get_columns("api_keys")}
     finally:
         engine.dispose()
+
+
+def test_failed_step_line_must_be_positive(migrated_engine):
+    with migrated_engine.begin() as conn:
+        conn.execute(text(KEY), {"hash": "d" * 64})
+        conn.execute(text(RUN), {"idem": "fs", "provider": "github_actions"})
+        run_id = conn.execute(text("SELECT id FROM test_runs WHERE idempotency_key = 'fs'")).scalar()
+        conn.execute(text(
+            "INSERT INTO test_results (run_id, test_key, suite, class_name, name, status, duration_ms, truncated,"
+            " failed_step_text, failed_step_line) "
+            "VALUES (:r, :k, '', '', 'n', 'failed', 1, 0, 'When x', 3)"), {"r": run_id, "k": "e" * 64})
+    with pytest.raises(IntegrityError):
+        with migrated_engine.begin() as conn:
+            conn.execute(text("UPDATE test_results SET failed_step_line = 0"))

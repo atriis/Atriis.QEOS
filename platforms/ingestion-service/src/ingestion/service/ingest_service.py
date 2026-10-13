@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from qeos_shared.keys import test_key
 from src.ingestion.core.config import settings
 from src.ingestion.models import ApiKey, Run, RunChangedFile, RunComponent, RunResult
-from src.ingestion.models.run import FULL_SCOPE
+from src.ingestion.models.run import FAILED_STEP_TEXT_LENGTH, FULL_SCOPE
 from src.ingestion.schemas.collect import RunUpload
 from src.ingestion.service import collection_settings_service, impact_service, masking_pattern_service
 from src.ingestion.utils import custom_masking, metrics
@@ -71,6 +71,10 @@ def _request_hash(upload: RunUpload) -> str:
     for name, default in _LATER_RUN_FIELDS.items():
         if data["run"].get(name, default) == default:
             data["run"].pop(name, None)
+    # Result field added by migration 021: absent from the hash while null, for the same reason
+    for result in data["results"]:
+        if result.get("failed_step") is None:
+            result.pop("failed_step", None)
     canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -174,7 +178,8 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
             # Mask before truncating: a cut through a secret would leave its first half unmatched
             message, message_kinds = mask(result.message, patterns)
             details, details_kinds = mask(result.details, patterns)
-            kinds = message_kinds | details_kinds
+            step_text, step_kinds = mask(result.failed_step.text if result.failed_step else None, patterns)
+            kinds = message_kinds | details_kinds | step_kinds
             masked_kinds.update(kinds)
             message, cut_message = truncate_utf8(message, settings.MAX_TEXT_BYTES)
             details, cut_details = truncate_utf8(details, settings.MAX_TEXT_BYTES)
@@ -192,6 +197,8 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
                 "redacted": bool(kinds),
                 "file": result.file,
                 "owner": result.owner,
+                "failed_step_text": step_text[:FAILED_STEP_TEXT_LENGTH] if step_text is not None else None,
+                "failed_step_line": result.failed_step.line if result.failed_step else None,
             })
         db.execute(insert(RunResult), rows)  # one executemany, not 20,000 ORM objects
 

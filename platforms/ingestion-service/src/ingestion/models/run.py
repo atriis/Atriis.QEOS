@@ -81,6 +81,9 @@ class Run(Base):
     )
 
 
+FAILED_STEP_TEXT_LENGTH = 1000
+
+
 class RunResult(Base):
     """One test case's outcome within a run. Table test_results."""
 
@@ -101,9 +104,13 @@ class RunResult(Base):
     redacted = Column(Boolean, nullable=False, default=False, server_default=false())
     file = Column(String(1000), nullable=True)
     owner = Column(String(255), nullable=True)  # from CODEOWNERS, via the collector
+    # The Cucumber step that failed, as the collector reported it (spec 2026-10-13); masked like message
+    failed_step_text = Column(String(FAILED_STEP_TEXT_LENGTH), nullable=True)
+    failed_step_line = Column(Integer, nullable=True)  # its line in the .feature file
 
     __table_args__ = (
         CheckConstraint("status IN ('passed','failed','skipped','errored')", name="chk_test_results_status"),
+        CheckConstraint("failed_step_line > 0", name="chk_test_results_failed_step_line"),
         Index("ix_test_results_test_key_run", "test_key", "run_id"),
         # Migration 016: the report reads only failing rows for causes and regression candidates
         Index("ix_test_results_failing", "run_id", "test_key",

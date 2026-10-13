@@ -96,6 +96,16 @@ class RunIn(BaseModel):
         return self
 
 
+class FailedStepIn(BaseModel):
+    """The Cucumber step that failed (spec 2026-10-13 §2)."""
+    model_config = ConfigDict(extra="forbid")
+
+    text: Annotated[str, StringConstraints(min_length=1, max_length=1000)]
+    line: Optional[int] = Field(None, ge=1, le=1_000_000)
+
+    _no_unstorable = field_validator("text", mode="before")(_reject_unstorable)
+
+
 class ResultIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -109,6 +119,7 @@ class ResultIn(BaseModel):
     details: Optional[str] = None
     file: Optional[_text(1000)] = None
     owner: Optional[_text(255)] = None  # from CODEOWNERS, e.g. "@org/qa-team"
+    failed_step: Optional[FailedStepIn] = None
 
     _no_unstorable = field_validator("suite", "class_name", "name", "file", "owner", mode="before")(_reject_unstorable)
     _clean_text = field_validator("message", "details", mode="after")(_replace_unstorable)

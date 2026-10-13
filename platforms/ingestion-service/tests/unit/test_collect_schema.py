@@ -123,3 +123,17 @@ def test_trigger_values(trigger):
 def test_an_unknown_trigger_is_rejected():
     with pytest.raises(ValidationError):
         RunUpload.model_validate(body(run={"trigger": "cron"}))
+
+
+def test_failed_step_is_optional_and_validated():
+    ok = body(results=[{"name": "t", "status": "failed", "failed_step": {"text": "When I search Lisbon", "line": 14}}])
+    assert RunUpload.model_validate(ok).results[0].failed_step.line == 14
+    no_line = body(results=[{"name": "t", "status": "failed", "failed_step": {"text": "When x"}}])
+    assert RunUpload.model_validate(no_line).results[0].failed_step.line is None
+
+
+@pytest.mark.parametrize("step", [{"text": ""}, {"text": "x" * 1001}, {"text": "x", "line": 0},
+                                  {"text": "x", "line": 1_000_001}, {"text": "x", "extra": 1}])
+def test_invalid_failed_step_is_rejected(step):
+    with pytest.raises(ValidationError):
+        RunUpload.model_validate(body(results=[{"name": "t", "status": "failed", "failed_step": step}]))
