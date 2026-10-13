@@ -230,6 +230,30 @@ jobs:
         run: |
           qeos-collector upload "reports/*.xml" --environment collector-py${{ matrix.python }}
 
+  collector-action:
+    name: collector-action installs and runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # The composite action as consumers use it; --dry-run parses and prints without uploading,
+      # so a broken install step fails here instead of in someone's CI
+      - name: Run the action
+        uses: ./collector-action
+        with:
+          url: https://qeos.example.invalid
+          patterns: collector/tests/fixtures/pytest.xml
+          extra-args: --dry-run
+
+      - name: The installed collector is this commit's version
+        run: |
+          expected=$(python -c "import re,pathlib; print(re.search(r'__version__ = \"([^\"]+)\"', pathlib.Path('collector/src/qeos_collector/__init__.py').read_text()).group(1))")
+          test "$(qeos-collector --version | awk '{print $NF}')" = "$expected"
+
   monitoring:
     name: Monitoring configuration
     runs-on: ubuntu-latest

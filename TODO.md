@@ -139,6 +139,7 @@
 - [x] Server side (2026-10-12): `collection_settings` and `test_runs.trigger` (migration 019), `GET/PUT /projects/{id}/collection-settings`, a manual upload to a project that switched collection off answers 202 and stores nothing, gateway route
 - [x] Collector 0.5.0: classify the run from the CI environment, `--trigger`, the 202 notice; tag `collector-v0.5.0`
 - [x] Collector 0.5.1 (2026-10-12, final review): `--gate` on a discarded run decides on the local results; spooled and partial-run discard messages; tag `collector-v0.5.1`
+- [x] Collector 0.5.2 (2026-10-13): collector-action installs from its own checkout (`$GITHUB_ACTION_PATH/../collector`); the old git URL came up empty inside reusable workflows ("empty revision"); CI now runs the action
 - [x] Dashboard (2026-10-12): the Collection card in Project Settings (switch, discard count)
 - [x] Docs (2026-10-12): SETUP 4.1.8a and troubleshooting, collector and ingestion READMEs, PRODUCT, README
 

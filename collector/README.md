@@ -6,7 +6,7 @@ Python 3.9 or newer, nothing else to install.
 ## Install
 
 ```bash
-pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.1#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.2#subdirectory=collector"
 ```
 
 ### Renamed from `qav-collector` (0.4.0)
@@ -67,7 +67,7 @@ instead of storing it twice.
           QEOS_URL: https://qeos.example.com
           QEOS_API_KEY: ${{ secrets.QEOS_API_KEY }}
         run: |
-          pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.1#subdirectory=collector"
+          pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.2#subdirectory=collector"
           qeos-collector upload "reports/**/*.xml"
 ```
 
@@ -78,7 +78,7 @@ test:
   script:
     - pytest --junitxml=reports/junit.xml
   after_script:
-    - pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.1#subdirectory=collector"
+    - pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.2#subdirectory=collector"
     - qeos-collector upload "reports/**/*.xml"
   variables:
     QEOS_URL: https://qeos.example.com
@@ -96,7 +96,7 @@ post {
   always {
     withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')]) {
       sh '''
-        pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.1#subdirectory=collector"
+        pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.2#subdirectory=collector"
         QEOS_URL=https://qeos.example.com qeos-collector upload "target/surefire-reports/*.xml"
       '''
     }
@@ -115,7 +115,7 @@ mass-archive guard is the backstop.
 steps:
   - script: mvn test   # or pytest --junitxml=reports/junit.xml, dotnet test --logger trx, …
   - script: |
-      pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.1#subdirectory=collector"
+      pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.2#subdirectory=collector"
       qeos-collector upload "**/TEST-*.xml"
     displayName: Upload test results to QEOS
     condition: always()        # report results even when the tests failed
@@ -264,7 +264,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.1#subdirectory=collector"
+      - run: pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.5.2#subdirectory=collector"
       - run: qeos-collector import-features
         env:
           QEOS_URL: ${{ vars.QEOS_URL }}

@@ -1,7 +1,7 @@
 # GitLab CI template: upload JUnit XML results to a QEOS platform.
 #
 # include:
-#   - remote: https://raw.githubusercontent.com/carneiru/QA-Vision-Platform/collector-v0.5.1/templates/qeos-collector.gitlab-ci.yml
+#   - remote: https://raw.githubusercontent.com/carneiru/QA-Vision-Platform/collector-v0.5.2/templates/qeos-collector.gitlab-ci.yml
 #
 # Set QEOS_URL as a CI/CD variable and QEOS_API_KEY as a masked variable.
 # Override QEOS_PATTERNS (and optionally QEOS_ENVIRONMENT, QEOS_EXTRA_ARGS).
@@ -14,7 +14,7 @@
   script:
     - QEOS_PATTERNS="${QEOS_PATTERNS:-${QAV_PATTERNS:-reports/**/*.xml}}"
     - QEOS_EXTRA_ARGS="${QEOS_EXTRA_ARGS:-${QAV_EXTRA_ARGS:-}}"
-    - QEOS_COLLECTOR_REF="${QEOS_COLLECTOR_REF:-${QAV_COLLECTOR_REF:-collector-v0.5.1}}"
+    - QEOS_COLLECTOR_REF="${QEOS_COLLECTOR_REF:-${QAV_COLLECTOR_REF:-collector-v0.5.2}}"
     - apt-get update -qq && apt-get install -y -qq git > /dev/null
     - pip install --quiet "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@${QEOS_COLLECTOR_REF}#subdirectory=collector"
     - qeos-collector upload ${QEOS_PATTERNS} --url "${QEOS_URL}" ${QEOS_ENVIRONMENT:+--environment "${QEOS_ENVIRONMENT}"} ${QEOS_EXTRA_ARGS}

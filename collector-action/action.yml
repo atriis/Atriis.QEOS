@@ -26,9 +26,11 @@ runs:
   steps:
     - name: Install qeos-collector (pinned to this action's ref)
       shell: bash
-      run: |
-        python -m pip install --quiet \
-          "qeos-collector @ git+https://github.com/${GITHUB_ACTION_REPOSITORY}@${GITHUB_ACTION_REF}#subdirectory=collector"
+      # From the action's own checkout: GitHub downloads the whole repository at the ref the
+      # workflow names, so ../collector is that same version. GITHUB_ACTION_REPOSITORY and
+      # GITHUB_ACTION_REF are not reliable here (empty when the action runs inside a reusable
+      # workflow), which made the old git+https install fail with "empty revision".
+      run: python -m pip install --quiet "$GITHUB_ACTION_PATH/../collector"
     - name: Upload test results
       shell: bash
       run: |
