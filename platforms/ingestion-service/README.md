@@ -183,14 +183,14 @@ has the counts, branch and commit, the first 5 failing tests (masked as stored) 
 `{DASHBOARD_URL}/projects/{id}/runs/{run_id}`. Design:
 `docs/superpowers/specs/2026-10-05-failure-notifications-design.md`.
 
-A run of only the suggested tests (`scope = impact-subset`, collector `run-impact`) is labelled so it is never read as
-a full verdict:
+**Suggested tests only.** A run of only the suggested tests (`scope = impact-subset`, collector `run-impact`) is
+labelled so it is never read as a full verdict:
 - **Failure alerts:**
   - the headline (and so the e-mail subject) ends " · Suggested tests only", or " · Suggested tests only, stopped
     after stage 1" for a `--fail-fast` stop;
   - the webhook carries `run.scope` and `run.stopped_after_stage` (`1` or null).
 - **Weekly summary:**
-  - a line says "Suggested tests only: N of M runs (K stopped after stage 1)";
+  - a line says "Suggested tests only: N of M runs", followed by "(K stopped after stage 1)" only when K > 0;
   - its webhook carries `suggested_only_runs` and `stopped_after_stage_1_runs`.
 
 - **Kinds:**
@@ -452,7 +452,8 @@ long as a nightly pass); run it once, off hours.
 | `POST /api/v1/collect/impact` (project API key, not a user token) | The same scoring, body, limits and 503 for the key's own project, for `qeos-collector impact` and `run-impact` (spec 2026-10-13). Only for a key with `can_read_impact` (owners and admins allow it, see *For a CI pipeline*); any other key answers 403 `{"code": "impact_not_allowed", "message": ...}`, before the body is read. A bad or revoked key is 401. It reads only; the gateway's `/api/v1/collect` rate limit applies |
 | `GET /api/v1/projects/{id}/analytics/impact-accuracy?days=30` | `days` 7, 14 or 30 (else 422, checked after the role): over the runs started in those days whose outcome is written (full runs only), `caught`, `missed`, `rate` (`caught / (caught + missed)`, null without new failures), `avg_suggested` (suggested tests per run, null without runs: suggesting every test would catch everything, and this shows it), `includes_replayed`, the `live` and `replayed` parts (`runs`, `caught`, `missed`, `suggested`), and the `misses` (newest run first, at most 50; `misses_total` counts them all) |
 
-The gateway routes them with the other `/projects/{id}/runs` and `/projects/{id}/analytics` paths; a 5,000-path body
+The gateway routes them with the other `/projects/{id}/runs` and `/projects/{id}/analytics` paths, and
+`/collect/impact` through `/api/v1/collect`; a 5,000-path body
 of full-length paths (about 5 MB) stays under its 10 MB body cap.
 
 ### Budgets (`scripts/impact_benchmark.py`)

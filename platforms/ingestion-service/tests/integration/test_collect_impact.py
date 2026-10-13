@@ -54,9 +54,15 @@ def test_the_other_projects_key_sees_only_its_own(client, make_key, seed_run):
 
 
 @pytest.mark.parametrize("body", [{"changed_paths": ["a.py"]}, {"changed_paths": []}, {}])
-def test_a_key_without_the_permission_is_403_with_its_code(client, make_key, seed_run, body):
-    """Every key is upload-only until an owner or admin allows it; the 403 comes before the body is looked at."""
+def test_a_key_without_the_permission_is_403_with_its_code(client, make_key, seed_run, monkeypatch, body):
+    """Every key is upload-only until an owner or admin allows it; the 403 comes before the body is looked at, and
+    nothing is scored."""
     seed_two_projects(seed_run)
+
+    def must_not_score(*args, **kwargs):
+        raise AssertionError("scored a change for a key without the permission")
+
+    monkeypatch.setattr(impact_service, "score_change", must_not_score)
     _, key = make_key(project_id=7)
     response = client.post(URL, json=body, headers=headers(key))
     assert response.status_code == 403
