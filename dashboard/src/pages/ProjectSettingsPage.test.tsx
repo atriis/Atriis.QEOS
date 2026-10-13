@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -8,9 +8,9 @@ import { setAccessToken } from "../auth/tokens";
 import ProjectSettingsPage, { isLocalOrigin } from "./ProjectSettingsPage";
 
 const KEYS = [
-  { id: 1, name: "ci", key_prefix: "qeos_abcdefgh", created_at: "2026-10-01T10:00:00Z",
+  { id: 1, name: "ci", key_prefix: "qeos_abcdefgh", can_read_impact: false, created_at: "2026-10-01T10:00:00Z",
     last_used_at: "2026-10-03T10:00:00Z", revoked_at: null },
-  { id: 2, name: "old", key_prefix: "qeos_zzzzzzzz", created_at: "2026-09-01T10:00:00Z",
+  { id: 2, name: "old", key_prefix: "qeos_zzzzzzzz", can_read_impact: true, created_at: "2026-09-01T10:00:00Z",
     last_used_at: null, revoked_at: "2026-09-15T10:00:00Z" },
 ];
 
@@ -218,4 +218,100 @@ test("copy buttons carry their visible text in the name and announce Copied poli
   expect(snippet).toHaveAccessibleName(expect.stringContaining("Copy snippet"));
   await userEvent.click(snippet);
   expect(await screen.findByText("Copied", { selector: "[role=status]" })).toBeInTheDocument();
+});
+
+describe("the test suggestions permission", () => {
+  const HELP = "Lets qeos-collector impact and run-impact read this project's test suggestions.";
+
+  function captureCreate() {
+    const bodies: unknown[] = [];
+    server.use(
+      http.get("/api/v1/projects/42/api-keys", () => HttpResponse.json([])),
+      http.post("/api/v1/projects/42/api-keys", async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json({ id: 3, name: "impact-ci", key_prefix: "qeos_newnewne", key: "qeos_newnewnewFULLSECRET",
+          can_read_impact: true, created_at: "2026-10-03T12:00:00Z" }, { status: 201 });
+      }),
+    );
+    return bodies;
+  }
+
+  test.each(["owner", "admin"])("a %s may create a key that reads them; the box starts off", async (role) => {
+    const bodies = captureCreate();
+    renderPage(role);
+    const box = await screen.findByRole("checkbox", { name: "Can read test suggestions" });
+    expect(box).not.toBeChecked();
+    expect(box).toHaveAccessibleDescription(HELP);
+    await userEvent.type(screen.getByPlaceholderText("e.g. github-actions"), "impact-ci");
+    await userEvent.click(box);
+    await userEvent.click(screen.getByRole("button", { name: /create key/i }));
+    await screen.findByText("qeos_newnewnewFULLSECRET");
+    expect(bodies).toEqual([{ name: "impact-ci", can_read_impact: true }]);
+    expect(screen.getByRole("checkbox", { name: "Can read test suggestions" })).not.toBeChecked(); // reset for the next key
+  });
+
+  test("a member creates upload-only keys and has no box", async () => {
+    const bodies = captureCreate();
+    renderPage("member");
+    await userEvent.type(await screen.findByPlaceholderText("e.g. github-actions"), "ci-2");
+    expect(screen.queryByRole("checkbox", { name: "Can read test suggestions" })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /create key/i }));
+    await screen.findByText("qeos_newnewnewFULLSECRET");
+    expect(bodies).toEqual([{ name: "ci-2", can_read_impact: false }]);
+  });
+
+  test.each(["member", "viewer"])("a %s sees On or Off as words, with no switch", async (role) => {
+    server.use(http.get("/api/v1/projects/42/api-keys", () => HttpResponse.json([KEYS[0], { ...KEYS[1], revoked_at: null }])));
+    renderPage(role);
+    expect(await screen.findByRole("columnheader", { name: "Test suggestions" })).toBeInTheDocument();
+    expect(within(screen.getByRole("row", { name: /^ci / })).getByText("Off")).toBeInTheDocument();
+    expect(within(screen.getByRole("row", { name: /^old / })).getByText("On")).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: /^Test suggestions/ })).not.toBeInTheDocument();
+    expect(screen.getByText((_, el) => el?.tagName === "P" && el.textContent === `${HELP} Only owners and admins allow test suggestions.`))
+      .toBeInTheDocument();
+  });
+
+  test.each(["owner", "admin"])("a %s turns it on with PATCH, and the row says On", async (role) => {
+    const bodies: unknown[] = [];
+    server.use(
+      http.get("/api/v1/projects/42/api-keys", () => HttpResponse.json([KEYS[0]])),
+      http.patch("/api/v1/projects/42/api-keys/1", async ({ request }) => {
+        bodies.push(await request.json());
+        return HttpResponse.json({ ...KEYS[0], can_read_impact: true });
+      }),
+    );
+    renderPage(role);
+    const toggle = await screen.findByRole("switch", { name: "Test suggestions for key ci" });
+    expect(toggle).not.toBeChecked();
+    expect(within(toggle).getByText("Off")).toBeInTheDocument();
+    await userEvent.click(toggle);
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Test suggestions for key ci" })).toBeChecked());
+    expect(within(screen.getByRole("switch", { name: "Test suggestions for key ci" })).getByText("On")).toBeInTheDocument();
+    expect(bodies).toEqual([{ can_read_impact: true }]);
+  });
+
+  test("a revoked key shows its value, with no switch", async () => {
+    server.use(http.get("/api/v1/projects/42/api-keys", () => HttpResponse.json(KEYS)));
+    renderPage("owner");
+    expect(await screen.findByRole("switch", { name: "Test suggestions for key ci" })).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: "Test suggestions for key old" })).not.toBeInTheDocument();
+    expect(within(screen.getByRole("row", { name: /^old / })).getByText("On")).toBeInTheDocument();
+  });
+
+  test("a key revoked meanwhile answers 409, and its message is shown", async () => {
+    let revoked = false;
+    server.use(
+      http.get("/api/v1/projects/42/api-keys", () =>
+        HttpResponse.json([revoked ? { ...KEYS[0], revoked_at: "2026-10-13T10:00:00Z" } : KEYS[0]])),
+      http.patch("/api/v1/projects/42/api-keys/1", () => {
+        revoked = true;
+        return HttpResponse.json({ detail: "API key is revoked" }, { status: 409 });
+      }),
+    );
+    renderPage("admin");
+    await userEvent.click(await screen.findByRole("switch", { name: "Test suggestions for key ci" }));
+    expect((await screen.findByText("API key is revoked")).closest("[role=alert]")).toBeInTheDocument();
+    // the list is read again, so the row now shows the key as revoked, without a switch
+    await waitFor(() => expect(screen.queryByRole("switch", { name: "Test suggestions for key ci" })).not.toBeInTheDocument());
+  });
 });

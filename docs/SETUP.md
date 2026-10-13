@@ -576,6 +576,15 @@ breaking the others. The **Last used** column shows whether a key is still in us
 Revoking a key works immediately ([4.9](#49-security-operations)). Old `qav_…` keys keep
 working.
 
+**Test suggestions.** Keys are upload-only by default. To let `qeos-collector impact` and
+`run-impact` read this project's test suggestions (the likely affected tests for a change), an
+owner or admin ticks **Can read test suggestions** when creating the key, or turns the key's
+**Test suggestions** switch on in the table later. The column reads On or Off for every role;
+members create upload-only keys. A key without it gets `403 impact_not_allowed` from
+`POST /api/v1/collect/impact`. Such a key reads only test names, path units and aggregate failure
+evidence, never individual results or messages ([SECURITY.md](../SECURITY.md)). A revoked key
+cannot be changed.
+
 #### 4.1.2 Report formats
 
 The collector reads, and detects from the file content:

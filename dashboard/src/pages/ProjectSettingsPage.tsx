@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiKeyCreated, createKey, listKeys, revokeKey } from "../api/keys";
+import { ApiKey, ApiKeyCreated, createKey, listKeys, revokeKey, updateKey } from "../api/keys";
 import { getProject } from "../api/orgs";
 import CollectionCard from "../components/CollectionCard";
 import CiTargetCard from "../components/CiTargetCard";
@@ -130,11 +130,28 @@ QEOS_URL=${origin} QEOS_API_KEY=<your key> qeos-collector import-features "tests
   };
 }
 
+/** A key's "may read test suggestions" switch, as the Collection card's: the state is the On/Off word and the thumb's
+ *  position, not colour alone. Not disabled while saving, so keyboard focus stays on it. */
+function ImpactSwitch({ apiKey, hint, saving, onToggle }: {
+  apiKey: ApiKey; hint: string; saving: boolean; onToggle: (on: boolean) => void;
+}) {
+  const on = apiKey.can_read_impact === true;
+  return (
+    <button type="button" role="switch" className="switch switch-compact" aria-checked={on} aria-busy={saving}
+      aria-label={`Test suggestions for key ${apiKey.name}`} aria-describedby={hint} onClick={() => onToggle(!on)}>
+      <span className="switch-track" aria-hidden="true"><span className="switch-thumb" /></span>
+      <span className="switch-state" aria-hidden="true">{saving ? "Saving…" : on ? "On" : "Off"}</span>
+    </button>
+  );
+}
+
 export default function ProjectSettingsPage() {
   const { projectId } = useParams();
   const id = Number(projectId);
   const qc = useQueryClient();
   const [name, setName] = useState("");
+  const [canReadImpact, setCanReadImpact] = useState(false);
+  const impactHint = useId();
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
   const local = isLocalOrigin(window.location.origin);
   const [platform, setPlatform] = useState(local ? "cli" : "github");
@@ -147,14 +164,24 @@ export default function ProjectSettingsPage() {
   const canEdit = EDIT_ROLES.includes(project.data?.my_role ?? "");
   // Same rule as the ingestion API (EDIT_ROLES on create and revoke): anyone with read access may list
   const roleKnown = project.data != null;
+  // Reading test suggestions is for owners and admins to allow (ingestion MANAGE_ROLES, spec 2026-10-13 §9)
+  const canManage = MANAGE_ROLES.includes(project.data?.my_role ?? "");
 
   const create = useMutation({
-    mutationFn: () => createKey(id, name.trim()),
+    mutationFn: () => createKey(id, name.trim(), canManage && canReadImpact),
     onSuccess: (key) => {
       setCreated(key);
       setName("");
+      setCanReadImpact(false);
       qc.invalidateQueries({ queryKey: ["keys", id] });
     },
+  });
+  const update = useMutation({
+    mutationFn: ({ keyId, on }: { keyId: number; on: boolean }) => updateKey(id, keyId, on),
+    onSuccess: (key) =>
+      qc.setQueryData<ApiKey[]>(["keys", id], (list) => list?.map((k) => (k.id === key.id ? key : k))),
+    // A 409 means the key was revoked meanwhile: read the list again so the row says so
+    onError: () => qc.invalidateQueries({ queryKey: ["keys", id] }),
   });
   const revoke = useMutation({
     mutationFn: (keyId: number) => revokeKey(id, keyId),
@@ -184,12 +211,26 @@ export default function ProjectSettingsPage() {
               Name
               <input required placeholder="e.g. github-actions" value={name} onChange={(e) => setName(e.target.value)} />
             </label>
+            {canManage && (
+              <label className="check">
+                <input type="checkbox" checked={canReadImpact} aria-describedby={impactHint}
+                  onChange={(e) => setCanReadImpact(e.target.checked)} />
+                Can read test suggestions
+              </label>
+            )}
             <button type="submit" disabled={create.isPending}>Create key</button>
           </form>
+        )}
+        {roleKnown && (
+          <p id={impactHint} className="muted">
+            Lets <code>qeos-collector impact</code> and <code>run-impact</code> read this project's test suggestions.
+            {!canManage && " Only owners and admins allow test suggestions."}
+          </p>
         )}
         <span role="status" className="sr-only">{snippetCopied ? "Copied" : ""}</span>
         {create.error != null && <ErrorBanner error={create.error} />}
         {revoke.error != null && <ErrorBanner error={revoke.error} />}
+        {update.error != null && <ErrorBanner error={update.error} />}
         {created && (
           <SecretBlock label={`API key ${created.name}`} value={created.key}
             copyLabel={`Copy key ${created.name}`} copyText="Copy key" />
@@ -202,7 +243,7 @@ export default function ProjectSettingsPage() {
           <table className="data">
             <thead>
               <tr>
-                <th>Name</th><th>Key</th><th>Created</th><th>Last used</th>
+                <th>Name</th><th>Key</th><th>Test suggestions</th><th>Created</th><th>Last used</th>
                 <th><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
@@ -211,6 +252,13 @@ export default function ProjectSettingsPage() {
                 <tr key={key.id}>
                   <td>{key.name}</td>
                   <td><code>{key.key_prefix}…</code></td>
+                  <td>
+                    {canManage && !key.revoked_at ? (
+                      <ImpactSwitch apiKey={key} hint={impactHint}
+                        saving={update.isPending && update.variables?.keyId === key.id}
+                        onToggle={(on) => { if (!update.isPending) update.mutate({ keyId: key.id, on }); }} />
+                    ) : (key.can_read_impact ? "On" : "Off")}
+                  </td>
                   <td>{new Date(key.created_at).toLocaleDateString()}</td>
                   <td>{key.last_used_at ? new Date(key.last_used_at).toLocaleString() : "—"}</td>
                   <td>

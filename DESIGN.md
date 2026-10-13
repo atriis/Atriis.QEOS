@@ -470,6 +470,15 @@ Likely affected tests (spec `docs/superpowers/specs/2026-10-12-test-impact-analy
     - instead of the outcome, the sentence "Suggested tests only, not evaluated: only the suggested tests ran, so
       this run cannot show what the suggestion missed.";
     - the suggestion is still listed, and the card never polls.
+  - **API keys (Project Settings):**
+    - a **Test suggestions** column reading On or Off as words;
+    - for owners and admins, an active key's cell holds the Collection card's switch (`.switch-compact`, named "Test
+      suggestions for key ci", "Saving…" while the PATCH runs), and the create form has a "Can read test suggestions"
+      checkbox, off by default;
+    - one muted help line under the form: "Lets `qeos-collector impact` and `run-impact` read this project's test
+      suggestions." (members also read "Only owners and admins allow test suggestions.");
+    - a failure (a 409 when the key was revoked meanwhile) is an Error Banner with the API's message, and the list
+      is read again.
 - **Report section** "Test impact" (`#report-impact`, the Report's last section). It follows no Report filter but the period, and has no gate.
   - **Period:** the Report's when it is the last 7, 14 or 30 days up to today; otherwise the last 30 days, and the note says why ("the Report's period is not the last 7, 14 or 30 days").
   - **Two Stats side by side** (`.impact-figures`, `.stat-big`, tabular figures): the catch rate ("75.0%", then "Suggestions caught 9 of 12 new failures") and the tests suggested per run ("6.4", one decimal at most, then "tests suggested per run, on average"), so a high rate bought by suggesting everything shows (spec §9). Without new failures the rate is "—" with "No new failures in 4 runs with a stored suggestion", never 0%.
