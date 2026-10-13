@@ -1,0 +1,9 @@
+{"features": [
+  {"uri": "features/pay.feature", "name": "Pay", "scenarios": [
+    {"name": "Pays with card", "line": 4, "tags": ["@smoke"], "status": "passed", "seconds": 2},
+    {"name": "Pays 10", "line": 12, "status": "failed", "seconds": 3},
+    {"name": "Pays 20", "line": 13, "status": "passed", "seconds": 1}]},
+  {"uri": "features/cart.feature", "name": "Cart", "scenarios": [
+    {"name": "Adds", "line": 3, "tags": ["@smoke"], "status": "passed", "seconds": 1},
+    {"name": "Removes", "line": 7, "status": "passed", "seconds": 1}]}
+]}

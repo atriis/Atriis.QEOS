@@ -13,6 +13,7 @@ MAX_RESULTS_PER_PART = 20000
 # The gateway accepts bodies up to 10 MB
 MAX_PART_BYTES = 9 * 1024 * 1024
 TRIGGERS = ("manual", "automatic", "qeos")
+SCOPES = ("full", "impact-subset")  # run-impact (spec 2026-10-13 §3.1): the one list of scopes
 MAX_RUN_SPAN = timedelta(days=7)
 BRANCH_LENGTH = 255
 ENVIRONMENT_LENGTH = 100
@@ -58,6 +59,8 @@ def build_run(
     pr_number: Optional[int] = None,
     base_branch: Optional[str] = None,
     trigger: Optional[str] = None,
+    scope: Optional[str] = None,
+    stages: Optional[dict] = None,
 ) -> Dict[str, str]:
     """Metadata the server would reject is left out or cut, so it never costs the whole run."""
     run = {
@@ -88,6 +91,11 @@ def build_run(
         run["base_branch"] = base_branch[:BRANCH_LENGTH]
     if trigger in TRIGGERS:
         run["trigger"] = trigger
+    # Only run-impact sends them, so an ordinary upload's body and request hash stay as they were
+    if scope in SCOPES:
+        run["scope"] = scope
+    if stages:
+        run["stages"] = stages
     return run
 
 
@@ -124,11 +132,20 @@ def build_parts(run: dict, results: List[dict], idempotency_key: str,
     if len(encoded) == 1:
         body, count = encoded[0]
         return [Part(body=body, idempotency_key=idempotency_key, count=count)]
+    if "stages" in run:
+        # The stages go with the first part only: the platform keeps the first it gets for the run
+        encoded = encoded[:1] + [(_without_stages(body), count) for body, count in encoded[1:]]
     # Numbered keys, so a re-run of the same CI job replays exactly the same parts
     return [
         Part(body=body, idempotency_key=f"{idempotency_key}-part-{number}", count=count)
         for number, (body, count) in enumerate(encoded, start=1)
     ]
+
+
+def _without_stages(body: bytes) -> bytes:
+    payload = json.loads(body)
+    payload["run"].pop("stages", None)
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
 def summarize(results: Sequence[dict]) -> Dict[str, int]:

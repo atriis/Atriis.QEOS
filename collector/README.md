@@ -316,6 +316,68 @@ qeos-collector impact --format json --out impact.json
 
 None of them means "tests failed": a pipeline branches on them.
 
+## `qeos-collector run-impact` (Cucumber)
+
+New in 0.7.0. Runs a Cucumber test command with the scenarios the change likely affects **first**, and every other
+scenario after. Both are uploaded as one run (`scope` `full`, with its `stages`), so failures in the changed area show
+up in minutes and the full suite still runs.
+
+```bash
+qeos-collector run-impact -- npx cucumber-js --tags "not @wip"
+qeos-collector run-impact -- mvn -q test -Dcucumber.filter.tags="not @wip"
+qeos-collector run-impact --cucumber js -- npm test
+```
+
+1. QEOS scores the change, as `impact` does. The key needs the **test suggestions** permission.
+2. **Discovery:** the command runs as a Cucumber dry run with a JSON report, with your own tags, profiles and
+   paths, to list the scenarios it would run.
+3. **Stage 1:** the suggested scenarios among them, through a rerun file. A suggested test matches a scenario on
+   its feature file and name, so every row of an outline with that name goes with it.
+4. **Stage 2:** every other one, through a second rerun file. No scenario runs twice, and no stage runs with an
+   empty rerun file. Suggested tests that the command does not run (left out by its filters, or not Cucumber) are
+   listed as skipped by the filter.
+5. Both stages' JSON reports are uploaded as one run.
+
+**Scoring never skips your tests.** When QEOS cannot score the change, for whatever reason (an invalid key, a key
+without the permission, a QEOS older than this command, a 422, 429 or 5xx, a timeout, no answer, no change data), the
+command runs as given, as one stage `all`, and the log says why (`warning: cannot score the change: …`). When QEOS
+answers that nothing is likely affected, or none of the suggested tests is among the command's scenarios, the command
+also runs as one stage.
+
+| `--cucumber` | Detected from | What run-impact appends |
+|---|---|---|
+| `js` (cucumber-js) | `cucumber-js` or `@cucumber/cucumber` in the command | `--dry-run`, `--format json:FILE`, and a rerun file `.qeos-impact/…/@stage-1.txt`. Both paths are relative to the working directory: cucumber-js 12 reads a rerun file only from a relative path to a file whose name starts with `@` |
+| `jvm` (Maven, Gradle) | `mvn`, `mvnw`, `gradle` or `gradlew` first | `-Dcucumber.execution.dry-run=true`, `-Dcucumber.plugin=json:FILE`, `-Dcucumber.features=@FILE` |
+| `ruby` | `cucumber` or `bundle exec cucumber` first | `--dry-run`, `--format json --out FILE`, `@FILE` |
+
+- **`--cucumber`:** pass it when the command hides the runner (`npm test`, a script). For `npm` and `pnpm`,
+  run-impact adds the `--` the script needs.
+- **Gradle:** it hands `-D` properties to its own JVM, not the test JVM. Forward them in `build.gradle`:
+  `test { systemProperties System.properties.findAll { it.key.startsWith("cucumber.") } }`.
+- **Windows:** programs are found as a shell would (`npx.cmd`, `mvn.cmd`), never run through a shell by
+  run-impact, and every path it hands Cucumber uses `/`. A `.cmd` or `.bat` runs through cmd.exe, so for
+  cucumber-jvm and Ruby Cucumber the working directory must not contain `% & | < > ^ "`; run-impact refuses
+  before running anything.
+
+**Feature paths.** Paths the command names (`npx cucumber-js features/checkout/`, `-Dcucumber.features=…`) are left
+out of the stages: the rerun files choose the scenarios.
+
+Paths run-impact cannot see would add scenarios to every stage, because cucumber-js adds a profile's `paths` to the
+rerun file's. Such paths come from:
+- an npm script;
+- a profile or config file with `paths`;
+- `--shard`.
+
+So before any test runs, a dry run of stage 1 must select exactly the planned scenarios. Otherwise run-impact runs
+nothing and exits 2, saying why. Select features with tags instead.
+
+**Working files** live in `.qeos-impact/<random>/` and are removed at the end. On first use run-impact writes
+`.qeos-impact/.gitignore` (`*`), so git never lists them. The upload options are those of `upload` (`--url`,
+`--environment`, `--component`, `--spool`, …).
+
+**The exit code** is the test command's, from the first failing stage, so the build fails when tests fail. When the
+upload fails after the tests ran, even for a configuration problem, the exit code stays the tests'.
+
 ## `.qeos.yml`
 
 Project defaults, read from the working directory — flags beat environment

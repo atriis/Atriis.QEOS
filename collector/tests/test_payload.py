@@ -160,3 +160,37 @@ def test_trigger_is_sent_only_when_known(trigger, sent):
     now = datetime.now(timezone.utc)
     run = build_run(ci_provider="github_actions", started_at=now, finished_at=now, trigger=trigger)
     assert run.get("trigger") == sent
+
+
+def test_scope_and_stages_are_sent_only_when_given():
+    moment = datetime(2026, 10, 13, 10, 0, tzinfo=timezone.utc)
+    base = {"ci_provider": "local", "started_at": moment, "finished_at": moment}
+    plain = build_run(**base)
+    assert "scope" not in plain and "stages" not in plain  # an ordinary upload hashes as before (plan Ruling 5)
+    stages = {"stages": [{"name": "all", "duration_s": 1.0, "tests": 1, "failed": 0}], "time_to_first_failure_s": None}
+    run = build_run(**base, scope="impact-subset", stages=stages)
+    assert (run["scope"], run["stages"]) == ("impact-subset", stages)
+    assert build_run(**base, scope="full")["scope"] == "full"
+    assert "scope" not in build_run(**base, scope="partial")
+    assert payload.SCOPES == ("full", "impact-subset")
+
+
+def test_stages_go_with_the_first_part_only(monkeypatch):
+    """Split uploads: the platform keeps the first part's stages (plan Ruling, split uploads)."""
+    stages = {"stages": [{"name": "all", "duration_s": 1.0, "tests": 8, "failed": 0}], "time_to_first_failure_s": None}
+    run = {**RUN, "scope": "full", "stages": stages}
+    rows = [dict(result(str(i)), details="x" * 1000) for i in range(8)]
+    monkeypatch.setattr(payload, "MAX_PART_BYTES", 2700)
+    parts = build_parts(run, rows, "k")
+    bodies = [json.loads(p.body) for p in parts]
+    assert len(parts) == 4 and all(len(p.body) <= 2700 for p in parts)
+    assert bodies[0]["run"]["stages"] == stages
+    assert all("stages" not in body["run"] for body in bodies[1:])
+    assert all(body["run"]["scope"] == "full" for body in bodies)
+    assert sum(len(body["results"]) for body in bodies) == 8
+
+
+def test_one_part_keeps_its_stages():
+    stages = {"stages": [], "time_to_first_failure_s": None}
+    [part] = build_parts({**RUN, "stages": stages}, [result("a")], "k")
+    assert json.loads(part.body)["run"]["stages"] == stages
