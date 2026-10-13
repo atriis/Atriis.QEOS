@@ -2,12 +2,19 @@
 
 `impact --format cucumber` reads the lines from the local .feature files (plan Ruling 14): English keywords only; a
 classpath: uri, a file in another language or one outside the working directory gives no line, and the scenario is
-named instead. run-impact takes its lines from Cucumber's own dry run."""
+named instead. run-impact takes its lines from Cucumber's own dry run, and this module holds its Cucumber arguments
+(plan Rulings 7, 8, 9, 21)."""
 from __future__ import annotations
 
+import json
 import os
 import re
-from typing import List, Optional, Tuple
+from dataclasses import dataclass
+from pathlib import PurePath
+from typing import Dict, List, Optional, Sequence, Tuple
+
+from qeos_collector import formats
+from qeos_collector.junit import CLASS_NAME_LENGTH, NAME_LENGTH, ParsedFile
 
 _SCENARIO = ("Scenario", "Example")
 _OUTLINE = ("Scenario Outline", "Scenario Template")
@@ -114,3 +121,184 @@ def has_feature_files(cwd: str) -> bool:
         if any(name.endswith(".feature") for name in files):
             return True
     return False
+
+
+# --- run-impact (Phase 3) -------------------------------------------------------------
+
+FLAVOURS = ("js", "jvm", "ruby")
+WORKDIR = ".qeos-impact"  # run-impact's files, under the working directory (plan Ruling 16)
+# Options that take a value, so their value is never read as a feature path
+_JS_VALUE_OPTIONS = frozenset({
+    "-c", "--config", "-f", "--format", "--format-options", "--i18n-keywords", "-i", "--import", "-l", "--loader",
+    "--language", "--name", "--order", "-p", "--profile", "--parallel", "--plugin", "--plugin-options", "-r",
+    "--require", "--require-module", "--retry", "--retry-tag-filter", "--shard", "-t", "--tags", "--world-parameters",
+})
+_RUBY_VALUE_OPTIONS = frozenset({
+    "-r", "--require", "-f", "--format", "-o", "--out", "-t", "--tags", "-n", "--name", "-p", "--profile", "-e",
+    "--exclude", "-l", "--lines", "--i18n", "--order", "--retry", "--snippet-type", "--language",
+})
+
+
+@dataclass(frozen=True)
+class Scenario:
+    """A scenario, or an outline row, as a Cucumber dry run reports it."""
+
+    feature: str  # the feature's name: a result's suite
+    uri: str      # "/"-separated: a result's class_name
+    name: str
+    line: int
+
+    @property
+    def location(self) -> str:
+        return f"{self.uri}:{self.line}"
+
+    @property
+    def key(self) -> Tuple[str, str]:
+        """(class_name, name) as an upload stores them (formats._row cuts them the same way): what a suggested test
+        is matched on. Not the suite: a renamed feature keeps its scenarios."""
+        return self.uri[:CLASS_NAME_LENGTH], self.name[:NAME_LENGTH]
+
+
+def _program(token: str) -> str:
+    name = token.replace("\\", "/").rsplit("/", 1)[-1].lower()
+    for suffix in (".cmd", ".exe", ".bat", ".ps1"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return name
+
+
+def _is_cucumber_js(token: str) -> bool:
+    return _program(token) == "cucumber-js" or "@cucumber/cucumber" in token.replace("\\", "/")
+
+
+def detect_flavour(command: Sequence[str]) -> Optional[str]:
+    """js, jvm or ruby from the command; None when it does not show (`npm test`, a script): --cucumber then says."""
+    if any(_is_cucumber_js(token) for token in command):
+        return "js"
+    names = [_program(token) for token in command]
+    first = names[0] if names else ""
+    if first in ("mvn", "mvnw", "gradle", "gradlew"):
+        return "jvm"
+    if first == "cucumber" or (first == "bundle" and "cucumber" in names):
+        return "ruby"
+    return None
+
+
+def with_separator(flavour: str, command: Sequence[str]) -> List[str]:
+    """npm and pnpm hand arguments to the script only after "--"."""
+    if flavour == "js" and command and _program(command[0]) in ("npm", "pnpm") and "--" not in command[1:]:
+        return [*command, "--"]
+    return list(command)
+
+
+def _runner_index(flavour: str, command: Sequence[str]) -> Optional[int]:
+    for index, token in enumerate(command):
+        if (flavour == "js" and _is_cucumber_js(token)) or (flavour == "ruby" and _program(token) == "cucumber"):
+            return index
+    return None
+
+
+def _names_features(arg: str, cwd: str) -> bool:
+    plain = re.sub(r"(:\d+)+$", "", arg)
+    return (plain.endswith(".feature") or any(c in plain for c in "*?[") or os.path.basename(plain).startswith("@")
+            or os.path.isdir(os.path.join(cwd, plain)))
+
+
+def strip_paths(flavour: str, command: Sequence[str], cwd: str) -> Tuple[List[str], List[str]]:
+    """(the command without the feature paths it names, those paths). Such paths would add scenarios to every stage
+    (cucumber-js adds them to the rerun file's). Only what the command shows: paths inside an npm script or a profile
+    stay, and run-impact's stage-1 check catches them (plan Ruling 8)."""
+    if flavour == "jvm":
+        removed = [arg for arg in command if arg.startswith("-Dcucumber.features=")]
+        return [arg for arg in command if arg not in removed], removed
+    start = _runner_index(flavour, command)
+    if start is None:
+        return list(command), []
+    values = _JS_VALUE_OPTIONS if flavour == "js" else _RUBY_VALUE_OPTIONS
+    kept, removed, takes_value = list(command[: start + 1]), [], False
+    for arg in command[start + 1:]:
+        if takes_value:
+            kept.append(arg)
+            takes_value = False
+        elif arg.startswith("-"):
+            kept.append(arg)
+            takes_value = arg in values  # "--tags @x"; "--tags=@x" carries its own value
+        elif _names_features(arg, cwd):
+            removed.append(arg)
+        else:
+            kept.append(arg)
+    return kept, removed
+
+
+def dry_run_arguments(flavour: str) -> List[str]:
+    return ["-Dcucumber.execution.dry-run=true"] if flavour == "jvm" else ["--dry-run"]
+
+
+def _relative(path: PurePath, cwd: str) -> str:
+    return PurePath(os.path.relpath(str(path), cwd)).as_posix()
+
+
+def report_arguments(flavour: str, report: PurePath, cwd: str) -> List[str]:
+    """A Cucumber JSON report at `report`, written with "/" whatever the runner's OS (plan Ruling 21). cucumber-js
+    gets it relative to the working directory: `json:C:/…` has two colons, which it warns about (12.6.0)."""
+    if flavour == "js":
+        return ["--format", f"json:{_relative(report, cwd)}"]
+    if flavour == "ruby":
+        return ["--format", "json", "--out", report.as_posix()]
+    return [f"-Dcucumber.plugin=json:{report.as_posix()}"]
+
+
+def rerun_argument(flavour: str, rerun: PurePath, cwd: str) -> str:
+    if flavour == "js":
+        # cucumber-js 12 reads an argument as a rerun file only when its file name starts with "@", and joins the
+        # argument to the working directory: a relative path (verified on 12.6.0)
+        return _relative(rerun, cwd)
+    if flavour == "ruby":
+        return "@" + rerun.as_posix()
+    return "-Dcucumber.features=@" + rerun.as_posix()
+
+
+def read_scenarios(path) -> List[Scenario]:
+    """The scenarios of a Cucumber JSON report (a dry run's), in report order, read by the upload's own parser
+    (formats._cucumber_feature): a background is not one, and a scenario without a name or a line is left out.
+    Raises OSError or ValueError when there is no readable report."""
+    with open(path, "rb") as handle:
+        data = json.load(handle)
+    scenarios: List[Scenario] = []
+    for feature in data if isinstance(data, list) else []:
+        if not isinstance(feature, dict) or "elements" not in feature:
+            continue
+        parsed, lines = ParsedFile(path=str(path)), []  # type: ParsedFile, List[Optional[int]]
+        formats._cucumber_feature(feature, parsed, lines)
+        scenarios.extend(Scenario(row["suite"], row["class_name"], row["name"], line)
+                         for row, line in zip(parsed.results, lines) if line is not None)
+    return scenarios
+
+
+def rerun_text(scenarios: Sequence[Scenario]) -> str:
+    """One `uri:line[:line…]` entry per feature file, in first-seen order: the format cucumber-js, cucumber-jvm and
+    Ruby Cucumber all read."""
+    lines: Dict[str, List[int]] = {}
+    for scenario in scenarios:
+        lines.setdefault(scenario.uri, []).append(scenario.line)
+    return "".join(f"{uri}:{':'.join(str(n) for n in sorted(set(found)))}\n" for uri, found in lines.items())
+
+
+def write_rerun(path, scenarios: Sequence[Scenario]) -> None:
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(rerun_text(scenarios))
+
+
+def _test_key(test: dict) -> Tuple[str, str]:
+    return str(test.get("class_name") or "").replace("\\", "/"), str(test.get("name") or "")
+
+
+def split(tests: Sequence[dict], scenarios: Sequence[Scenario]) -> Tuple[List[Scenario], List[Scenario], List[dict]]:
+    """(stage 1, stage 2, suggested tests not among the scenarios). Every scenario lands in exactly one stage, in
+    report order. A suggested test matches on (class_name, name): for Cucumber, the feature's uri and the scenario's
+    name, so the rows of an outline that share its name go with it."""
+    wanted = {_test_key(test) for test in tests}
+    first = [s for s in scenarios if s.key in wanted]
+    rest = [s for s in scenarios if s.key not in wanted]
+    found = {s.key for s in first}
+    return first, rest, [test for test in tests if _test_key(test) not in found]

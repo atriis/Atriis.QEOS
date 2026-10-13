@@ -122,7 +122,9 @@ def _parse_cucumber_file(path: str, parsed: ParsedFile) -> ParsedFile:
     return parsed
 
 
-def _cucumber_feature(feature: dict, parsed: ParsedFile) -> None:
+def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] = None) -> None:
+    """The feature's scenarios (and outline rows) as results. With `lines`, each result's scenario line too (an int,
+    or None), in step with parsed.results: run-impact's discovery reads a dry run through this parser."""
     suite = str(feature.get("name") or "")
     # Windows runners report "tests\features\a.feature"; the key must not depend on the OS (ADR-023)
     uri = str(feature.get("uri") or "").replace("\\", "/")
@@ -177,6 +179,9 @@ def _cucumber_feature(feature: dict, parsed: ParsedFile) -> None:
                     entry["line"] = line
                 row["failed_step"] = entry
         parsed.results.append(row)
+        if lines is not None:
+            line = element.get("line")
+            lines.append(line if isinstance(line, int) and not isinstance(line, bool) and line > 0 else None)
 
 
 # --- Playwright JSON reporter --------------------------------------------------
