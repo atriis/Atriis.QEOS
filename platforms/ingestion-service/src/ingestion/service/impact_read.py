@@ -25,9 +25,11 @@ def run_impact(db: Session, run: Run) -> dict:
     outcome = None
     if row.evaluated_at is not None:
         outcome = {"evaluated_at": as_utc(row.evaluated_at), "caught": row.caught or [], "missed": row.missed or []}
+    # Derived, not stored: a subset run's suggestion keeps evaluated_at null for good (plan Ruling 3)
+    evaluation = "not_evaluated" if not run.is_full else "evaluated" if row.evaluated_at is not None else "pending"
     return {"run_id": run.id, "state": row.suggested["state"], "changed_paths": paths, "replayed": row.replayed,
             "scored_at": as_utc(row.scored_at), "suggestion": {**row.suggested, "model_version": row.model_version},
-            "outcome": outcome}
+            "outcome": outcome, "evaluation": evaluation}
 
 
 def _suggested_count(db: Session):
@@ -44,7 +46,8 @@ def accuracy(db: Session, project_id: int, since: datetime, days: int) -> dict:
         select(RunImpact.run_id, RunImpact.replayed, RunImpact.caught, RunImpact.missed, _suggested_count(db),
                Run.started_at, Run.branch)
         .join(Run, Run.id == RunImpact.run_id)
-        .where(Run.project_id == project_id, Run.started_at >= since, RunImpact.evaluated_at.is_not(None))
+        .where(Run.project_id == project_id, Run.started_at >= since, RunImpact.evaluated_at.is_not(None),
+               Run.is_full)  # an outcome on a subset run (none is written since migration 020) never counts
         .order_by(Run.started_at.desc(), Run.id.desc())
     ).all()
     parts = {flag: {"runs": 0, "caught": 0, "missed": 0, "suggested": 0} for flag in (False, True)}

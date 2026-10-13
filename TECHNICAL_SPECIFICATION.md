@@ -138,7 +138,9 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   apart, with at most 50 misses and their total; and
   `GET /projects/{id}/runs/{run_id}/impact` reads the suggestion stored with a
   run at upload (scored before its results), its changed paths and its outcome
-  (`ok`, `not_enough_history`, `no_change_data` or `not_scored`).
+  (`ok`, `not_enough_history`, `no_change_data` or `not_scored`). Its `evaluation` is `not_evaluated` for a
+  run of only the suggested tests (`scope = impact-subset`), which the statistics, the outcome evaluation and
+  the accuracy figure leave out.
 - **Report**: `POST /analytics/report` with sections summary, failure_causes,
   regressions, tests, duration over a period (ADR-026; the dashboard joins
   test-management's case areas for "by area" and coverage).

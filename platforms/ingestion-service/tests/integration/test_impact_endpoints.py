@@ -69,7 +69,7 @@ def test_a_run_without_changed_files_has_no_change_data(client, auth, viewer, se
     response = client.get(run_url(run.id), headers=auth())
     assert response.status_code == 200
     assert response.json() == {"run_id": run.id, "state": "no_change_data", "changed_paths": [], "replayed": False,
-                               "scored_at": None, "suggestion": None, "outcome": None}
+                               "scored_at": None, "suggestion": None, "outcome": None, "evaluation": None}
 
 
 def test_changed_files_without_a_stored_suggestion_are_not_scored(client, auth, viewer, seed_change_run):

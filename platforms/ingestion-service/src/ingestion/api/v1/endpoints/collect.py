@@ -82,7 +82,8 @@ def collect_run(
         if run.failed + run.errored:
             # After the response: the collector never waits on Slack or Teams
             background.add_task(notification_service.notify_run, sessionmaker(bind=db.get_bind()), run.id)
-        if run.changed_files:
+        # A run of only the suggested tests is never evaluated (spec 2026-10-13 §3.1)
+        if run.changed_files and run.is_full:
             # After the response, from the stored results: the outcome of the suggestion stored with the run (spec
             # §3.4). Never in the request: finding the new failures takes 120-585 ms per run
             background.add_task(impact_service.evaluate_run, sessionmaker(bind=db.get_bind()), run.id)

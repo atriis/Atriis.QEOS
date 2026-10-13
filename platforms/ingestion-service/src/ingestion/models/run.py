@@ -2,6 +2,7 @@ from sqlalchemy import (
     JSON, Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, false,
     text,
 )
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.sql import func
 
 from src.ingestion.db.base import Base
@@ -59,6 +60,13 @@ class Run(Base):
     deletions = Column(Integer, nullable=True)
     changes_truncated = Column(Boolean, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    @hybrid_property
+    def is_full(self):
+        """A full run, not one of only the suggested tests: `run.is_full` in Python, `Run.is_full` in a query. Only
+        full runs count in the impact statistics, the outcome evaluation and the accuracy figure (spec 2026-10-13
+        §3.1)."""
+        return self.scope == FULL_SCOPE
 
     __table_args__ = (
         UniqueConstraint("project_id", "idempotency_key", name="uq_test_runs_project_idempotency"),

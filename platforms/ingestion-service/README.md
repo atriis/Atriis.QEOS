@@ -347,6 +347,12 @@ coverage instrumentation, no AI: co-failure statistics on PostgreSQL.
   `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`) and anything under `dist/`, `build/`, `vendor/` or `node_modules/`
   are not units. A change of more than 300 distinct paths counts at folder level only. Runs whose change list the
   collector truncated are left out.
+- **Runs of only the suggested tests** (`scope = impact-subset`: collector `run-impact --suggested-only`, or a
+  `--fail-fast` stop) are left out of the statistics, the 20-run history count and replay. Their results still
+  count everywhere else:
+  - as earlier outcomes for later runs;
+  - *failing on this branch*;
+  - trends, flaky detection and the Report.
 - **Tables** (migration 018), rebuilt per project in one transaction by `python -m src.ingestion.jobs.impact_rollup`
   (one pass on start, then every 24 hours with `--loop`, lock 7351004, heartbeat `impact_rollup`; the
   `impact-rollup` compose service runs it, and the JobStale alert fires after two days without a success; each pass
@@ -389,6 +395,9 @@ the upload: no suggestion is stored, or the outcome stays empty (`evaluated_at` 
 collector upload split into parts is one run per part, so each part gets its own suggestion and outcome. A replayed
 upload (same Idempotency-Key) is not scored again.
 
+A run of only the suggested tests has its suggestion stored, but it is never evaluated, neither after the
+response nor by the nightly pass, which selects full runs only. It could not show what the suggestion missed.
+
 The suggestion lists:
 
 - statistical suggestions, at most 50: `changed_runs ≥ 3`, `new_failures ≥ 2` and `lift ≥ 2`, ordered by
@@ -422,9 +431,9 @@ long as a nightly pass); run it once, off hours.
 
 | Endpoint | Returns |
 |---|---|
-| `GET /api/v1/projects/{id}/runs/{run_id}/impact` | `state`: `ok`, `not_enough_history`, `no_change_data` (no changed files uploaded) or `not_scored` (changed files, but uploaded before test impact or scoring failed); `changed_paths`; `replayed`; `scored_at`; `suggestion` (`history_runs`, `needed_runs`, `statistical_total`, `model_version`, `tests` with `kind` and `evidence`); `outcome` (`caught`, `missed`, `evaluated_at`), null until written. A run of another project is a 404 |
+| `GET /api/v1/projects/{id}/runs/{run_id}/impact` | `state`: `ok`, `not_enough_history`, `no_change_data` (no changed files uploaded) or `not_scored` (changed files, but uploaded before test impact or scoring failed); `changed_paths`; `replayed`; `scored_at`; `suggestion` (`history_runs`, `needed_runs`, `statistical_total`, `model_version`, `tests` with `kind` and `evidence`); `outcome` (`caught`, `missed`, `evaluated_at`), null until written; `evaluation`: `pending`, `evaluated` or `not_evaluated` (the run ran only the suggested tests), null without a stored suggestion. A run of another project is a 404 |
 | `POST /api/v1/projects/{id}/analytics/impact` | Body `{"changed_paths": [...], "branch": "main" or null}`: the upload's scoring for any change, as of now, reading only the change's unit hashes. 1 to 5,000 paths of 1 to 1,000 characters, no NUL, branch at most 255, no other field; else 422. It has the same one total 2 s budget as at upload (each PostgreSQL statement capped at the time left); running out answers 503 `{"code": "impact_timeout", "message": ...}` |
-| `GET /api/v1/projects/{id}/analytics/impact-accuracy?days=30` | `days` 7, 14 or 30 (else 422, checked after the role): over the runs started in those days whose outcome is written, `caught`, `missed`, `rate` (`caught / (caught + missed)`, null without new failures), `avg_suggested` (suggested tests per run, null without runs: suggesting every test would catch everything, and this shows it), `includes_replayed`, the `live` and `replayed` parts (`runs`, `caught`, `missed`, `suggested`), and the `misses` (newest run first, at most 50; `misses_total` counts them all) |
+| `GET /api/v1/projects/{id}/analytics/impact-accuracy?days=30` | `days` 7, 14 or 30 (else 422, checked after the role): over the runs started in those days whose outcome is written (full runs only), `caught`, `missed`, `rate` (`caught / (caught + missed)`, null without new failures), `avg_suggested` (suggested tests per run, null without runs: suggesting every test would catch everything, and this shows it), `includes_replayed`, the `live` and `replayed` parts (`runs`, `caught`, `missed`, `suggested`), and the `misses` (newest run first, at most 50; `misses_total` counts them all) |
 
 The gateway routes them with the other `/projects/{id}/runs` and `/projects/{id}/analytics` paths; a 5,000-path body
 of full-length paths (about 5 MB) stays under its 10 MB body cap.

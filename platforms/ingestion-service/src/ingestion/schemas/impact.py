@@ -52,6 +52,8 @@ class RunImpactOut(BaseModel):
     scored_at: Optional[datetime] = None
     suggestion: Optional[SuggestionOut] = None
     outcome: Optional[OutcomeOut] = None
+    # not_evaluated: the run ran only the suggested tests (spec 2026-10-13 §3.1); None without a stored suggestion
+    evaluation: Optional[Literal["pending", "evaluated", "not_evaluated"]] = None
 
 
 class AccuracyPartOut(BaseModel):

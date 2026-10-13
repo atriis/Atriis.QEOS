@@ -37,11 +37,12 @@ MAX_PENDING_PER_PASS = 500  # outcomes one nightly pass writes at most, oldest f
 
 
 def history_runs(db: Session, project_id: int, until: datetime) -> int:
-    """Runs with changed files, not truncated, started in the 90 days before `until` ("not enough history" below 20)."""
+    """Full runs with changed files, not truncated, started in the 90 days before `until` ("not enough history" below
+    20). Runs of only the suggested tests do not count (spec 2026-10-13 §3.1)."""
     return db.execute(
         select(func.count()).select_from(Run).where(
             Run.project_id == project_id, Run.started_at >= until - timedelta(days=WINDOW_DAYS), Run.started_at < until,
-            Run.changed_files > 0, or_(Run.changes_truncated.is_(None), Run.changes_truncated.is_(False)))
+            Run.changed_files > 0, Run.is_full, or_(Run.changes_truncated.is_(None), Run.changes_truncated.is_(False)))
     ).scalar_one()
 
 
@@ -256,7 +257,8 @@ def record_outcome(db: Session, run_id: int, suggested: dict, newly: Sequence[Im
 def evaluate(db: Session, run_id: int, now: datetime) -> bool:
     """The run's new failures against its stored suggestion, committed. True when this call wrote the outcome."""
     row, run = db.get(RunImpact, run_id), db.get(Run, run_id)
-    if row is None or run is None or row.evaluated_at is not None:
+    # A run of only the suggested tests cannot show what the suggestion missed: never evaluated (spec 2026-10-13 §3.1)
+    if row is None or run is None or row.evaluated_at is not None or not run.is_full:
         return False
     suggested, excluded = row.suggested, live_excluded(db, run.project_id)
     written = record_outcome(db, run_id, suggested, newly_failed_in_run(db, run, excluded), now)
@@ -280,7 +282,9 @@ def evaluate_pending(db: Session, now: datetime) -> int:
     MAX_PENDING_PER_PASS (a backlog is worked off over several passes, never one unbounded pass); a run that fails is
     logged and left for the next pass. Returns the outcomes written."""
     run_ids = [run_id for (run_id,) in db.execute(
-        select(RunImpact.run_id).where(RunImpact.evaluated_at.is_(None), RunImpact.scored_at < now - PENDING_AFTER)
+        select(RunImpact.run_id).join(Run, Run.id == RunImpact.run_id)
+        # Full runs only: subset suggestions, never evaluated, must not take the pass's places (plan Ruling 3)
+        .where(RunImpact.evaluated_at.is_(None), RunImpact.scored_at < now - PENDING_AFTER, Run.is_full)
         .order_by(RunImpact.scored_at, RunImpact.run_id).limit(MAX_PENDING_PER_PASS))]
     written = 0
     for run_id in run_ids:

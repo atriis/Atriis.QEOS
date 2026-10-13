@@ -16,6 +16,7 @@ from src.ingestion.core.config import settings
 from src.ingestion.db.base import Base
 from src.ingestion.db.session import get_db
 from src.ingestion.models import ApiKey, Run, RunResult  # noqa: F401  registers tables
+from src.ingestion.models.run import FULL_SCOPE
 
 # A database file of this run's own: two runs of the suite at once (two terminals, two agents) used to share
 # ./test.db and drop each other's tables mid-test
@@ -173,12 +174,14 @@ def seed_run(db, make_key):
     keys = {}
 
     def _seed(started_at, results=(("t1", "passed", 10),), project_id=1, branch="main", environment=None,
-              ci_provider="local", ci_run_url=None, duration_ms=1000, commit_sha=None):
+              ci_provider="local", ci_run_url=None, duration_ms=1000, commit_sha=None, scope=FULL_SCOPE,
+              stages=None):
         if project_id not in keys:
             keys[project_id] = make_key(project_id=project_id)[0]
         counts = Counter(r[1] for r in results)
         run = Run(project_id=project_id, api_key_id=keys[project_id].id, request_hash="h", ci_provider=ci_provider,
                   ci_run_url=ci_run_url, branch=branch, environment=environment, commit_sha=commit_sha,
+                  scope=scope, stages=stages,
                   started_at=started_at, finished_at=started_at + timedelta(seconds=1), duration_ms=duration_ms,
                   total=len(results), passed=counts["passed"], failed=counts["failed"],
                   skipped=counts["skipped"], errored=counts["errored"], created_at=started_at)

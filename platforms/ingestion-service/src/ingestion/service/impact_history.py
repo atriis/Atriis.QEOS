@@ -173,10 +173,12 @@ def newly_failed_bulk(db: Session, runs: List[ChangeRun], excluded: Set[str]) ->
 
 def change_runs(db: Session, project_id: int, start: datetime, end: datetime, *,
                 include_truncated: bool = False) -> List[ChangeRun]:
-    """Runs started in [start, end) with at least one changed file, oldest first. A run whose change list the
+    """Full runs started in [start, end) with at least one changed file, oldest first; runs of only the suggested
+    tests are never in the statistics or replayed (spec 2026-10-13 §3.1). A run whose change list the
     collector truncated is left out of the statistics (spec §3.1) unless `include_truncated` (replay scores it, as an
     upload does; plan Ruling 16)."""
-    filters = [Run.project_id == project_id, Run.started_at >= start, Run.started_at < end, Run.changed_files > 0]
+    filters = [Run.project_id == project_id, Run.started_at >= start, Run.started_at < end, Run.changed_files > 0,
+               Run.is_full]
     if not include_truncated:
         filters.append(or_(Run.changes_truncated.is_(None), Run.changes_truncated.is_(False)))
     runs = db.execute(
