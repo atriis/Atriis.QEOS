@@ -54,6 +54,12 @@ class Stage:
     def failed(self) -> int:
         return sum(1 for row in self.report.results if row["status"] in FAILING)
 
+    @property
+    def broke(self) -> bool:
+        """A failed or errored scenario, or a command that exited non-zero without a report (it crashed): what
+        --fail-fast stops on. A non-zero exit alone, with a report, is not (undefined steps, say)."""
+        return self.failed > 0 or (self.returncode != 0 and not self.report.results)
+
 
 def run_command(argv: Sequence[str]) -> int:
     """The command's exit code. The program is looked up with shutil.which, so a Windows runner finds npx.cmd or
@@ -217,6 +223,11 @@ def _run_stages(args, say, command, flavour, cwd, found: impact.Suggestion,
         say(f"the stages leave out the command's own feature paths ({' '.join(removed)}): the rerun files choose")
     _check_selection(steps, narrowed, first)
     stages = [steps.stage(1, "suggested", narrowed, first)]
+    if args.suggested_only:
+        return stages, SUBSET, None, missing
+    if args.fail_fast and stages[0].broke:
+        say("stage 1 failed: stopping before stage 2 (--fail-fast)")
+        return stages, SUBSET, 1, missing
     if rest:  # every scenario suggested: one stage, still the full suite (plan Ruling 9)
         stages.append(steps.stage(2, "rest", narrowed, rest))
     return stages, FULL, None, missing

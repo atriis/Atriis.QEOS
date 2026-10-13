@@ -46,6 +46,8 @@ def cucumber(tmp_path, monkeypatch):
     monkeypatch.setenv("FAKE_CUCUMBER_LOG", str(log))
     monkeypatch.delenv("FAKE_CUCUMBER_EXTRA", raising=False)
     monkeypatch.delenv("FAKE_CUCUMBER_WINDOWS", raising=False)
+    monkeypatch.delenv("FAKE_CUCUMBER_CRASH", raising=False)
+    monkeypatch.delenv("FAKE_CUCUMBER_EXIT", raising=False)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(impact, "collect_changes", lambda env, commit: CHANGES)
     monkeypatch.setattr(cli, "collect_changes", lambda env, commit: CHANGES)
@@ -368,3 +370,158 @@ def test_cmd_exe_is_not_a_concern_off_windows_or_for_an_exe(monkeypatch):
     monkeypatch.setattr(run_impact, "_WINDOWS", True)
     monkeypatch.setattr(run_impact.shutil, "which", lambda name: "C:/tools/cucumber.exe")
     run_impact.check_paths("ruby", ["cucumber"], "C:/ci/50%off")
+
+
+# --- the modes (Task 17) -------------------------------------------------------------------
+
+
+def test_fail_fast_stops_after_a_failing_stage_1_and_uploads_a_subset(platform, cucumber, capsys):
+    platform.reply(200, suggested(PAYS_10))
+    platform.reply(201, RECEIPT)
+    assert run(command("--fail-fast"), env_for(platform)) == 1
+    assert [c["dry_run"] for c in cucumber()] == [True, True, False]  # stage 2 never started
+    [body] = uploads(platform)
+    assert body["run"]["scope"] == "impact-subset"
+    assert body["run"]["stages"]["stopped_after_stage"] == 1
+    assert [s["name"] for s in body["run"]["stages"]["stages"]] == ["suggested"]
+    assert len(body["results"]) == 1
+    assert "stage 1 failed: stopping before stage 2 (--fail-fast)" in capsys.readouterr().err
+
+
+def test_fail_fast_with_a_passing_stage_1_runs_the_rest(platform, cucumber):
+    platform.reply(200, suggested(PAYS_20))
+    platform.reply(201, RECEIPT)
+    assert run(command("--fail-fast"), env_for(platform)) == 1  # Pays 10 fails in stage 2
+    assert len(cucumber()) == 4
+    run_ = uploads(platform)[0]["run"]
+    assert run_["scope"] == "full" and "stopped_after_stage" not in run_["stages"]
+
+
+def test_fail_fast_counts_a_stage_that_crashed_without_a_report_as_failed(platform, cucumber, monkeypatch):
+    """The crashed-stage ruling: a non-zero exit with no report is a failure, so stage 2 does not start."""
+    monkeypatch.setenv("FAKE_CUCUMBER_CRASH", "1")
+    platform.reply(200, suggested(PAYS_20))
+    assert run(command("--fail-fast"), env_for(platform)) == 3  # the crashed command's own exit code
+    assert [c["dry_run"] for c in cucumber()] == [True, True, False]
+    assert uploads(platform) == []  # no results to upload
+
+
+def test_fail_fast_does_not_stop_on_a_non_zero_exit_with_a_clean_report(platform, cucumber, monkeypatch):
+    """Undefined steps make cucumber-js exit 1 with no failed scenario: not a stage-1 failure (plan Ruling 11)."""
+    monkeypatch.setenv("FAKE_CUCUMBER_EXIT", "1")
+    platform.reply(200, suggested(PAYS_20))
+    platform.reply(201, RECEIPT)
+    assert run(command("--fail-fast"), env_for(platform)) == 1
+    assert [c["dry_run"] for c in cucumber()] == [True, True, False, False]
+    assert uploads(platform)[0]["run"]["scope"] == "full"
+
+
+def test_without_fail_fast_a_crashed_stage_1_still_runs_the_rest(platform, cucumber, monkeypatch):
+    monkeypatch.setenv("FAKE_CUCUMBER_CRASH", "1")
+    platform.reply(200, suggested(PAYS_20))
+    assert run(command(), env_for(platform)) == 3
+    assert [c["dry_run"] for c in cucumber()] == [True, True, False, False]
+
+
+def test_suggested_only_runs_stage_1_as_a_subset(platform, cucumber):
+    platform.reply(200, suggested(PAYS_20))
+    platform.reply(201, RECEIPT)
+    assert run(command("--suggested-only"), env_for(platform)) == 0
+    assert [c["dry_run"] for c in cucumber()] == [True, True, False]
+    run_ = uploads(platform)[0]["run"]
+    assert run_["scope"] == "impact-subset"
+    assert [s["name"] for s in run_["stages"]["stages"]] == ["suggested"]
+    assert "stopped_after_stage" not in run_["stages"]
+
+
+@pytest.mark.parametrize("status, answer", [
+    (200, suggested()),                                                    # nothing to suggest (3)
+    (503, {"detail": {"code": "impact_timeout", "message": "slow"}}),     # QEOS out of time (4)
+    (403, {"detail": {"code": "impact_not_allowed", "message": "no"}}),   # an upload-only key (2)
+])
+def test_suggested_only_falls_back_to_the_full_suite(platform, cucumber, capsys, status, answer):
+    platform.reply(status, answer)
+    platform.reply(201, RECEIPT)
+    assert run(command("--suggested-only"), env_for(platform)) == 1  # the full suite's Pays 10 fails
+    calls = cucumber()
+    assert [c["dry_run"] for c in calls] == [False] and len(calls[0]["ran"]) == 5
+    run_ = uploads(platform)[0]["run"]
+    assert run_["scope"] == "full" and [s["name"] for s in run_["stages"]["stages"]] == ["all"]
+    assert "running the full suite instead (--suggested-only falls back to it)" in capsys.readouterr().err
+
+
+def test_suggested_only_without_a_suggested_scenario_falls_back_too(platform, cucumber):
+    platform.reply(200, suggested(GONE))
+    platform.reply(201, RECEIPT)
+    assert run(command("--suggested-only"), env_for(platform)) == 1
+    assert [c["dry_run"] for c in cucumber()] == [True, False]
+    assert uploads(platform)[0]["run"]["scope"] == "full"
+
+
+@pytest.mark.parametrize("status, answer, code", [
+    (200, suggested(), 3),
+    (503, {"detail": "busy"}, 4),
+    (401, {"detail": "Invalid API key"}, 2),
+    (403, {"detail": {"code": "impact_not_allowed", "message": "no"}}, 2),
+])
+def test_no_fallback_runs_nothing_and_exits_as_impact_would(platform, cucumber, status, answer, code):
+    platform.reply(status, answer)
+    assert run(command("--suggested-only", "--no-fallback"), env_for(platform)) == code
+    assert cucumber() == [] and uploads(platform) == []
+
+
+def test_no_fallback_when_no_suggested_scenario_is_discovered_exits_3(platform, cucumber):
+    platform.reply(200, suggested(GONE))
+    assert run(command("--suggested-only", "--no-fallback"), env_for(platform)) == 3
+    assert [c["dry_run"] for c in cucumber()] == [True] and uploads(platform) == []
+
+
+def test_no_fallback_without_suggested_only_is_a_usage_error(platform, cucumber, capsys):
+    assert run(command("--no-fallback"), env_for(platform)) == 2
+    assert cucumber() == [] and platform.requests == []
+    assert "--no-fallback only goes with --suggested-only" in capsys.readouterr().err
+
+
+def test_the_gate_judges_the_uploaded_run(platform, cucumber, capsys):
+    platform.reply(200, suggested(PAYS_10))
+    platform.reply(201, {**RECEIPT, "quarantined": 1, "blocking": 0})
+    assert run(command("--gate"), env_for(platform)) == 0  # the tests exited 1; the only failure is quarantined
+    assert "gate passed: 1 failure(s) in quarantine, not counted" in capsys.readouterr().err
+
+
+def test_the_gate_fails_on_failures_outside_quarantine(platform, cucumber):
+    platform.reply(200, suggested(PAYS_20))
+    platform.reply(201, {**RECEIPT, "blocking": 1})
+    assert run(command("--gate", "--suggested-only"), env_for(platform)) == 1  # Pays 20 passed; the gate decides
+
+
+def test_the_gate_is_read_from_the_environment(platform, cucumber):
+    platform.reply(200, suggested(PAYS_10))
+    platform.reply(201, {**RECEIPT, "quarantined": 1, "blocking": 0})
+    assert run(command(), env_for(platform, QEOS_GATE="true")) == 0
+
+
+def test_the_gate_fails_closed_without_an_upload(platform, cucumber, capsys):
+    platform.reply(200, suggested(PAYS_20))
+    platform.reply(401, {"detail": "Invalid API key"})
+    assert run(command("--gate", "--suggested-only"), env_for(platform)) == 1
+    assert "gate cannot pass without an upload" in capsys.readouterr().err
+
+
+def test_a_discarded_run_is_gated_on_its_local_results(platform, cucumber, capsys):
+    platform.reply(200, suggested(PAYS_20))
+    platform.reply(202, {"discarded": True, "reason": "manual runs are off"})
+    assert run(command("--gate", "--suggested-only"), env_for(platform)) == 0  # Pays 20 passed
+    assert "gate: decided on local results (run not collected)" in capsys.readouterr().err
+
+
+def test_without_the_gate_a_failed_upload_keeps_the_tests_exit_code(platform, cucumber):
+    platform.reply(200, suggested(PAYS_20))
+    platform.reply(401, {"detail": "Invalid API key"})
+    assert run(command("--suggested-only"), env_for(platform)) == 0  # Pays 20 passed
+
+
+def test_fail_on_error_fails_a_passing_run_whose_upload_failed(platform, cucumber):
+    platform.reply(200, suggested(PAYS_20))
+    platform.reply(401, {"detail": "Invalid API key"})
+    assert run(command("--suggested-only", "--fail-on-error"), env_for(platform)) == 1

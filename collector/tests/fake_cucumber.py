@@ -4,9 +4,11 @@ It reads a scenario catalogue from FAKE_CUCUMBER_SPEC and understands the argume
 (plan Ruling 7). It writes a Cucumber JSON report and exits 1 when a scenario it ran failed. When FAKE_CUCUMBER_LOG is
 set, it appends one JSON line per invocation: {"argv", "dry_run", "ran", "rerun"}.
 
-Two more variables:
+More variables:
 - FAKE_CUCUMBER_EXTRA names a feature uri it always adds to a rerun selection, as a profile's `paths` would;
-- FAKE_CUCUMBER_WINDOWS=1 reports uris with backslashes, as a Windows runner does."""
+- FAKE_CUCUMBER_WINDOWS=1 reports uris with backslashes, as a Windows runner does;
+- FAKE_CUCUMBER_CRASH=1 makes every real (not dry) run exit 3 without a report, as a crashed runner does;
+- FAKE_CUCUMBER_EXIT=N makes every real run that has no failure exit N, with its report (undefined steps, say)."""
 import json
 import os
 import sys
@@ -52,6 +54,7 @@ def main(argv):
         elif os.path.basename(arg).startswith("@"):  # cucumber-js 12: a relative path to a file named @...
             rerun, wanted = read_rerun(os.path.join(os.getcwd(), arg))
         i += 1
+    crash = not dry_run and os.environ.get("FAKE_CUCUMBER_CRASH") == "1"
     extra = os.environ.get("FAKE_CUCUMBER_EXTRA")
     windows = os.environ.get("FAKE_CUCUMBER_WINDOWS") == "1"
     ran, features, failed = [], [], False
@@ -73,14 +76,18 @@ def main(argv):
         if elements:
             uri = feature["uri"].replace("/", "\\") if windows else feature["uri"]
             features.append({"uri": uri, "name": feature["name"], "keyword": "Feature", "elements": elements})
-    if report:
+    if report and not crash:
         with open(report, "w", encoding="utf-8") as handle:
             json.dump(features, handle)
     log = os.environ.get("FAKE_CUCUMBER_LOG")
     if log:
         with open(log, "a", encoding="utf-8") as handle:
             handle.write(json.dumps({"argv": argv, "dry_run": dry_run, "ran": ran, "rerun": rerun}) + "\n")
-    return 1 if failed else 0
+    if crash:
+        return 3
+    if failed:
+        return 1
+    return 0 if dry_run else int(os.environ.get("FAKE_CUCUMBER_EXIT", "0"))
 
 
 if __name__ == "__main__":

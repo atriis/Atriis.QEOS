@@ -371,6 +371,27 @@ rerun file's. Such paths come from:
 So before any test runs, a dry run of stage 1 must select exactly the planned scenarios. Otherwise run-impact runs
 nothing and exits 2, saying why. Select features with tags instead.
 
+**Modes.**
+- **`--fail-fast`:** when stage 1 fails, stop before stage 2. Stage 1 fails when a suggested scenario fails, or when
+  the command exits non-zero without writing a report (it crashed). The run is uploaded as suggested tests only,
+  stopped after stage 1.
+- **`--suggested-only`:** run stage 1 only. The run is uploaded as suggested tests only, and it never counts in the
+  impact statistics or the accuracy figure. When there is no suggestion (nothing suggested, not enough history, none
+  of the suggested tests among the command's scenarios, or QEOS cannot score the change), the full suite runs
+  instead and the log says why.
+- **`--no-fallback`** (with `--suggested-only`): in that case run nothing, upload nothing, and exit 2, 3 or 4 as
+  `impact` would. It is the only way run-impact ends without running tests because of scoring.
+- **`--gate`:** judges the uploaded run, as for `upload`. It exits 1 on failures outside quarantine, and 1 when
+  nothing could be uploaded.
+
+| Exit | When |
+|---|---|
+| The test command's | Without `--gate`: the first failing stage's exit code, else 0 |
+| 0 / 1 | With `--gate`: the gate's verdict on the uploaded run; 1 when nothing was uploaded |
+| 1 | `--fail-on-error`, the tests passed and the upload failed |
+| 2 | Before any test runs: no command, an unknown Cucumber (pass `--cucumber`), a command run-impact cannot narrow, a dry run without a JSON report, no URL or key, a working directory cmd.exe would change |
+| 2 / 3 / 4 | `--suggested-only --no-fallback` with nothing to run: as `impact` |
+
 **Working files** live in `.qeos-impact/<random>/` and are removed at the end. On first use run-impact writes
 `.qeos-impact/.gitignore` (`*`), so git never lists them. The upload options are those of `upload` (`--url`,
 `--environment`, `--component`, `--spool`, …).
