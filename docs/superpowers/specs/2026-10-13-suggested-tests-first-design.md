@@ -104,3 +104,26 @@ Three phases, each ending in a gate (all suites, smoke) and a push:
 Builds suggested-tests-first execution in the customer's CI, using the existing scoring. Stays out: other
 runner formats (follow-ups), skipping tests by default, executing tests on QEOS infrastructure (ADR-025),
 the team run queue and local runner (v2 roadmap). No TARGET technology is introduced.
+
+## 9. Amendments from the implementation plan (2026-10-13)
+
+The plan's 23 rulings (`docs/superpowers/plans/2026-10-13-suggested-tests-first.md`) replace the text above
+where they differ. The main ones:
+
+- The collector scores through a new `POST /api/v1/collect/impact` authenticated by the project API key
+  (`/analytics/impact` needs a person's sign-in). **Each API key has a "can read test suggestions"
+  permission, off by default (user's decision 2026-10-13)**: owners and admins set it when creating a key or
+  later; without it the endpoint answers 403 and the collector exits 2 with that explanation. Existing keys
+  stay upload-only.
+- Exit codes: 0 when any test is listed (a "not enough history" suggestion that still lists labelled tests is
+  0); 3 when nothing is listed or there is no change data; 4 for unreachable, 429, 5xx or timeout; 2 for
+  configuration problems (401, 403, 404, TLS).
+- `not_evaluated` is derived from the run's `scope`, returned as an `evaluation` field; subset runs are never
+  evaluated and are left out of the statistics, `history_runs`, outcomes and accuracy, while their results
+  still count as history, *failing on this branch*, trends and flaky detection.
+- One Cucumber mechanism for cucumber-js, cucumber-jvm and Ruby: a JSON dry run, then rerun files of
+  `uri:line`, with per-flavour arguments (`--cucumber js|jvm|ruby` when detection fails). A stage-1 dry run
+  must select exactly the plan before any test runs. No stage runs with an empty rerun file.
+- The request hash leaves out `scope` and `stages` at their defaults, so older uploads still replay.
+- The weekly summary gains a count line for subset runs (it lists no individual runs).
+
