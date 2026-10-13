@@ -157,3 +157,22 @@ def test_junit_results_have_no_failed_step():
     from pathlib import Path
     parsed = parse_file(str(Path(__file__).parent / "fixtures" / "pytest.xml"))
     assert parsed.results and all("failed_step" not in r for r in parsed.results)
+
+
+def test_whitespace_only_step_name_gives_no_failed_step(tmp_path):
+    rows = parse_cucumber(tmp_path, steps=[step("", " ", 2, "failed", "e")])
+    assert "failed_step" not in rows[0]
+
+
+def test_implausible_line_numbers_are_dropped_but_text_is_kept(tmp_path):
+    for bad in (True, 0, 2_000_000, 3.5):
+        rows = parse_cucumber(tmp_path, steps=[step("When ", "x", bad, "failed", "e")])
+        assert rows[0]["failed_step"] == {"text": "When x"}, bad
+
+
+def test_outline_row_failure_reports_the_template_line(tmp_path):
+    # cucumber expands an outline row into a scenario whose steps report the template step's line
+    elements = [{"type": "scenario", "keyword": "Scenario Outline", "name": "S row 2", "line": 12,
+                 "steps": [step("When ", "I pay 5", 9, "failed", "e")]}]
+    rows = parse_file(write(tmp_path, [{"uri": "f.feature", "name": "F", "elements": elements}])).results
+    assert rows[0]["failed_step"] == {"text": "When I pay 5", "line": 9}

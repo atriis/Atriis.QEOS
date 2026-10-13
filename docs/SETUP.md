@@ -1682,7 +1682,7 @@ The gateway always joins a Docker network fixed at `172.30.1.0/24`, with monitor
 | SSO button shows, sign-in answers 503 | auth-service lacks `GOOGLE_CLIENT_ID` / `AZURE_CLIENT_ID` + `AZURE_ALLOWED_TENANTS`: use the override file ([3.8](#38-single-sign-on-google-and-microsoft)). |
 | Collector exits 2 | A configuration problem (URL, key, no matching files, `http://` URL, bad `--ca-file`, invalid `--trigger`). `qeos-collector check` names it. |
 | My run doesn't appear in QEOS | Check Settings › Collection and the collector's `run not collected` line: the run looked manual and the project does not collect manual runs ([4.1.8a](#418a-manual-runs-and-the-run-trigger)). Pass `--trigger automatic` if it is not. |
-| `collector-action` fails with `has an empty revision (after @)` | collector-action 0.5.1 and earlier built its install URL from variables GitHub leaves empty inside reusable workflows. Use `@collector-v0.6.0` or later, or the floating `@collector-v0`. |
+| `collector-action` fails with `has an empty revision (after @)` | collector-action 0.5.1 and earlier built its install URL from variables GitHub leaves empty inside reusable workflows. Use `@collector-v0.5.2` or later, or the floating `@collector-v0`. |
 | Collector: certificate verify failed | Local stack: `--ca-file` with the gateway certificate. Private CA: `--ca-file` with that CA. |
 | Upload 401 | Wrong, revoked or missing key. On Azure, the secret is not mapped in `env:` (you see the literal `$(QEOS_API_KEY)`). |
 | CI build is green but no run arrives | `QEOS_URL` missing or unreachable (hosted runner → localhost, or a closed tunnel). By default the collector never fails the build; add `--fail-on-error` while you debug. |
