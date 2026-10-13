@@ -7,7 +7,7 @@ import { getHistory, getLatestResults, getTests } from "../api/analytics";
 import FailedStepTip from "../components/FailedStepTip";
 import LastResultPill from "../components/LastResultPill";
 import { featureDetailQuery } from "../lib/featureQueries";
-import { locateFailedStep, scenarioSteps, stepLines } from "../lib/failedStep";
+import { locateFailedStep, matchesStep, scenarioSteps, stepLines } from "../lib/failedStep";
 import ConfirmButton from "../components/ConfirmButton";
 import ErrorBanner from "../components/ErrorBanner";
 import GherkinBlock from "../components/GherkinBlock";
@@ -224,8 +224,10 @@ function CaseEditor() {
     const shown = stepLines(c.gherkin);
     const source = feature.data?.content;
     const scenarioLine = feature.data?.cases.find((fc) => fc.number === c.number)?.line ?? null;
-    const index = source && scenarioLine
-      ? locateFailedStep(scenarioSteps(source, scenarioLine), step)
+    const mapped = source && scenarioLine ? locateFailedStep(scenarioSteps(source, scenarioLine), step) : null;
+    // The file's steps must line up with the displayed ones; if not, trust the text alone
+    const index = mapped != null && shown[mapped] && matchesStep(shown[mapped].text, step.text)
+      ? mapped
       : locateFailedStep(shown, { text: step.text });
     return index != null && shown[index] ? shown[index].line : null;
   }, [c, latest.data, feature.data]);
@@ -293,7 +295,7 @@ function CaseEditor() {
           {imported ? (
             <>
               <h2>Gherkin</h2>
-              {key != null && <LastResultPill result={latest.data} />}
+              {key != null && latest.isSuccess && <LastResultPill result={latest.data} />}
               <GherkinBlock
                 text={c?.gherkin ?? ""}
                 failed={failedLine != null && latest.data

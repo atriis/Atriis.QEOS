@@ -24,21 +24,34 @@ export function stepLines(text: string, from = 1, to = Number.MAX_SAFE_INTEGER):
   return out;
 }
 
-/** The steps a scenario runs: its Background's (feature- or rule-level), then its own. */
+/** The trimmed lines, with doc-string fences and their contents blanked so they never read as structure. */
+function structure(source: string): string[] {
+  let fence: string | null = null;
+  return source.split(/\r?\n/).map((raw) => {
+    const t = raw.trim();
+    if (fence) { if (t.startsWith(fence)) fence = null; return ""; }
+    if (t.startsWith('"""') || t.startsWith("```")) { fence = t.slice(0, 3); return ""; }
+    return t;
+  });
+}
+
+/** The steps a scenario runs: the feature Background's, then its Rule's Background's, then its own. */
 export function scenarioSteps(source: string, scenarioLine: number): StepLine[] {
-  const lines = source.split(/\r?\n/).map((l) => l.trim());
-  // The Background in force: the last one before the scenario, unless a Rule opened after it.
-  let bgStart = 0;
+  const lines = structure(source);
+  let featureBg = 0;
+  let ruleBg = 0;
+  let inRule = false;
   for (let n = 1; n < scenarioLine && n <= lines.length; n++) {
-    if (isHeading(lines[n - 1], RULE)) bgStart = 0;
-    else if (isHeading(lines[n - 1], BACKGROUND)) bgStart = n;
+    const t = lines[n - 1];
+    if (isHeading(t, RULE)) { inRule = true; ruleBg = 0; }
+    else if (isHeading(t, BACKGROUND)) { if (inRule) ruleBg = n; else featureBg = n; }
   }
   const endBefore = (start: number) => {
     for (let n = start + 1; n <= lines.length; n++) if (isBoundary(lines[n - 1])) return n - 1;
     return lines.length;
   };
-  const bg = bgStart ? stepLines(source, bgStart, endBefore(bgStart)) : [];
-  return [...bg, ...stepLines(source, scenarioLine, endBefore(scenarioLine))];
+  const steps = (start: number) => (start ? stepLines(source, start, endBefore(start)) : []);
+  return [...steps(featureBg), ...steps(ruleBg), ...steps(scenarioLine)];
 }
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

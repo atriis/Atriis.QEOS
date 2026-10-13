@@ -60,7 +60,24 @@ test("handles CRLF", () => {
   expect(stepLines("Scenario: s\r\n  Given a\r\n  When b\r\n")).toEqual([{ line: 2, text: "Given a" }, { line: 3, text: "When b" }]);
 });
 
-test("a Rule resets the Background", () => {
-  const ruled = ["Feature: F", "  Background:", "    Given outer", "  Rule: r", "    Scenario: s", "      When x"].join("\n");
-  expect(scenarioSteps(ruled, 5).map((s) => s.text)).toEqual(["When x"]);
+const texts = (src: string[], line: number) => scenarioSteps(src.join("\n"), line).map((x) => x.text);
+
+test("a Rule without its own Background keeps the feature Background", () => {
+  expect(texts(["Feature: F", "  Background:", "    Given outer", "  Rule: r", "    Scenario: s", "      When x"], 5))
+    .toEqual(["Given outer", "When x"]);
+});
+
+test("a Rule's Background comes after the feature Background", () => {
+  expect(texts(["Feature: F", "  Background:", "    Given outer", "  Rule: r", "    Background:", "      Given inner",
+    "    Scenario: s", "      When x"], 7)).toEqual(["Given outer", "Given inner", "When x"]);
+});
+
+test("a later Rule does not inherit an earlier Rule's Background", () => {
+  expect(texts(["Feature: F", "  Background:", "    Given outer", "  Rule: a", "    Background:", "      Given inner",
+    "    Scenario: s1", "      When x", "  Rule: b", "    Scenario: s2", "      When y"], 10)).toEqual(["Given outer", "When y"]);
+});
+
+test("a doc string's @tags and headings do not end the scenario", () => {
+  const src = ["Feature: F", "Scenario: s", "Given x:", '"""', "@foo", "Rule: z", '"""', "Then y"].join("\n");
+  expect(scenarioSteps(src, 2).map((x) => x.line)).toEqual([3, 8]);
 });

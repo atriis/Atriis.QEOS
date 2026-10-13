@@ -90,3 +90,26 @@ test("no automated test key: no pill, no request", async () => {
   expect(screen.queryByText(/No runs yet/)).toBeNull();
   expect(latestCalls).toBe(0);
 });
+
+test("inside a Rule, the feature Background still counts: the red line is the failing step", async () => {
+  const feature = ["Feature: F", "  Background:", "    Given outer", "  Rule: r", "    Scenario: s", "      When x", "      Then y"].join("\n");
+  setup(
+    kase({ gherkin: "Given outer\nWhen x\nThen y" }),
+    result({ failed_step: { text: "Then y", line: 7 } }),
+    { ...DETAIL, content: feature, cases: [{ ...DETAIL.cases[0], line: 5 }] },
+  );
+  renderCase();
+  await waitFor(() => expect(document.querySelector(".gk-failed")).not.toBeNull());
+  expect(document.querySelector(".gk-failed")).toHaveTextContent("Then y");
+  expect(document.querySelectorAll(".gk-failed")).toHaveLength(1);
+});
+
+test("a failed latest-results request still shows the Gherkin, with no pill", async () => {
+  setup(kase(), null);
+  server.use(http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ detail: "boom" }, { status: 500 })));
+  renderCase();
+  await screen.findByRole("heading", { name: "Gherkin" });
+  await waitFor(() => expect(document.querySelector(".gk-failed")).toBeNull());
+  expect(screen.queryByText(/No runs yet/)).toBeNull();
+  expect(document.querySelector(".badge")).toBeNull();
+});
