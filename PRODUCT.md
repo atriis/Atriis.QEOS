@@ -124,8 +124,8 @@ yet.
   and replayed history (`--backfill-days`) are shown separately.
 - Below 20 runs with changed files, QEOS says "Not enough history yet" rather than guessing; a run with no change
   data gets a compact one-line card, not an empty one.
-- Suggestions decide what to run **first**, never what to skip by default. Skipping tests is considered only when
-  the accuracy figure supports it.
+- Suggestions decide what to run **first**. A team may run only the suggested tests explicitly
+  (`--suggested-only`); runs never skip tests by default.
   - In CI, the collector's `run-impact` runs them first and then the rest of the suite, as one run.
   - A team may opt into running only them (`--suggested-only`, with the full suite as fallback when there is no
     suggestion).

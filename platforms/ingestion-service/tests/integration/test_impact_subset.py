@@ -164,3 +164,19 @@ def test_a_run_without_a_stored_suggestion_has_a_null_evaluation(client, auth, p
     body = client.get(f"/api/v1/projects/1/runs/{run.id}/impact", headers=auth()).json()
     assert body["state"] == ("not_scored" if with_changes else "no_change_data")
     assert "evaluation" in body and body["evaluation"] is None
+
+
+def test_a_subset_runs_failures_still_count_in_trends_and_flaky_detection(client, auth, project_role, seed_run,
+                                                                           monkeypatch):
+    """Spec 2026-10-13 §9: subset runs leave only the impact figures; their results are real results."""
+    monkeypatch.setattr(analytics, "_now", lambda: NOW)
+    project_role("viewer", project_id=1)
+    for hours, status in enumerate(("passed", "failed", "passed", "failed", "passed")):
+        subset = status == "failed"
+        seed_run(NOW - timedelta(hours=5 - hours), results=(("flipper", status, 5),),
+                 scope=SUBSET if subset else FULL_SCOPE, stages=STOPPED if subset else None)
+    trend = client.get("/api/v1/projects/1/analytics/trends", params={"days": 1}, headers=auth()).json()["days"]
+    assert sum(day["runs"] for day in trend) == 5
+    assert sum(day["failed"] for day in trend) == 2
+    flaky = client.get("/api/v1/projects/1/analytics/flaky", headers=auth()).json()
+    assert [item["name"] for item in flaky] == ["flipper"]  # 4 flips in 5 runs, two of them subset runs

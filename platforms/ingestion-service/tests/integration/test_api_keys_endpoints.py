@@ -114,7 +114,9 @@ def test_only_owners_and_admins_create_a_key_that_reads_impact(client, auth, pro
 def test_the_list_shows_the_permission_and_existing_keys_are_upload_only(client, auth, project_role, make_key, db):
     existing, _ = make_key()  # a key as migration 020 finds it: no value given
     project_role("viewer")
-    assert [(k["id"], k["can_read_impact"]) for k in client.get(BASE, headers=auth()).json()] == [(existing.id, False)]
+    listed = client.get(BASE, headers=auth()).json()
+    assert [(k["id"], k["can_read_impact"]) for k in listed] == [(existing.id, False)]
+    assert not {"key", "key_hash"} & set(listed[0])  # the key is shown once, at creation; its hash never
     existing.can_read_impact = True
     db.commit()
     assert client.get(BASE, headers=auth()).json()[0]["can_read_impact"] is True

@@ -81,7 +81,9 @@ def _request_hash(upload: RunUpload) -> str:
 
 def _stages_to_store(db: Session, project_id: int, idempotency_key: Optional[str], upload: RunUpload) -> Optional[dict]:
     """run-impact's stages describe the whole run, which a split upload stores as one run per part: they are kept on
-    the first part that brings them, and every later part of the same run gets none (plan ruling, split uploads)."""
+    the first part that brings them, and every later part of the same run gets none (plan ruling, split uploads).
+    The collector uploads the parts one after another, so two parts of one run arriving at once are out of scope: both
+    could keep their stages, which only shows the stage line twice."""
     if upload.run.stages is None:
         return None
     part = _PART_KEY.match(idempotency_key or "")
