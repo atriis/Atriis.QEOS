@@ -29,6 +29,12 @@ IMPACT_NOT_ALLOWED = {
 }
 
 
+def _touch(db: Session, key: ApiKey, now: Optional[datetime] = None) -> None:
+    """Marks the key as used, the way an upload does."""
+    key.last_used_at = now or datetime.now(timezone.utc)
+    db.commit()
+
+
 @router.get("/key", response_model=KeyCheck)
 def check_key(key: ApiKey = Depends(get_api_key)):
     """Proof the key works, for `qeos-collector check` — uploads nothing."""
@@ -45,8 +51,7 @@ def import_token(db: Session = Depends(get_db), key: ApiKey = Depends(get_api_ke
         "scope": IMPORT_SCOPE, "token_type": "service",
         "iat": now, "exp": now + timedelta(seconds=SERVICE_TOKEN_SECONDS),
     }
-    key.last_used_at = now
-    db.commit()
+    _touch(db, key, now)
     return {
         "token": jwt.encode(claims, settings.SECRET_KEY, algorithm=settings.ALGORITHM),
         "expires_in": SERVICE_TOKEN_SECONDS, "project_id": key.project_id,
@@ -65,7 +70,8 @@ def get_impact_key(key: ApiKey = Depends(get_api_key)) -> ApiKey:
 def collect_impact(body: ImpactIn, db: Session = Depends(get_db), key: ApiKey = Depends(get_impact_key)):
     """Likely affected tests for a change, for `qeos-collector impact` and `run-impact` (spec 2026-10-13 §2): the
     scoring of POST /projects/{id}/analytics/impact for the key's own project, with the key instead of a user's token.
-    Reads only; stores nothing."""
+    Reads only; stores nothing beyond the key's last_used_at."""
+    _touch(db, key)
     return score_or_503(db, key.project_id, body)
 
 

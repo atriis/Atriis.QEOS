@@ -184,6 +184,7 @@ class KeyCheck(BaseModel):
 
     project_id: int
     name: str
+    can_read_impact: bool = False
 
 
 class RunReceipt(BaseModel):

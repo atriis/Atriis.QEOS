@@ -581,8 +581,9 @@ working.
 owner or admin ticks **Can read test suggestions** when creating the key, or turns the key's
 **Test suggestions** switch on in the table later. The column reads On or Off for every role;
 members create upload-only keys. A key without it gets `403 impact_not_allowed` from
-`POST /api/v1/collect/impact`. Such a key reads only test names, path units and aggregate failure
-evidence, never individual results or messages ([SECURITY.md](../SECURITY.md)). A revoked key
+`POST /api/v1/collect/impact`. Such a key reads only test names, path units, aggregate failure
+evidence and which named tests failed in the branch's latest run; never failure messages, stack traces or other runs'
+details ([SECURITY.md](../SECURITY.md)). A revoked key
 cannot be changed.
 
 #### 4.1.2 Report formats

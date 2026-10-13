@@ -110,3 +110,11 @@ def test_another_database_error_is_not_a_timeout(client, make_key, monkeypatch):
     with pytest.raises(OperationalError):
         client.post(URL, json={"changed_paths": ["a.py"]}, headers=headers(allowed_key(make_key)))
 
+
+
+def test_reading_suggestions_marks_the_key_as_used(client, make_key, db):
+    row, key = make_key(project_id=7, can_read_impact=True)
+    assert row.last_used_at is None
+    assert client.post(URL, json={"changed_paths": ["src/cart/x.py"]}, headers=headers(key)).status_code == 200
+    db.refresh(row)
+    assert row.last_used_at is not None

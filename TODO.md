@@ -286,6 +286,7 @@ Kubernetes stays out until its blueprint trigger fires (first multi-node deploym
    - [ ] Follow-up: `impact_test_base.id` is a 32-bit serial rebuilt nightly; make it BigInteger or drop it for `(project_id, test_key)` before real scale.
    - [ ] Follow-up: tune the thresholds with real data. The random-failure benchmark suggested about 76 tests per change; watch `avg_suggested`.
    - [ ] Release B: a collector command that runs the suggested tests first (never instead of the full suite), from `POST /analytics/impact`
+   - [ ] Mark suggested-only runs on the Overview's Latest run / Failing in latest run / Recent runs widgets
    - [ ] A learned model on the same features once outcomes accumulate; it must beat `stats-v1` on the catch rate (with the average suggestion size beside it), with no new infrastructure
    - [ ] Phase 6 embeddings: code embeddings and semantic similarity (Qdrant) when "Phase 6 AI engine work begins"
    - [ ] The accuracy figure in the weekly summary

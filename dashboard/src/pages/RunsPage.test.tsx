@@ -293,3 +293,11 @@ test("the Runs filter names the applied scope", async () => {
   expect(await screen.findByText("Runs: Suggested tests only")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Full runs only" })).toHaveAttribute("aria-pressed", "false");
 });
+
+test("the scope filter option and its chip both read Full runs only", async () => {
+  server.use(http.get("/api/v1/projects/42/runs", () => HttpResponse.json([])));
+  renderRuns("/projects/42/runs?scope=full");
+  expect(await screen.findByRole("option", { name: "Full runs only" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Full runs only" })).toHaveAttribute("aria-pressed", "true");
+  expect(screen.queryByText(/Full suite only/)).not.toBeInTheDocument();
+});

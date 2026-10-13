@@ -128,7 +128,7 @@ yet.
   - In CI, the collector's `run-impact` runs them first and then the rest of the suite, as one run.
   - A team may opt into running only them (`--suggested-only`, with the full suite as fallback when there is no
     suggestion).
-  - Such runs are marked "Suggested tests only" wherever a run is shown or announced.
+  - Such runs are marked "Suggested tests only" on the run page, the runs list, failure alerts and the weekly summary.
   - They never count in the impact statistics or the accuracy figure: a run of only the suggested tests cannot
     show what the suggestion missed.
 - **Run likely affected** selects the linked cases. A suggested test with no linked case is listed as not runnable

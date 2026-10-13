@@ -100,7 +100,7 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   null additions/deletions for binary), git metadata (author, message, PR,
   base branch), components under test (ADR-018). The receipt reports
   `quarantined`/`blocking` failures for `qeos-collector upload --gate`.
-  `GET /collect/key` checks a key; `POST /collect/token` trades it for a
+  `GET /collect/key` checks a key and answers `project_id`, `name` and `can_read_impact`; `POST /collect/token` trades it for a
   5-minute service token that only test-management's import accepts (ADR-024).
   `POST /collect/impact` scores a change for the key's project with the analytics route's scoring, limits and
   503 `impact_timeout`, for the collector's `impact` and `run-impact`; only keys with `can_read_impact`

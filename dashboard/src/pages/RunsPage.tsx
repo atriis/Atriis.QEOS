@@ -36,7 +36,7 @@ type Key = (typeof KEYS)[number];
 type Values = Record<Key, string>;
 
 /** run-impact's partial runs (spec 2026-10-13 §3.2): "full" hides them. */
-const SCOPE_LABELS: Record<RunScope, string> = { full: "Full suite only", "impact-subset": "Suggested tests only" };
+const SCOPE_LABELS: Record<RunScope, string> = { full: "Full runs only", "impact-subset": "Suggested tests only" };
 const asScope = (s: string): RunScope | undefined => SCOPES.find((scope) => scope === s);
 
 const QUICK: QuickChip[] = [
