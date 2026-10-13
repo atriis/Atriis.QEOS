@@ -35,6 +35,8 @@ FAILING = ("failed", "errored")
 SHOWN_MISSING = 5
 _WINDOWS = os.name == "nt"
 EXTRA_ARGS = "QEOS_ACTION_EXTRA_ARGS"  # the GitHub Action's extra-args, for the collector only
+# What the test command never sees: the collector's own flags and the project API key (its legacy name too)
+_NOT_FOR_TESTS = frozenset({EXTRA_ARGS, "QEOS_API_KEY", "QAV_API_KEY"})
 # cmd.exe expands % (and ! with delayed expansion) and splits on & | < > ^ even inside the quotes subprocess adds
 _CMD_SPECIAL = frozenset('%!&|<>^"')
 
@@ -73,7 +75,7 @@ def run_command(argv: Sequence[str]) -> int:
     """The command's exit code. The program is looked up with shutil.which, so a Windows runner finds npx.cmd or
     mvn.cmd through PATHEXT, which a bare CreateProcess does not (plan Ruling 21). Never through a shell."""
     program = shutil.which(argv[0]) or argv[0]
-    child = {name: value for name, value in os.environ.items() if name != EXTRA_ARGS}  # the collector's, not theirs
+    child = {name: value for name, value in os.environ.items() if name not in _NOT_FOR_TESTS}
     try:
         return subprocess.run([program, *argv[1:]], check=False, env=child).returncode
     except OSError as exc:
@@ -258,7 +260,7 @@ def _run_stages(args, say, command, flavour, cwd, found: impact.Suggestion,
     stages = [steps.stage(1, "suggested", narrowed, first)]
     if args.suggested_only:
         return stages, SUBSET, None, missing
-    if args.fail_fast and stages[0].broke:
+    if args.fail_fast and stages[0].broke and rest:  # with nothing left, stage 1 was the full suite
         say("stage 1 failed: stopping before stage 2 (--fail-fast)")
         return stages, SUBSET, 1, missing
     if rest:  # every scenario suggested: one stage, still the full suite (plan Ruling 9)
@@ -279,9 +281,20 @@ def _finish(env: Mapping[str, str], say, found: impact.Suggestion, missing: List
                 "uploaded as suggested tests only (impact-subset), so it does not count in the statistics")
             scope = SUBSET
     payload = stages_payload(stages, stopped)
-    summary.publish(env, say, found.tests, missing, stages, payload, scope, secret=secret)
+    try:
+        summary.publish(env, say, found.tests, missing, stages, payload, scope, secret=secret)
+    except Exception as exc:  # noqa: BLE001 - a summary never costs the upload or the verdict
+        say(f"warning: cannot write the summary ({type(exc).__name__}: {exc})")
     receipt = upload([stage.report for stage in stages], scope, payload)
     tests = next((stage.returncode for stage in stages if stage.returncode != 0), 0)
+    crashed = [(number, stage) for number, stage in enumerate(stages, start=1)
+               if stage.no_report and stage.returncode != 0]
+    if crashed and (gate or fail_on_error):
+        # A crash has no results for the gate to judge: the uploaded rest could pass and hide it
+        number, stage = crashed[0]
+        say(f"{'gate' if gate else 'run'} failed: stage {number} ({stage.name}) exited {stage.returncode} without a "
+            "report")
+        return 1
     if gate:
         if receipt is None:
             say("gate failed: the gate cannot pass without an upload")

@@ -847,10 +847,48 @@ def test_extra_args_that_are_flags_go_in_front(platform, cucumber):
     assert [c["dry_run"] for c in cucumber()] == [True, True, False]  # --fail-fast took effect
 
 
-def test_the_test_command_does_not_see_the_actions_extra_args(monkeypatch):
-    """They are the collector's flags; a nested qeos-collector (or the tests) must not pick them up."""
-    monkeypatch.setenv("QEOS_ACTION_EXTRA_ARGS", "--cucumber js")
+@pytest.mark.parametrize("name", ["QEOS_ACTION_EXTRA_ARGS", "QEOS_API_KEY", "QAV_API_KEY"])
+def test_the_test_command_sees_neither_the_key_nor_the_actions_extra_args(monkeypatch, name):
+    """The API key is the collector's (the tests have no use for it, and their logs are not scrubbed); the extra args
+    are the collector's flags, which a nested qeos-collector must not pick up."""
+    monkeypatch.setenv(name, "qeos_secret_or_flags")
     monkeypatch.setenv("QEOS_SOMETHING_ELSE", "kept")
-    check = "import os, sys; sys.exit(3 if 'QEOS_ACTION_EXTRA_ARGS' in os.environ else 0 if 'QEOS_SOMETHING_ELSE' " \
-            "in os.environ else 4)"
+    check = f"import os, sys; sys.exit(3 if {name!r} in os.environ else 0 if 'QEOS_SOMETHING_ELSE' in os.environ " \
+            "else 4)"
     assert run_impact.run_command([sys.executable, "-c", check]) == 0
+
+
+# --- final review ---------------------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("option", ["--gate", "--fail-on-error"])
+def test_a_crashed_stage_fails_a_gated_run(platform, cucumber, monkeypatch, capsys, option):
+    """The uploaded rest passes the gate; the crashed stage has no results to judge, so it must not hide."""
+    monkeypatch.setenv("FAKE_CUCUMBER_CRASH", "features/cart.feature:3")
+    platform.reply(200, suggested(ADDS))
+    platform.reply(201, {**RECEIPT, "failed": 0, "blocking": 0})
+    assert run([*command(option), "--tags", "@smoke"], env_for(platform)) == 1  # stage 2 (Pays with card) passed
+    assert len(uploads(platform)) == 1  # the rest is still uploaded
+    assert "stage 1 (suggested) exited 3 without a report" in capsys.readouterr().err
+
+
+def test_fail_fast_with_every_scenario_suggested_is_a_full_run(platform, cucumber, capsys):
+    """Nothing was left for stage 2: stage 1 was the whole suite, so the run is full and was not stopped."""
+    platform.reply(200, suggested(PAYS_WITH_CARD, PAYS_10, PAYS_20, ADDS, REMOVES))
+    platform.reply(201, RECEIPT)
+    assert run(command("--fail-fast"), env_for(platform)) == 1  # Pays 10 failed
+    run_ = uploads(platform)[0]["run"]
+    assert run_["scope"] == "full" and "stopped_after_stage" not in run_["stages"]
+    assert "stopping before stage 2" not in capsys.readouterr().err
+
+
+def test_a_broken_summary_does_not_cost_the_upload(platform, cucumber, monkeypatch, capsys):
+    def broken(*args, **kwargs):
+        raise RuntimeError("no summary today")
+
+    monkeypatch.setattr(run_impact.summary, "publish", broken)
+    platform.reply(200, suggested(PAYS_10))
+    platform.reply(201, {**RECEIPT, "quarantined": 1, "blocking": 0})
+    assert run(command("--gate"), env_for(platform)) == 0  # the upload and the gate still happened
+    assert len(uploads(platform)) == 1
+    assert "warning: cannot write the summary (RuntimeError: no summary today)" in capsys.readouterr().err
