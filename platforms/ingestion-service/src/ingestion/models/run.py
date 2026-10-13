@@ -1,5 +1,6 @@
 from sqlalchemy import (
-    Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, false, text,
+    JSON, Boolean, CheckConstraint, Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, false,
+    text,
 )
 from sqlalchemy.sql import func
 
@@ -8,6 +9,10 @@ from src.ingestion.db.base import Base
 CI_PROVIDERS = ("github_actions", "gitlab_ci", "jenkins", "azure_pipelines", "other", "local")
 STATUSES = ("passed", "failed", "skipped", "errored")
 TRIGGERS = ("manual", "automatic", "qeos")
+# run-impact (spec 2026-10-13 §3.1): a full run, or one that ran only the suggested tests. The one list of scopes: the
+# model's check, the upload schema and the runs filter all take it from here (migration 020 keeps its own frozen copy)
+FULL_SCOPE, SUBSET_SCOPE = "full", "impact-subset"
+SCOPES = (FULL_SCOPE, SUBSET_SCOPE)
 
 
 class Run(Base):
@@ -33,6 +38,11 @@ class Run(Base):
     base_branch = Column(String(255), nullable=True)
     # How the CI run started, as the collector classified it (ADR-030); null: unknown or an older collector
     trigger = Column(String(10), nullable=True)
+    # Migration 020: "impact-subset" when only the suggested tests ran (run-impact --suggested-only or --fail-fast);
+    # every older upload is a full run. stages: run-impact's stages, null for an ordinary upload (SQL NULL, never a
+    # JSON null, so "IS NULL" finds every run without stages)
+    scope = Column(String(20), nullable=False, default=FULL_SCOPE, server_default=FULL_SCOPE)
+    stages = Column(JSON(none_as_null=True), nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=False)
     finished_at = Column(DateTime(timezone=True), nullable=False)
     duration_ms = Column(Integer, nullable=False)
@@ -56,6 +66,7 @@ class Run(Base):
             "ci_provider IN ('github_actions','gitlab_ci','jenkins','azure_pipelines','other','local')", name="chk_test_runs_ci_provider"
         ),
         CheckConstraint("\"trigger\" IN ('manual','automatic','qeos')", name="chk_test_runs_trigger"),
+        CheckConstraint(f"scope IN ({','.join(repr(scope) for scope in SCOPES)})", name="chk_test_runs_scope"),
         Index("ix_test_runs_project_created", "project_id", "created_at"),
         Index("ix_test_runs_project_branch", "project_id", "branch"),
         Index("ix_test_runs_project_started", "project_id", "started_at"),

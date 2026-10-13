@@ -303,3 +303,79 @@ def test_collection_settings_defaults(migrated_engine):
             "SELECT collect_manual, discarded_count, last_discarded_at FROM collection_settings WHERE project_id = 5"
         )).one()
     assert (bool(row[0]), row[1], row[2]) == (True, 0, None)
+
+
+def test_scope_defaults_to_full_and_is_checked(migrated_engine):
+    with migrated_engine.begin() as conn:
+        conn.execute(text(KEY), {"hash": "d" * 64})
+        conn.execute(text(RUN), {"idem": "s1", "provider": "github_actions"})
+        row = conn.execute(text("SELECT scope, stages FROM test_runs WHERE idempotency_key = 's1'")).one()
+    assert (row[0], row[1]) == ("full", None)
+    with migrated_engine.begin() as conn:
+        conn.execute(text("UPDATE test_runs SET scope = 'impact-subset' WHERE idempotency_key = 's1'"))
+    with pytest.raises(IntegrityError):
+        with migrated_engine.begin() as conn:
+            conn.execute(text("UPDATE test_runs SET scope = 'partial' WHERE idempotency_key = 's1'"))
+
+
+def test_api_keys_cannot_read_impact_by_default(migrated_engine):
+    """Migration 020: every key, existing or new, is upload-only until an owner or admin allows it (spec §9)."""
+    with migrated_engine.begin() as conn:
+        conn.execute(text(KEY), {"hash": "e" * 64})
+        assert conn.execute(text("SELECT can_read_impact FROM api_keys")).scalar() in (False, 0)
+
+
+def _load_020():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("m020", SERVICE_ROOT / "alembic" / "versions" / "020_run_scope.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_models_scope_check_matches_the_migrations():
+    """The model builds its check from SCOPES; the migration keeps a frozen copy. They must say the same."""
+    (check,) = [c for c in Base.metadata.tables["test_runs"].constraints if c.name == "chk_test_runs_scope"]
+    assert str(check.sqltext) == _load_020().SCOPE_IN
+
+
+def test_run_scope_postgres_path_validates_the_check_in_its_own_transaction(monkeypatch):
+    """Ruling (migration lock): on PostgreSQL the check is added NOT VALID, then validated in a separate statement
+    inside an autocommit block, so the scan never holds the ACCESS EXCLUSIVE lock of ADD CONSTRAINT."""
+    from unittest.mock import MagicMock
+
+    module = _load_020()
+    fake = MagicMock()
+    fake.get_bind.return_value.dialect.name = "postgresql"
+    events = []
+    fake.execute.side_effect = lambda sql: events.append(sql)
+    block = fake.get_context.return_value.autocommit_block.return_value
+    block.__enter__.side_effect = lambda *a: events.append("<autocommit>")
+    block.__exit__.side_effect = lambda *a: events.append("</autocommit>")
+    monkeypatch.setattr(module, "op", fake)
+    module.upgrade()
+    add = next(i for i, sql in enumerate(events) if "ADD CONSTRAINT chk_test_runs_scope" in sql)
+    assert events[add].rstrip().endswith("NOT VALID; END IF; END $$")
+    assert "IF NOT EXISTS (SELECT 1 FROM pg_constraint" in events[add]  # re-runnable
+    assert events[add + 1:] == ["<autocommit>", "ALTER TABLE test_runs VALIDATE CONSTRAINT chk_test_runs_scope",
+                                "</autocommit>"]
+    assert all("IF NOT EXISTS" in sql for sql in events[:add])
+    assert any("can_read_impact BOOLEAN NOT NULL DEFAULT false" in sql for sql in events[:add])
+
+
+def test_run_scope_downgrade_drops_the_columns(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'downgrade_020.db').as_posix()}"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(SERVICE_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "019")
+    engine = create_engine(url)
+    try:
+        columns = {column["name"] for column in inspect(engine).get_columns("test_runs")}
+        assert not {"scope", "stages"} & columns
+        assert "trigger" in columns  # 019 is still there
+        assert "can_read_impact" not in {column["name"] for column in inspect(engine).get_columns("api_keys")}
+    finally:
+        engine.dispose()
