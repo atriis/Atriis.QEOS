@@ -1005,6 +1005,13 @@ stack on `https://localhost:8443`, add `--ca-file qeos-ca.crt` ([4.1.3](#413-col
   a filtered view can be bookmarked and shared.
 - **Last runs** column: for each linked case, its status in the project's last 10 runs, oldest
   to newest (Passed, Failed, Re-run, Skipped, Didn't run). Unlinked cases show "not linked".
+- **Failed step** (scenario page and the scenario cards on a feature page): when a case's latest
+  result failed, its failing step shows in red, and a **last-result pill** shows the status. The
+  latest result is the newest on any branch, not only the default one. Hover the step, or focus it
+  with the keyboard, to see the error and an **Open run** link. The exact line needs the collector
+  0.6.0 or later; results uploaded by older collectors are matched to the step by its text. A
+  failure in the Background shows as "Failed in Background" on the feature card. A Scenario
+  Outline marks the failing step on the first example row only.
 
 Suites: **Test cases** → **Suites** tab → create a suite (its name must be unique), add cases,
 order them, and **Run suite** ([4.3](#43-run-from-qeos-play-and-stop)). Deleting a suite keeps

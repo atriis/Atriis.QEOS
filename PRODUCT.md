@@ -24,7 +24,8 @@ turns them into analytics: trends, per-test statistics and history, run
 comparison, failures grouped by cause, flaky-test detection with quarantine,
 and a filterable, printable Report per period. It also keeps a test-case
 catalogue in sync with the team's Gherkin features and starts runs in the
-team's own GitHub Actions. Success: a team answers "what is broken, what is
+team's own GitHub Actions, and shows a failing scenario's failed step in red
+where the team reads it. Success: a team answers "what is broken, what is
 flaky, what is getting worse" from one place instead of scrolling CI logs.
 
 ## Positioning
