@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Info, XCircle } from "lucide-react";
@@ -8,6 +8,7 @@ import { MAX_RUN_CASES } from "../api/runRequests";
 import { useRunStrips } from "../components/CaseTable";
 import ErrorBanner from "../components/ErrorBanner";
 import { featureLabel } from "../components/FeatureList";
+import FailedTipAnchor from "../components/FailedTipAnchor";
 import FailedStepTip from "../components/FailedStepTip";
 import GherkinBlock from "../components/GherkinBlock";
 import LastResultPill from "../components/LastResultPill";
@@ -45,31 +46,14 @@ function statusCounts(statuses: (string | undefined)[]): string {
   return [...n].sort((x, y) => order(x[0]) - order(y[0])).map(([k, v]) => `${v} ${k}`).join(" · ");
 }
 
-/** A Background step failed: named on the card, with the same tip as a failed line (hover, focus, Escape). */
+/** A step the scenario inherits (its Background, feature- or rule-level) failed: named on the card, with the same tip as a failed line. */
 function BackgroundFailure({ projectId, step, result }: { projectId: number; step: string; result: LatestResult }) {
-  const [hover, setHover] = useState(false);
-  const [focus, setFocus] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
-  const open = (hover || focus) && !dismissed;
   return (
     <p className="scenario-bg-failure">
-      <span
-        className="scenario-bg-failure-line"
-        tabIndex={0}
-        onMouseEnter={() => setHover(true)}
-        onMouseLeave={() => { setHover(false); setDismissed(false); }}
-        onFocus={() => setFocus(true)}
-        onBlur={() => { setFocus(false); setDismissed(false); }}
-        onKeyDown={(e) => { if (e.key === "Escape" && open) { e.stopPropagation(); setDismissed(true); } }}
-      >
+      <FailedTipAnchor className="scenario-bg-failure-line" tip={<FailedStepTip projectId={projectId} result={result} />}>
         <XCircle size={14} aria-hidden="true" />
         Failed in Background: {step}
-      </span>
-      {open && (
-        <span role="tooltip" className="failed-tip scenario-bg-failure-tip" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
-          <FailedStepTip projectId={projectId} result={result} />
-        </span>
-      )}
+      </FailedTipAnchor>
     </p>
   );
 }
@@ -103,7 +87,7 @@ export default function FeaturePage() {
     return rebuilt.data ? rebuildFeature(data, rebuilt.data) : null;
   }, [data, rebuilt.data]);
   const cases = useMemo(() => data?.cases ?? [], [data]);
-  const keys = useMemo(() => cases.flatMap((c) => (c.automated_test_key ? [c.automated_test_key] : [])), [cases]);
+  const keys = useMemo(() => [...new Set(cases.flatMap((c) => (c.automated_test_key ? [c.automated_test_key] : [])))], [cases]);
   const { lastRuns } = useRunStrips(id, keys);
   const latest = useQuery({
     queryKey: ["latest-results", "feature", id, keys],
@@ -137,8 +121,8 @@ export default function FeaturePage() {
     if (at == null) return null;
     const line = steps[at].line;
     if (line >= block.start && line <= block.end) return { line: line - block.start + 1, result };
-    if (split?.preamble && line >= split.preamble.start && line <= split.preamble.end) return { background: steps[at].text, result };
-    return null;
+    // Outside the scenario's own block: inherited from a Background (feature- or rule-level)
+    return { background: steps[at].text, result };
   };
 
   const cards: { c: FeatureCase; block: Block }[] = [];

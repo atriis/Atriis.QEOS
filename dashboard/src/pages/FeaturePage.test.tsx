@@ -147,6 +147,61 @@ test("a Background failure is named on the card", async () => {
   expect(await screen.findByRole("tooltip")).toHaveTextContent("bg broke");
 });
 
+test("the Background note has the full tip keyboard path: Tab to Open run, Escape returns to the note", async () => {
+  const content = ["Feature: Login", "", "  Background:", "    Given bg", "", "  Scenario: Good password", "    When a"].join("\n");
+  server.use(
+    http.get(`${P}/features/detail`, () => HttpResponse.json({ ...DETAIL, content, cases: [
+      detailCase(12, { scenario_name: "Good password", line: 6, automated_test_key: KEY }),
+    ] })),
+    http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
+      [KEY]: result("failed", { message: "bg broke", failed_step: { text: "Given bg", line: 4 } }),
+    } })),
+  );
+  renderAt();
+  const note = (await screen.findByText("Failed in Background: Given bg")) as HTMLElement;
+  act(() => note.focus());
+  const tip = await screen.findByRole("tooltip");
+  expect(note).toHaveAttribute("aria-describedby", tip.id);
+  expect(tip.parentElement).toBe(document.body);
+  await userEvent.tab();
+  expect(document.activeElement).toBe(within(tip).getByRole("link", { name: "Open run" }));
+  await userEvent.keyboard("{Escape}");
+  expect(document.activeElement).toBe(note);
+  expect(screen.queryByRole("tooltip")).toBeNull();
+});
+
+test("a failed step in a Rule-level Background is named on the card too", async () => {
+  const content = ["Feature: Login", "", "  Rule: r", "    Background:", "      Given rule bg", "", "    Scenario: Good password", "      When a"].join("\n");
+  server.use(
+    http.get(`${P}/features/detail`, () => HttpResponse.json({ ...DETAIL, content, cases: [
+      detailCase(12, { scenario_name: "Good password", line: 7, automated_test_key: KEY }),
+    ] })),
+    http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
+      [KEY]: result("failed", { message: "rule bg broke", failed_step: { text: "Given rule bg", line: 5 } }),
+    } })),
+  );
+  renderAt();
+  expect(await screen.findByText("Failed in Background: Given rule bg")).toBeInTheDocument();
+  expect(document.querySelector(".gk-failed")).toBeNull();
+});
+
+test("duplicate automated keys are sent once", async () => {
+  const bodies: { keys: string[] }[] = [];
+  server.use(
+    http.get(`${P}/features/detail`, () => HttpResponse.json({ ...DETAIL, cases: [
+      detailCase(12, { line: 4, automated_test_key: KEY }),
+      detailCase(13, { line: 7, automated_test_key: KEY }),
+    ] })),
+    http.post(`${P}/analytics/latest-results`, async ({ request }) => {
+      bodies.push(await request.json() as { keys: string[] });
+      return HttpResponse.json({ results: {} });
+    }),
+  );
+  renderAt();
+  await waitFor(() => expect(bodies).toHaveLength(1));
+  expect(bodies[0].keys).toEqual([KEY]);
+});
+
 test("one latest-results request per 500 cases", async () => {
   const keys = Array.from({ length: 501 }, (_, i) => i.toString(16).padStart(64, "0"));
   const bodies: { keys: string[] }[] = [];

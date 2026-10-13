@@ -120,3 +120,23 @@ test("after Escape the tip stays closed when the pointer leaves and comes back w
   await userEvent.hover(line);
   expect(screen.queryByRole("tooltip")).toBeNull();
 });
+
+test("Tab out of the tip skips hidden, inert and disabled elements after the block", async () => {
+  render(
+    <>
+      <GherkinBlock text={"Scenario: s\n  When a"} failed={{ line: 2, tip: <a href="#run">Open run</a> }} />
+      <button hidden>hidden attr</button>
+      <div style={{ display: "none" }}><button>display none</button></div>
+      <div style={{ visibility: "hidden" }}><button>visibility hidden</button></div>
+      <div inert><button>inert</button></div>
+      <span tabIndex={0} {...{ disabled: true }}>disabled tabindex</span>
+      <button>real next</button>
+    </>,
+  );
+  const line = failedLine() as HTMLElement;
+  line.focus();
+  await userEvent.tab();
+  expect(document.activeElement).toBe(screen.getByRole("link", { name: "Open run" }));
+  await userEvent.tab();
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "real next" }));
+});
