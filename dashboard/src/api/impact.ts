@@ -53,6 +53,9 @@ export interface RunImpact {
   suggestion: ImpactSuggestion | null;
   /** Null until written, right after the upload. */
   outcome: ImpactOutcome | null;
+  /** `not_evaluated`: the run ran only the suggested tests, so it cannot show what the suggestion missed (spec 2026-10-13
+   *  §3.1). Null without a stored suggestion; older servers omit it. */
+  evaluation?: "pending" | "evaluated" | "not_evaluated" | null;
 }
 
 export interface AccuracyPart {

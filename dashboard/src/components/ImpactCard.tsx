@@ -81,7 +81,13 @@ function Body({ projectId, branch, data }: { projectId: number; branch?: string 
           {`Not enough history yet: ${plural(s.history_runs, "run", "runs")} with changed files, needs ${formatCount(s.needed_runs)}`}
         </p>
       )}
-      <Outcome projectId={projectId} branch={branch} suggested={s.tests.length} outcome={data.outcome} />
+      {data.evaluation === "not_evaluated" ? (
+        <p className="muted impact-outcome">
+          Suggested tests only, not evaluated: only the suggested tests ran, so this run cannot show what the suggestion missed.
+        </p>
+      ) : (
+        <Outcome projectId={projectId} branch={branch} suggested={s.tests.length} outcome={data.outcome} />
+      )}
       {s.tests.length === 0 ? (
         <p className="muted">{s.state === "not_enough_history" ? "Nothing to suggest yet." : "No tests are likely affected by this change"}</p>
       ) : (
@@ -116,6 +122,7 @@ export default function ImpactCard({ projectId, runId, branch }: { projectId: nu
       <div className="impact-head">
         <h2 id={titleId}>Likely affected tests</h2>
         {query.data?.replayed && <StatusPill tone="neutral" label="Replayed" />}
+        {query.data?.evaluation === "not_evaluated" && <StatusPill tone="neutral" label="Not evaluated" />}
       </div>
       {query.isPending && (
         <SkeletonStatus label="Loading likely affected tests…">

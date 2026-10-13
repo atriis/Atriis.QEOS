@@ -14,7 +14,7 @@ export const IMPACT_POLL_MAX = 40;
 /** Ask again while a stored suggestion waits for its outcome, up to IMPACT_POLL_MAX answers. */
 export function impactPollInterval(query: { state: { data?: RunImpact; dataUpdateCount: number } }): number | false {
   const data = query.state.data;
-  const pending = data !== undefined && data.suggestion !== null && data.outcome === null;
+  const pending = data !== undefined && data.suggestion !== null && data.outcome === null && data.evaluation !== "not_evaluated";
   return pending && query.state.dataUpdateCount < IMPACT_POLL_MAX ? IMPACT_POLL_MS : false;
 }
 

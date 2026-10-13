@@ -194,9 +194,27 @@ test("a failed load shows the error with Retry, and Retry asks again", async () 
   expect(await screen.findByRole("link", { name: "pays" })).toBeInTheDocument();
 });
 
+test("a suggested-only run is not evaluated, and says why", async () => {
+  renderCard(impact({ outcome: null, evaluation: "not_evaluated" }));
+  expect(await screen.findByText("Suggested tests only, not evaluated: only the suggested tests ran, so this run cannot"
+    + " show what the suggestion missed.")).toBeInTheDocument();
+  expect(screen.getByText("Not evaluated", { selector: ".pill" })).toBeInTheDocument();
+  expect(screen.queryByText(/outcome not recorded yet/)).not.toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "pays" })).toBeInTheDocument(); // the suggestion itself is still listed
+});
+
 describe("a pending outcome", () => {
   beforeEach(() => vi.useFakeTimers({ shouldAdvanceTime: true }));
   afterEach(() => vi.useRealTimers());
+
+  test("is never asked for when the run is not evaluated", async () => {
+    let calls = 0;
+    server.use(http.get(IMPACT_URL, () => { calls += 1; return HttpResponse.json(impact({ outcome: null, evaluation: "not_evaluated" })); }));
+    mount();
+    expect(await screen.findByText(/Suggested tests only, not evaluated/)).toBeInTheDocument();
+    await act(() => vi.advanceTimersByTimeAsync(IMPACT_POLL_MS * 3));
+    expect(calls).toBe(1);
+  });
 
   test("is asked for again every few seconds until it arrives", async () => {
     let calls = 0;
