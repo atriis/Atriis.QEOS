@@ -92,7 +92,12 @@ details.
   so a save over a newer one is refused (409).
 - **CI uploads.** Per-project API keys, stored as SHA-256 hashes and shown once.
   A key can also be traded for a 5-minute service token that only the Gherkin
-  import accepts.
+  import accepts. Keys are upload-only unless an owner or admin allows test
+  suggestions for that key (`can_read_impact`, off by default and for every key
+  that existed before migration 020): only such a key may read its project's
+  suggestions (test names and path units) for the collector. Owners and admins set
+  it when creating a key or later (`PATCH /projects/{id}/api-keys/{key_id}`); a
+  member can create keys, upload-only ones.
 - **Collection of manual runs.** The project toggle that discards manual CI runs is a noise
   filter, not an access control. The collector reports `run.trigger`, so whoever holds the project's
   API key can label a manual run `automatic` and have it stored. API keys remain the boundary.

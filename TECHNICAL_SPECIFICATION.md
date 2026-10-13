@@ -195,7 +195,8 @@ run_changed_files, run_components, muted_tests (quarantine), flaky_daily /
 flaky_rollup_days (daily flip aggregates + computed-day markers), impact_pairs /
 impact_test_base (test impact statistics, rebuilt nightly) and run_impact (the
 suggestion stored with a run and its outcome; cascades with the run), api_keys
-(SHA-256 of the key), masking_patterns, notification_channels, collection_settings. Test-management:
+(SHA-256 of the key; `can_read_impact`, off by default, set by owners and admins), masking_patterns,
+notification_channels, collection_settings. Test-management:
 cases, case_labels, suites, suite_cases, feature_files, ci_targets,
 run_requests. Project: projects, repositories, overview_layouts (a JSONB layout
 per project default or user, with a version for conflict checks).

@@ -12,6 +12,12 @@ Receives test results from CI. Design: `docs/superpowers/specs/2026-09-29-ingest
      -d '{"name":"GitHub Actions - main"}'
    ```
 
+   A key is upload-only. An owner or admin can also let it read the project's test suggestions, for
+   `qeos-collector run-impact`: `"can_read_impact": true` at creation (a member asking for it gets `403`), or later
+   `PATCH /api/v1/projects/<project_id>/api-keys/<key_id>` with `{"can_read_impact": true|false}` (owners and
+   admins; `404` for a key of another project, `409` for a revoked key). Keys that existed before migration 020
+   stay upload-only. The keys list shows `can_read_impact` for every key.
+
 2. The pipeline uploads one run per job:
 
    ```bash
