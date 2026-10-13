@@ -1108,3 +1108,16 @@ button.switch.switch-compact { gap: var(--space-2); padding: var(--space-1) var(
 .failed-tip { position: fixed; z-index: 70; width: max-content; max-width: min(420px, 90vw); padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: var(--space-1); background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-2); font-family: var(--font-sans); font-size: 13px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; cursor: auto; user-select: text; }
 .failed-tip-meta { color: var(--text-secondary); font-size: 12px; }
 @media (max-width: 640px) { .gherkin.numbered .gk-failed .gk-failed-end { grid-column: 2; } }
+
+/* Feature page: one card per scenario (header row: case chip + title, then status + run strip) over its Gherkin */
+.feature-counts { margin: 0 0 var(--space-3); font-variant-numeric: tabular-nums; }
+.scenario-card { padding: 0; overflow: visible; margin-bottom: var(--space-3); }
+.scenario-card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); padding: var(--space-3) var(--space-4); }
+.scenario-card-head h2 { display: flex; align-items: center; gap: var(--space-3); flex: 1 1 260px; min-width: 0; margin: 0; font-size: 15px; }
+.scenario-card-title { min-width: 0; overflow-wrap: anywhere; }
+.scenario-card-status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+.scenario-card > .feature-source { border-top: 1px solid var(--border); border-radius: 0 0 var(--radius-sm) var(--radius-sm); overflow: hidden; }
+.scenario-bg-failure { position: relative; margin: 0; padding: 0 var(--space-4) var(--space-3); max-width: none; }
+.scenario-bg-failure-line { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--danger-text); font-size: 13px; font-weight: 600; cursor: help; border-radius: 2px; overflow-wrap: anywhere; }
+.scenario-bg-failure-line:focus-visible { outline: 2px solid var(--status-failed); outline-offset: 2px; }
+.failed-tip.scenario-bg-failure-tip { position: absolute; inset-block-start: calc(100% - var(--space-2)); inset-inline-start: var(--space-4); }

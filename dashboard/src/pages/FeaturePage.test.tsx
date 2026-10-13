@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -9,6 +9,7 @@ import FeaturePage from "./FeaturePage";
 
 const P = "/api/v1/projects/42";
 const KEY = "d".repeat(64);
+const KEY2 = "e".repeat(64);
 const PATH = "features/auth/login.feature";
 const URL_ = `/projects/42/cases/feature?path=${encodeURIComponent(PATH)}`;
 const TARGET = { available: true, configured: true, provider: "github", repo: "acme/obt", workflow: "qeos-run.yml",
@@ -33,7 +34,7 @@ const DETAIL = {
   feature_name: "Login", path: PATH, folder: "features/auth", content: CONTENT, imported_at: "2026-10-08T09:00:00Z",
   cases: [
     detailCase(12, { scenario_name: "Good password", line: 4, automated_test_key: KEY }),
-    detailCase(13, { scenario_name: "Bad password", line: 7 }),
+    detailCase(13, { scenario_name: "Bad password", line: 7, automated_test_key: KEY2 }),
   ],
 };
 
@@ -41,6 +42,10 @@ const kase = (number: number, extra: object = {}) => ({
   number, key: `TC-${number}`, title: `Title ${number}`, description: null, steps: [], labels: [], priority: "medium",
   status: "ready", automated_test_key: null, automated_name: null, created_by: 1, created_at: "2026-10-06T10:00:00Z",
   updated_by: null, updated_at: null, suites: [], source_path: PATH, gherkin: null, feature_name: "Login", ...extra,
+});
+
+const result = (status: string, extra: object = {}) => ({
+  status, run_id: 9, branch: "main", environment: null, started_at: "2026-10-08T09:00:00Z", message: null, ...extra,
 });
 
 function asRole(role: string) {
@@ -55,6 +60,7 @@ beforeEach(() => {
       new URL(request.url).searchParams.get("path") === PATH
         ? HttpResponse.json(DETAIL)
         : HttpResponse.json({ detail: "Feature not found" }, { status: 404 })),
+    http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {} })),
     http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({
       runs: [{ id: 7, started_at: "2026-10-08T09:00:00Z", branch: "main" }], statuses: { [KEY]: ["failed"] },
     })),
@@ -73,21 +79,107 @@ function renderAt(url = URL_) {
   );
 }
 
-test("the raw file shows with line numbers; each scenario line links its case", async () => {
+test("the header names the file; each scenario is a card linking its case, with its run strip", async () => {
   renderAt();
   expect(await screen.findByRole("heading", { level: 1, name: "Login" })).toBeInTheDocument();
   expect(screen.getByText(PATH)).toBeInTheDocument();
-  const file = await screen.findByLabelText("Feature file");
-  const lines = file.querySelectorAll(".gk-line");
-  expect(lines).toHaveLength(8);
-  expect(lines[3]).toHaveAttribute("data-line", "4");
-  expect(lines[3]).toHaveTextContent("Scenario: Good password");
-  expect(within(lines[3] as HTMLElement).getByRole("link", { name: "TC-12" })).toHaveAttribute("href", "/projects/42/cases/12");
-  expect(within(lines[6] as HTMLElement).getByRole("link", { name: "TC-13" })).toHaveAttribute("href", "/projects/42/cases/13");
-  // The linked case shows its run strip; the unlinked one says so
-  expect(within(lines[3] as HTMLElement).getByRole("link", { name: /Last 1 run/ })).toBeInTheDocument();
-  expect(within(lines[6] as HTMLElement).getByText("not linked")).toBeInTheDocument();
+  const cards = await screen.findAllByRole("article");
+  expect(cards).toHaveLength(2);
+  expect(within(cards[0]).getByRole("link", { name: "TC-12" })).toHaveAttribute("href", "/projects/42/cases/12");
+  expect(within(cards[1]).getByRole("link", { name: "TC-13" })).toHaveAttribute("href", "/projects/42/cases/13");
+  expect(within(cards[0]).getByRole("link", { name: /Last 1 run/ })).toBeInTheDocument();
+  // The scenario's own lines, numbered as in the file
+  expect(cards[1].querySelectorAll(".gk-line")).toHaveLength(2);
+  expect(cards[1].querySelector(".gk-line")).toHaveAttribute("data-line", "7");
   expect(screen.queryByText(/Re-import this file/)).not.toBeInTheDocument();
+});
+
+test("one card per scenario with its status, Background once", async () => {
+  server.use(http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: { [KEY]: result("passed") } })));
+  renderAt();
+  const cards = await screen.findAllByRole("article");
+  expect(cards).toHaveLength(2);
+  expect(await within(cards[0]).findByText(/Passed/)).toBeInTheDocument();
+  expect(within(cards[1]).getByText("No runs yet")).toBeInTheDocument();
+  expect(screen.getByText("1 passed · 1 no runs")).toBeInTheDocument();
+  // The preamble (tag, Feature line) is shown once, outside the cards
+  expect(screen.getByLabelText("Feature")).toHaveTextContent("Feature: Login");
+  for (const card of cards) expect(card).not.toHaveTextContent("Feature: Login");
+});
+
+test("the failed step is red on its card, with the error", async () => {
+  server.use(http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
+    [KEY2]: result("failed", { message: "expected an error banner", failed_step: { text: "Then I see an error", line: 8 } }),
+  } })));
+  renderAt();
+  const cards = await screen.findAllByRole("article");
+  await waitFor(() => expect(cards[1].querySelector(".gk-failed")).not.toBeNull());
+  expect(cards[0].querySelector(".gk-failed")).toBeNull();
+  const failed = cards[1].querySelector(".gk-failed") as HTMLElement;
+  expect(failed).toHaveTextContent("Then I see an error");
+  expect(failed).toHaveAttribute("data-line", "8");
+  act(() => failed.focus());
+  const tip = await screen.findByRole("tooltip");
+  expect(tip).toHaveTextContent("expected an error banner");
+  expect(within(tip).getByRole("link", { name: "Open run" })).toHaveAttribute("href", "/projects/42/runs/9");
+  expect(screen.getByText("1 failed · 1 no runs")).toBeInTheDocument();
+});
+
+test("a Background failure is named on the card", async () => {
+  const content = ["Feature: Login", "", "  Background:", "    Given bg", "", "  Scenario: Good password", "    When a", "",
+    "  Scenario: Bad password", "    Then b"].join("\n");
+  server.use(
+    http.get(`${P}/features/detail`, () => HttpResponse.json({ ...DETAIL, content, cases: [
+      detailCase(12, { scenario_name: "Good password", line: 6, automated_test_key: KEY }),
+      detailCase(13, { scenario_name: "Bad password", line: 9, automated_test_key: KEY2 }),
+    ] })),
+    http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
+      [KEY]: result("failed", { message: "bg broke", failed_step: { text: "Given bg", line: 4 } }),
+    } })),
+  );
+  renderAt();
+  const cards = await screen.findAllByRole("article");
+  const note = await within(cards[0]).findByText("Failed in Background: Given bg");
+  expect(within(cards[1]).queryByText(/Failed in Background/)).not.toBeInTheDocument();
+  expect(document.querySelector(".gk-failed")).toBeNull();
+  expect(screen.getByLabelText("Feature")).toHaveTextContent("Background:");
+  act(() => note.focus());
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("bg broke");
+});
+
+test("one latest-results request per 500 cases", async () => {
+  const keys = Array.from({ length: 501 }, (_, i) => i.toString(16).padStart(64, "0"));
+  const bodies: { keys: string[] }[] = [];
+  server.use(
+    http.get(`${P}/features/detail`, () => HttpResponse.json({ ...DETAIL, cases: keys.map((k, i) => detailCase(100 + i, { automated_test_key: k })) })),
+    http.post(`${P}/analytics/latest-results`, async ({ request }) => {
+      bodies.push(await request.json() as { keys: string[] });
+      return HttpResponse.json({ results: {} });
+    }),
+  );
+  renderAt();
+  await waitFor(() => expect(bodies).toHaveLength(2));
+  expect(bodies.map((b) => b.keys.length).sort((x, y) => x - y)).toEqual([1, 500]);
+});
+
+test("a file stored before raw content: cards from each case's Gherkin, text matching", async () => {
+  server.use(
+    http.get(`${P}/features/detail`, () => HttpResponse.json({ ...DETAIL, content: null, imported_at: null,
+      cases: DETAIL.cases.map((c) => ({ ...c, line: null })) })),
+    http.get(`${P}/cases`, () => HttpResponse.json({ total: 2, items: [
+      kase(12, { gherkin: "@smoke\nScenario: Good password\n  Given I type \"secret\"" }),
+      kase(13, { gherkin: "Scenario: Bad password\n  Then I see an error" }),
+    ] })),
+    http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
+      // The recorded line (99) means nothing here: the step is found by its text
+      [KEY2]: result("failed", { message: "no banner", failed_step: { text: "Then I see an error", line: 99 } }),
+    } })),
+  );
+  renderAt();
+  const cards = await screen.findAllByRole("article");
+  await waitFor(() => expect(cards[1].querySelector(".gk-failed")).not.toBeNull());
+  expect(cards[1].querySelector(".gk-failed")).toHaveTextContent("Then I see an error");
+  expect(cards[0].querySelector(".gk-failed")).toBeNull();
 });
 
 test("Run feature asks to run every scenario of the file", async () => {
@@ -101,7 +193,7 @@ test("Run feature asks to run every scenario of the file", async () => {
 test("a viewer reads the file but has no Run feature", async () => {
   asRole("viewer");
   renderAt();
-  await screen.findByLabelText("Feature file");
+  await screen.findAllByRole("article");
   expect(screen.queryByRole("button", { name: "Run feature" })).not.toBeInTheDocument();
 });
 
@@ -117,14 +209,13 @@ test("without the stored file the scenarios are rebuilt from the cases, with a n
   );
   renderAt();
   expect(await screen.findByText("Re-import this file to see it exactly as written.")).toBeInTheDocument();
-  const file = await screen.findByLabelText("Feature file");
-  expect(file).toHaveTextContent("Feature: Login");
-  expect(file).toHaveTextContent("Scenario: Good password");
+  const cards = await screen.findAllByRole("article");
+  expect(cards).toHaveLength(2);
+  expect(cards[0]).toHaveTextContent("Scenario: Good password");
   // A case with no stored Gherkin is shown by its title
-  expect(file).toHaveTextContent("Scenario: Title 13");
-  expect(file).not.toHaveTextContent("Title 40");
-  const goodLine = [...file.querySelectorAll(".gk-line")].find((l) => l.textContent?.includes("Scenario: Good password"))!;
-  expect(within(goodLine as HTMLElement).getByRole("link", { name: "TC-12" })).toBeInTheDocument();
+  expect(cards[1]).toHaveTextContent("Scenario: Title 13");
+  expect(document.body).not.toHaveTextContent("Title 40");
+  expect(within(cards[0]).getByRole("link", { name: "TC-12" })).toBeInTheDocument();
 });
 
 test("an unknown or archived file says it is not found", async () => {

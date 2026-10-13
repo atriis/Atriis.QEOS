@@ -1,18 +1,24 @@
-import { type ReactNode, useMemo, useRef } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Info } from "lucide-react";
+import { Info, XCircle } from "lucide-react";
+import { type LatestResult, getLatestResults } from "../api/analytics";
 import { type Case, type FeatureCase, type FeatureDetail, listCases } from "../api/cases";
 import { MAX_RUN_CASES } from "../api/runRequests";
 import { useRunStrips } from "../components/CaseTable";
 import ErrorBanner from "../components/ErrorBanner";
 import { featureLabel } from "../components/FeatureList";
+import FailedStepTip from "../components/FailedStepTip";
 import GherkinBlock from "../components/GherkinBlock";
+import LastResultPill from "../components/LastResultPill";
 import PageHeader from "../components/PageHeader";
 import RunControl from "../components/RunControl";
+import { type Block, splitFeature } from "../lib/featureBlocks";
+import { locateFailedStep, scenarioSteps } from "../lib/failedStep";
 import { GROUP_CASES_MAX, featureDetailQuery, fileLabel } from "../lib/featureQueries";
 import { useCanEdit } from "../lib/useCanEdit";
 
+const LATEST_BATCH = 500;
 const HEADING = /^\s*[^\s:#@|][^:#@|]*:/;
 
 /** The file as the cases hold it, for a file imported before raw files were stored: the Feature line, then
@@ -29,6 +35,43 @@ export function rebuildFeature(detail: FeatureDetail, cases: Case[]): { text: st
     out.push(...block);
   }
   return { text: out.join("\n"), lines };
+}
+
+/** "3 passed · 1 failed · 2 no runs": cases by the status of their latest result. */
+function statusCounts(statuses: (string | undefined)[]): string {
+  const n = new Map<string, number>();
+  for (const st of statuses) n.set(st ?? "no runs", (n.get(st ?? "no runs") ?? 0) + 1);
+  const order = (k: string) => (k === "no runs" ? 2 : k === "passed" ? 0 : k === "failed" ? 1 : 1.5);
+  return [...n].sort((x, y) => order(x[0]) - order(y[0])).map(([k, v]) => `${v} ${k}`).join(" · ");
+}
+
+/** A Background step failed: named on the card, with the same tip as a failed line (hover, focus, Escape). */
+function BackgroundFailure({ projectId, step, result }: { projectId: number; step: string; result: LatestResult }) {
+  const [hover, setHover] = useState(false);
+  const [focus, setFocus] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const open = (hover || focus) && !dismissed;
+  return (
+    <p className="scenario-bg-failure">
+      <span
+        className="scenario-bg-failure-line"
+        tabIndex={0}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => { setHover(false); setDismissed(false); }}
+        onFocus={() => setFocus(true)}
+        onBlur={() => { setFocus(false); setDismissed(false); }}
+        onKeyDown={(e) => { if (e.key === "Escape" && open) { e.stopPropagation(); setDismissed(true); } }}
+      >
+        <XCircle size={14} aria-hidden="true" />
+        Failed in Background: {step}
+      </span>
+      {open && (
+        <span role="tooltip" className="failed-tip scenario-bg-failure-tip" onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+          <FailedStepTip projectId={projectId} result={result} />
+        </span>
+      )}
+    </p>
+  );
 }
 
 /** One .feature file: its raw text with each scenario linked to its case, and Run feature. */
@@ -60,24 +103,55 @@ export default function FeaturePage() {
     return rebuilt.data ? rebuildFeature(data, rebuilt.data) : null;
   }, [data, rebuilt.data]);
   const cases = useMemo(() => data?.cases ?? [], [data]);
-  const { lastRuns } = useRunStrips(id, useMemo(() => cases.map((c) => c.automated_test_key), [cases]));
+  const keys = useMemo(() => cases.flatMap((c) => (c.automated_test_key ? [c.automated_test_key] : [])), [cases]);
+  const { lastRuns } = useRunStrips(id, keys);
+  const latest = useQuery({
+    queryKey: ["latest-results", "feature", id, keys],
+    enabled: keys.length > 0,
+    queryFn: async () => {
+      const merged: Record<string, LatestResult> = {};
+      const batches: string[][] = [];
+      for (let i = 0; i < keys.length; i += LATEST_BATCH) batches.push(keys.slice(i, i + LATEST_BATCH));
+      for (const r of await Promise.all(batches.map((b) => getLatestResults(id, b)))) Object.assign(merged, r.results);
+      return merged;
+    },
+  });
 
-  const chip = (c: FeatureCase) => (
-    <>
-      <Link className="case-chip" to={`/projects/${id}/cases/${c.number}`} title={c.title}>{c.key}</Link>
-      {lastRuns(c.automated_test_key)}
-    </>
-  );
-  const annotations = new Map<number, ReactNode>();
-  const placed = new Set<number>();
-  for (const c of cases) {
-    const line = source?.lines.get(c.number);
-    if (line != null && !annotations.has(line)) {
-      annotations.set(line, chip(c));
-      placed.add(c.number);
+  const results = latest.data ?? {};
+  const resultOf = (c: FeatureCase) => (c.automated_test_key ? results[c.automated_test_key.toLowerCase()] : undefined);
+  const split = useMemo(() => {
+    if (!source) return null;
+    return splitFeature(source.text, [...source.lines.values()]);
+  }, [source]);
+  const stored = data?.content != null;
+
+  /** Where a case's failed step is: a line inside its own block, or the Background in the preamble. */
+  const failureOf = (c: FeatureCase, block: Block): { line?: number; background?: string; result: LatestResult } | null => {
+    const result = resultOf(c);
+    const step = result?.failed_step;
+    const heading = source?.lines.get(c.number);
+    if (!result || !step || !source || heading == null) return null;
+    const steps = scenarioSteps(source.text, heading);
+    // A file rebuilt from the cases has its own line numbers: only the text can be trusted
+    const at = locateFailedStep(steps, stored ? step : { text: step.text });
+    if (at == null) return null;
+    const line = steps[at].line;
+    if (line >= block.start && line <= block.end) return { line: line - block.start + 1, result };
+    if (split?.preamble && line >= split.preamble.start && line <= split.preamble.end) return { background: steps[at].text, result };
+    return null;
+  };
+
+  const cards: { c: FeatureCase; block: Block }[] = [];
+  const unplaced: FeatureCase[] = [];
+  if (source && split) {
+    const used = new Set<number>();
+    for (const c of cases) {
+      const line = source.lines.get(c.number);
+      const block = line != null && !used.has(line) ? split.scenarios.get(line) : undefined;
+      if (block && line != null) { used.add(line); cards.push({ c, block }); } else unplaced.push(c);
     }
   }
-  const unplaced = source ? cases.filter((c) => !placed.has(c.number)) : [];
+  const counts = latest.isSuccess ? statusCounts(cases.map((c) => resultOf(c)?.status)) : "";
   const title = data ? featureLabel(data) : fileLabel(path) || "Feature";
 
   return (
@@ -103,11 +177,38 @@ export default function FeaturePage() {
           <span>Re-import this file to see it exactly as written.</span>
         </p>
       )}
-      {source && (
+      {counts !== "" && <p className="muted feature-counts">{counts}</p>}
+      {latest.error != null && <p className="muted">The latest results could not be loaded.</p>}
+      {split?.preamble && (
         <div className="card feature-source">
-          <GherkinBlock text={source.text} label="Feature file" numbered annotations={annotations} />
+          <GherkinBlock text={split.preamble.text} label="Feature" numbered startLine={split.preamble.start} />
         </div>
       )}
+      {cards.map(({ c, block }) => {
+        const failure = failureOf(c, block);
+        const result = resultOf(c);
+        return (
+          <article key={c.number} className="card scenario-card" aria-label={`${c.key} ${c.title}`}>
+            <div className="scenario-card-head">
+              <h2>
+                <Link className="case-chip" to={`/projects/${id}/cases/${c.number}`}>{c.key}</Link>
+                <span className="scenario-card-title">{c.title}</span>
+              </h2>
+              <div className="scenario-card-status">
+                {c.automated_test_key != null && latest.isSuccess && <LastResultPill result={result} />}
+                {lastRuns(c.automated_test_key)}
+              </div>
+            </div>
+            {failure?.background != null && <BackgroundFailure projectId={id} step={failure.background} result={failure.result} />}
+            <div className="feature-source">
+              <GherkinBlock text={block.text} label={`${c.key} Gherkin`} numbered startLine={block.start}
+                failed={failure?.line != null
+                  ? { line: failure.line, tip: <FailedStepTip projectId={id} result={failure.result} /> }
+                  : undefined} />
+            </div>
+          </article>
+        );
+      })}
       {unplaced.length > 0 && (
         <div className="card">
           <h2>Scenarios not found in the file</h2>
