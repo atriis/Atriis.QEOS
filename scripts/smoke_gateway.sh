@@ -150,8 +150,11 @@ ORG_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
 check "create a project" 201 POST "$BASE/api/v1/organizations/$ORG_ID/projects" "${AUTH[@]}" \
   -H "Content-Type: application/json" -d "{\"name\":\"Smoke $SUFFIX\"}"
 PROJECT_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
+# The smoke user owns the project, so its key may read test suggestions (spec 2026-10-13 §9): /collect/impact below
 check "create an API key -> ingestion-service (overlap route)" 201 POST \
-  "$BASE/api/v1/projects/$PROJECT_ID/api-keys" "${AUTH[@]}" -H "Content-Type: application/json" -d '{"name":"smoke"}'
+  "$BASE/api/v1/projects/$PROJECT_ID/api-keys" "${AUTH[@]}" -H "Content-Type: application/json" \
+  -d '{"name":"smoke","can_read_impact":true}'
+body_has "... allowed to read test suggestions" '"can_read_impact":true'
 API_KEY="$(sed -n 's/.*"key":"\(qeos_[^"]*\)".*/\1/p' "$TMP/body")"
 KEY_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
 check "collection settings -> ingestion-service" 200 GET "$BASE/api/v1/projects/$PROJECT_ID/collection-settings" "${AUTH[@]}"
@@ -426,6 +429,33 @@ body_has "... with its model version" '"model_version":"stats-v1"'
 body_matches "... the new failure was missed: the suggestion was scored before the run's own results" \
   "\"missed\":\[\{\"test_key\":\"[0-9a-f]{64}\",\"suite\":\"[^\"]*\",\"class_name\":\"[^\"]*\",\"name\":\"$IMPACT_TEST\"\}\]"
 check "impact of a run that is not there -> 404" 404 GET "$BASE/api/v1/projects/$PROJECT_ID/runs/999999999/impact" "${AUTH[@]}"
+# ---- suggested tests first (spec 2026-10-13 §5): a two-stage run, and a run of only the suggested tests ----
+# The subset run also fails IMPACT_TEST, so the branch's latest run still names it ("failing on this branch" below).
+SUBSET_TEST="subset-only-$SUFFIX"
+STAGES_FULL='"scope":"full","stages":{"stages":[{"name":"suggested","duration_s":65.0,"tests":1,"failed":1},{"name":"rest","duration_s":850.0,"tests":1,"failed":0}],"time_to_first_failure_s":42.5}'
+STAGES_STOPPED='"scope":"impact-subset","stages":{"stages":[{"name":"suggested","duration_s":65.0,"tests":2,"failed":2}],"time_to_first_failure_s":30.0,"stopped_after_stage":1}'
+TWO_STAGE_RUN="{\"run\":{\"ci_provider\":\"local\",\"branch\":\"$IMPACT_BRANCH\",\"started_at\":\"$(at -34)\",\"finished_at\":\"$(at -33)\",$STAGES_FULL},\"results\":[{\"name\":\"$IMPACT_TEST\",\"status\":\"failed\",\"message\":\"broke\"},{\"name\":\"steady-$SUFFIX\",\"status\":\"passed\"}],$IMPACT_CHANGES}"
+SUBSET_RUN="{\"run\":{\"ci_provider\":\"local\",\"branch\":\"$IMPACT_BRANCH\",\"started_at\":\"$(at -32)\",\"finished_at\":\"$(at -31)\",$STAGES_STOPPED},\"results\":[{\"name\":\"$IMPACT_TEST\",\"status\":\"failed\",\"message\":\"broke\"},{\"name\":\"$SUBSET_TEST\",\"status\":\"failed\",\"message\":\"broke\"}],$IMPACT_CHANGES}"
+check "upload a two-stage run (run-impact, scope full)" 201 POST "$BASE/api/v1/collect/runs" \
+  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "$TWO_STAGE_RUN"
+TWO_STAGE_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
+check "read the two-stage run" 200 GET "$BASE/api/v1/runs/${TWO_STAGE_ID:-0}" "${AUTH[@]}"
+body_has "... stored as a full run" '"scope":"full"'
+body_has "... with both stages" '"name":"rest","duration_s":850.0'
+body_has "... with its time to the first failure" '"time_to_first_failure_s":42.5'
+check "upload a run of only the suggested tests, stopped after stage 1" 201 POST "$BASE/api/v1/collect/runs" \
+  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "$SUBSET_RUN"
+SUBSET_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
+check "read the suggested-only run" 200 GET "$BASE/api/v1/runs/${SUBSET_ID:-0}" "${AUTH[@]}"
+body_has "... stored as a subset run" '"scope":"impact-subset"'
+body_has "... that stopped after stage 1" '"stopped_after_stage":1'
+check "impact of the suggested-only run" 200 GET "$BASE/api/v1/projects/$PROJECT_ID/runs/${SUBSET_ID:-0}/impact" "${AUTH[@]}"
+body_has "... is not evaluated" '"evaluation":"not_evaluated"'
+body_has "... and has no outcome" '"outcome":null'
+check "the runs list without suggested-only runs" 200 GET \
+  "$BASE/api/v1/projects/$PROJECT_ID/runs?scope=full&branch=$IMPACT_BRANCH" "${AUTH[@]}"
+body_lacks "... leaves the suggested-only run out" "\"id\":${SUBSET_ID:-0},"
+body_has "... and keeps the two-stage run" "\"id\":${TWO_STAGE_ID:-0},"
 if docker compose ps --status running --services 2>/dev/null | grep -qx impact-rollup; then
   pass "impact-rollup is running"
 else
@@ -441,6 +471,15 @@ if docker compose run --rm -T impact-rollup python -m src.ingestion.jobs.impact_
 else
   fail "impact rollup pass: $(tail -c 400 "$TMP/impact_err")"
 fi
+IMPACT_BASE_ROWS="$(docker compose exec -T postgres psql -U postgres -d ingestion_db -tAc \
+  "SELECT count(*) FROM impact_test_base WHERE name = '$IMPACT_TEST'" | tr -d '\r ')"
+SUBSET_BASE_ROWS="$(docker compose exec -T postgres psql -U postgres -d ingestion_db -tAc \
+  "SELECT count(*) FROM impact_test_base WHERE name = '$SUBSET_TEST'" | tr -d '\r ')"
+if [ "${IMPACT_BASE_ROWS:-0}" != "0" ] && [ "$SUBSET_BASE_ROWS" = "0" ]; then
+  pass "the rollup counted today's full runs and left the suggested-only run out of the statistics"
+else
+  fail "impact_test_base: $IMPACT_TEST has ${IMPACT_BASE_ROWS:-?} row(s) (want 1+), $SUBSET_TEST has ${SUBSET_BASE_ROWS:-?} (want 0)"
+fi
 check "score a change -> ingestion-service (analytics route)" 200 POST \
   "$BASE/api/v1/projects/$PROJECT_ID/analytics/impact" "${AUTH[@]}" -H "Content-Type: application/json" \
   -d "{\"changed_paths\":[\"src/impact/smoke.py\"],\"branch\":\"$IMPACT_BRANCH\"}"
@@ -448,11 +487,30 @@ body_has "... suggests the test that now fails on the branch" "\"name\":\"$IMPAC
 check "score a change without paths -> 422" 422 POST \
   "$BASE/api/v1/projects/$PROJECT_ID/analytics/impact" "${AUTH[@]}" -H "Content-Type: application/json" \
   -d '{"changed_paths":[]}'
+check "score a change with the API key -> /api/v1/collect/impact" 200 POST "$BASE/api/v1/collect/impact" \
+  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" \
+  -d "{\"changed_paths\":[\"src/impact/smoke.py\"],\"branch\":\"$IMPACT_BRANCH\"}"
+body_has "... suggests the test failing on the branch, as the collector reads it" "\"name\":\"$IMPACT_TEST\",\"kind\":\"failing_on_branch\""
+check "the collector's scoring without a key -> 401" 401 POST "$BASE/api/v1/collect/impact" \
+  -H "Content-Type: application/json" -d '{"changed_paths":["src/impact/smoke.py"]}'
+# Keys are upload-only unless an owner or admin allows test suggestions (off by default)
+check "create an upload-only API key" 201 POST "$BASE/api/v1/projects/$PROJECT_ID/api-keys" "${AUTH[@]}" \
+  -H "Content-Type: application/json" -d '{"name":"smoke-upload-only"}'
+body_has "... not allowed to read test suggestions" '"can_read_impact":false'
+UPLOAD_ONLY_KEY="$(sed -n 's/.*"key":"\(qeos_[^"]*\)".*/\1/p' "$TMP/body")"
+UPLOAD_ONLY_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
+check "the collector's scoring with an upload-only key -> 403" 403 POST "$BASE/api/v1/collect/impact" \
+  -H "Authorization: Bearer $UPLOAD_ONLY_KEY" -H "Content-Type: application/json" \
+  -d '{"changed_paths":["src/impact/smoke.py"]}'
+body_has "... with its code" '"code":"impact_not_allowed"'
+check "revoke the upload-only key" 204 DELETE "$BASE/api/v1/projects/$PROJECT_ID/api-keys/${UPLOAD_ONLY_ID:-0}" "${AUTH[@]}"
 check "impact accuracy -> ingestion-service (analytics route)" 200 GET \
   "$BASE/api/v1/projects/$PROJECT_ID/analytics/impact-accuracy?days=7" "${AUTH[@]}"
 body_matches "... counts the miss" '"missed":[1-9]'
 body_matches "... with the suggested tests per run" '"avg_suggested":[0-9]'
 body_has "... no replayed runs" '"includes_replayed":false'
+body_lacks "... and not the suggested-only run's new failure" "\"name\":\"$SUBSET_TEST\""
+body_lacks "... nor the suggested-only run" "\"run_id\":${SUBSET_ID:-0},"
 check "impact accuracy over 10 days -> 422" 422 GET \
   "$BASE/api/v1/projects/$PROJECT_ID/analytics/impact-accuracy?days=10" "${AUTH[@]}"
 
