@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.ingestion.core.config import settings
 from src.ingestion.models import Run, RunResult
+from src.ingestion.models.run import FAILED_STEP_TEXT_LENGTH
 from src.ingestion.service import masking_pattern_service
 from src.ingestion.service.ingest_service import CI_RUN_URL_LENGTH, COMMIT_MESSAGE_LENGTH, mask, truncate_utf8
 
@@ -66,15 +67,17 @@ def _results_pass(
             row_kinds: Counter = Counter()
             message, message_changed, message_cut = _remask_text(row.message, patterns, row_kinds)
             details, details_changed, details_cut = _remask_text(row.details, patterns, row_kinds)
-            if not (message_changed or details_changed):
+            step, step_changed, step_cut = _remask_text(row.failed_step_text, patterns, row_kinds)
+            if not (message_changed or details_changed or step_changed):
                 continue
             changed += 1
             # A result counts once per kind, the way ingest's metrics count it
             kinds.update({kind: 1 for kind in row_kinds})
             if not dry_run:
                 row.message, row.details = message, details
+                row.failed_step_text = step[:FAILED_STEP_TEXT_LENGTH] if step is not None else None
                 row.redacted = True
-                row.truncated = row.truncated or message_cut or details_cut
+                row.truncated = row.truncated or message_cut or details_cut or step_cut
         last_id = batch[-1][0].id
         if dry_run:
             db.rollback()

@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from src.ingestion.core.config import settings
 from src.ingestion.jobs import remask
 from src.ingestion.models import Run, RunResult
+from src.ingestion.models.run import FAILED_STEP_TEXT_LENGTH
 
 WHEN = datetime(2026, 9, 1, tzinfo=timezone.utc)
 SECRET = "ghp_" + "a" * 36
@@ -23,7 +24,7 @@ def session_factory(db):
 def add_run(db, make_key):
     keys = {}
 
-    def _add(project_id=1, results=(), ci_run_url=None):
+    def _add(project_id=1, results=(), ci_run_url=None, failed_steps=None):
         if project_id not in keys:
             keys[project_id] = make_key(project_id=project_id)[0]
         run = Run(project_id=project_id, api_key_id=keys[project_id].id, request_hash="h", ci_provider="local",
@@ -33,7 +34,8 @@ def add_run(db, make_key):
         db.flush()
         for i, (message, details) in enumerate(results):
             db.add(RunResult(run_id=run.id, test_key=f"{i:064d}", name=f"t{i}", status="failed",
-                             duration_ms=1, message=message, details=details))
+                             duration_ms=1, message=message, details=details,
+                             failed_step_text=(failed_steps or {}).get(i)))
         db.commit()
         return run.id
 
@@ -118,3 +120,21 @@ def test_commit_subjects_already_stored_are_masked(db, session_factory, add_run,
     db.expire_all()
     assert SECRET not in db.get(Run, run_id).commit_message
     assert summary(capsys)["runs_changed"] == 1
+
+
+def test_failed_step_text_is_masked_when_nothing_else_is(db, session_factory, add_run, capsys):
+    run_id = add_run(results=[("plain", None)], failed_steps={0: f"When I log in with {SECRET}"})
+    run_job(session_factory)
+    row = results(db, run_id)[0]
+    assert SECRET not in row.failed_step_text and "[REDACTED:github_token]" in row.failed_step_text
+    assert row.message == "plain" and row.redacted is True
+    report = summary(capsys)
+    assert report["results_changed"] == 1 and report["kinds"] == {"github_token": 1}
+
+
+def test_failed_step_text_is_cut_back_to_its_column_length(db, session_factory, add_run):
+    run_id = add_run(results=[("plain", None)], failed_steps={0: "x" * 985 + " password=ab"})  # 997 chars
+    run_job(session_factory)
+    row = results(db, run_id)[0]
+    assert len(row.failed_step_text) == FAILED_STEP_TEXT_LENGTH
+    assert "password=[RED" in row.failed_step_text and "ab" not in row.failed_step_text[985:]
