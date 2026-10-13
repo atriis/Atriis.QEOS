@@ -3,9 +3,9 @@
 export type TokenKind = "keyword" | "tag" | "table" | "docstring" | "comment" | "text" | "param" | "string";
 export interface Token { kind: TokenKind; text: string }
 
-const HEADINGS = ["Scenario Outline:", "Scenario Template:", "Scenario:", "Example:", "Examples:", "Background:", "Rule:", "Feature:",
+export const HEADINGS = ["Scenario Outline:", "Scenario Template:", "Scenario:", "Example:", "Examples:", "Background:", "Rule:", "Feature:",
   "Esquema do Cenário:", "Cenário:", "Exemplos:", "Contexto:", "Regra:", "Funcionalidade:"];
-const STEPS = ["Given ", "When ", "Then ", "And ", "But ", "* ", "Dado ", "Dada ", "Quando ", "Então ", "E ", "Mas "];
+export const STEPS = ["Given ", "When ", "Then ", "And ", "But ", "* ", "Dado ", "Dada ", "Quando ", "Então ", "E ", "Mas "];
 
 const PLACEHOLDER = /<[^\s<>"][^<>"]*>/g;
 
