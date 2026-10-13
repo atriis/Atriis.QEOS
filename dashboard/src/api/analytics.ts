@@ -208,6 +208,16 @@ export function getFlaky(
   return apiFetch(`/api/v1/projects/${projectId}/analytics/flaky${q}`, { signal: init.signal });
 }
 
+export interface LatestResult {
+  status: string; run_id: number; branch: string | null; environment: string | null;
+  started_at: string; message: string | null; failed_step?: { text: string; line?: number };
+}
+
+/** Each test's latest result on any branch, with the failed step; at most 500 keys per call. */
+export function getLatestResults(projectId: number, keys: string[]): Promise<{ results: Record<string, LatestResult> }> {
+  return apiFetch(`/api/v1/projects/${projectId}/analytics/latest-results`, { method: "POST", body: JSON.stringify({ keys }) });
+}
+
 const COUNT = new Intl.NumberFormat();
 
 /** A count in the reader's locale ("2,124"): the Report and the Overview widgets print counts the same way. */

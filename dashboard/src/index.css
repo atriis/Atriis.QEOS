@@ -1096,3 +1096,14 @@ button.switch.switch-compact { gap: var(--space-2); padding: var(--space-1) var(
 
 /* run-impact's stages on the run page (spec 2026-10-13 §3.2): figures line up from run to run */
 .run-stages { font-variant-numeric: tabular-nums; }
+
+/* Failed step: red wash + left bar + the word "failed" with an icon (never colour alone). The tip sits below the line, inside it, so the pointer can move onto it. */
+.gherkin .gk-failed { position: relative; display: block; background: color-mix(in srgb, var(--status-failed) 14%, transparent); box-shadow: inset 3px 0 0 var(--status-failed); border-radius: 2px; cursor: help; }
+.gherkin .gk-failed:focus-visible { outline: 2px solid var(--status-failed); outline-offset: 1px; }
+.gherkin.numbered .gk-failed { display: grid; }
+.gherkin:not(.numbered) .gk-failed { padding-inline-start: var(--space-2); }
+.gk-failed-mark { display: inline-flex; align-items: center; gap: 4px; margin-inline-start: var(--space-3); font-family: var(--font-sans); font-size: 12px; font-weight: 600; color: var(--danger-text); user-select: none; white-space: nowrap; }
+.gherkin.numbered .gk-failed .gk-failed-mark { grid-column: 3; margin: 0; }
+.failed-tip { position: absolute; z-index: 40; inset-inline-start: 4ch; top: 100%; margin-top: 4px; width: max-content; max-width: min(420px, 90vw); padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: var(--space-1); background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-2); font-family: var(--font-sans); font-size: 13px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; cursor: auto; user-select: text; }
+.failed-tip-meta { color: var(--text-secondary); font-size: 12px; }
+@media (max-width: 640px) { .gherkin.numbered .gk-failed .gk-failed-mark { grid-column: 2; } .failed-tip { inset-inline-start: 0; } }
