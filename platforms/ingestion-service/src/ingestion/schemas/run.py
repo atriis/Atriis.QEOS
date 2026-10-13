@@ -3,6 +3,23 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
 
+from src.ingestion.models.run import FULL_SCOPE
+
+
+class StageOut(BaseModel):
+    name: str
+    duration_s: float
+    tests: int
+    failed: int
+
+
+class StagesOut(BaseModel):
+    """run-impact's stages (spec 2026-10-13 §3.1)."""
+
+    stages: list[StageOut]
+    time_to_first_failure_s: Optional[float] = None
+    stopped_after_stage: Optional[int] = None
+
 
 class RunOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -20,6 +37,8 @@ class RunOut(BaseModel):
     pr_number: Optional[int] = None
     base_branch: Optional[str] = None
     trigger: Optional[str] = None
+    scope: str = FULL_SCOPE  # "impact-subset": only the suggested tests ran
+    stages: Optional[StagesOut] = None
     started_at: datetime
     finished_at: datetime
     duration_ms: int

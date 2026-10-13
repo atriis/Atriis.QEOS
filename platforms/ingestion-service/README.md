@@ -34,6 +34,20 @@ Receives test results from CI. Design: `docs/superpowers/specs/2026-09-29-ingest
    includes it (`null` when absent), so a retry that spans the deploy of this field, of a run stored earlier
    under the same `Idempotency-Key`, gets `409`; this is accepted (ADR-030).
 
+   A run uploaded by `qeos-collector run-impact` (collector 0.6.0, migration 020) also carries:
+   - `"scope": "full" | "impact-subset"`: default `full`; `impact-subset` when only the suggested tests ran;
+   - `"stages"`:
+     - `stages`: 1 or 2 items of `{"name": "suggested" | "rest" | "all", "duration_s", "tests", "failed"}`;
+     - `time_to_first_failure_s`: null without a failure;
+     - `stopped_after_stage`: `1`, only with `impact-subset`.
+
+   Anything else is `422` (NaN and infinity too). Unlike `trigger`, these two fields are left out of the request
+   hash while they hold their defaults, so an upload stored before them still replays instead of answering `409`.
+   A split upload (keys `<key>-part-N`) is one run per part: each part keeps its `scope`, and the `stages` are kept
+   on the first part that sends them, since they describe the whole run.
+
+   A `422` lists each error's `loc`, `msg` and `type`; it never echoes the submitted value (`input`, `ctx`).
+
 ## Collection settings
 
 `GET /api/v1/projects/{id}/collection-settings` (any project member) returns `collect_manual` (default
@@ -79,7 +93,8 @@ can sync cases without a user login. See ADR-024.
   most 255 characters; `%` and `_` match themselves; combines with `branch`),
   `status=failing|passing` (failing means at least one failed or errored result), `environment`,
   `ci_provider`, `commit` (hex prefix of 4+ characters, any case), `pr`, `author`
-  (case-insensitive substring; `%` and `_` match themselves), `since` (inclusive) and `until`
+  (case-insensitive substring; `%` and `_` match themselves), `scope` (`full` hides runs of only the
+  suggested tests; `impact-subset` shows only them), `since` (inclusive) and `until`
   (exclusive) on `started_at`, as ISO 8601 instants. `branch_contains` cannot use the branch
   index; a per-project scan is fine at today's sizes (a `pg_trgm` GIN index on `lower(branch)` is
   the fix if run tables grow very large).

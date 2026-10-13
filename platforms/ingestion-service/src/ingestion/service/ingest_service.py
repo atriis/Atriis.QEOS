@@ -1,5 +1,6 @@
 import hashlib
 import json
+import re
 from collections import Counter
 from datetime import datetime, timezone
 from typing import Optional
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from qeos_shared.keys import test_key
 from src.ingestion.core.config import settings
 from src.ingestion.models import ApiKey, Run, RunChangedFile, RunComponent, RunResult
+from src.ingestion.models.run import FULL_SCOPE
 from src.ingestion.schemas.collect import RunUpload
 from src.ingestion.service import collection_settings_service, impact_service, masking_pattern_service
 from src.ingestion.utils import custom_masking, metrics
@@ -57,9 +59,37 @@ def mask(
     return text, found | custom_found
 
 
+# Run fields added by migration 020, at their defaults: left out of the hash, so an upload stored before them (a spooled
+# part resent after the upgrade) still replays instead of answering 409 (plan Ruling 5)
+_LATER_RUN_FIELDS = {"scope": FULL_SCOPE, "stages": None}
+# The collector's Idempotency-Key for part N of a split upload (collector payload.build_parts)
+_PART_KEY = re.compile(r"^(?P<run>.+)-part-[0-9]+$")
+
+
 def _request_hash(upload: RunUpload) -> str:
-    canonical = json.dumps(upload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    data = upload.model_dump(mode="json")
+    for name, default in _LATER_RUN_FIELDS.items():
+        if data["run"].get(name, default) == default:
+            data["run"].pop(name, None)
+    canonical = json.dumps(data, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _stages_to_store(db: Session, project_id: int, idempotency_key: Optional[str], upload: RunUpload) -> Optional[dict]:
+    """run-impact's stages describe the whole run, which a split upload stores as one run per part: they are kept on
+    the first part that brings them, and every later part of the same run gets none (plan ruling, split uploads)."""
+    if upload.run.stages is None:
+        return None
+    part = _PART_KEY.match(idempotency_key or "")
+    if part is not None:
+        sibling = db.query(Run.id).filter(
+            Run.project_id == project_id,
+            Run.idempotency_key.startswith(f"{part['run']}-part-", autoescape=True),
+            Run.stages.is_not(None),
+        ).first()
+        if sibling is not None:
+            return None
+    return upload.run.stages.model_dump(mode="json")
 
 
 def _existing(db: Session, project_id: int, idempotency_key: str) -> Optional[Run]:
@@ -114,6 +144,8 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
         pr_number=meta.pr_number,
         base_branch=meta.base_branch,
         trigger=meta.trigger,
+        scope=meta.scope,
+        stages=_stages_to_store(db, key.project_id, idempotency_key, upload),
         started_at=meta.started_at,
         finished_at=meta.finished_at,
         duration_ms=int((meta.finished_at - meta.started_at).total_seconds() * 1000),

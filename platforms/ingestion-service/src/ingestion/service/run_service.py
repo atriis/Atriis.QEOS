@@ -23,6 +23,7 @@ class RunFilters:
     author: Optional[str] = None  # substring, case-insensitive
     since: Optional[datetime] = None  # started_at >= since
     until: Optional[datetime] = None  # started_at < until
+    scope: Optional[str] = None  # one of SCOPES; "full" hides runs of only the suggested tests
 
 
 def list_runs(db: Session, project_id: int, limit: int, offset: int, filters: RunFilters = RunFilters()) -> list[Run]:
@@ -50,6 +51,8 @@ def list_runs(db: Session, project_id: int, limit: int, offset: int, filters: Ru
         query = query.filter(Run.started_at >= f.since)
     if f.until is not None:
         query = query.filter(Run.started_at < f.until)
+    if f.scope is not None:
+        query = query.filter(Run.scope == f.scope)
     return query.order_by(Run.created_at.desc(), Run.id.desc()).offset(offset).limit(limit).all()
 
 

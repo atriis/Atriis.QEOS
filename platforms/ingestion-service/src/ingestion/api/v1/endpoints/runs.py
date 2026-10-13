@@ -8,7 +8,7 @@ from src.ingestion.api.deps import (
     READ_ROLES, Caller, ProjectAccess, check_project_role, get_caller, get_db, require_project_role,
 )
 from src.ingestion.api.v1.endpoints.analytics import NO_NUL
-from src.ingestion.models.run import CI_PROVIDERS
+from src.ingestion.models.run import CI_PROVIDERS, SCOPES
 from src.ingestion.schemas.run import (
     ChangedFileOut, ComponentOut, FailureGroupsOut, ResultOut, RunComparison, RunDetail, RunOut, RunSummary,
 )
@@ -33,12 +33,13 @@ def list_runs(
     author: Optional[str] = Query(None, max_length=255, pattern=NO_NUL),
     since: Optional[datetime] = Query(None),
     until: Optional[datetime] = Query(None),
+    scope: Optional[Literal[SCOPES]] = Query(None),  # "full" hides runs of only the suggested tests
     db: Session = Depends(get_db),
     access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
 ):
     filters = run_service.RunFilters(
         branch=branch, branch_contains=branch_contains, status=status_filter, environment=environment, ci_provider=ci_provider,
-        commit=commit, pr=pr, author=author, since=since, until=until,
+        commit=commit, pr=pr, author=author, since=since, until=until, scope=scope,
     )
     return run_service.list_runs(db, access.project_id, limit, offset, filters)
 

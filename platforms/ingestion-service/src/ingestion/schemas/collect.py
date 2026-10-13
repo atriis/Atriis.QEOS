@@ -5,6 +5,7 @@ from typing import Annotated, Literal, Optional
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from src.ingestion.core.config import settings
+from src.ingestion.models.run import FULL_SCOPE, SCOPES, SUBSET_SCOPE
 
 # A CI runner's clock can drift a little; a day ahead means a broken clock or a bad payload
 MAX_CLOCK_SKEW = timedelta(hours=1)
@@ -32,6 +33,29 @@ def _text(max_length: int):
     return Annotated[str, StringConstraints(max_length=max_length)]
 
 
+MAX_STAGE_SECONDS = MAX_RUN_SPAN.total_seconds()
+
+
+class StageIn(BaseModel):
+    """One stage of a run-impact run (spec 2026-10-13 §3.1, plan Ruling 6)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: Literal["suggested", "rest", "all"]
+    duration_s: float = Field(ge=0, le=MAX_STAGE_SECONDS, allow_inf_nan=False)
+    tests: int = Field(ge=0, le=2_147_483_647)
+    failed: int = Field(ge=0, le=2_147_483_647)
+
+
+class StagesIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    stages: list[StageIn] = Field(min_length=1, max_length=2)
+    # From the start of stage 1 to the end of the first failing scenario; None without a failure
+    time_to_first_failure_s: Optional[float] = Field(None, ge=0, le=MAX_STAGE_SECONDS, allow_inf_nan=False)
+    stopped_after_stage: Optional[Literal[1]] = None  # --fail-fast stopped after a failing stage 1
+
+
 class RunIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -47,6 +71,10 @@ class RunIn(BaseModel):
     base_branch: Optional[_text(255)] = None
     # How the CI run started, as the collector classified it (ADR-030); absent: unknown, collected
     trigger: Optional[Literal["manual", "automatic", "qeos"]] = None
+    # run-impact (spec 2026-10-13 §3.1): "impact-subset" when only the suggested tests ran; absent: a full run.
+    # A split upload may send stages on every part; ingestion keeps them on the first part that has them
+    scope: Literal[SCOPES] = FULL_SCOPE
+    stages: Optional[StagesIn] = None
     started_at: AwareDatetime
     finished_at: AwareDatetime
 
@@ -63,6 +91,8 @@ class RunIn(BaseModel):
             raise ValueError("finished_at is too far in the future")
         if self.finished_at - self.started_at > MAX_RUN_SPAN:
             raise ValueError("a run may not span more than 7 days")
+        if self.stages is not None and self.stages.stopped_after_stage is not None and self.scope != SUBSET_SCOPE:
+            raise ValueError(f"stopped_after_stage needs scope {SUBSET_SCOPE}: a run that stopped did not run in full")
         return self
 
 

@@ -106,6 +106,10 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   collector and stored on the run. When the project has switched off collection of manual runs
   and `trigger` is `manual`, the answer is `202 {"discarded": true, "reason": "manual runs are
   not collected for this project"}` and nothing is stored (ADR-030).
+  Optional `run.scope` (`full` default, `impact-subset`) and `run.stages` (run-impact's stages: duration, tests
+  and failures per stage, `time_to_first_failure_s`, `stopped_after_stage`; migration 020), left out of the
+  request hash at their defaults; a split upload keeps the `stages` on its first part that sends them. A 422
+  never echoes the submitted value (no `input` or `ctx`).
 - **Collection settings**: `GET/PUT /projects/{id}/collection-settings` (`collect_manual`, default
   true; `discarded_count` and `last_discarded_at`; members read, owners and admins write), table
   `collection_settings` (ADR-030).
@@ -115,7 +119,7 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   a preview; ADR-020); `python -m src.ingestion.jobs.remask` re-masks stored
   results.
 - **Read**: runs list per project (filters: branch, failing/passing, environment, CI, commit
-  prefix, PR, author, started-at range), run detail with status filter and changed
+  prefix, PR, author, started-at range, scope), run detail with status filter and changed
   files, run summary, failures grouped by error signature, comparison of two
   runs. Access: user JWT + project role via project-service.
 - **Analytics** (read roles): trends (`bucket=day|week|month`, Monday weeks,

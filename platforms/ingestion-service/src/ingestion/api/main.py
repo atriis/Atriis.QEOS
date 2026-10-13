@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
-from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from qeos_shared.metrics import install_metrics
 from starlette.middleware.cors import CORSMiddleware
 
@@ -32,11 +33,14 @@ metrics.REGISTRY.register(HEARTBEATS)
 
 
 @app.exception_handler(RequestValidationError)
-async def count_rejected_uploads(request: Request, exc: RequestValidationError):
-    # Count 422s on the upload endpoint; every other route keeps FastAPI's default behaviour
+async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """FastAPI's 422 echoes each error's `input` (for a body error, the whole body: a secret in an upload would come
+    back) and `ctx`, which can hold the value too. A NaN there made the default handler itself fail with a 500. Both
+    are dropped, as in test-management (ADR-025). 422s on the upload endpoint are counted."""
     if request.url.path == f"{settings.API_V1_STR}/collect/runs":
         metrics.REJECTED.labels(reason="validation").inc()
-    return await request_validation_exception_handler(request, exc)
+    errors = [{k: v for k, v in error.items() if k not in ("input", "ctx")} for error in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(errors)})
 
 
 @app.get("/health")
