@@ -298,11 +298,11 @@ def mixed_commits(db: Session, project_id: int, since: datetime, branch: Optiona
 
 
 def _latest_ranked(filters, *columns):
-    """Each test's results ranked newest first (run start, then run id): position 1 is its latest."""
+    """Each test's results ranked newest first (run start, run id, row id): position 1 is its latest."""
     return (
         select(RunResult.test_key, *columns,
                func.row_number().over(partition_by=RunResult.test_key,
-                                      order_by=(Run.started_at.desc(), Run.id.desc())).label("position"))
+                                      order_by=(Run.started_at.desc(), Run.id.desc(), RunResult.id.desc())).label("position"))
         .join(Run, Run.id == RunResult.run_id).where(*filters)
     ).subquery()
 
@@ -330,7 +330,7 @@ def latest_results(db: Session, project_id: int, keys: List[str]) -> dict:
     out = {}
     for r in db.execute(select(ranked).where(ranked.c.position == 1)).mappings():
         entry = {"status": r["status"], "run_id": r["run_id"], "branch": r["branch"],
-                 "environment": r["environment"], "started_at": r["started_at"], "message": r["message"]}
+                 "environment": r["environment"], "started_at": as_utc(r["started_at"]), "message": r["message"]}
         step = failed_step_of(r["status"], r["message"], r["details"], r["failed_step_text"], r["failed_step_line"])
         if step:
             entry["failed_step"] = step

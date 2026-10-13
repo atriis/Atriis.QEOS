@@ -20,7 +20,7 @@ def test_latest_on_any_branch_with_the_failed_step(client, auth, project_role, s
     got = body["results"][key]
     assert got["status"] == "failed" and got["branch"] == "feature/x" and got["run_id"] == run.id
     assert got["failed_step"] == {"text": "When I search Lisbon", "line": 14} and got["message"] == "boom"
-    assert got["started_at"].startswith("2026-10-01T01:00:00")
+    assert got["started_at"].startswith("2026-10-01T01:00:00") and got["started_at"].endswith("+00:00")
 
 
 def test_keys_without_results_are_absent(client, auth, project_role):
@@ -42,3 +42,24 @@ def test_limits_and_roles(client, auth, project_role):
     assert client.post(URL, json={"keys": ["not-a-key"]}, headers=auth()).status_code == 422
     project_role(status_code=404)
     assert client.post(URL, json={"keys": ["a" * 64]}, headers=auth()).status_code == 404
+
+
+def test_duplicate_keys_give_one_entry(client, auth, project_role, seed_run):
+    project_role("viewer")
+    seed_run(T0, results=(("search", "passed", 5),))
+    key = report_key("search")
+    resp = client.post(URL, json={"keys": [key, key, key.upper()]}, headers=auth())
+    assert resp.status_code == 200 and list(resp.json()["results"]) == [key.lower()]
+
+
+def test_another_projects_results_are_never_returned(client, auth, project_role, seed_run):
+    project_role("viewer")
+    seed_run(T0, results=(("search", "failed", 5),), project_id=2)
+    assert client.post(URL, json={"keys": [report_key("search")]}, headers=auth()).json() == {"results": {}}
+
+
+def test_two_rows_of_one_test_in_a_run_rank_by_id(client, auth, project_role, seed_run):
+    project_role("viewer")
+    seed_run(T0, results=(("search", "failed", 5), ("search", "passed", 5)))
+    got = client.post(URL, json={"keys": [report_key("search")]}, headers=auth()).json()["results"]
+    assert got[report_key("search")]["status"] == "passed"
