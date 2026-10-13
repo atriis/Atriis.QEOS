@@ -381,6 +381,27 @@ def test_run_scope_downgrade_drops_the_columns(tmp_path):
         engine.dispose()
 
 
+def test_rows_from_before_020_become_full_runs_and_upload_only_keys(tmp_path):
+    """Existing data at the upgrade: every run is a full run and every key is upload-only (spec 2026-10-13 §9)."""
+    url = f"sqlite:///{(tmp_path / 'upgrade_020.db').as_posix()}"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(SERVICE_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "019")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(KEY), {"hash": "9" * 64})
+            conn.execute(text(RUN), {"idem": "before-020", "provider": "local"})
+        engine.dispose()
+        command.upgrade(cfg, "head")
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT scope, stages FROM test_runs")).one() == ("full", None)
+            assert conn.execute(text("SELECT can_read_impact FROM api_keys")).scalar() in (False, 0)
+    finally:
+        engine.dispose()
+
+
 def test_failed_step_line_must_be_positive(migrated_engine):
     with migrated_engine.begin() as conn:
         conn.execute(text(KEY), {"hash": "d" * 64})
@@ -393,3 +414,20 @@ def test_failed_step_line_must_be_positive(migrated_engine):
     with pytest.raises(IntegrityError):
         with migrated_engine.begin() as conn:
             conn.execute(text("UPDATE test_results SET failed_step_line = 0"))
+
+
+def test_failed_step_downgrade_drops_the_columns(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'downgrade_021.db').as_posix()}"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(SERVICE_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "020")
+    engine = create_engine(url)
+    try:
+        columns = {column["name"] for column in inspect(engine).get_columns("test_results")}
+        assert not {"failed_step_text", "failed_step_line"} & columns
+        assert "owner" in columns
+        assert "scope" in {column["name"] for column in inspect(engine).get_columns("test_runs")}  # 020 is still there
+    finally:
+        engine.dispose()
