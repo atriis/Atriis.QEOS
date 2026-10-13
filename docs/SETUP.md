@@ -1031,10 +1031,12 @@ stack on `https://localhost:8443`, add `--ca-file qeos-ca.crt` ([4.1.3](#413-col
 - **Failed step** (scenario page and the scenario cards on a feature page): when a case's latest
   result failed, its failing step shows in red, and a **last-result pill** shows the status. The
   latest result is the newest on any branch, not only the default one. Hover the step, or focus it
-  with the keyboard, to see the error and an **Open run** link. The exact line needs the collector
+  with the keyboard, to see the error, branch, environment and time, and an **Open run** link. The exact line needs the collector
   0.6.0 or later; results uploaded by older collectors are matched to the step by its text. A
   failure in the Background shows as "Failed in Background" on the feature card. A Scenario
-  Outline marks the failing step on the first example row only.
+  Outline case is linked to its first example row only, so its pill and failed step come from that
+  row. Hand-written cases (not imported from a .feature file) show the last-result pill but no red
+  step.
 
 Suites: **Test cases** → **Suites** tab → create a suite (its name must be unique), add cases,
 order them, and **Run suite** ([4.3](#43-run-from-qeos-play-and-stop)). Deleting a suite keeps

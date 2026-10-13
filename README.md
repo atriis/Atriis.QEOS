@@ -76,7 +76,7 @@ pipeline already produces, and it starts runs only through workflows you own.
 ### Test management
 - A **case catalogue** with suites, priorities, statuses and links to the automated tests that cover each case.
 - A **Feature view** grouped by `.feature` file.
-- **Failed step:** a scenario's latest failure shows its failing step in red, with the error on hover, on the scenario page and on the feature page's scenario cards.
+- **Failed step:** a scenario's latest failure, from any branch, shows its failing step in red on the scenario page and the feature page's cards. Hover or keyboard focus shows the error, branch, environment, time and **Open run**.
 - **Gherkin import:** from the browser, or synced from the repository's default branch.
 - **Run from QEOS:** run a selection, a case or a suite in your GitHub Actions workflow, with a duration estimate before, during and after the run.
 - **Run likely affected:** on the Test cases page, select the cases linked to the tests a branch's latest change is likely to affect, then run them as usual.
