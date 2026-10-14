@@ -88,7 +88,8 @@ details.
   reveals neither superuser status nor password validity. Every break-glass
   sign-in is logged at WARNING with user id, email, IP and time; no password,
   token or client id is ever logged. auth-service refuses to start when a
-  provider the mode lists is not configured.
+  provider the mode lists is not configured. Turning the mode on ends every refresh session of every
+  non-superuser once (access tokens expire within 60 minutes).
 - **Access control.** Organisation roles (owner, admin, member, viewer,
   billing_manager) checked on every request; project access follows the
   organisation role; non-members get 404.

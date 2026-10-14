@@ -36,3 +36,20 @@ def test_env_py_falls_back_to_the_settings_url(monkeypatch, capsys):
     sql = capsys.readouterr().out
     assert "CREATE TABLE users" in sql
     assert "CREATE TABLE pending_registrations" in sql
+
+
+def test_migration_008_adds_the_mode_state_and_the_link_allowance(monkeypatch, capsys):
+    monkeypatch.setattr(settings, "DATABASE_URL", "postgresql://svc:pw@dbhost:5432/auth_db")
+    cfg = _config()
+    cfg.set_main_option("sqlalchemy.url", "")
+
+    command.upgrade(cfg, "007:008", sql=True)
+    up = capsys.readouterr().out
+    assert "CREATE TABLE auth_mode_state" in up
+    assert "ADD COLUMN microsoft_link_allowed_until" in up
+    assert "INSERT INTO auth_mode_state (id, sso_only) VALUES (1, false)" in up
+
+    command.downgrade(cfg, "008:007", sql=True)
+    down = capsys.readouterr().out
+    assert "DROP TABLE auth_mode_state" in down
+    assert "DROP COLUMN microsoft_link_allowed_until" in down

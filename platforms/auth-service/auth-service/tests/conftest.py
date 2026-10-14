@@ -38,13 +38,18 @@ def db():
         Base.metadata.drop_all(bind=engine)
 
 @pytest.fixture(scope="function")
-def client(db):
+def client(db, monkeypatch):
     def override_get_db():
         try:
             yield db
         finally:
             db.close()
-    
+
+    # The start-up hooks open their own session (SessionLocal: the configured PostgreSQL). Since ADR-031
+    # one of them reads and writes auth_mode_state on every start, so point them at this run's SQLite file.
+    import src.auth.api.main as api_main
+    monkeypatch.setattr(api_main, "SessionLocal", TestingSessionLocal)
+
     app.dependency_overrides[get_db] = override_get_db
     # https base URL so the client's cookie jar accepts the Secure refresh cookie
     with TestClient(app, base_url="https://testserver") as c:

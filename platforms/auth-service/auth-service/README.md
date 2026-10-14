@@ -210,6 +210,8 @@ With `AUTH_SSO_ONLY=true`, every refusal answers `403 {"detail": {"code": "sso_o
 - `POST /auth/change-password` and a password in `PUT /users/me`: superusers only.
 - `/sso/{provider}` and `/users/me/link/{provider}` for a provider not in `AUTH_SSO_PROVIDERS` (GitHub always).
 
+Sessions: the table `auth_mode_state` (migration 008, one row) records the mode last applied. At start-up, when `AUTH_SSO_ONLY=true` and the stored value is `false`, auth-service revokes every refresh session of every user who is not a superuser, then stores `true`, in one transaction that locks the row (`SELECT … FOR UPDATE`): each off-to-on change revokes once, restarts do not. Access tokens already issued work until they expire (at most `ACCESS_TOKEN_EXPIRE_MINUTES`); the next refresh is refused.
+
 ### User Management
 - `GET /api/v1/users/me` - Get current user's profile. `monitoring_url` is `"/grafana/"` for a superuser while `MONITORING_ENABLED` is true, otherwise `null`; the dashboard shows its Monitoring item only when it is set.
 - `PUT /api/v1/users/me` - Update current user's profile. Accepts `UserSelfUpdate` only: password (with `current_password`), full_name, avatar_url, department, job_title. Unknown fields are rejected with 422 rather than silently ignored, so `email`, `is_active` and `is_superuser` all fail loudly. Changing a password revokes every session; an SSO account cannot gain a password here.

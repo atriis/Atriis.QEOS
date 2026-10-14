@@ -23,6 +23,10 @@ class User(Base):
     mfa_secret = Column(String(64), nullable=True)
     mfa_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
 
+    # SSO-only mode (ADR-031): a superuser let this account link a Microsoft identity at its next
+    # Microsoft sign-in, until this time. Cleared when used.
+    microsoft_link_allowed_until = Column(DateTime(timezone=True), nullable=True)
+
     # Profile information
     avatar_url = Column(String(500), nullable=True)
     department = Column(String(100), nullable=True)

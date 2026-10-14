@@ -5,7 +5,7 @@ from src.auth.api.v1.api import api_router
 from src.auth.api.v1.endpoints import internal
 from src.auth.config import settings
 from src.auth.db.session import SessionLocal
-from src.auth.service.auth_mode import check_sso_only_settings, warn_if_no_break_glass
+from src.auth.service.auth_mode import apply_auth_mode, check_sso_only_settings, warn_if_no_break_glass
 from src.auth.service.bootstrap import bootstrap_first_superuser
 
 app = FastAPI(
@@ -30,6 +30,7 @@ def _apply_auth_mode() -> None:
     check_sso_only_settings()
     db = SessionLocal()
     try:
+        apply_auth_mode(db)
         warn_if_no_break_glass(db)
     finally:
         db.close()

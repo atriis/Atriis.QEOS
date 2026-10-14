@@ -8,9 +8,13 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import HTTPException, Request, status
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.auth.config import settings
+from src.auth.models.auth_mode import STATE_ROW_ID, AuthModeState
+from src.auth.models.session import RefreshToken
 from src.auth.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -125,3 +129,38 @@ def log_break_glass(user: User, ip: Optional[str]) -> None:
         "break-glass sign-in: user_id=%s email=%s ip=%s at=%s",
         user.id, user.email, ip or "unknown", datetime.now(timezone.utc).isoformat(),
     )
+
+
+def _state_select():
+    return select(AuthModeState).where(AuthModeState.id == STATE_ROW_ID).with_for_update()
+
+
+def apply_auth_mode(db: Session) -> int:
+    """Record the mode; on an off-to-on change, revoke every refresh session of every user who is not a
+    superuser. One transaction holding the state row's lock, so two processes starting together revoke
+    once and a restart with the mode already on revokes nothing. Returns the number of sessions revoked."""
+    wanted = bool(settings.AUTH_SSO_ONLY)
+    state = db.execute(_state_select()).scalar_one_or_none()
+    if state is None:
+        # Only a database migrated without 008's seed row (the test schema is built from the models)
+        state = AuthModeState(id=STATE_ROW_ID, sso_only=False)
+        db.add(state)
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()  # another process inserted it first: wait for its lock and read its result
+            state = db.execute(_state_select()).scalar_one()
+
+    revoked = 0
+    if wanted and not state.sso_only:
+        not_superusers = select(User.id).where(User.is_superuser.isnot(True))
+        revoked = db.query(RefreshToken).filter(
+            RefreshToken.is_revoked == False,  # noqa: E712
+            RefreshToken.user_id.in_(not_superusers),
+        ).update({RefreshToken.is_revoked: True}, synchronize_session=False)
+        logger.warning("SSO-only mode turned on: revoked %d sessions of users who are not superusers", revoked)
+    if state.sso_only != wanted:
+        state.sso_only = wanted
+        state.applied_at = datetime.now(timezone.utc)
+    db.commit()
+    return revoked
