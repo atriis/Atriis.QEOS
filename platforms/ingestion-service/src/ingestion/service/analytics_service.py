@@ -320,10 +320,18 @@ def failed_step_of(status, message, details, step_text, step_line) -> Optional[d
     return None
 
 
-def latest_results(db: Session, project_id: int, keys: List[str]) -> dict:
+def run_in_project(db: Session, project_id: int, run_id: int) -> bool:
+    return db.execute(select(Run.id).where(Run.id == run_id, Run.project_id == project_id)).first() is not None
+
+
+def latest_results(db: Session, project_id: int, keys: List[str], run_id: Optional[int] = None) -> dict:
+    """Each test's latest result, or with `run_id` its result in that run (a re-run's last row)."""
     keys = sorted({k.lower() for k in keys})
+    filters = [Run.project_id == project_id, RunResult.test_key.in_(keys)]
+    if run_id is not None:
+        filters.append(Run.id == run_id)
     ranked = _latest_ranked(
-        [Run.project_id == project_id, RunResult.test_key.in_(keys)],
+        filters,
         RunResult.status, RunResult.message, RunResult.details, RunResult.failed_step_text,
         RunResult.failed_step_line, Run.id.label("run_id"), Run.branch, Run.environment, Run.started_at,
     )

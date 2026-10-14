@@ -177,6 +177,8 @@ def run_strip(
 class LatestResultsIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     keys: List[Annotated[str, StringConstraints(pattern=r"^[0-9a-fA-F]{64}$")]] = Field(min_length=1, max_length=500)
+    # Each test's result in this run instead of its latest (a Last runs bar opens a case or feature as of a run)
+    run_id: Optional[int] = Field(default=None, gt=0)
 
 
 @router.post("/latest-results")
@@ -185,8 +187,11 @@ def latest_results(
     db: Session = Depends(get_db),
     access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
 ):
-    """Each test's latest result on any branch, with the failed step (scenario and feature pages)."""
-    return {"results": analytics_service.latest_results(db, access.project_id, body.keys)}
+    """Each test's latest result on any branch, with the failed step (scenario and feature pages); with `run_id`,
+    its result in that run, and tests not in it left out. A run of another project is 404, as on the run endpoints."""
+    if body.run_id is not None and not analytics_service.run_in_project(db, access.project_id, body.run_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return {"results": analytics_service.latest_results(db, access.project_id, body.keys, body.run_id)}
 
 
 ESTIMATE_WINDOW_DAYS = 30

@@ -76,3 +76,42 @@ def test_the_message_is_cut_to_the_excerpt(client, auth, project_role, seed_run,
     key = report_key("search")
     got = client.post(URL, json={"keys": [key]}, headers=auth()).json()["results"][key]
     assert len(got["message"]) == MESSAGE_EXCERPT
+
+
+def test_run_id_gives_each_test_its_result_in_that_run(client, auth, project_role, seed_run, db):
+    project_role("viewer")
+    old = seed_run(T0, results=(("search", "failed", 5), ("login", "passed", 5)))
+    seed_run(T0 + timedelta(hours=1), results=(("search", "passed", 5),))
+    row = db.query(RunResult).filter_by(run_id=old.id, name="search").one()
+    row.message, row.failed_step_text, row.failed_step_line = "boom", "When I search Lisbon", 14
+    db.commit()
+    search, login = report_key("search"), report_key("login")
+    got = client.post(URL, json={"keys": [search, login], "run_id": old.id}, headers=auth()).json()["results"]
+    assert got[search]["status"] == "failed" and got[search]["run_id"] == old.id
+    assert got[search]["failed_step"] == {"text": "When I search Lisbon", "line": 14}
+    assert got[login]["status"] == "passed" and "failed_step" not in got[login]
+
+
+def test_run_id_leaves_out_tests_not_in_that_run(client, auth, project_role, seed_run):
+    project_role("viewer")
+    run = seed_run(T0, results=(("login", "passed", 5),))
+    seed_run(T0 + timedelta(hours=1), results=(("search", "failed", 5),))
+    got = client.post(URL, json={"keys": [report_key("search")], "run_id": run.id}, headers=auth()).json()
+    assert got == {"results": {}}
+
+
+def test_run_id_takes_the_last_row_of_a_re_run(client, auth, project_role, seed_run):
+    project_role("viewer")
+    run = seed_run(T0, results=(("search", "failed", 5), ("search", "passed", 5)))
+    seed_run(T0 + timedelta(hours=1), results=(("search", "failed", 5),))
+    got = client.post(URL, json={"keys": [report_key("search")], "run_id": run.id}, headers=auth()).json()["results"]
+    assert got[report_key("search")]["status"] == "passed"
+
+
+def test_run_id_of_another_project_or_unknown_is_404(client, auth, project_role, seed_run):
+    project_role("viewer")
+    other = seed_run(T0, results=(("search", "failed", 5),), project_id=2)
+    key = report_key("search")
+    assert client.post(URL, json={"keys": [key], "run_id": other.id}, headers=auth()).status_code == 404
+    assert client.post(URL, json={"keys": [key], "run_id": 999999}, headers=auth()).status_code == 404
+    assert client.post(URL, json={"keys": [key], "run_id": 0}, headers=auth()).status_code == 422

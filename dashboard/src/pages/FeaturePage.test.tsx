@@ -87,7 +87,8 @@ test("the header names the file; each scenario is a card linking its case, with 
   expect(cards).toHaveLength(2);
   expect(within(cards[0]).getByRole("link", { name: "TC-12" })).toHaveAttribute("href", "/projects/42/cases/12");
   expect(within(cards[1]).getByRole("link", { name: "TC-13" })).toHaveAttribute("href", "/projects/42/cases/13");
-  expect(within(cards[0]).getByRole("link", { name: /Last 1 run/ })).toBeInTheDocument();
+  // A bar opens the scenario's case as of its run
+  expect(within(within(cards[0]).getByRole("group", { name: /Last 1 run/ })).getByRole("link")).toHaveAttribute("href", expect.stringMatching(/^\/projects\/42\/cases\/12\?run=\d+$/));
   // The scenario's own lines, numbered as in the file
   expect(cards[1].querySelectorAll(".gk-line")).toHaveLength(2);
   expect(cards[1].querySelector(".gk-line")).toHaveAttribute("data-line", "7");

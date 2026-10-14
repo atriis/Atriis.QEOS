@@ -1,3 +1,4 @@
+import { useRef, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
 import type { StripEntry, StripStatus } from "../api/analytics";
 import { dateFormat } from "../lib/words";
@@ -20,21 +21,41 @@ export function stripSummary(statuses: StripStatus[]): string {
   return `Last ${statuses.length} ${statuses.length === 1 ? "run" : "runs"}: ${parts.join(", ")}`;
 }
 
-/** A test's own last results, oldest to newest: only runs it was in, so there are no gaps. */
-export default function RunStrip({ projectId, entries }: { projectId: number; entries: StripEntry[] }) {
+/** A test's own last results, oldest to newest: only runs it was in, so there are no gaps. Each bar is a link to its
+ *  run (or to `href(run)`: the case or feature as of that run); the strip is one tab stop, arrow keys move between bars. */
+export default function RunStrip({ projectId, entries, href }: {
+  projectId: number;
+  entries: StripEntry[];
+  href?: (runId: number) => string;
+}) {
+  const [picked, setPicked] = useState<number | null>(null);
+  const links = useRef<(HTMLAnchorElement | null)[]>([]);
   if (entries.length === 0) return <span className="muted">No runs yet</span>;
-  const summary = stripSummary(entries.map((e) => e.status));
-  const labels = entries.map((e) => `Run #${e.run_id}, ${dateFormat.format(new Date(e.started_at))}: ${WORD[e.status]}`);
-  const bars = entries.map((e, i) => <span key={e.run_id} className={`run-bar bar-${e.status}`} title={labels[i]} aria-hidden="true" />);
-  const newest = entries[entries.length - 1];
-  // The per-run list sits after the link: inside it, the link's aria-label would hide it from screen readers.
+  const last = entries.length - 1;
+  // The newest run is the tab stop until another bar takes focus
+  const active = picked == null ? last : Math.min(picked, last);
+  const to = href ?? ((runId: number) => `/projects/${projectId}/runs/${runId}`);
+  const move = (e: KeyboardEvent<HTMLDivElement>) => {
+    const next = { ArrowLeft: active - 1, ArrowRight: active + 1, Home: 0, End: last }[e.key];
+    if (next === undefined) return;
+    e.preventDefault();
+    const index = Math.max(0, Math.min(last, next));
+    setPicked(index);
+    links.current[index]?.focus();
+  };
   return (
-    <>
-      <Link className="run-strip" to={`/projects/${projectId}/runs/${newest.run_id}`} aria-label={`${summary}, opens run #${newest.run_id}`}>
-        {bars}
-      </Link>
-      <ol className="sr-only">{labels.map((l, i) => <li key={entries[i].run_id}>{l}</li>)}</ol>
-    </>
+    <div className="run-strip" role="group" aria-label={stripSummary(entries.map((e) => e.status))} onKeyDown={move}>
+      {entries.map((e, i) => {
+        const label = `Run #${e.run_id}, ${dateFormat.format(new Date(e.started_at))}: ${WORD[e.status]}`;
+        return (
+          <Link key={e.run_id} className="run-bar-link" to={to(e.run_id)} aria-label={label} title={label}
+            tabIndex={i === active ? 0 : -1} onFocus={() => setPicked(i)}
+            ref={(el) => { links.current[i] = el; }}>
+            <span className={`run-bar bar-${e.status}`} aria-hidden="true" />
+          </Link>
+        );
+      })}
+    </div>
   );
 }
 

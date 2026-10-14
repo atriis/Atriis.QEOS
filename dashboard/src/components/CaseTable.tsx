@@ -45,6 +45,17 @@ function summarizeRuns(ran: StripStatus[]): string {
 /** run-strip takes at most 200 keys a request. */
 const STRIP_KEYS_MAX = 200;
 
+export interface StripOptions {
+  hideEmpty?: boolean;
+  href?: (runId: number) => string;
+}
+
+/** A bar opens the case as of its run (the failed step marked) or the feature as of its run. */
+export const caseAsOfRun = (projectId: number, caseNumber: number) => (runId: number) =>
+  `/projects/${projectId}/cases/${caseNumber}?run=${runId}`;
+export const featureAsOfRun = (projectId: number, path: string) => (runId: number) =>
+  `/projects/${projectId}/cases/feature?path=${encodeURIComponent(path)}&run=${runId}`;
+
 /** Last runs for a set of linked cases: one strip request per set, shared by every reader of the same keys. */
 export function useRunStrips(projectId: number, testKeys: (string | null)[]) {
   const keys = useMemo(() => [...new Set(testKeys.filter((k): k is string => !!k))].sort(), [testKeys]);
@@ -56,14 +67,15 @@ export function useRunStrips(projectId: number, testKeys: (string | null)[]) {
   });
   // Shown in its own column on wide screens and in the narrow line under the title on phones.
   // hideEmpty: the caller already says "No runs yet" (the scenario card's pill), so a test without results shows nothing.
-  const lastRuns = (key: string | null, { hideEmpty = false }: { hideEmpty?: boolean } = {}) =>
+  // href: where a bar goes for its run (the case as of that run); without it, the run itself.
+  const lastRuns = (key: string | null, { hideEmpty = false, href }: StripOptions = {}) =>
     !key ? (
       <span className="muted">not linked</span>
     ) : strip.isError ? (
       <span aria-label="Last runs unavailable">—</span>
     ) : strip.data ? (
       hideEmpty && !strip.data.tests[key.toLowerCase()]?.length ? null
-        : <RunStrip projectId={projectId} entries={strip.data.tests[key.toLowerCase()] ?? []} />
+        : <RunStrip projectId={projectId} entries={strip.data.tests[key.toLowerCase()] ?? []} href={href} />
     ) : (
       <RunStripSkeleton />
     );
@@ -93,13 +105,13 @@ export function useFeatureStrips(projectId: number, rows: { test_keys?: string[]
   const aggregate = (row: { test_keys?: string[] }): StripEntry[] | null =>
     strip.data ? mergeStrips((row.test_keys ?? []).map((k) => strip.data.tests[k.toLowerCase()] ?? [])) : null;
   // undefined test_keys: an older server, so nothing to show; an empty list: nothing linked
-  const lastRuns = (row: { test_keys?: string[] }): ReactNode =>
+  const lastRuns = (row: { test_keys?: string[]; path?: string | null }): ReactNode =>
     !row.test_keys ? null : row.test_keys.length === 0 ? (
       <span className="muted">not linked</span>
     ) : strip.isError ? (
       <span aria-label="Last runs unavailable">—</span>
     ) : strip.data ? (
-      <RunStrip projectId={projectId} entries={aggregate(row)!} />
+      <RunStrip projectId={projectId} entries={aggregate(row)!} href={row.path != null ? featureAsOfRun(projectId, row.path) : undefined} />
     ) : (
       <RunStripSkeleton />
     );
@@ -161,7 +173,7 @@ interface RowProps {
   selectable: boolean;
   picked: ReadonlyMap<number, unknown>;
   onToggle: (c: CaseRowData) => void;
-  lastRuns: (key: string | null) => ReactNode;
+  lastRuns: (key: string | null, options?: StripOptions) => ReactNode;
   lastRunsSummary: (key: string | null) => string | null;
   className?: string;
   /** A feature's expanded scenario: the checkbox moves into the title cell, indented under the feature's chevron. */
@@ -191,7 +203,7 @@ export function CaseRow({ projectId, c, selectable, picked, onToggle, lastRuns, 
           { label: "Automated", value: c.automated_test_key ? "Linked" : "Manual" },
         ]} />
       </td>
-      <td className="hide-narrow">{lastRuns(c.automated_test_key)}</td>
+      <td className="hide-narrow">{lastRuns(c.automated_test_key, { href: caseAsOfRun(projectId, c.number) })}</td>
       <td className="hide-narrow">{c.priority}</td>
       <td><CaseStatusPill status={c.status} /></td>
       <td className="hide-narrow">

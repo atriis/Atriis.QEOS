@@ -463,7 +463,9 @@ test("linked cases show their last runs; unlinked say not linked", async () => {
     }),
   );
   renderAt("/projects/42/cases?group=scenario");
-  expect(await screen.findByRole("link", { name: /^Last 1 runs?: 1 failed/ })).toBeInTheDocument();
+  const strip = await screen.findByRole("group", { name: /^Last 1 runs?: 1 failed/ });
+  // A bar opens the case as of its run
+  expect(within(strip).getByRole("link")).toHaveAttribute("href", "/projects/42/cases/1?run=9");
   expect(asked).toEqual([stripKey]);
   expect(screen.getByText("not linked")).toBeInTheDocument();
   expect(screen.getByRole("columnheader", { name: /last runs/i })).toBeInTheDocument();

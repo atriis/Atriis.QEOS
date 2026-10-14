@@ -355,9 +355,11 @@ test("a feature row shows one strip: the worst status per run over its scenarios
   })));
   renderCases();
   await screen.findByRole("link", { name: "Login" });
-  const strip = await within(featureRow("Login")).findByRole("link", { name: /^Last 2 runs/ });
-  expect(strip).toHaveAttribute("aria-label", "Last 2 runs: 1 passed, 1 failed, opens run #2");
-  expect(strip).toHaveAttribute("href", "/projects/42/runs/2");
+  const strip = await within(featureRow("Login")).findByRole("group", { name: "Last 2 runs: 1 passed, 1 failed" });
+  // A bar opens the feature as of its run
+  const bars = within(strip).getAllByRole("link");
+  expect(bars[1]).toHaveAttribute("href", `/projects/42/cases/feature?path=${encodeURIComponent(LOGIN.path)}&run=2`);
+  expect(bars[0]).toHaveAccessibleName(/^Run #1, .+: failed$/);
   expect(strip.querySelectorAll(".bar-failed")).toHaveLength(1);
   expect(strip.querySelectorAll(".bar-passed")).toHaveLength(1);
 });
@@ -372,7 +374,7 @@ test("a feature row's Last runs is the strip alone, never a failing count; the n
   renderCases();
   await screen.findByRole("link", { name: "Login" });
   const row = featureRow("Login");
-  expect(await within(row).findByRole("link", { name: /^Last 2 runs/ })).toBeInTheDocument();
+  expect(await within(row).findByRole("group", { name: /^Last 2 runs/ })).toBeInTheDocument();
   expect(within(row).queryByText(/failing/)).not.toBeInTheDocument();
   expect(within(row).getByText("1 failed, 1 passed of the last 2")).toBeInTheDocument();
 });
@@ -389,8 +391,8 @@ test("more than 200 keys go out in chunks of 200, merged into one strip", async 
   }));
   renderCases();
   await screen.findByRole("link", { name: "Login" });
-  expect(await within(featureRow("M")).findByRole("link", { name: /^Last 1 run: 1 failed/ })).toBeInTheDocument();
-  expect(within(featureRow("Login")).getByRole("link", { name: /^Last 1 run: 1 passed/ })).toBeInTheDocument();
+  expect(await within(featureRow("M")).findByRole("group", { name: /^Last 1 run: 1 failed/ })).toBeInTheDocument();
+  expect(within(featureRow("Login")).getByRole("group", { name: /^Last 1 run: 1 passed/ })).toBeInTheDocument();
   expect(bodies.map((b) => b.test_keys.length).sort()).toEqual([1, 200]);
 });
 
@@ -401,8 +403,7 @@ test("a feature row's strip joins scenarios that ran in different runs, with no 
   })));
   renderCases();
   await screen.findByRole("link", { name: "Login" });
-  const strip = await within(featureRow("Login")).findByRole("link", { name: /^Last 3 runs/ });
-  expect(strip).toHaveAttribute("aria-label", "Last 3 runs: 2 passed, 1 failed, opens run #3");
+  const strip = await within(featureRow("Login")).findByRole("group", { name: "Last 3 runs: 2 passed, 1 failed" });
   expect(strip.querySelectorAll(".run-bar")).toHaveLength(3);
 });
 

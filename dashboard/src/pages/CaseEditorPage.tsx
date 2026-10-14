@@ -1,11 +1,13 @@
 import { FormEvent, useEffect, useId, useMemo, useState } from "react";
 import { ArrowDown, ArrowLeft, ArrowUp, Bot, FileCode, Plus, Trash2 } from "lucide-react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Case, CaseInput, PRIORITIES, Priority, STATUSES, CaseStatus, Step, createCase, getCase, parseLabels, updateCase } from "../api/cases";
 import { getHistory, getLatestResults, getTests } from "../api/analytics";
 import FailedStepTip from "../components/FailedStepTip";
 import LastResultPill from "../components/LastResultPill";
+import RunContextNote from "../components/RunContextNote";
+import { runParam, statusWord, useScrollToFailure } from "../lib/runContext";
 import { featureDetailQuery } from "../lib/featureQueries";
 import { locateFailedStep, matchesStep, scenarioSteps, stepLines } from "../lib/failedStep";
 import ConfirmButton from "../components/ConfirmButton";
@@ -143,6 +145,8 @@ function CaseEditor() {
   const { projectId, caseNumber } = useParams();
   const id = Number(projectId);
   const number = caseNumber ? Number(caseNumber) : null;
+  // Opened from a Last runs bar: the case as of that run
+  const runId = runParam(useSearchParams()[0]);
   const navigate = useNavigate();
   const qc = useQueryClient();
   const canEdit = useCanEdit(id) === true;
@@ -210,9 +214,9 @@ function CaseEditor() {
   const c = existing.data;
   const key = c?.automated_test_key ?? null;
   const latest = useQuery({
-    queryKey: ["latest-results", id, key],
+    queryKey: ["latest-results", id, key, runId],
     enabled: key != null,
-    queryFn: () => getLatestResults(id, [key!]).then((r) => r.results[key!.toLowerCase()] ?? null),
+    queryFn: () => getLatestResults(id, [key!], runId ?? undefined).then((r) => r.results[key!.toLowerCase()] ?? null),
   });
   const wantsFeature = !!c?.source_path && latest.data?.failed_step != null;
   const feature = useQuery({ ...featureDetailQuery(id, c?.source_path ?? ""), enabled: wantsFeature });
@@ -231,6 +235,7 @@ function CaseEditor() {
       : locateFailedStep(shown, { text: step.text });
     return index != null && shown[index] ? shown[index].line : null;
   }, [c, latest.data, feature.data, feature.isPending, wantsFeature]);
+  useScrollToFailure(runId, failedLine != null);
 
   if (number !== null && existing.error != null) {
     return (
@@ -259,6 +264,13 @@ function CaseEditor() {
         </Link>
       </p>
       <PageHeader title={c ? `${c.key} · ${c.title}` : "New test case"} />
+      {c && runId != null && (
+        <RunContextNote projectId={id} runId={runId} latestHref={`/projects/${id}/cases/${c.number}`}
+          error={latest.error ?? undefined}
+          startedAt={latest.data?.started_at} status={latest.data ? statusWord(latest.data.status) : undefined}
+          missing={key == null ? `This case has no automated test, so it has no result in run #${runId}.`
+            : latest.isSuccess && latest.data == null ? `This case was not in run #${runId}.` : undefined} />
+      )}
       {c?.source_path && c.status !== "archived" && (
         <RunControl projectId={id} cases={[{ number: c.number, title: c.title, testKey: c.automated_test_key }]} selection={{ case_numbers: [c.number] }} label="Run" emphasis={!dirty} />
       )}
@@ -295,7 +307,7 @@ function CaseEditor() {
           {imported ? (
             <>
               <h2>Gherkin</h2>
-              {key != null && latest.isSuccess && <LastResultPill result={latest.data} />}
+              {key != null && latest.isSuccess && (runId == null || latest.data != null) && <LastResultPill result={latest.data} />}
               <GherkinBlock
                 text={c?.gherkin ?? ""}
                 failed={failedLine != null && latest.data
@@ -305,7 +317,7 @@ function CaseEditor() {
             </>
           ) : (
             <>
-          {key != null && latest.isSuccess && <LastResultPill result={latest.data} />}
+          {key != null && latest.isSuccess && (runId == null || latest.data != null) && <LastResultPill result={latest.data} />}
           <h2 id={`${ids}-steps`}>Steps</h2>
           <ol className="steps" aria-labelledby={`${ids}-steps`}>
             {draft.steps.map((s, i) => (

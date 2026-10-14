@@ -214,9 +214,11 @@ export interface LatestResult {
   started_at: string; message: string | null; failed_step?: { text: string; line?: number };
 }
 
-/** Each test's latest result on any branch, with the failed step; at most 500 keys per call. */
-export function getLatestResults(projectId: number, keys: string[]): Promise<{ results: Record<string, LatestResult> }> {
-  return apiFetch(`/api/v1/projects/${projectId}/analytics/latest-results`, { method: "POST", body: JSON.stringify({ keys }) });
+/** Each test's latest result on any branch, with the failed step; at most 500 keys per call. With `runId`, each test's
+ *  result in that run instead (tests not in it are absent; a run of another project is a 404). */
+export function getLatestResults(projectId: number, keys: string[], runId?: number): Promise<{ results: Record<string, LatestResult> }> {
+  const body = runId == null ? { keys } : { keys, run_id: runId };
+  return apiFetch(`/api/v1/projects/${projectId}/analytics/latest-results`, { method: "POST", body: JSON.stringify(body) });
 }
 
 const COUNT = new Intl.NumberFormat();
