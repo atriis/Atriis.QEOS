@@ -2,7 +2,10 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import QRCode from "qrcode";
 import { CircleCheck, CircleSlash } from "lucide-react";
-import { changePassword, getMe, linkMicrosoft, mfaConfirm, mfaDisable, mfaEnroll, type Me } from "../api/auth";
+import {
+  allowMicrosoftLink, changePassword, getMe, getSsoReadiness, linkMicrosoft, mfaConfirm, mfaDisable, mfaEnroll,
+  type Me, type SsoReadiness,
+} from "../api/auth";
 import { getMicrosoftCredential, microsoftEnabled } from "../auth/ssoProviders";
 import { downloadCsv } from "../lib/csv";
 import ErrorBanner from "../components/ErrorBanner";
@@ -150,6 +153,94 @@ function MicrosoftAccountCard({ me, onLinked }: { me: Me; onLinked: () => void }
         </>
       )}
     </form>
+  );
+}
+
+function formatDay(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+/** Superusers only (ADR-031): whether the mode is on and how to change it (never from here, so a stolen
+ *  session cannot switch it), who has linked Microsoft, and the one-time link allowance. */
+function SsoOnlyAdminCard({ ssoOnly }: { ssoOnly: boolean }) {
+  const [readiness, setReadiness] = useState<SsoReadiness | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [allowing, setAllowing] = useState<number | null>(null);
+
+  useEffect(() => {
+    getSsoReadiness().then(setReadiness).catch((err) => setError(err));
+  }, []);
+
+  async function onAllow(userId: number) {
+    setError(null);
+    setAllowing(userId);
+    try {
+      const entry = await allowMicrosoftLink(userId);
+      setReadiness((current) => current && {
+        ...current,
+        unlinked: current.unlinked.map((user) => (user.id === userId ? entry : user)),
+      });
+    } catch (err) {
+      setError(err);
+    } finally {
+      setAllowing(null);
+    }
+  }
+
+  return (
+    <section className="card" aria-labelledby="sso-only-heading">
+      <h3 id="sso-only-heading">Microsoft-only sign-in</h3>
+      <p className="mfa-status" role="status">
+        {ssoOnly
+          ? <><CircleCheck size={16} aria-hidden="true" /> <strong>Microsoft-only sign-in: On</strong></>
+          : <><CircleSlash size={16} aria-hidden="true" /> <strong>Microsoft-only sign-in: Off</strong></>}
+      </p>
+      <p className="muted">
+        {ssoOnly ? (
+          <>Only superusers can still sign in with a password. To turn it off, set <code>AUTH_SSO_ONLY=false</code> in <code>.env</code> and restart auth-service.</>
+        ) : (
+          <>Link everyone first. Then set <code>AUTH_SSO_ONLY=true</code> in <code>.env</code> and restart auth-service: everyone who is not a superuser is signed out once.</>
+        )}
+      </p>
+      {error != null && <ErrorBanner error={error} />}
+      {readiness && (
+        <>
+          <p>{`${readiness.linked} of ${readiness.active_users} active users have linked Microsoft.`}</p>
+          {readiness.unlinked.length > 0 && (
+            <table className="data">
+              <caption className="sr-only">Active users who have not linked Microsoft</caption>
+              <thead>
+                <tr>
+                  <th scope="col">User</th>
+                  <th scope="col">Next sign-in</th>
+                </tr>
+              </thead>
+              <tbody>
+                {readiness.unlinked.map((user) => (
+                  <tr key={user.id}>
+                    <td>
+                      {user.full_name && <>{user.full_name}<br /></>}
+                      <span className={user.full_name ? "muted" : undefined}>{user.email}</span>
+                      {user.is_superuser && <span className="muted"> · superuser</span>}
+                    </td>
+                    <td>
+                      {user.link_allowed_until ? (
+                        `Allowed until ${formatDay(user.link_allowed_until)}`
+                      ) : (
+                        <button type="button" onClick={() => void onAllow(user.id)} disabled={allowing !== null}
+                          aria-label={`Allow link at next sign-in for ${user.email}`}>
+                          Allow link at next sign-in
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -365,6 +456,7 @@ export default function SecurityPage() {
           </form>
         )}
       </div>
+      {me?.is_superuser === true && <SsoOnlyAdminCard ssoOnly={me.sso_only === true} />}
     </div>
   );
 }

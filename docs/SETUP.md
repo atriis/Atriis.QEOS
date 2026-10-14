@@ -535,9 +535,7 @@ For a company deployment where people sign in only with their Microsoft work acc
 
 1. Configure Microsoft as above and check that signing in with Microsoft works.
 2. Ask everyone with a password account to link Microsoft: account menu → Security → Microsoft account → Link Microsoft account (they confirm their QEOS password, then sign in with Microsoft).
-3. Check readiness as a superuser: `GET /api/v1/users/sso-readiness` lists the active users who have not
-   linked. For someone who missed it, `POST /api/v1/users/{id}/allow-microsoft-link` lets that account
-   link at its next Microsoft sign-in, for 7 days.
+3. Check readiness as a superuser: Security → Microsoft-only sign-in shows "N of M active users have linked Microsoft" and lists who has not. For someone who missed it, **Allow link at next sign-in** lets that account link at its next Microsoft sign-in, for 7 days (APIs: `GET /api/v1/users/sso-readiness`, `POST /api/v1/users/{id}/allow-microsoft-link`).
 4. In `.env`: `AUTH_SSO_ONLY=true` (and `AUTH_SSO_PROVIDERS=microsoft`, the default). Then
    `docker compose up -d --wait auth-service`.
 

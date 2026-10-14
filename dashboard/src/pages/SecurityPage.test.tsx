@@ -285,3 +285,66 @@ test("the Password card waits for the account, so an SSO-only non-superuser neve
   await screen.findByRole("heading", { name: "Microsoft account" });
   expect(screen.queryByRole("heading", { name: "Password" })).not.toBeInTheDocument();
 });
+
+const READINESS = {
+  active_users: 15,
+  linked: 12,
+  unlinked: [
+    { id: 7, email: "ana@example.com", full_name: "Ana", is_superuser: false, link_allowed_until: null },
+    { id: 1, email: "root@example.com", full_name: null, is_superuser: true, link_allowed_until: "2026-10-21T10:00:00+00:00" },
+  ],
+};
+
+test("a superuser sees the mode, the readiness and who has not linked", async () => {
+  meIs({ is_superuser: true, sso_only: false, has_password: true, linked_providers: [] });
+  server.use(http.get("/api/v1/users/sso-readiness", () => HttpResponse.json(READINESS)));
+  renderSecurity();
+  const card = (await screen.findByRole("heading", { name: "Microsoft-only sign-in" })).closest("section")!;
+  expect(within(card).getByText("Microsoft-only sign-in: Off")).toBeInTheDocument();
+  expect(within(card).getByText("AUTH_SSO_ONLY=true")).toBeInTheDocument();
+  expect(await within(card).findByText("12 of 15 active users have linked Microsoft.")).toBeInTheDocument();
+  expect(within(card).getByRole("button", { name: "Allow link at next sign-in for ana@example.com" })).toBeInTheDocument();
+  const rootRow = within(card).getByText("root@example.com").closest("tr")!;
+  expect(within(rootRow).getByText(/allowed until/i)).toBeInTheDocument();
+  expect(within(rootRow).getByText(/superuser/i)).toBeInTheDocument();
+});
+
+test("allowing a link shows until when", async () => {
+  meIs({ is_superuser: true, sso_only: true, has_password: true, linked_providers: ["microsoft"] });
+  server.use(
+    http.get("/api/v1/users/sso-readiness", () => HttpResponse.json(READINESS)),
+    http.post("/api/v1/users/7/allow-microsoft-link", () => HttpResponse.json(
+      { ...READINESS.unlinked[0], link_allowed_until: "2026-10-21T12:00:00+00:00" })),
+  );
+  renderSecurity();
+  await userEvent.click(await screen.findByRole("button", { name: "Allow link at next sign-in for ana@example.com" }));
+  const anaRow = (await screen.findByText("ana@example.com")).closest("tr")!;
+  expect(await within(anaRow).findByText(/allowed until/i)).toBeInTheDocument();
+  expect(screen.getByText("Microsoft-only sign-in: On")).toBeInTheDocument();
+});
+
+test("an allow refusal is shown in the card", async () => {
+  meIs({ is_superuser: true, sso_only: true, has_password: true, linked_providers: ["microsoft"] });
+  server.use(
+    http.get("/api/v1/users/sso-readiness", () => HttpResponse.json(READINESS)),
+    http.post("/api/v1/users/7/allow-microsoft-link", () =>
+      HttpResponse.json({ detail: "User has already linked Microsoft" }, { status: 409 })),
+  );
+  renderSecurity();
+  await userEvent.click(await screen.findByRole("button", { name: "Allow link at next sign-in for ana@example.com" }));
+  const card = screen.getByRole("heading", { name: "Microsoft-only sign-in" }).closest("section")!;
+  expect(await within(card).findByRole("alert")).toHaveTextContent("User has already linked Microsoft");
+});
+
+test("a non-superuser neither sees the card nor asks for readiness", async () => {
+  let asked = false;
+  meIs({ is_superuser: false, sso_only: true, has_password: false, linked_providers: ["microsoft"] });
+  server.use(http.get("/api/v1/users/sso-readiness", () => {
+    asked = true;
+    return HttpResponse.json(READINESS);
+  }));
+  renderSecurity();
+  await screen.findByRole("heading", { name: "Microsoft account" });
+  expect(screen.queryByRole("heading", { name: "Microsoft-only sign-in" })).not.toBeInTheDocument();
+  expect(asked).toBe(false);
+});

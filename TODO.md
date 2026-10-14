@@ -209,6 +209,7 @@ Reliability and operations
 
 ### Dashboard follow-ups
 - [x] SSO sign-in buttons (Google, Microsoft) in the login page — rendered only when `VITE_*` client ids are baked at build time; manual verification against a real tenant still pending
+- [x] SSO-only mode in the dashboard (ADR-031): sign-in page from `/auth/methods` with an administrator disclosure, recovery pages point to sign-in, Security page Microsoft link card, superuser readiness card with the one-time link allowance
 - [x] Refresh token in an httpOnly cookie — `qeos_refresh`, Secure, SameSite=Strict, Path=/api/v1/auth (ADR-013)
 - [x] Mute / acknowledge flaky tests
 - [x] CSV export buttons on the tests and flaky views (client-side; tests view pages the API at limit=200, capped at 10k rows)

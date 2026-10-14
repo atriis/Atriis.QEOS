@@ -156,3 +156,28 @@ export async function linkMicrosoft(credential: string, currentPassword?: string
   if (currentPassword) body.current_password = currentPassword;
   await apiFetch("/api/v1/users/me/link/microsoft", { method: "POST", body: JSON.stringify(body) });
 }
+
+/** One active user without a Microsoft link (GET /users/sso-readiness, superusers; ADR-031). */
+export interface SsoReadinessEntry {
+  id: number;
+  email: string;
+  full_name: string | null;
+  is_superuser: boolean;
+  /** Set while a one-time link allowance is valid */
+  link_allowed_until: string | null;
+}
+
+export interface SsoReadiness {
+  active_users: number;
+  linked: number;
+  unlinked: SsoReadinessEntry[];
+}
+
+export function getSsoReadiness(): Promise<SsoReadiness> {
+  return apiFetch("/api/v1/users/sso-readiness");
+}
+
+/** Lets that account link Microsoft at its next Microsoft sign-in, for 7 days. */
+export function allowMicrosoftLink(userId: number): Promise<SsoReadinessEntry> {
+  return apiFetch(`/api/v1/users/${userId}/allow-microsoft-link`, { method: "POST", body: "{}" });
+}
