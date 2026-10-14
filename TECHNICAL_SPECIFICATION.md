@@ -133,7 +133,7 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   runs and shows, but its failures do not fail a run or alert), latest-keys,
   latest-results (each test's latest result with its failed step; the result payload's optional
   `failed_step` `{text 1-1000, line 1-1,000,000}` is stored masked) and
-  run-strip (latest results for case lists), duration-estimate (Run from QEOS),
+  run-strip (each test's own last results, for case lists), duration-estimate (Run from QEOS),
   test impact (ADR-029; every role that reads runs): `POST /analytics/impact`
   scores any change (1–5,000 paths of 1–1,000 characters, optional branch)
   against the co-failure statistics with the upload's scoring under the same

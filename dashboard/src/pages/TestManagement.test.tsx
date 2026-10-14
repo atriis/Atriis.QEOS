@@ -41,7 +41,7 @@ beforeEach(() => {
     http.get(`${P}/case-folders`, () => HttpResponse.json([])),
     http.get(`${P}/case-labels`, () => HttpResponse.json([])),
     http.get(`${P}/cases`, () => HttpResponse.json({ total: 0, items: [] })),
-    http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({ runs: [], statuses: {} })),
+    http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({ tests: {} })),
   );
 });
 
@@ -459,7 +459,7 @@ test("linked cases show their last runs; unlinked say not linked", async () => {
     http.get(`${P}/cases`, () => HttpResponse.json({ total: 2, items: [kase(1, { automated_test_key: stripKey }), kase(2)] })),
     http.post(`${P}/analytics/run-strip`, async ({ request }) => {
       asked = ((await request.json()) as { test_keys: string[] }).test_keys;
-      return HttpResponse.json({ runs: [{ id: 9, started_at: "2026-10-06T10:00:00Z", branch: "main" }], statuses: { [stripKey]: ["failed"] } });
+      return HttpResponse.json({ tests: { [stripKey]: [{ run_id: 9, started_at: "2026-10-06T10:00:00Z", branch: "main", status: "failed" }] } });
     }),
   );
   renderAt("/projects/42/cases?group=scenario");
@@ -467,7 +467,9 @@ test("linked cases show their last runs; unlinked say not linked", async () => {
   expect(asked).toEqual([stripKey]);
   expect(screen.getByText("not linked")).toBeInTheDocument();
   expect(screen.getByRole("columnheader", { name: /last runs/i })).toBeInTheDocument();
-  expect(screen.getByText("Didn't run")).toBeInTheDocument();
+  const legend = screen.getByRole("list", { name: "Last runs legend" });
+  expect(within(legend).getAllByRole("listitem").map((li) => li.textContent?.trim())).toEqual(["Passed", "Failed", "Re-run", "Skipped"]);
+  expect(screen.queryByText("Didn't run")).toBeNull(); // the strip only holds runs the case was in
 });
 
 test("the run-strip request keys are deduplicated and sorted, and the skeleton shows while loading", async () => {
@@ -481,7 +483,7 @@ test("the run-strip request keys are deduplicated and sorted, and the skeleton s
     http.post(`${P}/analytics/run-strip`, async ({ request }) => {
       body = (await request.json()) as { test_keys: string[] };
       await gate;
-      return HttpResponse.json({ runs: [], statuses: {} });
+      return HttpResponse.json({ tests: {} });
     }),
   );
   renderAt("/projects/42/cases?group=scenario");
@@ -495,7 +497,7 @@ test("the legend is hidden when no case on the page is linked", async () => {
   server.use(http.get(`${P}/cases`, () => HttpResponse.json({ total: 1, items: [kase(1)] })));
   renderAt("/projects/42/cases?group=scenario");
   await screen.findByText("not linked");
-  expect(screen.queryByText("Didn't run")).toBeNull();
+  expect(screen.queryByRole("list", { name: "Last runs legend" })).toBeNull();
 });
 
 test("no linked cases means no run-strip request", async () => {
@@ -503,7 +505,7 @@ test("no linked cases means no run-strip request", async () => {
   let called = false;
   server.use(
     http.get(`${P}/cases`, () => HttpResponse.json({ total: 1, items: [kase(1)] })),
-    http.post(`${P}/analytics/run-strip`, () => { called = true; return HttpResponse.json({ runs: [], statuses: {} }); }),
+    http.post(`${P}/analytics/run-strip`, () => { called = true; return HttpResponse.json({ tests: {} }); }),
   );
   renderAt("/projects/42/cases?group=scenario");
   await screen.findByText("not linked");
@@ -543,8 +545,7 @@ test("on phones the last runs come back as a count under the title", async () =>
   server.use(
     http.get(`${P}/cases`, () => HttpResponse.json({ total: 1, items: [kase(1, { automated_test_key: stripKey })] })),
     http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({
-      runs: [{ id: 9, started_at: "2026-10-06T10:00:00Z", branch: "main" }, { id: 8, started_at: "2026-10-05T10:00:00Z", branch: "main" }, { id: 7, started_at: "2026-10-04T10:00:00Z", branch: "main" }],
-      statuses: { [stripKey]: ["failed", "passed", "passed"] },
+      tests: { [stripKey]: [{ run_id: 7, started_at: "2026-10-04T10:00:00Z", branch: "main", status: "failed" }, { run_id: 8, started_at: "2026-10-05T10:00:00Z", branch: "main", status: "passed" }, { run_id: 9, started_at: "2026-10-06T10:00:00Z", branch: "main", status: "passed" }] },
     })),
   );
   renderAt("/projects/42/cases?group=scenario");

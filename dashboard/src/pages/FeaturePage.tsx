@@ -181,7 +181,7 @@ export default function FeaturePage() {
               </h2>
               <div className="scenario-card-status">
                 {c.automated_test_key != null && latest.isSuccess && <LastResultPill result={result} />}
-                {lastRuns(c.automated_test_key)}
+                {lastRuns(c.automated_test_key, { hideEmpty: latest.isSuccess })}
               </div>
             </div>
             {failure?.background != null && <BackgroundFailure projectId={id} step={failure.background} result={failure.result} />}

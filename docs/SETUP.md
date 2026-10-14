@@ -1095,8 +1095,10 @@ stack on `https://localhost:8443`, add `--ca-file qeos-ca.crt` ([4.1.3](#413-col
 - **Quick chips**: one click for **Failing**, **Never ran** and **Linked**. Active filters appear
   as chips that you can remove one by one, or all at once with **Clear all**. Filters live in the URL, so
   a filtered view can be bookmarked and shared.
-- **Last runs** column: for each linked case, its status in the project's last 10 runs, oldest
-  to newest (Passed, Failed, Re-run, Skipped, Didn't run). Unlinked cases show "not linked".
+- **Last runs** column: for each linked case, its own last 10 results, oldest to newest (Passed,
+  Failed, Re-run, Skipped). Only runs the case was in count, so a run of another suite never shows
+  as a gap. A feature row shows the last 10 runs any of its scenarios was in, with the worst status
+  per run. Unlinked cases show "not linked".
 - **Failed step** (scenario page and the scenario cards on a feature page): when a case's latest
   result failed, its failing step shows in red, and a **last-result pill** shows the status. The
   latest result is the newest on any branch, not only the default one. Hover the step, or focus it

@@ -107,15 +107,16 @@ export function getLatestKeys(
   return apiFetch(`/api/v1/projects/${projectId}/analytics/latest-keys${buildQuery({ status })}`);
 }
 
-export type StripStatus = "passed" | "failed" | "rerun" | "skipped" | null;
-export interface StripRun { id: number; started_at: string; branch: string | null }
+export type StripStatus = "passed" | "failed" | "rerun" | "skipped";
+/** One result in a test's strip: the run it was in and the test's status there. */
+export interface StripEntry { run_id: number; started_at: string; branch: string | null; status: StripStatus }
 
-/** Each test's status in the project's last runs (oldest to newest); statuses are keyed by lowercase test key. */
+/** Each test's own last results (oldest to newest), only runs it was in; keyed by lowercase test key. */
 export function getRunStrip(
   projectId: number,
   testKeys: string[],
   limit = 10,
-): Promise<{ runs: StripRun[]; statuses: Record<string, StripStatus[]> }> {
+): Promise<{ tests: Record<string, StripEntry[]> }> {
   return apiFetch(`/api/v1/projects/${projectId}/analytics/run-strip`, {
     method: "POST",
     body: JSON.stringify({ test_keys: testKeys, limit }),

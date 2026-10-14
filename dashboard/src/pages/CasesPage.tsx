@@ -30,7 +30,7 @@ import PageHeader from "../components/PageHeader";
 import { tableCardClass, useIsWide } from "../lib/useIsWide";
 
 const RESULTS = ["passed", "failed", "skipped", "never"];
-const LEGEND = [["passed", "Passed"], ["failed", "Failed"], ["rerun", "Re-run"], ["skipped", "Skipped"], ["none", "Didn't run"]] as const;
+const LEGEND = [["passed", "Passed"], ["failed", "Failed"], ["rerun", "Re-run"], ["skipped", "Skipped"]] as const;
 const KEYS = ["q", "label", "status", "priority", "origin", "folder", "linked", "result", "feature", "ado"] as const;
 // The form also holds where the search looks; it is part of the search, not a filter of its own (no chip)
 const FORM_KEYS = [...KEYS, "search_in"] as const;

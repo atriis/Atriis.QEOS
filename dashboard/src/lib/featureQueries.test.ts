@@ -1,4 +1,5 @@
-import { fileLabel, groupByFeature, worstPerRun } from "./featureQueries";
+import { fileLabel, groupByFeature, mergeStrips } from "./featureQueries";
+import type { StripEntry, StripStatus } from "../api/analytics";
 import type { Case } from "../api/cases";
 
 const kase = (number: number, extra: Partial<Case>) => ({
@@ -13,10 +14,27 @@ test("fileLabel drops the path and a trailing .feature, in any case", () => {
   expect(fileLabel("x.feature/y")).toBe("y");
 });
 
-test("worstPerRun takes the worst status per run: failed > rerun > passed > skipped > null", () => {
-  expect(worstPerRun(3, [["passed", "skipped", null], ["failed", "passed", null]])).toEqual(["failed", "passed", null]);
-  expect(worstPerRun(2, [["skipped", "rerun"], ["passed", "passed"]])).toEqual(["passed", "rerun"]);
-  expect(worstPerRun(2, [])).toEqual([null, null]);
+const at = (run_id: number, status: StripStatus, hour = run_id): StripEntry =>
+  ({ run_id, started_at: `2026-10-06T${String(hour).padStart(2, "0")}:00:00Z`, branch: "main", status });
+
+test("mergeStrips takes the worst status per run: failed > rerun > passed > skipped", () => {
+  expect(mergeStrips([[at(1, "passed"), at(2, "skipped")], [at(1, "failed"), at(2, "passed")]]).map((e) => e.status))
+    .toEqual(["failed", "passed"]);
+  expect(mergeStrips([[at(1, "skipped"), at(2, "rerun")], [at(1, "passed"), at(2, "passed")]]).map((e) => e.status))
+    .toEqual(["passed", "rerun"]);
+  expect(mergeStrips([])).toEqual([]);
+});
+
+test("mergeStrips joins scenarios that ran in different runs, oldest to newest, newest ten kept", () => {
+  const a = [1, 3, 5, 7, 9, 11].map((r) => at(r, "passed"));
+  const b = [2, 4, 6, 8, 10, 12].map((r) => at(r, r === 12 ? "failed" : "passed"));
+  const merged = mergeStrips([a, b]);
+  expect(merged.map((e) => e.run_id)).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+  expect(merged[merged.length - 1].status).toBe("failed");
+});
+
+test("mergeStrips orders by start time, then run id", () => {
+  expect(mergeStrips([[at(9, "passed", 1)], [at(4, "passed", 2), at(5, "failed", 1)]]).map((e) => e.run_id)).toEqual([5, 9, 4]);
 });
 
 test("the client-side grouping fills test_keys with its cases' distinct keys, sorted", () => {

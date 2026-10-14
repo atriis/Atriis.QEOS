@@ -58,7 +58,7 @@ function mockCases(items = [kase(1), kase(2, { status: "ready", priority: "high"
     http.get(`${P}/case-folders`, () => HttpResponse.json([])),
     http.get(`${P}/case-labels`, () => HttpResponse.json([{ label: "flights", count: 3 }])),
     http.get(`${P}/cases`, () => HttpResponse.json({ total: items.length, items })),
-    http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({ runs: [], statuses: {} })),
+    http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({ tests: {} })),
     http.get(`${P}/analytics/latest-keys`, () => HttpResponse.json({ keys: [] })),
     http.post(`${P}/cases/search`, () => HttpResponse.json({ total: items.length, items })),
   );

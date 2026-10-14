@@ -62,7 +62,7 @@ beforeEach(() => {
         : HttpResponse.json({ detail: "Feature not found" }, { status: 404 })),
     http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {} })),
     http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({
-      runs: [{ id: 7, started_at: "2026-10-08T09:00:00Z", branch: "main" }], statuses: { [KEY]: ["failed"] },
+      tests: { [KEY]: [{ run_id: 7, started_at: "2026-10-08T09:00:00Z", branch: "main", status: "failed" }] },
     })),
   );
 });

@@ -55,7 +55,7 @@ function apis({ thisWeek = 0.924 as number | null, lastWeek = 0.893 as number | 
       failingSearch = body;
       return HttpResponse.json({ total: failing, items: failing > 0 ? [kase(1)] : [] });
     }),
-    http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({ runs: [], statuses: {} })),
+    http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({ tests: {} })),
     http.get(`${P}/analytics/flaky`, () =>
       HttpResponse.json([flakyRow("a", false), flakyRow("b", false), flakyRow("c", false), flakyRow("d", true), flakyRow("e", true)])),
   );

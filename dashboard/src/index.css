@@ -11,7 +11,7 @@
   --hover-strong: rgba(8, 145, 178, 0.09);
   --text-primary: #0f1b26;
   --text-secondary: #4b5d6e;
-  --text-muted: #74879a; /* chart ticks and non-text outlines (run-strip bar-none): 3.4:1+, never body text */
+  --text-muted: #74879a; /* chart ticks and non-text outlines: 3.4:1+, never body text */
   --grid: #e2e9ee;
   --border: rgba(15, 27, 38, 0.1);
   --border-strong: rgba(15, 27, 38, 0.18);
@@ -356,7 +356,6 @@ a.run-strip:hover .run-bar { filter: brightness(1.15); }
 .bar-failed { background: var(--status-failed); clip-path: polygon(0 3px, 50% 0, 100% 3px, 100% 100%, 0 100%); }
 .bar-rerun { background: repeating-linear-gradient(135deg, var(--status-rerun) 0 2px, var(--status-rerun-stripe) 2px 4px); }
 .bar-skipped { background: transparent; outline: 1px dashed var(--text-secondary); outline-offset: -1px; }
-.bar-none { background: transparent; box-shadow: inset 0 0 0 1px var(--text-muted); } /* --text-muted: 3.6:1 light, 4.9:1 dark on --surface-1 */
 .bar-loading { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border-strong); }
 .run-legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); list-style: none; margin: 0 0 var(--space-2); padding: 0; font-size: 12.5px; color: var(--text-secondary); }
 .run-legend li { display: inline-flex; align-items: center; gap: 6px; }

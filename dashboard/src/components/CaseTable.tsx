@@ -3,9 +3,9 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Bot, FileCode } from "lucide-react";
 import type { CaseStatus, Priority } from "../api/cases";
-import { getRunStrip, type StripStatus } from "../api/analytics";
+import { getRunStrip, type StripEntry, type StripStatus } from "../api/analytics";
 import { MAX_RUN_CASES } from "../api/runRequests";
-import { worstPerRun } from "../lib/featureQueries";
+import { mergeStrips } from "../lib/featureQueries";
 import NarrowMeta from "./NarrowMeta";
 import RunStrip, { RunStripSkeleton } from "./RunStrip";
 import { CaseStatusPill } from "./StatusPill";
@@ -35,8 +35,7 @@ export function Labels({ labels }: { labels: string[] }) {
 }
 
 /** The phones' count in place of a strip: "1 failed, 2 passed of the last 3", "none yet" when no run had the test. */
-function summarizeRuns(statuses: StripStatus[]): string {
-  const ran = statuses.filter((s) => s !== null);
+function summarizeRuns(ran: StripStatus[]): string {
   if (ran.length === 0) return "none yet";
   const count = (status: string) => ran.filter((s) => s === status).length;
   const parts = (["failed", "rerun", "passed", "skipped"] as const).filter((st) => count(st) > 0).map((st) => `${count(st)} ${st}`);
@@ -55,27 +54,29 @@ export function useRunStrips(projectId: number, testKeys: (string | null)[]) {
     enabled: keys.length > 0,
     staleTime: 60_000,
   });
-  // Shown in its own column on wide screens and in the narrow line under the title on phones
-  const lastRuns = (key: string | null) =>
+  // Shown in its own column on wide screens and in the narrow line under the title on phones.
+  // hideEmpty: the caller already says "No runs yet" (the scenario card's pill), so a test without results shows nothing.
+  const lastRuns = (key: string | null, { hideEmpty = false }: { hideEmpty?: boolean } = {}) =>
     !key ? (
       <span className="muted">not linked</span>
     ) : strip.isError ? (
       <span aria-label="Last runs unavailable">—</span>
     ) : strip.data ? (
-      <RunStrip projectId={projectId} runs={strip.data.runs} statuses={strip.data.statuses[key.toLowerCase()] ?? strip.data.runs.map(() => null)} />
+      hideEmpty && !strip.data.tests[key.toLowerCase()]?.length ? null
+        : <RunStrip projectId={projectId} entries={strip.data.tests[key.toLowerCase()] ?? []} />
     ) : (
       <RunStripSkeleton />
     );
   // Phones get a count instead of the strip: the same information, in a line, without a second set of links
   const lastRunsSummary = (key: string | null): string | null => {
     if (!key || !strip.data) return null;
-    return summarizeRuns(strip.data.statuses[key.toLowerCase()] ?? []);
+    return summarizeRuns((strip.data.tests[key.toLowerCase()] ?? []).map((e) => e.status));
   };
   return { keys, lastRuns, lastRunsSummary };
 }
 
-/** Last runs for feature rows: every row's keys fetched together (200 a request, in parallel, merged), and per row one
- *  status per run, the worst over its scenarios. The runs are the project's, so every response holds the same ones. */
+/** Last runs for feature rows: every row's keys fetched together (200 a request, in parallel, merged), and per row the
+ *  newest runs any of its scenarios was in, each with the worst status over its scenarios. */
 export function useFeatureStrips(projectId: number, rows: { test_keys?: string[] }[]) {
   const keys = useMemo(() => [...new Set(rows.flatMap((r) => r.test_keys ?? []))].sort(), [rows]);
   const strip = useQuery({
@@ -84,15 +85,13 @@ export function useFeatureStrips(projectId: number, rows: { test_keys?: string[]
       const chunks: string[][] = [];
       for (let i = 0; i < keys.length; i += STRIP_KEYS_MAX) chunks.push(keys.slice(i, i + STRIP_KEYS_MAX));
       const parts = await Promise.all(chunks.map((chunk) => getRunStrip(projectId, chunk)));
-      return { runs: parts[0].runs, statuses: Object.assign({}, ...parts.map((p) => p.statuses)) as Record<string, StripStatus[]> };
+      return { tests: Object.assign({}, ...parts.map((p) => p.tests)) as Record<string, StripEntry[]> };
     },
     enabled: keys.length > 0,
     staleTime: 60_000,
   });
-  const aggregate = (row: { test_keys?: string[] }): StripStatus[] | null =>
-    strip.data
-      ? worstPerRun(strip.data.runs.length, (row.test_keys ?? []).map((k) => strip.data.statuses[k.toLowerCase()] ?? []))
-      : null;
+  const aggregate = (row: { test_keys?: string[] }): StripEntry[] | null =>
+    strip.data ? mergeStrips((row.test_keys ?? []).map((k) => strip.data.tests[k.toLowerCase()] ?? [])) : null;
   // undefined test_keys: an older server, so nothing to show; an empty list: nothing linked
   const lastRuns = (row: { test_keys?: string[] }): ReactNode =>
     !row.test_keys ? null : row.test_keys.length === 0 ? (
@@ -100,13 +99,13 @@ export function useFeatureStrips(projectId: number, rows: { test_keys?: string[]
     ) : strip.isError ? (
       <span aria-label="Last runs unavailable">—</span>
     ) : strip.data ? (
-      <RunStrip projectId={projectId} runs={strip.data.runs} statuses={aggregate(row)!} />
+      <RunStrip projectId={projectId} entries={aggregate(row)!} />
     ) : (
       <RunStripSkeleton />
     );
   const lastRunsSummary = (row: { test_keys?: string[] }): string | null => {
     const statuses = row.test_keys?.length ? aggregate(row) : null;
-    return statuses ? summarizeRuns(statuses) : null;
+    return statuses ? summarizeRuns(statuses.map((e) => e.status)) : null;
   };
   return { lastRuns, lastRunsSummary };
 }

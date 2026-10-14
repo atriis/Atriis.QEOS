@@ -60,7 +60,7 @@ beforeEach(() => {
       return HttpResponse.json({ total: 2, items: [LOGIN, MANUAL] });
     }),
     http.get(`${P}/features/detail`, () => HttpResponse.json(LOGIN_DETAIL)),
-    http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({ runs: [], statuses: {} })),
+    http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({ tests: {} })),
   );
 });
 
@@ -345,12 +345,13 @@ test("the client-side grouping computes the same aggregates from the cases", asy
 
 const KEY_A = "a".repeat(64);
 const KEY_B = "b".repeat(64);
-const RUNS = [{ id: 1, started_at: "2026-10-06T10:00:00Z", branch: "main" }, { id: 2, started_at: "2026-10-07T10:00:00Z", branch: "main" }];
+const T1 = "2026-10-06T10:00:00Z", T2 = "2026-10-07T10:00:00Z", T3 = "2026-10-08T10:00:00Z";
+const entry = (run_id: number, started_at: string, status: string) => ({ run_id, started_at, branch: "main", status });
 
 test("a feature row shows one strip: the worst status per run over its scenarios", async () => {
   withFeatures({ ...LOGIN, test_keys: [KEY_A, KEY_B] });
   server.use(http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({
-    runs: RUNS, statuses: { [KEY_A]: ["passed", "passed"], [KEY_B]: ["failed", "passed"] },
+    tests: { [KEY_A]: [entry(1, T1, "passed"), entry(2, T2, "passed")], [KEY_B]: [entry(1, T1, "failed"), entry(2, T2, "passed")] },
   })));
   renderCases();
   await screen.findByRole("link", { name: "Login" });
@@ -366,7 +367,7 @@ test("a feature row's Last runs is the strip alone, never a failing count; the n
   server.use(
     http.get(`${P}/analytics/latest-keys`, () => HttpResponse.json({ keys: [KEY_A] })),
     http.post(`${P}/cases/search`, () => HttpResponse.json({ total: 1, items: [kase(2, { automated_test_key: KEY_A })] })),
-    http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({ runs: RUNS, statuses: { [KEY_A]: ["passed", "failed"] } })),
+    http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({ tests: { [KEY_A]: [entry(1, T1, "passed"), entry(2, T2, "failed")] } })),
   );
   renderCases();
   await screen.findByRole("link", { name: "Login" });
@@ -383,14 +384,26 @@ test("more than 200 keys go out in chunks of 200, merged into one strip", async 
   server.use(http.post(`${P}/analytics/run-strip`, async ({ request }) => {
     const body = (await request.json()) as { test_keys: string[] };
     bodies.push(body);
-    const statuses = Object.fromEntries(body.test_keys.map((k) => [k, [k === keys[200] ? "failed" : "passed"]]));
-    return HttpResponse.json({ runs: [RUNS[0]], statuses });
+    const tests = Object.fromEntries(body.test_keys.map((k) => [k, [entry(1, T1, k === keys[200] ? "failed" : "passed")]]));
+    return HttpResponse.json({ tests });
   }));
   renderCases();
   await screen.findByRole("link", { name: "Login" });
   expect(await within(featureRow("M")).findByRole("link", { name: /^Last 1 run: 1 failed/ })).toBeInTheDocument();
   expect(within(featureRow("Login")).getByRole("link", { name: /^Last 1 run: 1 passed/ })).toBeInTheDocument();
   expect(bodies.map((b) => b.test_keys.length).sort()).toEqual([1, 200]);
+});
+
+test("a feature row's strip joins scenarios that ran in different runs, with no gaps", async () => {
+  withFeatures({ ...LOGIN, test_keys: [KEY_A, KEY_B] });
+  server.use(http.post(`${P}/analytics/run-strip`, () => HttpResponse.json({
+    tests: { [KEY_A]: [entry(1, T1, "passed"), entry(3, T3, "failed")], [KEY_B]: [entry(2, T2, "passed")] },
+  })));
+  renderCases();
+  await screen.findByRole("link", { name: "Login" });
+  const strip = await within(featureRow("Login")).findByRole("link", { name: /^Last 3 runs/ });
+  expect(strip).toHaveAttribute("aria-label", "Last 3 runs: 2 passed, 1 failed, opens run #3");
+  expect(strip.querySelectorAll(".run-bar")).toHaveLength(3);
 });
 
 test("a feature row shows a skeleton while loading and a dash when the strips fail", async () => {

@@ -1,5 +1,5 @@
 import { type Case, type CaseQuery, type CaseStatus, type Priority, type FeatureGroup, getFeatureDetail, listCases } from "../api/cases";
-import type { StripStatus } from "../api/analytics";
+import type { StripEntry, StripStatus } from "../api/analytics";
 import type { CaseRowData } from "../components/CaseTable";
 
 /** A page of the Feature view. */
@@ -17,9 +17,17 @@ export const fileLabel = (path: string) => path.slice(path.lastIndexOf("/") + 1)
 /** Worst first: what a feature's run shows when its scenarios disagree. */
 const WORST: StripStatus[] = ["failed", "rerun", "passed", "skipped"];
 
-/** One status per run over several tests, taking the worst present (failed > rerun > passed > skipped > null). */
-export function worstPerRun(runCount: number, perTest: StripStatus[][]): StripStatus[] {
-  return Array.from({ length: runCount }, (_, i) => WORST.find((w) => perTest.some((s) => s[i] === w)) ?? null);
+/** A feature's strip from its scenarios' strips: the newest `limit` runs any scenario was in, oldest to newest, each
+ *  with the worst status present (failed > rerun > passed > skipped). Exact when every strip holds that test's last
+ *  `limit` results: a run among the newest `limit` with any scenario is among each of its scenarios' newest `limit`. */
+export function mergeStrips(perTest: StripEntry[][], limit = 10): StripEntry[] {
+  const byRun = new Map<number, StripEntry>();
+  for (const entry of perTest.flat()) {
+    const seen = byRun.get(entry.run_id);
+    if (!seen || WORST.indexOf(entry.status) < WORST.indexOf(seen.status)) byRun.set(entry.run_id, entry);
+  }
+  const runs = [...byRun.values()].sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at) || a.run_id - b.run_id);
+  return runs.slice(-limit);
 }
 
 /** A feature group, with its cases when the page grouped them itself (filters the feature list cannot apply). */

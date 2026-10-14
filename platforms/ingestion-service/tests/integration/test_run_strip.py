@@ -1,4 +1,4 @@
-"""POST /analytics/run-strip: each test's status in the project's last N runs (Cases 'Last runs')."""
+"""POST /analytics/run-strip: each test's own last N results, oldest to newest (Cases 'Last runs')."""
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -36,39 +36,58 @@ def strip(client, auth, **body):
     return r.json()
 
 
-def test_runs_are_oldest_to_newest_and_aligned_for_every_key(runs, auth):
-    data = strip(runs, auth)
-    assert len(data["runs"]) == 4
-    assert [r["started_at"] for r in data["runs"]] == sorted(r["started_at"] for r in data["runs"])
-    assert data["statuses"][A] == ["passed", "rerun", "skipped", None]
-    assert data["statuses"][B] == [None, "failed", None, "passed"]   # errored counts as failed
-    assert data["statuses"][C] == [None, None, None, None]
+def statuses(entries):
+    return [e["status"] for e in entries]
+
+
+def test_each_test_gets_only_the_runs_it_was_in_oldest_to_newest(runs, auth):
+    tests = strip(runs, auth)["tests"]
+    assert statuses(tests[A]) == ["passed", "rerun", "skipped"]
+    assert statuses(tests[B]) == ["failed", "passed"]   # errored counts as failed
+    assert tests[C] == []
+    for entries in tests.values():
+        assert [e["started_at"] for e in entries] == sorted(e["started_at"] for e in entries)
+    assert {"run_id", "started_at", "branch", "status"} == set(tests[A][0])
+    assert tests[A][2]["branch"] == "dev"
+
+
+def test_a_test_missing_from_newer_runs_still_shows_its_own_last_results(client, make_key, project_role, auth):
+    project_role("viewer", project_id=7)
+    _, key = make_key(project_id=7)
+    now = datetime.now(timezone.utc)
+    upload(client, key, started=now - timedelta(hours=30), results=[{"name": "A", "status": "failed"}])
+    for h in range(12, 0, -1):   # twelve newer runs of another suite
+        upload(client, key, started=now - timedelta(hours=h), results=[{"name": "B", "status": "passed"}])
+    tests = strip(client, auth)["tests"]
+    assert statuses(tests[A]) == ["failed"]
+    assert len(tests[B]) == 10
 
 
 def test_a_retried_test_is_a_rerun_whatever_the_outcome(runs, auth):
-    assert strip(runs, auth)["statuses"][A][1] == "rerun"
+    assert strip(runs, auth)["tests"][A][1]["status"] == "rerun"
 
 
-def test_limit_keeps_the_newest_runs(runs, auth):
-    data = strip(runs, auth, limit=2)
-    assert data["statuses"][A] == ["skipped", None]
+def test_limit_keeps_each_tests_newest_results(runs, auth):
+    tests = strip(runs, auth, limit=2)["tests"]
+    assert statuses(tests[A]) == ["rerun", "skipped"]
+    assert statuses(tests[B]) == ["failed", "passed"]
 
 
 def test_branch_only_counts_that_branchs_runs(runs, auth):
-    data = strip(runs, auth, branch="main")
-    assert len(data["runs"]) == 3 and data["statuses"][A] == ["passed", "rerun", None]
+    tests = strip(runs, auth, branch="main")["tests"]
+    assert statuses(tests[A]) == ["passed", "rerun"]
 
 
 def test_keys_are_case_insensitive(runs, auth):
     r = runs.post(URL, json={"test_keys": [A.upper()]}, headers=auth())
-    assert r.json()["statuses"][A] == ["passed", "rerun", "skipped", None]
+    assert statuses(r.json()["tests"][A]) == ["passed", "rerun", "skipped"]
 
 
 def test_other_projects_runs_are_invisible(runs, auth, make_key, project_role):
     project_role("viewer", project_id=8)
     _, other = make_key(project_id=8)
     upload(runs, other, started=datetime.now(timezone.utc), results=[{"name": "A", "status": "failed"}])
-    assert len(strip(runs, auth)["runs"]) == 4
+    assert statuses(strip(runs, auth)["tests"][A]) == ["passed", "rerun", "skipped"]
 
 
 @pytest.mark.parametrize("body", [{"test_keys": []}, {"test_keys": ["x"]}, {"test_keys": [A] * 201},
@@ -83,16 +102,15 @@ def test_runs_with_identical_started_at_are_ordered_by_id(client, make_key, proj
     same = datetime.now(timezone.utc) - timedelta(hours=1)
     upload(client, key, started=same, results=[{"name": "A", "status": "passed"}])
     upload(client, key, started=same, results=[{"name": "A", "status": "failed"}])
-    data = strip(client, auth)
-    assert [r["id"] for r in data["runs"]] == sorted(r["id"] for r in data["runs"])
-    assert len(data["runs"]) == 2
-    assert data["statuses"][A] == ["passed", "failed"]
+    entries = strip(client, auth)["tests"][A]
+    assert [e["run_id"] for e in entries] == sorted(e["run_id"] for e in entries)
+    assert statuses(entries) == ["passed", "failed"]
 
 
 def test_duplicate_and_mixed_case_keys_map_to_one_lowercased_entry(runs, auth):
     r = runs.post(URL, json={"test_keys": [A, A.upper(), A.title()]}, headers=auth())
     assert r.status_code == 200, r.text
-    assert list(r.json()["statuses"]) == [A]
+    assert list(r.json()["tests"]) == [A]
 
 
 def test_unknown_body_fields_are_422(runs, auth):
