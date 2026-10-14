@@ -1729,10 +1729,11 @@ damage it):
 docker compose exec -T postgres pg_dumpall -U postgres -f /tmp/qeos-backup.sql
 docker compose cp postgres:/tmp/qeos-backup.sql .\qeos-backup.sql
 ```
-bash:
+bash (Git Bash on Windows) writes `backups/qeos-<time>.sql.gz` and keeps 14 days, like production:
 ```bash
-docker compose exec -T postgres pg_dumpall -U postgres | gzip > qeos-backup.sql.gz
+bash deploy/backup.sh --local
 ```
+Without `--local` the script uses the production compose file, which stops with "set QEOS_DOMAIN".
 
 Restore onto an **empty** volume with the **same** `.env`:
 ```
@@ -1741,6 +1742,8 @@ docker compose cp ./qeos-backup.sql postgres:/tmp/qeos-backup.sql
 docker compose exec -T postgres psql -U postgres -f /tmp/qeos-backup.sql
 docker compose up -d --build --wait gateway
 ```
+For a `.sql.gz` from `backup.sh`, replace the `cp` and `psql` lines with
+`gunzip -c backups/qeos-<time>.sql.gz | docker compose exec -T postgres psql -U postgres` (bash).
 One `ERROR: role "postgres" already exists` during the restore is expected.
 
 ### 7.4 Monitoring (optional)

@@ -97,8 +97,9 @@ is needed: the certificate is a real one.
 
 ## 7. Backups
 
-`deploy/backup.sh` dumps every database (one compressed file) and keeps 14 days.
-Schedule it daily:
+`deploy/backup.sh` dumps every database (one compressed file) and keeps 14 days. A failed run
+leaves no partial file. `bash deploy/backup.sh --local` does the same for a local stack
+(`docker-compose.yml` only, no `QEOS_DOMAIN`). Schedule it daily:
 
 ```bash
 crontab -e
