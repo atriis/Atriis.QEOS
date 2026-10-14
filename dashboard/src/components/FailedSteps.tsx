@@ -24,15 +24,26 @@ export default function FailedSteps({ projectId, runId }: { projectId: number; r
     queryFn: () => casesByTestKey(projectId, keys),
     staleTime: 60_000,
   });
-  const { hash } = useLocation();
+  const { hash, key: locationKey } = useLocation();
   const target = hash.startsWith(ANCHOR) ? decodeURIComponent(hash.slice(ANCHOR.length)) : null;
   const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(new Map());
   const scrolled = useRef<string | null>(null);
+  // Following the same link again reopens its row and scrolls back to it, even after the user collapsed it
+  useEffect(() => {
+    if (target == null) return;
+    scrolled.current = null;
+    setToggled((t) => {
+      if (!t.has(target)) return t;
+      const next = new Map(t);
+      next.delete(target);
+      return next;
+    });
+  }, [target, locationKey]);
   useEffect(() => {
     if (target == null || scrolled.current === target || !steps?.some((s) => s.key === target)) return;
     scrolled.current = target;
     document.getElementById(stepAnchor(target))?.scrollIntoView?.({ block: "start" });
-  }, [target, steps]);
+  }, [target, steps, locationKey]);
 
   const hrefOf = (t: FailedStepTest) => {
     const number = linked.data?.get(t.test_key.toLowerCase());

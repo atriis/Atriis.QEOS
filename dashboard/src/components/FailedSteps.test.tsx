@@ -1,7 +1,9 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { http, HttpResponse } from "msw";
 import { server } from "../test/server";
 import { setAccessToken } from "../auth/tokens";
@@ -52,7 +54,7 @@ function renderAt(url = "/projects/42/runs/61") {
     <QueryClientProvider client={qc}>
       <MemoryRouter initialEntries={[url]}>
         <Routes>
-          <Route path="/projects/:projectId/runs/:runId" element={<FailedSteps projectId={42} runId={61} />} />
+          <Route path="/projects/:projectId/runs/:runId" element={<><Link to={`#step-${LOGIN}`}>follow</Link><FailedSteps projectId={42} runId={61} /></>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -129,4 +131,19 @@ test("a failed request says so with Retry inside the section", async () => {
   expect(await screen.findByRole("alert")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Failed steps" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+});
+
+test("following a step's link again reopens its row after it was collapsed", async () => {
+  setup();
+  renderAt(`/projects/42/runs/61#step-${LOGIN}`);
+  const button = await screen.findByRole("button", { name: "Given I log in" });
+  await userEvent.click(button);
+  expect(button).toHaveAttribute("aria-expanded", "false");
+  await userEvent.click(screen.getByRole("link", { name: "follow" }));
+  await waitFor(() => expect(button).toHaveAttribute("aria-expanded", "true"));
+});
+
+test("the stylesheet keeps a collapsed panel hidden (an author display would override [hidden])", () => {
+  const css = readFileSync(resolve(__dirname, "../index.css"), "utf8");
+  expect(css).toMatch(/\.step-errors\[hidden\]\s*\{\s*display:\s*none/);
 });
