@@ -182,6 +182,8 @@ function SsoOnlyAdminCard({ ssoOnly }: { ssoOnly: boolean }) {
       });
     } catch (err) {
       setError(err);
+      // The row may be stale (already linked, gone): refresh so no Allow button keeps failing the same way
+      await getSsoReadiness().then(setReadiness).catch(() => undefined);
     } finally {
       setAllowing(null);
     }

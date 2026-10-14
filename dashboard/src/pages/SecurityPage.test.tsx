@@ -345,6 +345,29 @@ test("a non-superuser neither sees the card nor asks for readiness", async () =>
   }));
   renderSecurity();
   await screen.findByRole("heading", { name: "Microsoft account" });
+  // /users/me has answered (the two-factor status comes from the same response), so the card would be mounted by now
+  expect(await screen.findByText("Two-factor authentication: Off")).toBeInTheDocument();
   expect(screen.queryByRole("heading", { name: "Microsoft-only sign-in" })).not.toBeInTheDocument();
   expect(asked).toBe(false);
+});
+
+test("a refused allow refreshes the list so the stale row goes", async () => {
+  meIs({ is_superuser: true, sso_only: true, has_password: true, linked_providers: ["microsoft"] });
+  let reads = 0;
+  server.use(
+    http.get("/api/v1/users/sso-readiness", () => {
+      reads += 1;
+      return HttpResponse.json(reads === 1 ? READINESS
+        : { active_users: 15, linked: 13, unlinked: [READINESS.unlinked[1]] });
+    }),
+    http.post("/api/v1/users/7/allow-microsoft-link", () =>
+      HttpResponse.json({ detail: "User has already linked Microsoft" }, { status: 409 })),
+  );
+  renderSecurity();
+  await userEvent.click(await screen.findByRole("button", { name: "Allow link at next sign-in for ana@example.com" }));
+  const card = screen.getByRole("heading", { name: "Microsoft-only sign-in" }).closest("section")!;
+  expect(await within(card).findByText("13 of 15 active users have linked Microsoft.")).toBeInTheDocument();
+  expect(within(card).queryByText("ana@example.com")).not.toBeInTheDocument();
+  expect(within(card).getByRole("alert")).toHaveTextContent("User has already linked Microsoft");
+  expect(reads).toBe(2);
 });
