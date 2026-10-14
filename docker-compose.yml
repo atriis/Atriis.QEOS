@@ -40,6 +40,13 @@ x-auth-env: &auth-env
   INTERNAL_API_PASSWORD: ${INTERNAL_API_PASSWORD:?set INTERNAL_API_PASSWORD (service-to-service internal APIs; URL-safe characters)}
   # Offer Grafana to superusers (ADR-027); set with COMPOSE_PROFILES=monitoring
   MONITORING_ENABLED: ${MONITORING_ENABLED:-false}
+  # Microsoft sign-in (SETUP section 3.8) and SSO-only mode (ADR-031). Empty Azure values leave Microsoft off;
+  # with AUTH_SSO_ONLY=true auth-service refuses to start unless every provider in AUTH_SSO_PROVIDERS is configured
+  AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
+  AZURE_TENANT_ID: ${AZURE_TENANT_ID:-}
+  AZURE_ALLOWED_TENANTS: ${AZURE_ALLOWED_TENANTS:-}
+  AUTH_SSO_ONLY: ${AUTH_SSO_ONLY:-false}
+  AUTH_SSO_PROVIDERS: ${AUTH_SSO_PROVIDERS:-microsoft}
 
 x-organization-env: &organization-env
   <<: *build-env

@@ -479,18 +479,17 @@ Two halves must match:
 - **auth-service** verifies the provider's ID token and must know the same client id.
   Without it, `POST /api/v1/sso/{google|microsoft}` answers 503.
 
-**The stock `docker-compose.yml` does not pass auth-service's SSO variables.** Add a
-`docker-compose.override.yml` next to it (Compose merges it automatically when you run
-`docker compose` without `-f`):
+`docker-compose.yml` passes the Microsoft settings (`AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+`AZURE_ALLOWED_TENANTS`) and the SSO-only settings (`AUTH_SSO_ONLY`, `AUTH_SSO_PROVIDERS`) from `.env`
+to auth-service. Google's `GOOGLE_CLIENT_ID` still needs a `docker-compose.override.yml` next to it
+(Compose merges it automatically when you run `docker compose` without `-f`):
 
 ```yaml
-# docker-compose.override.yml (local file; keep it out of git if it holds tenant ids you consider private)
+# docker-compose.override.yml (local file)
 services:
   auth-service:
     environment:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-}
-      AZURE_ALLOWED_TENANTS: ${AZURE_ALLOWED_TENANTS:-}
 ```
 In production, add it explicitly:
 `docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml -f docker-compose.override.yml …`.
@@ -539,7 +538,8 @@ lands on the project list. `docker compose logs auth-service` shows no "not conf
 |---|---|
 | "Invalid or expired verification token" | Links work once and for 24 h. Already used: sign in. Expired: register again. |
 | No verification email | SMTP not configured. Take the link from the auth-service log. |
-| SSO button visible but sign-in fails with 503 | The dashboard has the `VITE_*` id but auth-service does not. Add the override file above. |
+| SSO button visible but sign-in fails with 503 | The dashboard has the `VITE_*` id but auth-service does not. Set `AZURE_CLIENT_ID`/`AZURE_ALLOWED_TENANTS` in `.env` (Microsoft) or add the override file above (Google), then recreate auth-service. |
+| auth-service exits at start with "AUTH_SSO_ONLY=true but …" | A provider in `AUTH_SSO_PROVIDERS` is not configured or not valid (`microsoft`, `google`). The log names the missing setting. |
 | SSO button missing | The `VITE_*` value was set after the build. Rebuild with `--build`. |
 | Google: "origin not allowed" | Add the exact origin, including the port, to Authorized JavaScript origins. |
 | Invitee sees "not found" on the link | The link was already used, revoked, or is older than 7 days. Invite again. |
@@ -1790,7 +1790,7 @@ The gateway always joins a Docker network fixed at `172.30.1.0/24`, with monitor
 | Signed out after editing `.env` | `SECRET_KEY` changed. Sign in again; API keys keep working. |
 | No verification or reset email | SMTP not configured: the links are in `docker compose logs auth-service`. If SMTP is configured, check that log for the SMTP error. |
 | 429 Too Many Requests | Per-IP rate limit (5/s on sign-in, 20/s API, 10/s uploads). Wait a second. Behind a proxy in production, check `GATEWAY_TRUSTED_PROXIES` (set by the prod file). |
-| SSO button shows, sign-in answers 503 | auth-service lacks `GOOGLE_CLIENT_ID` / `AZURE_CLIENT_ID` + `AZURE_ALLOWED_TENANTS`: use the override file ([3.8](#38-single-sign-on-google-and-microsoft)). |
+| SSO button shows, sign-in answers 503 | auth-service lacks `AZURE_CLIENT_ID` + `AZURE_ALLOWED_TENANTS` (set them in `.env`) or `GOOGLE_CLIENT_ID` (use the override file): [3.8](#38-single-sign-on-google-and-microsoft). |
 | Collector exits 2 | A configuration problem (URL, key, no matching files, `http://` URL, bad `--ca-file`, invalid `--trigger`). `qeos-collector check` names it. |
 | `impact` exits 2: "This API key may not read test suggestions" | The key is upload-only (403 `impact_not_allowed`). A project owner or admin turns on the key's **Test suggestions** switch in Settings → **API keys** ([4.1.1](#411-api-keys)); `qeos-collector check` then prints `Test suggestions: allowed`. |
 | My run doesn't appear in QEOS | Check Settings › Collection and the collector's `run not collected` line: the run looked manual and the project does not collect manual runs ([4.1.8a](#418a-manual-runs-and-the-run-trigger)). Pass `--trigger automatic` if it is not. |

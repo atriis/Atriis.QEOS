@@ -5,6 +5,7 @@ from src.auth.api.v1.api import api_router
 from src.auth.api.v1.endpoints import internal
 from src.auth.config import settings
 from src.auth.db.session import SessionLocal
+from src.auth.service.auth_mode import check_sso_only_settings, warn_if_no_break_glass
 from src.auth.service.bootstrap import bootstrap_first_superuser
 
 app = FastAPI(
@@ -18,6 +19,18 @@ def _bootstrap_first_superuser() -> None:
     db = SessionLocal()
     try:
         bootstrap_first_superuser(db)
+    finally:
+        db.close()
+
+
+@app.on_event("startup")
+def _apply_auth_mode() -> None:
+    # ADR-031. Registered after the bootstrap, so the superuser it creates counts for the warning.
+    # A listed provider that cannot work stops start-up here, before any database access.
+    check_sso_only_settings()
+    db = SessionLocal()
+    try:
+        warn_if_no_break_glass(db)
     finally:
         db.close()
 

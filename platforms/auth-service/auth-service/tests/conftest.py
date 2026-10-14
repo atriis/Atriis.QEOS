@@ -81,3 +81,60 @@ def register_and_verify(client, db):
         return verified.json()
 
     return _do
+
+
+@pytest.fixture(autouse=True)
+def _session_local_on_sqlite(monkeypatch):
+    """Start-up hooks open their own session through SessionLocal; point it at the test SQLite database so
+    no test reaches PostgreSQL. The schema exists only while the `db` fixture is active."""
+    import src.auth.api.main as main_module
+
+    monkeypatch.setattr(main_module, "SessionLocal", TestingSessionLocal)
+
+
+SSO_CLIENT_ID = "11111111-2222-3333-4444-555555555555"
+SSO_TENANT = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+TEST_PASSWORD = "securepassword123"
+
+
+@pytest.fixture
+def sso_only(monkeypatch):
+    """SSO-only mode (ADR-031) with Microsoft configured, Google not. The endpoints read settings per request,
+    so this works whether it is set up before or after `client`. Start-up hooks open their session on the
+    test SQLite database (the autouse fixture above). The ids match tests/integration/test_microsoft_sso.py."""
+    from src.auth.config import settings
+
+    monkeypatch.setattr(settings, "AUTH_SSO_ONLY", True)
+    monkeypatch.setattr(settings, "AUTH_SSO_PROVIDERS", "microsoft")
+    monkeypatch.setattr(settings, "AZURE_CLIENT_ID", SSO_CLIENT_ID)
+    monkeypatch.setattr(settings, "AZURE_ALLOWED_TENANTS", SSO_TENANT)
+    monkeypatch.setattr(settings, "AZURE_TENANT_ID", "")
+    monkeypatch.setattr(settings, "GOOGLE_CLIENT_ID", "")
+
+
+@pytest.fixture
+def make_user(db):
+    """A user row written straight to the database; `password=None` is a passwordless (SSO) account."""
+    from src.auth.models.user import User
+    from src.auth.utils.password import get_password_hash
+
+    def _make(email, *, superuser=False, active=True, password=TEST_PASSWORD):
+        user = User(
+            email=email,
+            hashed_password=get_password_hash(password) if password else None,
+            is_active=active,
+            is_superuser=superuser,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user
+
+    return _make
+
+
+@pytest.fixture
+def auth_header():
+    from src.auth.utils.tokens import create_access_token
+
+    return lambda user: {"Authorization": f"Bearer {create_access_token({'sub': str(user.id)})}"}

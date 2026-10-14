@@ -76,6 +76,13 @@ class Settings(BaseServiceSettings):
     AZURE_ALLOWED_TENANTS: str = ""
     SAML_SETTINGS: str = "{}"
 
+    # SSO-only mode (ADR-031): people sign in only with the providers in AUTH_SSO_PROVIDERS. Active
+    # superusers keep password sign-in (break-glass, MFA still applies). With the mode on, start-up
+    # refuses a listed provider that is not configured above.
+    AUTH_SSO_ONLY: bool = False
+    # Comma-separated; valid names: microsoft, google
+    AUTH_SSO_PROVIDERS: str = "microsoft"
+
     @property
     def redis_url(self) -> RedisDsn:
         """Return Redis URL, either direct or constructed from components."""

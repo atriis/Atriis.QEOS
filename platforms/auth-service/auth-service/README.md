@@ -146,6 +146,8 @@ When `SMTP_HOST` is unset (the default), verification and reset links are logged
 
 - `AZURE_CLIENT_ID`: the Entra app registration's client id (the required token audience)
 - `AZURE_ALLOWED_TENANTS`: comma-separated tenant ids allowed to sign in (empty: `AZURE_TENANT_ID`, if set)
+- `AUTH_SSO_ONLY`: SSO-only mode (default `false`, ADR-031). People sign in only with the providers below; active superusers keep password sign-in (break-glass, MFA still applies).
+- `AUTH_SSO_PROVIDERS`: comma-separated providers allowed in the mode (default `microsoft`; valid: `microsoft`, `google`). With the mode on, start-up stops when a listed provider is unknown or not configured, and logs the missing setting's name. With the mode on and no active superuser, start-up logs a WARNING.
 
 Without both, `POST /sso/microsoft` answers 503. The settings below are accepted by the config
 module but nothing reads them yet:
