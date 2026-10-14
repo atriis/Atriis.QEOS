@@ -237,7 +237,30 @@ def test_several_steps_cost_a_bounded_number_of_queries(client, auth, project_ro
     finally:
         event.remove(engine, "before_cursor_execute", count)
     assert len(steps) == 5 and all(s["since"]["runs"] == 4 and s["since"]["capped"] for s in steps)
-    assert len(statements) <= 6
+    assert 3 <= len(statements) <= 6  # at least get_run, the failing rows and the history: a listener that hears
+    # nothing (another engine) fails here
+
+
+def test_tests_with_different_histories_walk_the_union_of_their_runs(client, auth, project_role, step_run):
+    """One step failing in lisbon and porto; each test's own 50-run window differs (lisbon ran in 55 earlier runs,
+    porto in 5), the walk is over the union of their runs, newest first:
+      lisbon runs m0..m59 (minute i): passed i < 50, skipped 50..54 (passed over), failed at the step 55..59;
+      porto-only runs at m50:30..m54:30, failed at the step.
+    Walk from this run: m59..m55 (lisbon failed, 5 runs), m54:30..m50:30 (porto failed, 5 runs; lisbon's skipped
+    runs m54..m50 are passed over), m49 (lisbon passed) stops it: since = m50:30, runs = 1 + 5 + 5 = 11,
+    last_passed = m49, capped False."""
+    project_role("viewer")
+    lisbon = {}
+    for i in range(60):
+        spec = "passed" if i < 50 else "skipped" if i < 55 else failing("When I search Lisbon")
+        lisbon[i] = step_run(T0 + timedelta(minutes=i), {"lisbon": spec})
+    porto = {i: step_run(T0 + timedelta(minutes=i, seconds=30), {"porto": failing("When I search Porto")})
+             for i in range(50, 55)}
+    run = step_run(T0 + timedelta(hours=2), {"lisbon": failing("When I search Lisbon"),
+                                             "porto": failing("When I search Porto")})
+    (step,) = get(client, auth, run)
+    assert step["since"] == {**step["since"], "run_id": porto[50].id, "runs": 11, "capped": False}
+    assert step["last_passed"]["run_id"] == lisbon[49].id
 
 
 def test_another_projects_runs_never_join_the_streak(client, auth, project_role, step_run):
