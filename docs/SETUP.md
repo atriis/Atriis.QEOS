@@ -1139,6 +1139,19 @@ stack on `https://localhost:8443`, add `--ca-file qeos-ca.crt` ([4.1.3](#413-col
   Outline case is linked to its first example row only, so its pill and failed step come from that
   row. Hand-written cases (not imported from a .feature file) show the last-result pill but no red
   step.
+- **Failed steps across test cases** (run page, the **Failed steps** card under **Failures by cause**, and
+  one extra line in the failed-step tooltip): each failed Cucumber step is listed once, the one in the
+  most test cases first. A row shows the step, "failed in N test cases" and "failing since run #430,
+  14 Oct (5 runs) · last passed in run #429" (or "new in this run"; "failing for more than 50 runs"
+  or "for more than 90 days" when the streak is longer than QEOS counts). Open a row to see its errors
+  grouped by shape (quoted values, numbers, UUIDs and hex in the first error line are folded together), each with the
+  test cases that hit it and the text they ran; a test case links to the case as of that run. "Failing
+  since" counts only runs on the same branch as the run (every branch when the run has none). The
+  tooltip says "Also failed in 11 other test cases in this run · failing since run #430" (or "Only this
+  test case · new in this run") and links to the row. From collector 0.8.0 the run page groups a failed
+  step across test cases by its step definition (Cucumber's match location), so one step with other
+  parameters is one row; with an older collector the steps group by their exact text, and the row says
+  so.
 
 Suites: **Test cases** → **Suites** tab → create a suite (its name must be unique), add cases,
 order them, and **Run suite** ([4.3](#43-run-from-qeos-play-and-stop)). Deleting a suite keeps
@@ -1303,7 +1316,7 @@ everything listed here.
 |---|---|---|
 | **Overview** | Widgets; by default the latest run, its failures grouped by cause, the pass rate this week and flaky tests in the last 14 days. | **Customise** (every role): move, resize, remove and add widgets, change their settings, then **Save**. Owners and admins: **Edit project default**. See [Customise the Overview](#customise-the-overview). |
 | **Runs** | Every run, newest first, with counts and duration. | Status (With failures / All green), Branch; **More filters**: Environment, CI, Commit (4+ hex), Pull request, Author, From, To; sort by Failed or Duration. Tab **Requested runs** ([4.3](#43-run-from-qeos-play-and-stop)). |
-| Run page | Results, failures grouped by cause (new, or failing for N runs in a row), owners from CODEOWNERS, changed files with the **likely affected tests** beside them (evidence, and which new failures were suggested or missed), components, a link to the CI job. | **Compare with previous run #N**. |
+| Run page | Results, failures grouped by cause (new, or failing for N runs in a row), owners from CODEOWNERS, **Failed steps** (one row per failed step across test cases), changed files with the **likely affected tests** beside them (evidence, and which new failures were suggested or missed), components, a link to the CI job. | **Compare with previous run #N**. |
 | Compare (`runs/<id>/compare/<base>`) | New failures, fixed, still failing, slower (≥1 s and ≥50 %), added, removed. Up to 200 each. | Choose any other run of the project. |
 | **Test results** | Every test seen in the window: runs, pass rate, average duration, last status. Click a test for its history. | 7 / 30 / 90 days, sort, search, CSV. |
 | **Flaky** | Tests that both pass and fail. **Confirmed**: passed and failed on the same commit in the same environment. **Suspected**: the result flips between consecutive runs on a branch. | Window 7/14/30/90 days, minimum runs, minimum flip rate, branch. **Quarantine** / **Release** (members and above). |
