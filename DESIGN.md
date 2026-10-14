@@ -335,8 +335,8 @@ A compact visual history of a test's own last results (up to 10), one link per r
   - **Passed:** `--status-passed` (green).
   - **Failed:** `--status-failed` (red) with a notch cut from the top to signal failure without colour alone.
   - **Re-run:** `--status-rerun` (amber: #b07800 light, #e0a000 dark) with diagonal stripes to distinguish it without relying on hue (dark stripe tone #8a6200, 3.2:1 on the surface).
-  - **Skipped:** a dashed outline with no fill, since the test did not run.
-  - Each bar colour meets at least 3:1 non-text contrast against the cell's background in both themes.
+  - **Skipped:** a yellow fill (`--status-skipped-fill`, #facc15) with a dashed edge (`--status-skipped-edge`, #854d0e). The dashed edge keeps it apart from a passed bar without relying on hue (green and yellow are a common colour-blind confusion).
+  - Each bar meets at least 3:1 non-text contrast against the cell's background in both themes. The skipped fill is only 1.5:1 on white, so in light mode its dashed edge carries the boundary (7.2:1 on white); in dark mode the fill is 11.5:1.
 - **WCAG:** the notch, stripes and the skipped outline satisfy 1.4.1 (use of colour). Each bar's link fills the strip's 24px height and its 2px gap, so the hit areas touch with no dead space; at 8px wide they are below 2.5.8's 24px (known limitation: the column has room for 10 runs, not 10 targets of 24px). Keyboard users reach every bar with the arrow keys.
 - **Accessibility:** when the test has no results, the cell shows the muted text "No runs yet"; on a feature page's scenario card, whose status pill already says so, it shows nothing.
 - **Rendering:** until data arrives, the column shows 10 outlined skeleton bars (`--surface-2` fill, `--border-strong` outline). If the request fails, a dash appears and the rest of the page continues working.
