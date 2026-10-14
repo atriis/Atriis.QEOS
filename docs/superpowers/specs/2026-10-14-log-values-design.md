@@ -1,6 +1,7 @@
 # Log values: patterns captured from test logs — design
 
-Status: sections 1–3 approved in conversation 2026-10-14; pending review of this written spec.
+Status: sections 1–3 approved in conversation 2026-10-14, plus copy-to-clipboard and per-pattern link
+templates (approved in review); pending review of this written spec.
 Blueprint: collector (Integrations), ingestion (Intelligence), dashboard (Collaboration); PostgreSQL only.
 New ADR-032.
 
@@ -62,19 +63,24 @@ results.
 
 ### 3.1 Patterns
 
-- Table `log_patterns (id, project_id, name, pattern, created_by_user_id, created_at)`, unique
-  `(project_id, name)`.
+- Table `log_patterns (id, project_id, name, pattern, link_template, created_by_user_id, created_at)`,
+  unique `(project_id, name)`.
 - Name: the masking name format (`^[a-z][a-z0-9_]{0,31}$`), shown as the label in tooltips.
 - Pattern: a regular expression, at most 256 characters, compiled with RE2 (linear time, as masking), with
   **at most one capture group**: with a group, the value is the group's text; without, the whole match.
 - At most 20 patterns per project.
+- `link_template` (optional, at most 500 characters): an `https://` URL containing `{value}` exactly once,
+  e.g. `https://backoffice.example.com/trips/{value}`. Validated on the server: scheme `https` only (no
+  `javascript:`, `data:` or `http:`), a host, `{value}` present. The value is URL-encoded when the link is
+  built, so a value cannot change the host or path structure.
 - No edit (as masking): delete and add again.
 
 ### 3.2 Endpoints (ingestion, mounted like masking)
 
 - `GET /api/v1/projects/{id}/log-patterns`: any project member (READ_ROLES).
-- `POST …/log-patterns`: owner, admin, member (EDIT_ROLES). 201 with the pattern; 422 invalid name,
-  invalid or too long regex, more than one group, limit reached; 409 duplicate name.
+- `POST …/log-patterns`: owner, admin, member (EDIT_ROLES). Body `{name, pattern, link_template?}`. 201 with
+  the pattern; 422 invalid name, invalid or too long regex, more than one group, invalid link template,
+  limit reached; 409 duplicate name.
 - `DELETE …/log-patterns/{pattern_id}`: EDIT_ROLES; 204; its values are deleted with it.
 - `POST …/log-patterns/preview`: EDIT_ROLES. Body `{name, pattern, sample}` (sample up to 64 KB). Returns the
   sample as it would be stored (masked) and the values this pattern finds in it. Nothing is saved.
@@ -118,7 +124,7 @@ project, or a column on an existing per-project table if one exists).
 ### 4.2 Last runs bar tooltip
 
 - `run-strip` entries gain `values: [{"name": "trip_id", "values": ["3960562"]}, …]` (patterns in name
-  order, values in log order; empty list when none).
+  order, values in log order; empty list when none). The tooltip shows text only, no links.
 - The bar's tooltip (`title`) and its accessible label: today's line, then one line per pattern with values,
   values comma-separated:
   ```
@@ -132,9 +138,16 @@ project, or a column on an existing per-project table if one exists).
 
 ### 4.3 Test case page and feature page cards
 
-- `latest-results` gains the same `values` for the result it returns (latest, or the run opened from a bar).
+- `latest-results` gains the same `values` for the result it returns (latest, or the run opened from a bar),
+  each pattern entry also carrying its `link_template` (or null).
 - Under the last-result pill: "Log values" line, `trip_id: 3960562 · route_key: wasToBos` (values within a
   pattern comma-separated), only when there are values. Same line under each scenario card's pill.
+- Each value is a chip: a button **copies** the value to the clipboard (a brief "Copied" note, announced to
+  screen readers); when the pattern has a link template, the value is also a link to the template with the
+  URL-encoded value, opening in a new tab (`rel="noopener noreferrer"`). The dashboard builds the link only
+  from an `https:` template (checked again on the client).
+- Settings card: an optional "Link" field on the add form (placeholder
+  `https://backoffice.example.com/trips/{value}`), shown in the list when set.
 
 ## 5. Testing
 
@@ -143,13 +156,15 @@ project, or a column on an existing per-project table if one exists).
 - **Collector:** `log` from Cucumber text attachments (plain and base64), step order, Background included,
   binary skipped, 64 KB cut, absent when empty; JUnit `system-out`; retry without `log` on a 422.
 - **Ingestion:** `log` masked and stored; values extracted with group / without group; distinct and ordered;
-  200-character and 20-value caps; pattern validation (name, length, RE2, groups, limit, duplicate); preview;
+  200-character and 20-value caps; pattern validation (name, length, RE2, groups, limit, duplicate); link template validation (https only,
+  `{value}` once, length); preview;
   delete cascades; re-scan fills past results within 90 days only, idempotent, one job per project; remask
   re-applies; export includes; retention deletes; `run-strip` and `latest-results` values; migration 023 up
   and down on PostgreSQL.
 - **Dashboard:** settings card (list, add, help popover examples, preview chips, errors, scanning state,
   viewer read-only); tooltip lines for passed, failed, skipped bars, accessible label, "+N more"; feature
-  row merge; case page and feature card line; lint, typecheck, build.
+  row merge; case page and feature card line; copy chip (clipboard call, "Copied" note); value link built from the
+  template with an encoded value, only for https, new tab; lint, typecheck, build.
 - **Gateway smoke:** `GET …/log-patterns` routed (401 without a token).
 
 ## 6. Documentation
