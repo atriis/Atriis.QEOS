@@ -28,32 +28,42 @@ PLACEHOLDER = "…"
 _QUOTED = re.compile(r"""(?<!\w)(['"`])(?:(?!\1)[^\n])*\1(?!\w)""")
 
 
-# An HTTP status code (100-599) right after one of these words is part of the error, not a value: `expected 200 got 500`
-_STATUS_CONTEXT = re.compile(r"\b(?:status|http|code|got|returned|expected)\s*[:=]?\s*$", re.IGNORECASE)
+# An HTTP status code (100-599) right after status/HTTP/code is part of the error, not a value. After got/returned/
+# expected it is one only when the line also speaks of a status (`expected status 200 but got 500`, not
+# `expected 3 items, got 250 rows`).
+_STATUS_AFTER = re.compile(r"\b(?:status|http|code)\s*[:=]?\s*$", re.IGNORECASE)
+_OUTCOME_AFTER = re.compile(r"\b(?:got|returned|expected)\s*[:=]?\s*$", re.IGNORECASE)
+_STATUS_WORD = re.compile(r"\b(?:status|http|code|response)\b", re.IGNORECASE)
 _STATUS_CODE = re.compile(r"[1-5]\d\d")
+_MAX_LINE = 2000  # the line is capped before normalising, so a huge message costs no more than a long one
 
 
 def _first_line(message: Optional[str]) -> str:
     for line in (message or "").splitlines():
         if line.strip():
-            return line.strip()
+            return line.strip()[:_MAX_LINE]
     return ""
 
 
-def _number(line: str, match: "re.Match[str]") -> str:
-    kept = _STATUS_CODE.fullmatch(match.group()) and _STATUS_CONTEXT.search(line[: match.start()])
-    return match.group() if kept else PLACEHOLDER
+def _number(line: str, match: "re.Match[str]", has_status_word: bool) -> str:
+    if not _STATUS_CODE.fullmatch(match.group()):
+        return PLACEHOLDER
+    before = line[: match.start()]
+    if _STATUS_AFTER.search(before) or (has_status_word and _OUTCOME_AFTER.search(before)):
+        return match.group()
+    return PLACEHOLDER
 
 
 def error_shape(message: Optional[str]) -> str:
     """The first line of the error with quoted values, UUIDs, hex strings and numbers replaced by …: failures of one
     step that differ only in their values share it (`Invalid city 'Lisb0n'` and `Invalid city 'P0rto'`). HTTP status
-    codes after status/HTTP/code/got/returned/expected stay (`expected 200 got 500` is not `expected 200 got 404`).
-    The values are replaced first and the line cut after, so no token is cut half way and the length of a value never
-    changes the shape."""
+    codes stay (`status 500` is not `status 404`; `expected status 200 but got 500` keeps both). The values are
+    replaced first and the line cut after, so no token is cut half way and the length of a value never changes the
+    shape."""
     line = _first_line(message)
+    has_status_word = bool(_STATUS_WORD.search(line))
     line = _QUOTED.sub(lambda m: f"{m.group(1)}{PLACEHOLDER}{m.group(1)}", line)
     for pattern in (_UUID, _HEX_PREFIXED, _HEX):
         line = pattern.sub(PLACEHOLDER, line)
-    line = _NUMBER.sub(lambda m: _number(line, m), line)
+    line = _NUMBER.sub(lambda m: _number(line, m, has_status_word), line)
     return _SPACE.sub(" ", line).strip()[:HEADLINE]

@@ -34,8 +34,17 @@ def test_different_http_statuses_are_different_shapes():
     assert error_shape("Request failed with status 500") != error_shape("Request failed with status 404")
 
 
-def test_expected_and_actual_status_codes_are_both_kept():
-    assert error_shape("expected 200 got 500") == "expected 200 got 500"
+def test_expected_and_actual_status_are_kept_when_the_line_speaks_of_a_status():
+    assert error_shape("expected status 200 but got 500") != error_shape("expected status 200 but got 404")
+    assert error_shape("expected status 200 but got 500") == "expected status 200 but got 500"
+
+
+def test_a_bare_expected_got_pair_without_a_status_word_collapses():
+    assert error_shape("expected 200 got 500") == "expected … got …"
+
+
+def test_a_count_after_got_is_not_a_status():
+    assert error_shape("expected 3 items, got 250 rows") == "expected … items, got … rows"
 
 
 def test_http_followed_by_a_status_is_kept():
@@ -55,3 +64,7 @@ def test_values_of_different_length_near_the_cut_share_a_shape():
     a = error_shape(f"{prefix} 123e4567-e89b-12d3-a456-426614174000 tail")
     b = error_shape(f"{prefix} 7 tail")
     assert a == b and len(a) <= 300
+
+
+def test_a_huge_first_line_is_bounded():
+    assert len(error_shape("y " * 5000 + "status 500")) <= 300
