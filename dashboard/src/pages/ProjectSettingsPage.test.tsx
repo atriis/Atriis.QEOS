@@ -124,7 +124,7 @@ test("hosted CI runners on localhost get a warning, not a silent snippet", async
   await screen.findByText(/no api keys/i);
 
   await userEvent.selectOptions(screen.getByLabelText(/ci platform/i), "github");
-  expect(screen.getByTestId("ci-snippet")).toHaveTextContent("collector-action@collector-v0.7.0");
+  expect(screen.getByTestId("ci-snippet")).toHaveTextContent("collector-action@collector-v0.8.0");
   expect(screen.getByRole("note")).toHaveTextContent(/cannot reach localhost/i);
 
   await userEvent.selectOptions(screen.getByLabelText(/ci platform/i), "gitlab");
@@ -164,7 +164,7 @@ test("every CI snippet syncs test cases from .feature files with the pinned coll
     await userEvent.selectOptions(screen.getByLabelText(/ci platform/i), platform);
     const snippet = screen.getByTestId("ci-snippet");
     expect(snippet).toHaveTextContent("import-features");
-    expect(snippet).toHaveTextContent("collector-v0.7.0");
+    expect(snippet).toHaveTextContent("collector-v0.8.0");
     if (platform === "jenkins") {
       // Groovy comments are //, never #
       const lines = (snippet.textContent ?? "").split(/\r?\n/).map((l) => l.trim());

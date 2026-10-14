@@ -14,7 +14,7 @@ import NotificationsCard from "../components/NotificationsCard";
 import RepositoriesCard from "../components/RepositoriesCard";
 import PageHeader from "../components/PageHeader";
 
-const COLLECTOR_REF = "collector-v0.7.0";
+const COLLECTOR_REF = "collector-v0.8.0";
 
 // Mirrors EDIT_ROLES in platforms/project-service/src/project/api/deps.py
 const EDIT_ROLES = ["owner", "admin", "member"];

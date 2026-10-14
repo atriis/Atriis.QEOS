@@ -1,7 +1,7 @@
 # GitLab CI template: upload JUnit XML results to a QEOS platform.
 #
 # include:
-#   - remote: https://raw.githubusercontent.com/atriis/Atriis.QEOS/collector-v0.7.0/templates/qeos-collector.gitlab-ci.yml
+#   - remote: https://raw.githubusercontent.com/atriis/Atriis.QEOS/collector-v0.8.0/templates/qeos-collector.gitlab-ci.yml
 #
 # Set QEOS_URL as a CI/CD variable and QEOS_API_KEY as a masked variable.
 # Override QEOS_PATTERNS (and optionally QEOS_ENVIRONMENT, QEOS_EXTRA_ARGS).
@@ -14,7 +14,7 @@
   script:
     - QEOS_PATTERNS="${QEOS_PATTERNS:-${QAV_PATTERNS:-reports/**/*.xml}}"
     - QEOS_EXTRA_ARGS="${QEOS_EXTRA_ARGS:-${QAV_EXTRA_ARGS:-}}"
-    - QEOS_COLLECTOR_REF="${QEOS_COLLECTOR_REF:-${QAV_COLLECTOR_REF:-collector-v0.7.0}}"
+    - QEOS_COLLECTOR_REF="${QEOS_COLLECTOR_REF:-${QAV_COLLECTOR_REF:-collector-v0.8.0}}"
     - apt-get update -qq && apt-get install -y -qq git > /dev/null
     - pip install --quiet "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${QEOS_COLLECTOR_REF}#subdirectory=collector"
     - qeos-collector upload ${QEOS_PATTERNS} --url "${QEOS_URL}" ${QEOS_ENVIRONMENT:+--environment "${QEOS_ENVIRONMENT}"} ${QEOS_EXTRA_ARGS}
@@ -38,7 +38,7 @@ qeos-collector-upload:
 #   script:
 #     - git fetch --quiet origin "+refs/heads/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME:refs/remotes/origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 #     - apt-get update -qq && apt-get install -y -qq python3-pip > /dev/null
-#     - pip install --quiet --break-system-packages "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.7.0#subdirectory=collector"
+#     - pip install --quiet --break-system-packages "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.8.0#subdirectory=collector"
 #     - qeos-collector run-impact --url "$QEOS_URL" -- npx cucumber-js --tags "not @wip"
 #   rules:
 #     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
