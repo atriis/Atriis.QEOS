@@ -377,6 +377,14 @@ The design is in ADR-019.
 **Before pushing:** `git config core.hooksPath .githooks` once per clone runs the architecture docs check
 on every `git push` ([`.githooks/pre-push`](.githooks/pre-push), under a second). The suites stay with you and CI.
 
+**Dependency updates:** Dependabot ([`.github/dependabot.yml`](.github/dependabot.yml)) checks pip, npm
+and GitHub Actions weekly and opens a pull request per update, with CI run on it:
+- Python minor and patch bumps arrive in one PR; each major bump in its own;
+- dashboard packages that must move together arrive together (`react`, `eslint`, `vite-test`);
+- security fixes arrive at once, not on the weekly schedule;
+- nothing merges by itself: merge a green PR; close a red one, or add an `ignore` rule with the reason
+  (as for `bcrypt >= 5` and `typescript >= 6.1`).
+
 **Conventions:**
 - Work lands directly on `master` with every suite green.
 - Behaviour changes are test-driven.
