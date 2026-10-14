@@ -20,7 +20,9 @@ def test_latest_on_any_branch_with_the_failed_step(client, auth, project_role, s
     body = client.post(URL, json={"keys": [key]}, headers=auth()).json()
     got = body["results"][key]
     assert got["status"] == "failed" and got["branch"] == "feature/x" and got["run_id"] == run.id
-    assert got["failed_step"] == {"text": "When I search Lisbon", "line": 14, "key": step_key(None, "When I search Lisbon")[0]} and got["message"] == "boom"
+    assert got["failed_step"] == {"text": "When I search Lisbon", "line": 14,
+                                  "key": step_key(None, "When I search Lisbon")[0]}
+    assert got["message"] == "boom"
     assert got["started_at"].startswith("2026-10-01T01:00:00") and got["started_at"].endswith("+00:00")
 
 
@@ -89,7 +91,8 @@ def test_run_id_gives_each_test_its_result_in_that_run(client, auth, project_rol
     search, login = report_key("search"), report_key("login")
     got = client.post(URL, json={"keys": [search, login], "run_id": old.id}, headers=auth()).json()["results"]
     assert got[search]["status"] == "failed" and got[search]["run_id"] == old.id
-    assert got[search]["failed_step"] == {"text": "When I search Lisbon", "line": 14, "key": step_key(None, "When I search Lisbon")[0]}
+    assert got[search]["failed_step"] == {"text": "When I search Lisbon", "line": 14,
+                                          "key": step_key(None, "When I search Lisbon")[0]}
     assert got[login]["status"] == "passed" and "failed_step" not in got[login]
 
 
