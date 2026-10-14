@@ -349,6 +349,13 @@ STEP_BODY="{\"run\":{\"ci_provider\":\"local\",\"branch\":\"smoke-step\",\"start
 check "upload a failed step with its definition (and a field from a newer collector)" 201 POST "$BASE/api/v1/collect/runs" \
   -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "$STEP_BODY"
 STEP_RUN_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
+check "analytics tests finds the failed step's test" 200 GET "$BASE/api/v1/projects/$PROJECT_ID/analytics/tests?search=step-lisb0n" "${AUTH[@]}"
+STEP_KEY="$(sed -n 's/.*"test_key":"\([0-9a-f]\{64\}\)".*/\1/p' "$TMP/body" | head -1)"
+check "latest-results -> the failed step's definition and key" 200 POST \
+  "$BASE/api/v1/projects/$PROJECT_ID/analytics/latest-results" "${AUTH[@]}" -H "Content-Type: application/json" \
+  -d "{\"keys\":[\"${STEP_KEY:-0000000000000000000000000000000000000000000000000000000000000000}\"]}"
+body_has "... with the step definition" '"definition":"features/step_definitions/search.js:12"'
+body_has "... and the step key" '"key":"'
 
 # ---- analytics, through the gateway's overlap route ----
 check "analytics trends -> ingestion-service (overlap route)" 200 GET \

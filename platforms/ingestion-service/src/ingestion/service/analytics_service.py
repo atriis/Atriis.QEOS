@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 from sqlalchemy import case, func, literal, select
 from sqlalchemy.orm import Session, aliased
 
+from src.ingestion.analytics.failed_steps import step_key
 from src.ingestion.analytics.flaky import FlipCount, LatestExecution, MixedCommit
 from src.ingestion.analytics.trends import RunRow, as_utc, pass_rate
 from src.ingestion.models import MutedTest, Run, RunResult
@@ -307,17 +308,25 @@ def _latest_ranked(filters, *columns):
     ).subquery()
 
 
-def failed_step_of(status, message, details, step_text, step_line) -> Optional[dict]:
+def failed_step_of(status, message, details, step_text, step_line, definition=None, pattern=None) -> Optional[dict]:
     """The failed step for a failed/errored result (spec 2026-10-13 §3.3). Rows stored before the collector
-    sent `failed_step` hold the step on details' first line, unless that line is just the message."""
+    sent `failed_step` hold the step on details' first line, unless that line is just the message. From collector
+    0.8.0 the step also has its definition and pattern; `key` names the step across test cases (spec 2026-10-14)."""
     if status not in ("failed", "errored"):
         return None
     if step_text:
-        return {"text": step_text, **({"line": step_line} if step_line else {})}
-    first = (details or "").split("\n", 1)[0].strip()
-    if first and first != (message or "").split("\n", 1)[0].strip():
-        return {"text": first}
-    return None
+        step = {"text": step_text, **({"line": step_line} if step_line else {})}
+    else:
+        first = (details or "").split("\n", 1)[0].strip()
+        if not first or first == (message or "").split("\n", 1)[0].strip():
+            return None
+        step = {"text": first}
+    if definition:
+        step["definition"] = definition
+    if pattern:
+        step["pattern"] = pattern
+    step["key"] = step_key(definition, step["text"])[0]
+    return step
 
 
 def run_in_project(db: Session, project_id: int, run_id: int) -> bool:
@@ -333,14 +342,16 @@ def latest_results(db: Session, project_id: int, keys: List[str], run_id: Option
     ranked = _latest_ranked(
         filters,
         RunResult.status, RunResult.message, RunResult.details, RunResult.failed_step_text,
-        RunResult.failed_step_line, Run.id.label("run_id"), Run.branch, Run.environment, Run.started_at,
+        RunResult.failed_step_line, RunResult.failed_step_definition, RunResult.failed_step_pattern,
+        Run.id.label("run_id"), Run.branch, Run.environment, Run.started_at,
     )
     out = {}
     for r in db.execute(select(ranked).where(ranked.c.position == 1)).mappings():
         entry = {"status": r["status"], "run_id": r["run_id"], "branch": r["branch"],
                  "environment": r["environment"], "started_at": as_utc(r["started_at"]),
                  "message": r["message"][:MESSAGE_EXCERPT] if r["message"] is not None else None}
-        step = failed_step_of(r["status"], r["message"], r["details"], r["failed_step_text"], r["failed_step_line"])
+        step = failed_step_of(r["status"], r["message"], r["details"], r["failed_step_text"], r["failed_step_line"],
+                              r["failed_step_definition"], r["failed_step_pattern"])
         if step:
             entry["failed_step"] = step
         out[r["test_key"]] = entry

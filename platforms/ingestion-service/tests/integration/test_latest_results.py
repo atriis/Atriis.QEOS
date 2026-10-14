@@ -1,6 +1,7 @@
 """Latest result per test key on any branch, with the failed step (spec 2026-10-13 §3.3)."""
 from datetime import datetime, timedelta, timezone
 
+from src.ingestion.analytics.failed_steps import step_key
 from src.ingestion.models import RunResult
 from tests.conftest import report_key
 
@@ -19,7 +20,7 @@ def test_latest_on_any_branch_with_the_failed_step(client, auth, project_role, s
     body = client.post(URL, json={"keys": [key]}, headers=auth()).json()
     got = body["results"][key]
     assert got["status"] == "failed" and got["branch"] == "feature/x" and got["run_id"] == run.id
-    assert got["failed_step"] == {"text": "When I search Lisbon", "line": 14} and got["message"] == "boom"
+    assert got["failed_step"] == {"text": "When I search Lisbon", "line": 14, "key": step_key(None, "When I search Lisbon")[0]} and got["message"] == "boom"
     assert got["started_at"].startswith("2026-10-01T01:00:00") and got["started_at"].endswith("+00:00")
 
 
@@ -88,7 +89,7 @@ def test_run_id_gives_each_test_its_result_in_that_run(client, auth, project_rol
     search, login = report_key("search"), report_key("login")
     got = client.post(URL, json={"keys": [search, login], "run_id": old.id}, headers=auth()).json()["results"]
     assert got[search]["status"] == "failed" and got[search]["run_id"] == old.id
-    assert got[search]["failed_step"] == {"text": "When I search Lisbon", "line": 14}
+    assert got[search]["failed_step"] == {"text": "When I search Lisbon", "line": 14, "key": step_key(None, "When I search Lisbon")[0]}
     assert got[login]["status"] == "passed" and "failed_step" not in got[login]
 
 
@@ -115,3 +116,16 @@ def test_run_id_of_another_project_or_unknown_is_404(client, auth, project_role,
     assert client.post(URL, json={"keys": [key], "run_id": other.id}, headers=auth()).status_code == 404
     assert client.post(URL, json={"keys": [key], "run_id": 999999}, headers=auth()).status_code == 404
     assert client.post(URL, json={"keys": [key], "run_id": 0}, headers=auth()).status_code == 422
+
+
+def test_the_step_definition_and_pattern_and_key_come_with_the_failed_step(client, auth, project_role, seed_run, db):
+    project_role("viewer")
+    run = seed_run(T0, results=(("search", "failed", 5),))
+    row = db.query(RunResult).filter_by(run_id=run.id).one()
+    row.failed_step_text, row.failed_step_line = "When I search Lisbon", 14
+    row.failed_step_definition, row.failed_step_pattern = "steps/search.js:12", "When I search {…}"
+    db.commit()
+    key = report_key("search")
+    got = client.post(URL, json={"keys": [key]}, headers=auth()).json()["results"][key]["failed_step"]
+    assert got == {"text": "When I search Lisbon", "line": 14, "definition": "steps/search.js:12",
+                   "pattern": "When I search {…}", "key": step_key("steps/search.js:12", "When I search Lisbon")[0]}
