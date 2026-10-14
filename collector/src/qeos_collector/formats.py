@@ -95,6 +95,50 @@ def _attach(row: dict, message: str, details: str) -> dict:
 _CUCUMBER_FAILED = ("failed",)
 _CUCUMBER_UNDECIDED = ("undefined", "pending", "ambiguous")
 
+# The failed step's step definition and its text with the matched arguments replaced (spec 2026-10-14 §2)
+ARGUMENT = "{…}"
+DEFINITION_LENGTH = 500
+STEP_TEXT_LENGTH = 1000
+
+
+def _step_definition(step: dict) -> Optional[str]:
+    """match.location: the code that ran the step (a file:line, or a method for cucumber-jvm)."""
+    match = step.get("match")
+    location = match.get("location") if isinstance(match, dict) else None
+    if not isinstance(location, str) or not location.strip():
+        return None
+    return location.strip()[:DEFINITION_LENGTH]
+
+
+def _step_pattern(step: dict, keyword: str, name: str) -> str:
+    """The step text with each match.arguments value (offsets into the name, after the keyword) replaced by {…}; the
+    text itself when there are no arguments or they do not fit the text."""
+    text = f"{keyword}{name}".strip()[:STEP_TEXT_LENGTH]
+    match = step.get("match")
+    arguments = match.get("arguments") if isinstance(match, dict) else None
+    if not isinstance(arguments, list):
+        return text
+    spans = []
+    for argument in arguments:
+        if not isinstance(argument, dict):
+            return text
+        value, offset = argument.get("val"), argument.get("offset")
+        if value is None or value == "":
+            continue  # an optional group that matched nothing
+        if (not isinstance(value, str) or not isinstance(offset, int) or isinstance(offset, bool) or offset < 0
+                or name[offset:offset + len(value)] != value):
+            return text
+        spans.append((offset, offset + len(value)))
+    spans.sort()
+    if any(start < previous_end for (_, previous_end), (start, _) in zip(spans, spans[1:])):
+        return text
+    parts, at = [], 0
+    for start, end in spans:
+        parts += [name[at:start], ARGUMENT]
+        at = end
+    parts.append(name[at:])
+    return f"{keyword}{''.join(parts)}".strip()[:STEP_TEXT_LENGTH]
+
 
 def _looks_like_json(path: str) -> bool:
     with open(path, "rb") as fh:
@@ -172,13 +216,18 @@ def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] =
         if failed_step is not None:
             result = failed_step.get("result") or {}
             message = str(result.get("error_message") or "")
-            step_name = f"{failed_step.get('keyword', '')}{failed_step.get('name', '')}".strip()
+            keyword, step_text = f"{failed_step.get('keyword', '')}", f"{failed_step.get('name', '')}"
+            step_name = f"{keyword}{step_text}".strip()
             _attach(row, _first_line(message), "\n".join(part for part in (step_name, message.strip()) if part))
             if step_name:
-                entry = {"text": step_name[:1000]}
+                entry = {"text": step_name[:STEP_TEXT_LENGTH]}
                 line = failed_step.get("line")
                 if isinstance(line, int) and not isinstance(line, bool) and 1 <= line <= 1_000_000:
                     entry["line"] = line
+                definition = _step_definition(failed_step)
+                if definition is not None:
+                    entry["definition"] = definition
+                entry["pattern"] = _step_pattern(failed_step, keyword, step_text)
                 row["failed_step"] = entry
         parsed.results.append(row)
         if lines is not None:

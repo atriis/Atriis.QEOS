@@ -3,6 +3,8 @@ dispatcher: a feature's scenarios become results in the shared shape."""
 import json
 from datetime import datetime, timezone
 
+import pytest
+
 from qeos_collector.formats import parse_file
 
 
@@ -134,13 +136,13 @@ def parse_cucumber(tmp_path, steps, background=None):
 def test_failed_step_carries_text_and_line(tmp_path):
     rows = parse_cucumber(tmp_path, steps=[step("Given ", "a user", 4, "passed"),
                                            step("When ", "I search Lisbon", 5, "failed", "boom")])
-    assert rows[0]["failed_step"] == {"text": "When I search Lisbon", "line": 5}
+    assert rows[0]["failed_step"] == {"text": "When I search Lisbon", "line": 5, "pattern": "When I search Lisbon"}
 
 
 def test_background_step_failure_keeps_its_own_line(tmp_path):
     rows = parse_cucumber(tmp_path, background=[step("Given ", "logged in", 3, "failed", "nope")],
                           steps=[step("When ", "x", 7, "skipped")])
-    assert rows[0]["failed_step"] == {"text": "Given logged in", "line": 3}
+    assert rows[0]["failed_step"] == {"text": "Given logged in", "line": 3, "pattern": "Given logged in"}
 
 
 def test_passed_and_skipped_scenarios_have_no_failed_step(tmp_path):
@@ -150,7 +152,8 @@ def test_passed_and_skipped_scenarios_have_no_failed_step(tmp_path):
 
 def test_missing_line_keeps_the_text_and_long_text_is_cut(tmp_path):
     rows = parse_cucumber(tmp_path, steps=[step("When ", "y" * 2000, None, "failed", "e")])
-    assert rows[0]["failed_step"]["text"] == ("When " + "y" * 2000)[:1000] and "line" not in rows[0]["failed_step"]
+    assert rows[0]["failed_step"]["text"] == ("When " + "y" * 2000)[:1000] and "line" not in rows[0]["failed_step"] \
+        and rows[0]["failed_step"]["pattern"] == ("When " + "y" * 2000)[:1000]
 
 
 def test_junit_results_have_no_failed_step():
@@ -167,7 +170,7 @@ def test_whitespace_only_step_name_gives_no_failed_step(tmp_path):
 def test_implausible_line_numbers_are_dropped_but_text_is_kept(tmp_path):
     for bad in (True, 0, 2_000_000, 3.5):
         rows = parse_cucumber(tmp_path, steps=[step("When ", "x", bad, "failed", "e")])
-        assert rows[0]["failed_step"] == {"text": "When x"}, bad
+        assert rows[0]["failed_step"] == {"text": "When x", "pattern": "When x"}, bad
 
 
 def test_outline_row_failure_reports_the_template_line(tmp_path):
@@ -175,4 +178,88 @@ def test_outline_row_failure_reports_the_template_line(tmp_path):
     elements = [{"type": "scenario", "keyword": "Scenario Outline", "name": "S row 2", "line": 12,
                  "steps": [step("When ", "I pay 5", 9, "failed", "e")]}]
     rows = parse_file(write(tmp_path, [{"uri": "f.feature", "name": "F", "elements": elements}])).results
-    assert rows[0]["failed_step"] == {"text": "When I pay 5", "line": 9}
+    assert rows[0]["failed_step"] == {"text": "When I pay 5", "line": 9, "pattern": "When I pay 5"}
+
+
+def matched(keyword, name, line, status, error=None, location=None, arguments=None):
+    entry = step(keyword, name, line, status, error)
+    match = {}
+    if location is not None:
+        match["location"] = location
+    if arguments is not None:
+        match["arguments"] = arguments
+    entry["match"] = match
+    return entry
+
+
+def failed_step_of(tmp_path, *args, **kwargs):
+    return parse_cucumber(tmp_path, steps=[matched(*args, **kwargs)])[0]["failed_step"]
+
+
+def test_cucumber_js_reports_the_definition_without_arguments(tmp_path):
+    # cucumber-js's json formatter: match.location only
+    got = failed_step_of(tmp_path, "When ", "I search Lisbon", 5, "failed", "boom",
+                         location="features/step_definitions/search.js:12")
+    assert got == {"text": "When I search Lisbon", "line": 5,
+                   "definition": "features/step_definitions/search.js:12", "pattern": "When I search Lisbon"}
+
+
+def test_cucumber_jvm_arguments_become_placeholders(tmp_path):
+    got = failed_step_of(tmp_path, "When ", "I search Lisbon in 2 days", 5, "failed", "boom",
+                         location="com.example.SearchSteps.search(java.lang.String,int)",
+                         arguments=[{"val": "Lisbon", "offset": 9}, {"val": "2", "offset": 19}])
+    assert got["definition"] == "com.example.SearchSteps.search(java.lang.String,int)"
+    assert got["pattern"] == "When I search {…} in {…} days"
+
+
+def test_ruby_arguments_in_any_order_become_placeholders(tmp_path):
+    got = failed_step_of(tmp_path, "Then ", 'I see "Porto" first', 8, "failed", "e",
+                         location="features/step_definitions/search_steps.rb:3",
+                         arguments=[{"offset": 6, "val": '"Porto"'}])
+    assert got["pattern"] == "Then I see {…} first"
+
+
+def test_an_optional_group_that_matched_nothing_is_skipped(tmp_path):
+    got = failed_step_of(tmp_path, "When ", "I search Porto", 5, "failed", "e", location="s.js:1",
+                         arguments=[{"val": None, "offset": None}, {"val": "Porto", "offset": 9}])
+    assert got["pattern"] == "When I search {…}"
+
+
+def test_no_match_gives_no_definition_and_the_text_as_pattern(tmp_path):
+    rows = parse_cucumber(tmp_path, steps=[step("When ", "I search Lisbon", 5, "failed", "boom")])
+    assert "definition" not in rows[0]["failed_step"] and rows[0]["failed_step"]["pattern"] == "When I search Lisbon"
+
+
+def test_a_blank_or_odd_location_gives_no_definition(tmp_path):
+    for location in ("", "   ", 12, ["a"]):
+        got = failed_step_of(tmp_path, "When ", "x", 5, "failed", "e", location=location)
+        assert "definition" not in got, location
+
+
+def test_a_long_location_is_cut_to_500(tmp_path):
+    got = failed_step_of(tmp_path, "When ", "x", 5, "failed", "e", location="d" * 800)
+    assert got["definition"] == "d" * 500
+
+
+@pytest.mark.parametrize("arguments", [
+    [{"val": "Lisbon", "offset": 3}],               # does not fit the text there
+    [{"val": "Lisbon", "offset": -1}],
+    [{"val": "Lisbon", "offset": True}],
+    [{"val": "Lisbon", "offset": "9"}],
+    [{"val": 7, "offset": 9}],
+    ["Lisbon"],
+    [{"val": "search Lisbon", "offset": 2}, {"val": "Lisbon", "offset": 9}],  # overlapping
+    {"val": "Lisbon", "offset": 9},                 # not a list
+])
+def test_bad_arguments_leave_the_text_as_pattern(tmp_path, arguments):
+    got = failed_step_of(tmp_path, "When ", "I search Lisbon", 5, "failed", "e", location="s.js:1", arguments=arguments)
+    assert got["pattern"] == "When I search Lisbon"
+
+
+def test_a_long_pattern_is_cut_to_1000(tmp_path):
+    name = "I type " + "y" * 2000
+    got = failed_step_of(tmp_path, "When ", name, 5, "failed", "e", location="s.js:1",
+                         arguments=[{"val": "y" * 2000, "offset": 7}])
+    assert got["pattern"] == "When I type {…}"
+    long = failed_step_of(tmp_path, "When ", name, 5, "failed", "e", location="s.js:1", arguments=[])
+    assert len(long["pattern"]) == 1000

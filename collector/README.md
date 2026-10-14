@@ -521,6 +521,7 @@ showing up, but its failures stop counting. With `--gate`, the collector decides
   scenario, a failed step fails the scenario, and undefined/pending steps leave it skipped.
   A failed scenario also carries `failed_step` (`{"text": "When I search", "line": 5}`, text cut to
   1000 characters, `line` omitted when the report has none); the other formats send none.
+  From 0.8.0 it also carries `definition`, the step definition that ran the step (Cucumber's `match.location`, cut to 500 characters, left out when the report has none), and `pattern`, the step text with each matched argument replaced by `{…}` (`When I search {…}`, cut to 1000 characters; the text itself when the report lists no arguments, as cucumber-js's does, or they do not fit the text). QEOS uses them to group one step's failures across test cases.
   collector 0.6.0 sends `failed_step`; it needs a platform with ingestion migration 021, so upgrade the platform first (an older platform answers 422 and the run is not stored).
 - Playwright's JSON reporter (`--reporter=json`): every retry attempt is kept as its own
   result (a flaky spec shows as fail+pass in one run), project name as suite, spec file as
