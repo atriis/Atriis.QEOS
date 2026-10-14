@@ -2,7 +2,7 @@ name: Release collector
 
 # Tag collector-vX.Y.Z to release. Publishing to PyPI uses trusted publishing
 # (OIDC, no token): configure the publisher once on pypi.org for project
-# qeos-collector (owner carneiru, repo QA-Vision-Platform, this workflow,
+# qeos-collector (owner atriis, repo Atriis.QEOS, this workflow,
 # environment pypi), then set the repository variable PYPI_PUBLISH=true.
 # Until that variable exists the publish job is skipped and a tag only
 # builds + verifies the artifacts.

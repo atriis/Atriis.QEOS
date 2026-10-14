@@ -24,7 +24,7 @@
 #     - checkout: self
 #       fetchDepth: 2
 #     - script: |
-#         python -m pip install --quiet "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.7.0#subdirectory=collector"
+#         python -m pip install --quiet "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.7.0#subdirectory=collector"
 #         qeos-collector run-impact --url https://qeos.example.com -- npx cucumber-js --tags "not @wip"
 #       displayName: Tests, the likely affected first
 #       env:
@@ -55,7 +55,7 @@ steps:
       versionSpec: "3.x"
 
   - script: |
-      python -m pip install --quiet --disable-pip-version-check "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@${{ parameters.ref }}#subdirectory=collector"
+      python -m pip install --quiet --disable-pip-version-check "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${{ parameters.ref }}#subdirectory=collector"
       qeos-collector upload "${{ parameters.patterns }}"
     displayName: Upload test results to QEOS
     condition: always()  # report results even when the tests failed

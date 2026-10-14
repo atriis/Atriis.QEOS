@@ -159,7 +159,7 @@ pytest from `collector/`; no network except a local test server.
 
 - `collector/pyproject.toml`: `name = "qav-collector"`, `version = "0.1.0"`, `requires-python = ">=3.9"`, no dependencies, the script entry point.
 - CI: a new job `collector` running its tests on Python 3.9 and 3.12; the `gateway` job's smoke test gains the end-to-end upload.
-- Release: a git tag `collector-v0.1.0`, created by the maintainer. Customers install with `pip install "qav-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.1.0#subdirectory=collector"`.
+- Release: a git tag `collector-v0.1.0`, created by the maintainer. Customers install with `pip install "qav-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.1.0#subdirectory=collector"`.
 
 ## Documentation
 

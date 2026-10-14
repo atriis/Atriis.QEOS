@@ -2372,7 +2372,7 @@ Python 3.9 or newer, nothing else to install.
 ## Install
 
 ```bash
-pip install "qav-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.1.0#subdirectory=collector"
+pip install "qav-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.1.0#subdirectory=collector"
 ```
 
 ## Use
@@ -2401,7 +2401,7 @@ stored instead of storing it twice.
           QAV_URL: https://qav.example.com
           QAV_API_KEY: ${{ secrets.QAV_API_KEY }}
         run: |
-          pip install "qav-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.1.0#subdirectory=collector"
+          pip install "qav-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.1.0#subdirectory=collector"
           qav-collector upload "reports/**/*.xml"
 ```
 
@@ -2412,7 +2412,7 @@ test:
   script:
     - pytest --junitxml=reports/junit.xml
   after_script:
-    - pip install "qav-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.1.0#subdirectory=collector"
+    - pip install "qav-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.1.0#subdirectory=collector"
     - qav-collector upload "reports/**/*.xml"
   variables:
     QAV_URL: https://qav.example.com
@@ -2426,7 +2426,7 @@ post {
   always {
     withCredentials([string(credentialsId: 'qav-api-key', variable: 'QAV_API_KEY')]) {
       sh '''
-        pip install "qav-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.1.0#subdirectory=collector"
+        pip install "qav-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.1.0#subdirectory=collector"
         QAV_URL=https://qav.example.com qav-collector upload "target/surefire-reports/*.xml"
       '''
     }

@@ -43,8 +43,8 @@ docker compose version            # 2.24 or newer
 ## 4. Install QEOS
 
 ```bash
-git clone https://github.com/carneiru/QA-Vision-Platform.git
-cd QA-Vision-Platform
+git clone https://github.com/atriis/Atriis.QEOS.git
+cd Atriis.QEOS
 bash deploy/init-env.sh qeos.example.com ops@example.com
 ```
 
@@ -103,7 +103,7 @@ Schedule it daily:
 ```bash
 crontab -e
 # 03:15 every day
-15 3 * * * cd /home/<you>/QA-Vision-Platform && bash deploy/backup.sh >> backups/backup.log 2>&1
+15 3 * * * cd /home/<you>/Atriis.QEOS && bash deploy/backup.sh >> backups/backup.log 2>&1
 ```
 
 Copy the `backups/` directory off the VM regularly (object storage, another machine):
@@ -123,7 +123,7 @@ One `ERROR: role "postgres" already exists` during the restore is expected and h
 ## 8. Updates
 
 ```bash
-cd QA-Vision-Platform
+cd Atriis.QEOS
 bash deploy/backup.sh          # always before an update
 git pull
 qeos up -d --build --wait edge

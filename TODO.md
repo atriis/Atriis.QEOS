@@ -146,8 +146,8 @@
 
 ### Collector — nice to have
 Distribution
-- [~] Publish to PyPI: workflow ready (trusted publishing, gated on repo variable PYPI_PUBLISH=true); needs the one-off publisher config on pypi.org (project qeos-collector, repo carneiru/QA-Vision-Platform, workflow release-collector.yml, environment pypi)
-- [x] Ready-made GitHub Action (`uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.1.0`) and GitLab CI template (`templates/qeos-collector.gitlab-ci.yml`) — both install the collector pinned to the tag
+- [~] Publish to PyPI: workflow ready (trusted publishing, gated on repo variable PYPI_PUBLISH=true); needs the one-off publisher config on pypi.org (project qeos-collector, repo atriis/Atriis.QEOS, workflow release-collector.yml, environment pypi)
+- [x] Ready-made GitHub Action (`uses: atriis/Atriis.QEOS/collector-action@collector-v0.1.0`) and GitLab CI template (`templates/qeos-collector.gitlab-ci.yml`) — both install the collector pinned to the tag
 - [x] A Jenkins shared-library step — `collector-jenkins/vars/qeosCollectorUpload.groovy` (workspace venv install, PEP 668-safe; key via env only). Proven against a real Jenkins LTS in Docker: library loaded from a git repo via JCasC, pipeline build SUCCESS, run stored with ci_provider=jenkins and the build URL
 - [x] Azure DevOps (collector 0.2.0). The collector detects Azure Pipelines (`TF_BUILD`):
   commit, branch (the source branch on PRs), PR number (the visible number for GitHub-hosted
@@ -162,7 +162,7 @@ Distribution
     snippet in Settings.
   - Verified live: an upload with an Azure PR environment was stored with every field, and a
     real public Azure repository was verified.
-- [x] A Docker image and a single-file (zipapp) build for runners without pip — zipapp (`collector/scripts/build_zipapp.py`, stdlib-only, runs on any Python 3.9+) and `collector/Dockerfile` (python:3.12-slim + git). On every `collector-v*` tag the release workflow uploads sdist+wheel+pyz to a GitHub Release and pushes `ghcr.io/carneiru/qeos-collector:<version>` + `:latest` (user-approved public surfaces, 2026-10-03)
+- [x] A Docker image and a single-file (zipapp) build for runners without pip — zipapp (`collector/scripts/build_zipapp.py`, stdlib-only, runs on any Python 3.9+) and `collector/Dockerfile` (python:3.12-slim + git). On every `collector-v*` tag the release workflow uploads sdist+wheel+pyz to a GitHub Release and pushes `ghcr.io/atriis/qeos-collector:<version>` + `:latest` (user-approved public surfaces, 2026-10-03)
 
 Formats
 - [x] Cucumber JSON (classic formatter) — scenarios map to the existing result shape (suite=feature, class=uri; background folds in; failed step fails, undefined/pending skip). Rich tags/steps columns still need ingestion fields — deferred until a consumer exists

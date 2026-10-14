@@ -13,7 +13,7 @@ def call(Map config = [:]) {
     String patterns = config.patterns ?: 'reports/**/*.xml'
     String ref = config.ref
     String source = config.source ?:
-        "qav-collector @ git+https://github.com/carneiru/QA-Vision-Platform@${ref}#subdirectory=collector"
+        "qav-collector @ git+https://github.com/atriis/Atriis.QEOS@${ref}#subdirectory=collector"
     String args = [
         config.environment ? "--environment '${config.environment}'" : '',
         config.caFile ? "--ca-file '${config.caFile}'" : '',

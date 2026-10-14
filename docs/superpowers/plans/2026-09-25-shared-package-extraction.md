@@ -800,7 +800,7 @@ cd shared && python -m pytest tests/ -v
 
 - [ ] **Step 2: Add `shared/` to the root README's Project Structure block**
 
-In the repository root `README.md`, find the `## Project Structure` code block and add this line immediately after the `QA-Vision-Platform/` line, before `├── platforms/`:
+In the repository root `README.md`, find the `## Project Structure` code block and add this line immediately after the `Atriis.QEOS/` line, before `├── platforms/`:
 
 ```
 ├── shared/                         # qav-shared: settings + DB session wiring used by services

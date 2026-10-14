@@ -874,7 +874,7 @@ For GitHub, append to the template:
 ```
 - name: Sync test cases from .feature files   # runs on master only (QAV_IMPORT_BRANCH to change)
   run: |
-    pip install "qav-collector @ git+https://github.com/carneiru/QA-Vision-Platform@${COLLECTOR_REF}#subdirectory=collector"
+    pip install "qav-collector @ git+https://github.com/atriis/Atriis.QEOS@${COLLECTOR_REF}#subdirectory=collector"
     qav-collector import-features "tests/features/**/*.feature"
   env:
     QAV_URL: ${origin}

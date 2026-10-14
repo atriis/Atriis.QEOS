@@ -1119,7 +1119,7 @@ KnowledgeObject {
 As it exists (2026-10-02). The earlier target tree (qa-ai-dashboard/, infra/, sdk/, ui/) was never created and is dropped; new top-level directories appear when their adoption trigger fires.
 
 ```
-QA-Vision-Platform/
+Atriis.QEOS/
 ├── .github/workflows/            # CI: per-service tests, collector matrix, dashboard, gateway full-stack smoke, CodeQL
 ├── platforms/                    # Wired, running services (FastAPI, src/<pkg> layout)
 │   ├── auth-service/auth-service/    # JWT + rotation/replay detection, SSO, MFA, httpOnly refresh cookie

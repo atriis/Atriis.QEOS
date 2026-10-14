@@ -40,7 +40,7 @@ function ciSnippets(origin: string): Record<string, { label: string; code: strin
     github: {
       label: "GitHub Actions",
       code: `# .github/workflows/tests.yml — after the test step
-- uses: carneiru/QA-Vision-Platform/collector-action@${COLLECTOR_REF}
+- uses: atriis/Atriis.QEOS/collector-action@${COLLECTOR_REF}
   if: always()   # report results even when tests failed
   with:
     url: ${origin}
@@ -50,7 +50,7 @@ function ciSnippets(origin: string): Record<string, { label: string; code: strin
 
 - name: Sync test cases from .feature files   # runs on the default branch only (QEOS_IMPORT_BRANCH to change)
   run: |
-    pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@${COLLECTOR_REF}#subdirectory=collector"
+    pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${COLLECTOR_REF}#subdirectory=collector"
     qeos-collector import-features "tests/features/**/*.feature"
   env:
     QEOS_URL: ${origin}
@@ -60,7 +60,7 @@ function ciSnippets(origin: string): Record<string, { label: string; code: strin
       label: "GitLab CI",
       code: `# .gitlab-ci.yml — set QEOS_API_KEY as a masked CI/CD variable
 include:
-  - remote: https://raw.githubusercontent.com/carneiru/QA-Vision-Platform/${COLLECTOR_REF}/templates/qeos-collector.gitlab-ci.yml
+  - remote: https://raw.githubusercontent.com/atriis/Atriis.QEOS/${COLLECTOR_REF}/templates/qeos-collector.gitlab-ci.yml
 
 qeos-collector-upload:
   variables:
@@ -71,7 +71,7 @@ qeos-collector-upload:
 qeos-import-features:
   image: python:3.12
   script:
-    - pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@${COLLECTOR_REF}#subdirectory=collector"
+    - pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${COLLECTOR_REF}#subdirectory=collector"
     - qeos-collector import-features "tests/features/**/*.feature"
   variables:
     QEOS_URL: ${origin}   # QEOS_API_KEY comes from the masked CI/CD variable`,
@@ -80,7 +80,7 @@ qeos-import-features:
       label: "Azure Pipelines",
       code: `# azure-pipelines.yml — after the test step; add QEOS_API_KEY as a secret pipeline variable
 - script: |
-    pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@${COLLECTOR_REF}#subdirectory=collector"
+    pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${COLLECTOR_REF}#subdirectory=collector"
     qeos-collector upload "reports/**/*.xml"
   displayName: Upload test results to QEOS
   condition: always()      # report results even when tests failed
@@ -92,7 +92,7 @@ qeos-import-features:
 
 # syncs test cases from .feature files; runs on the default branch only (set QEOS_IMPORT_BRANCH to change)
 - script: |
-    pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@${COLLECTOR_REF}#subdirectory=collector"
+    pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${COLLECTOR_REF}#subdirectory=collector"
     qeos-collector import-features "tests/features/**/*.feature"
   displayName: Sync test cases from .feature files
   env:
@@ -116,13 +116,13 @@ withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')
     cli: {
       label: "Any machine (CLI)",
       code: isLocalOrigin(origin)
-        ? `pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@${COLLECTOR_REF}#subdirectory=collector"
-# The local stack uses a self-signed certificate; from the QA-Vision-Platform folder:
+        ? `pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${COLLECTOR_REF}#subdirectory=collector"
+# The local stack uses a self-signed certificate; from the Atriis.QEOS folder:
 docker compose cp gateway:/etc/nginx/certs/tls.crt qeos-ca.crt
 QEOS_URL=${origin} QEOS_API_KEY=<your key> qeos-collector upload "reports/**/*.xml" --ca-file qeos-ca.crt
 # syncs test cases from .feature files; runs on the default branch only (set QEOS_IMPORT_BRANCH to change)
 QEOS_URL=${origin} QEOS_API_KEY=<your key> qeos-collector import-features "tests/features/**/*.feature" --ca-file qeos-ca.crt`
-        : `pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@${COLLECTOR_REF}#subdirectory=collector"
+        : `pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${COLLECTOR_REF}#subdirectory=collector"
 QEOS_URL=${origin} QEOS_API_KEY=<your key> qeos-collector upload "reports/**/*.xml"
 # syncs test cases from .feature files; runs on the default branch only (set QEOS_IMPORT_BRANCH to change)
 QEOS_URL=${origin} QEOS_API_KEY=<your key> qeos-collector import-features "tests/features/**/*.feature"`,

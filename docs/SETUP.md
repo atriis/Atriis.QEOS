@@ -17,7 +17,7 @@ instead.
 
 > **Names.** The product is QEOS. It used to be called QA Vision, and some technical names
 > stay on purpose: the Docker volumes are still `qa-vision_qav_*` (and `qa-vision_qeos_*` for
-> monitoring), and the repository is `carneiru/QA-Vision-Platform`. The Compose project, and so the
+> monitoring), and the repository is `atriis/Atriis.QEOS`. The Compose project, and so the
 > container names, became `qeos` on 2026-10-11 ([7.1](#71-updating)). The collector is
 > `qeos-collector` and reads `QEOS_URL` / `QEOS_API_KEY`. The old `qav-collector` command and
 > the `QAV_*` variables still work, with a deprecation warning.
@@ -71,8 +71,8 @@ The first build takes a few minutes.
 ### 2.1 Clone
 
 ```
-git clone https://github.com/carneiru/QA-Vision-Platform.git
-cd QA-Vision-Platform
+git clone https://github.com/atriis/Atriis.QEOS.git
+cd Atriis.QEOS
 ```
 
 Keep line endings as they are. The repository's `.gitattributes` forces LF on shell scripts, and a
@@ -606,7 +606,7 @@ are skipped with a warning.
 
 PowerShell:
 ```powershell
-pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.7.0#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.7.0#subdirectory=collector"
 $env:QEOS_URL = "https://localhost:8443"
 $env:QEOS_API_KEY = "<your key>"
 qeos-collector check "reports/**/*.xml" --ca-file $HOME\qeos-ca.crt     # verifies everything, uploads nothing
@@ -614,7 +614,7 @@ qeos-collector upload "reports/**/*.xml" --ca-file $HOME\qeos-ca.crt
 ```
 bash:
 ```bash
-pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.7.0#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.7.0#subdirectory=collector"
 export QEOS_URL=https://localhost:8443
 export QEOS_API_KEY=<your key>
 qeos-collector check "reports/**/*.xml" --ca-file ~/qeos-ca.crt
@@ -679,7 +679,7 @@ qeos-collector impact --format json --out impact.json
    - **Variable** `QEOS_URL` = `https://qeos.example.com` (no trailing slash)
 2. After the test step (the tests must write a report), add:
    ```yaml
-   - uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.7.0
+   - uses: atriis/Atriis.QEOS/collector-action@collector-v0.7.0
      if: always()                      # report failing builds too
      with:
        url: ${{ vars.QEOS_URL }}
@@ -700,7 +700,7 @@ qeos-collector impact --format json --out impact.json
 2. In `.gitlab-ci.yml`:
    ```yaml
    include:
-     - remote: https://raw.githubusercontent.com/carneiru/QA-Vision-Platform/collector-v0.7.0/templates/qeos-collector.gitlab-ci.yml
+     - remote: https://raw.githubusercontent.com/atriis/Atriis.QEOS/collector-v0.7.0/templates/qeos-collector.gitlab-ci.yml
 
    qeos-collector-upload:
      variables:
@@ -799,7 +799,7 @@ In the workflow that uploads, use `collector-action@collector-v0.5.0` or later (
 workflow can also be started by hand and you want those runs collected, set the trigger on the step:
 
 ```yaml
-- uses: carneiru/QA-Vision-Platform/collector-action@collector-v0
+- uses: atriis/Atriis.QEOS/collector-action@collector-v0
   if: always()
   with:
     url: ${{ vars.QEOS_URL }}
@@ -869,7 +869,7 @@ suite still runs every time, unless you opt into running only the likely affecte
 - uses: actions/checkout@v7
   with:
     fetch-depth: 0                      # the change is scored against the pull request's base
-- uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.7.0
+- uses: atriis/Atriis.QEOS/collector-action@collector-v0.7.0
   with:
     url: ${{ vars.QEOS_URL }}
     impact: first                       # or only: the likely affected scenarios alone
@@ -1038,7 +1038,7 @@ picked, such as `MyRepo/tests/features/...`).
          - uses: actions/checkout@v4
          - uses: actions/setup-python@v5
            with: { python-version: "3.12" }
-         - run: pip install "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.7.0#subdirectory=collector"
+         - run: pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.7.0#subdirectory=collector"
          - run: qeos-collector import-features "tests/features/**/*.feature" ${{ inputs.first_sync && '--allow-mass-archive' || '' }}
            env:
              QEOS_URL: ${{ vars.QEOS_URL }}
@@ -1581,7 +1581,7 @@ workflow that runs the suite (scheduled, per area, nightly…):
 ```yaml
       - name: Upload results to QEOS
         if: always() && vars.QEOS_URL != ''      # skipped cleanly where QEOS is not set up
-        uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.7.0
+        uses: atriis/Atriis.QEOS/collector-action@collector-v0.7.0
         with:
           url: ${{ vars.QEOS_URL }}
           patterns: test-results/cucumber-report.json

@@ -1,4 +1,4 @@
-# QEOS: run selected scenarios on demand (QA-Vision-Platform docs/superpowers/specs/2026-10-07-run-from-qa-vision-design.md).
+# QEOS: run selected scenarios on demand (Atriis.QEOS docs/superpowers/specs/2026-10-07-run-from-qa-vision-design.md).
 # Copy to .github/workflows/qeos-run.yml on the repository's DEFAULT branch (GitHub dispatches only
 # workflows found there) and qeos-run.mjs to .github/scripts/qeos-run.mjs. Both files must also
 # exist on the configured branch (Project Settings › Run from QEOS): that run reads them from there.
@@ -52,7 +52,7 @@ jobs:
 
       - name: Upload results to QEOS
         if: always() && vars.QEOS_URL != ''
-        uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.7.0
+        uses: atriis/Atriis.QEOS/collector-action@collector-v0.7.0
         with:
           url: ${{ vars.QEOS_URL }}
           patterns: test-results/cucumber-report.json

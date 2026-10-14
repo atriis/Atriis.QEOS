@@ -4384,7 +4384,7 @@ Expected: PASS (6 tests).
 - [ ] **Step 4: Write the workflow.** `templates/github/qa-vision-run.yml`:
 
 ```yaml
-# QA Vision: run selected scenarios on demand (QA-Vision-Platform docs/superpowers/specs/2026-10-07-run-from-qa-vision-design.md).
+# QA Vision: run selected scenarios on demand (Atriis.QEOS docs/superpowers/specs/2026-10-07-run-from-qa-vision-design.md).
 # Copy to .github/workflows/qa-vision-run.yml on the repository's DEFAULT branch (GitHub dispatches only
 # workflows found there) and qa-vision-run.mjs to .github/scripts/qa-vision-run.mjs.
 # Needs the repository secret QAV_API_KEY and the repository variable QAV_URL; the ENV secret feeds
@@ -4437,7 +4437,7 @@ jobs:
 
       - name: Upload results to QA Vision
         if: always()
-        uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.3.0
+        uses: atriis/Atriis.QEOS/collector-action@collector-v0.3.0
         with:
           url: ${{ vars.QAV_URL }}
           patterns: test-results/cucumber-report.json

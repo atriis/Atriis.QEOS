@@ -4998,7 +4998,7 @@ def call(Map config = [:]) {
         error("qeosCollectorUpload: impact '${impact}' needs testCommand, the Cucumber command to run")
     }
     String source = config.source ?:
-        "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@${ref}#subdirectory=collector"
+        "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${ref}#subdirectory=collector"
     String args = [
         config.environment ? "--environment '${config.environment}'" : '',
         config.caFile ? "--ca-file '${config.caFile}'" : '',
@@ -5063,7 +5063,7 @@ stage('Test') {
 #   script:
 #     - git fetch --quiet origin "+refs/heads/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME:refs/remotes/origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 #     - apt-get update -qq && apt-get install -y -qq python3-pip > /dev/null
-#     - pip install --quiet --break-system-packages "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.6.0#subdirectory=collector"
+#     - pip install --quiet --break-system-packages "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.6.0#subdirectory=collector"
 #     - qeos-collector run-impact --url "$QEOS_URL" -- npx cucumber-js --tags "not @wip"
 #   rules:
 #     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -5081,7 +5081,7 @@ In `templates/qeos-collector.azure-pipelines.yml`, after the header paragraph th
 #     - checkout: self
 #       fetchDepth: 2
 #     - script: |
-#         python -m pip install --quiet "qeos-collector @ git+https://github.com/carneiru/QA-Vision-Platform@collector-v0.6.0#subdirectory=collector"
+#         python -m pip install --quiet "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.6.0#subdirectory=collector"
 #         qeos-collector run-impact --url https://qeos.example.com -- npx cucumber-js --tags "not @wip"
 #       displayName: Tests, the likely affected first
 #       env:
@@ -5123,7 +5123,7 @@ as one run, so failures in the changed area show up in minutes ([Test impact](#t
 - uses: actions/checkout@v4
   with:
     fetch-depth: 0
-- uses: carneiru/QA-Vision-Platform/collector-action@collector-v0.6.0
+- uses: atriis/Atriis.QEOS/collector-action@collector-v0.6.0
   with:
     url: ${{ vars.QEOS_URL }}
     impact: first                       # or only: the likely affected scenarios alone
@@ -5365,8 +5365,8 @@ No tag yet: Task 22 tags after the gate and a green CI.
 mkdir -p ../qeos-cuke-check/features && cd ../qeos-cuke-check
 printf 'Feature: Pay\n\n  Scenario: Pays with card\n    Given a shopper\n' > features/pay.feature
 npm init -y >/dev/null && npm install --silent @cucumber/cucumber@12.6.0
-QEOS_API_KEY=qeos_placeholder ../QA-Vision-Platform/collector/.venv/Scripts/python -m qeos_collector run-impact --url https://qeos.example.invalid -- npx cucumber-js; echo "exit $?"
-cd ../QA-Vision-Platform && rm -rf ../qeos-cuke-check
+QEOS_API_KEY=qeos_placeholder ../Atriis.QEOS/collector/.venv/Scripts/python -m qeos_collector run-impact --url https://qeos.example.invalid -- npx cucumber-js; echo "exit $?"
+cd ../Atriis.QEOS && rm -rf ../qeos-cuke-check
 ```
 
 Expected:
