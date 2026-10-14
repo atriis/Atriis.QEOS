@@ -29,7 +29,7 @@ switching the mode from the dashboard.
   linked. Inactive users are refused.
 - `POST /users/me/link/microsoft` links a Microsoft identity to the signed-in account; an account with a
   password must send `current_password`.
-- Sessions are rows in `sessions` (refresh tokens, `is_revoked`); access tokens are JWTs that live
+- Sessions are rows in `refresh_tokens` (model `Session`, `is_revoked`); access tokens are JWTs that live
   `ACCESS_TOKEN_EXPIRE_MINUTES` (60); refresh tokens live `REFRESH_TOKEN_EXPIRE_DAYS` (30).
 
 ## 3. auth-service
