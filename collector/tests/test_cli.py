@@ -660,3 +660,43 @@ def test_the_gitlab_templates_qeos_extra_args_is_not_read(tmp_path, monkeypatch,
     env = {"QEOS_ACTION_EXTRA_ARGS": "--dry-run --no-changes", "QEOS_EXTRA_ARGS": "--environment gitlab"}
     assert main(["upload", "r.xml"], env) == 0
     assert "environment" not in json.loads(capsys.readouterr().out)["run"]
+
+
+CUCUMBER_WITH_MATCH = [{"uri": "features/search.feature", "name": "Search", "elements": [{
+    "type": "scenario", "name": "by city", "steps": [{
+        "keyword": "When ", "name": "I search Lisbon", "line": 4,
+        "match": {"location": "features/step_definitions/search.js:12"},
+        "result": {"status": "failed", "error_message": "Invalid city"}}]}]}]
+OLD_422 = {"detail": [{"type": "extra_forbidden", "loc": ["body", "results", 0, "failed_step", "definition"],
+                       "msg": "x"}]}
+
+
+def test_an_older_platform_still_stores_the_run_and_the_log_says_why(platform, tmp_path, capsys):
+    report = tmp_path / "cucumber.json"
+    report.write_text(json.dumps(CUCUMBER_WITH_MATCH), encoding="utf-8")
+    platform.reply(422, OLD_422)
+    platform.reply(201, RECEIPT)
+    assert run(["upload", str(report)], env_for(platform)) == 0
+    assert "definition" in sent(platform, 0)["results"][0]["failed_step"]
+    assert "definition" not in sent(platform, 1)["results"][0]["failed_step"]
+    err = capsys.readouterr().err
+    assert err.count("older than this collector") == 1 and "uploaded run 42 (201)" in err
+
+
+def test_a_spooled_part_also_gets_the_retry_without_the_fields(platform, tmp_path, capsys):
+    report = tmp_path / "cucumber.json"
+    report.write_text(json.dumps(CUCUMBER_WITH_MATCH), encoding="utf-8")
+    spool = tmp_path / "spool"
+    for _ in range(5):
+        platform.reply(503, {"detail": "down"})
+    assert run(["upload", str(report), "--spool", str(spool), "--idempotency-key", "job-9"],
+               env_for(platform)) == 0
+    platform.reply(422, OLD_422)
+    platform.reply(201, RECEIPT)  # the spooled part, again without the fields
+    platform.reply(201, RECEIPT)  # the current run
+    assert run(["upload", str(report), "--spool", str(spool), "--idempotency-key", "job-10"],
+               env_for(platform)) == 0
+    assert "definition" not in sent(platform, 6)["results"][0]["failed_step"]
+    assert [r["headers"]["Idempotency-Key"] for r in platform.requests[5:]] == ["job-9", "job-9", "job-10"]
+    err = capsys.readouterr().err
+    assert "older than this collector" in err and "resent 1 spooled part(s)" in err

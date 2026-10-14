@@ -24,6 +24,13 @@ BACKOFF_SECONDS = (1, 2, 4, 8)
 TIME_BUDGET_SECONDS = 120
 MAX_RETRY_AFTER_SECONDS = 10
 MAX_DETAIL_CHARS = 500
+STEP_DETAILS = ("definition", "pattern")
+OLDER_PLATFORM = ("the platform is older than this collector and refused the failed step's definition and pattern: "
+                  "sent again without them (upgrade QEOS to group failed steps across test cases)")
+
+
+def _ignore(message: str) -> None:
+    pass
 
 
 class ConfigError(Exception):
@@ -92,6 +99,7 @@ def upload_part(
     sleep: Callable[[float], None] = time.sleep,
     clock: Callable[[], float] = time.monotonic,
     rand: Callable[[], float] = random.random,
+    warn: Callable[[str], None] = _ignore,
 ) -> Tuple[int, dict]:
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -103,10 +111,12 @@ def upload_part(
     }
     started = clock()
     attempt = 0
+    payload = part.body
+    downgraded = False
     while True:
         attempt += 1
         try:
-            status, body, response_headers = _send(endpoint, part.body, headers, context)
+            status, body, response_headers = _send(endpoint, payload, headers, context)
         except (OSError, http.client.HTTPException) as exc:
             if _is_tls_error(exc):
                 raise UploadError(
@@ -121,7 +131,14 @@ def upload_part(
             elif status >= 500:
                 problem, wait = f"the platform answered {status}", _backoff(attempt, rand)
             else:
-                raise UploadError(_explain(status, body, response_headers))
+                # Spec 2026-10-14 §2: a server from before collector 0.8.0 forbids the two new fields. Once, and only
+                # for that: nothing was stored, so the same Idempotency-Key is reused
+                stripped = None if downgraded or status != 422 or not _names_failed_step(body)                     else without_step_details(payload)
+                if stripped is None:
+                    raise UploadError(_explain(status, body, response_headers))
+                payload, downgraded = stripped, True
+                warn(OLDER_PLATFORM)
+                continue
         if attempt >= MAX_ATTEMPTS:
             raise UploadError(f"{problem}; gave up after {attempt} attempts", retryable=True)
         if clock() - started + wait > TIME_BUDGET_SECONDS:
@@ -212,6 +229,37 @@ def _json(body: bytes) -> dict:
     except ValueError:
         return {}
     return value if isinstance(value, dict) else {}
+
+
+def _names_failed_step(body: bytes) -> bool:
+    """A validation error inside a result's failed_step (FastAPI's 422: {"detail": [{"loc": [...]}, ...]})."""
+    try:
+        detail = json.loads(body).get("detail")
+    except (ValueError, AttributeError):
+        return False
+    return isinstance(detail, list) and any(
+        isinstance(error, dict) and isinstance(error.get("loc"), list) and "failed_step" in error["loc"]
+        for error in detail
+    )
+
+
+def without_step_details(body: bytes) -> Optional[bytes]:
+    """The body without failed_step.definition and .pattern; None when it has neither (nothing to retry without)."""
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return None
+    removed = False
+    for result in (data.get("results") if isinstance(data, dict) else None) or []:
+        step = result.get("failed_step") if isinstance(result, dict) else None
+        if isinstance(step, dict):
+            for name in STEP_DETAILS:
+                if name in step:
+                    del step[name]
+                    removed = True
+    if not removed:
+        return None
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
 
 def _explain(status: int, body: bytes, headers: Mapping[str, str]) -> str:

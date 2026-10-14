@@ -554,7 +554,7 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
     for number, part in enumerate(parts, start=1):
         of = f"part {number} of {len(parts)}"
         try:
-            status, receipt = upload_part(endpoint, api_key, part, context, sleep=sleep, clock=clock)
+            status, receipt = upload_part(endpoint, api_key, part, context, sleep=sleep, clock=clock, warn=say)
         except UploadError as exc:
             say(f"upload failed: {exc}")
             if stored:
@@ -585,7 +585,7 @@ def _resend_spooled(spool_dir, endpoint, api_key, context, say: _Output, *, slee
     resent = discarded = 0
     for path, part in spooled_parts(spool_dir):
         try:
-            status, receipt = upload_part(endpoint, api_key, part, context, sleep=sleep, clock=clock)
+            status, receipt = upload_part(endpoint, api_key, part, context, sleep=sleep, clock=clock, warn=say)
         except UploadError as exc:
             if exc.retryable:
                 say(f"a spooled part still fails: {exc}")

@@ -1,3 +1,4 @@
+import json
 import socket
 import threading
 
@@ -305,3 +306,73 @@ def test_a_202_is_returned_not_raised(platform):
 
     status, body = send(collect(platform))
     assert (status, body["discarded"]) == (202, True)
+
+
+STEP_PART = Part(body=json.dumps({"run": {}, "results": [{"name": "t", "status": "failed", "failed_step": {
+    "text": "When I search Lisbon", "line": 4, "definition": "steps/search.js:12", "pattern": "When I search {…}"}}]},
+    ensure_ascii=False, separators=(",", ":")).encode("utf-8"), idempotency_key="gh-1-1-step", count=1)
+OLD_422 = {"detail": [{"type": "extra_forbidden", "loc": ["body", "results", 0, "failed_step", "definition"],
+                       "msg": "Extra inputs are not permitted"}]}
+
+
+def send_step(platform, warnings, part=STEP_PART):
+    fake = FakeTime()
+    return upload_part(collect(platform), KEY, part, None, sleep=fake.sleep, clock=fake.clock, rand=lambda: 0.0,
+                       warn=warnings.append)
+
+
+def test_an_older_platform_gets_the_upload_again_without_definition_and_pattern(platform):
+    platform.reply(422, OLD_422)
+    platform.reply(201, RECEIPT)
+    warnings = []
+    assert send_step(platform, warnings) == (201, RECEIPT)
+    first, second = (json.loads(r["body"]) for r in platform.requests)
+    assert first["results"][0]["failed_step"]["definition"] == "steps/search.js:12"
+    assert second["results"][0]["failed_step"] == {"text": "When I search Lisbon", "line": 4}
+    assert {r["headers"]["Idempotency-Key"] for r in platform.requests} == {"gh-1-1-step"}
+    assert len(warnings) == 1 and "older than this collector" in warnings[0]
+
+
+def test_the_retry_without_the_fields_happens_once(platform):
+    platform.reply(422, OLD_422)
+    platform.reply(422, OLD_422)
+    with pytest.raises(UploadError) as err:
+        send_step(platform, [])
+    assert len(platform.requests) == 2 and err.value.retryable is False
+
+
+def test_a_5xx_after_the_downgrade_keeps_the_stripped_body(platform):
+    platform.reply(422, OLD_422)
+    platform.reply(503)
+    platform.reply(201, RECEIPT)
+    assert send_step(platform, [])[0] == 201
+    assert all("definition" not in r["body"].decode() for r in platform.requests[1:])
+
+
+def test_other_422s_are_not_retried(platform):
+    platform.reply(422, {"detail": [{"type": "string_too_long", "loc": ["body", "results", 0, "name"], "msg": "x"}]})
+    warnings = []
+    with pytest.raises(UploadError):
+        send_step(platform, warnings)
+    assert len(platform.requests) == 1 and warnings == []
+
+
+def test_a_422_that_is_not_json_is_not_retried(platform):
+    platform.reply(422, b"<html>failed_step</html>")
+    with pytest.raises(UploadError):
+        send_step(platform, [])
+    assert len(platform.requests) == 1
+
+
+def test_a_part_without_the_fields_is_not_sent_again(platform):
+    platform.reply(422, OLD_422)
+    with pytest.raises(UploadError):
+        send_step(platform, [], part=PART)
+    assert len(platform.requests) == 1
+
+
+def test_without_step_details_strips_only_the_two_fields():
+    body = json.loads(upload.without_step_details(STEP_PART.body))
+    assert body["results"][0]["failed_step"] == {"text": "When I search Lisbon", "line": 4}
+    assert upload.without_step_details(PART.body) is None
+    assert upload.without_step_details(b"not json") is None
