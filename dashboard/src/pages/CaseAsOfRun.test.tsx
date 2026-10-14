@@ -150,9 +150,13 @@ test("without a step key (an older server) the tooltip has no spread line and as
   withSteps(spreadStep(12, 5));
   renderAt("/projects/42/cases/7?run=5");
   await waitFor(() => expect(document.querySelector(".gk-failed")).not.toBeNull());
+  await waitFor(() => expect(bodies.length).toBeGreaterThan(0));
   act(() => (document.querySelector(".gk-failed") as HTMLElement).focus());
-  expect(await screen.findByRole("tooltip")).not.toHaveTextContent(/Also failed|Only this test case/);
+  const tip = await screen.findByRole("tooltip");
+  await act(async () => { await new Promise((r) => setTimeout(r, 100)); });
   expect(stepRequests).toEqual([]);
+  expect(tip).not.toHaveTextContent(/Also failed|Only this test case/);
+  expect(within(tip).queryByRole("link", { name: /Also failed|Only this test case/ })).toBeNull();
 });
 
 test("a feature page asks once per run for all its cards", async () => {
@@ -165,12 +169,27 @@ test("a feature page asks once per run for all its cards", async () => {
 
 test("a failed failed-steps request leaves the tooltip as it was", async () => {
   setup({ results: { [KEY.toLowerCase()]: keyed } });
-  stepRequests = [];
-  server.use(http.get(`${P}/runs/:runId/failed-steps`, () => HttpResponse.json({ detail: "x" }, { status: 500 })));
+  let asked = 0;
+  server.use(http.get(`${P}/runs/:runId/failed-steps`, () => { asked++; return HttpResponse.json({ detail: "x" }, { status: 500 }); }));
+  renderAt("/projects/42/cases/7?run=5");
+  await waitFor(() => expect(document.querySelector(".gk-failed")).not.toBeNull());
+  await waitFor(() => expect(asked).toBeGreaterThan(0));
+  await act(async () => { await new Promise((r) => setTimeout(r, 100)); });
+  act(() => (document.querySelector(".gk-failed") as HTMLElement).focus());
+  const tip = await screen.findByRole("tooltip");
+  expect(asked).toBe(1);
+  expect(tip).toHaveTextContent("boom");
+  expect(tip).not.toHaveTextContent(/Also failed|Only this test case/);
+  expect(within(tip).queryByRole("link", { name: /Also failed|Only this test case/ })).toBeNull();
+});
+
+test("a streak capped at 50 runs reads failing for more than 50 runs", async () => {
+  setup({ results: { [KEY.toLowerCase()]: keyed } });
+  const capped = spreadStep(3, 50);
+  capped.steps[0].since = { run_id: 400, started_at: "2026-08-01T10:00:00Z", runs: 50, capped: true };
+  withSteps(capped);
   renderAt("/projects/42/cases/7?run=5");
   await waitFor(() => expect(document.querySelector(".gk-failed")).not.toBeNull());
   act(() => (document.querySelector(".gk-failed") as HTMLElement).focus());
-  const tip = await screen.findByRole("tooltip");
-  expect(tip).toHaveTextContent("boom");
-  expect(tip).not.toHaveTextContent(/Also failed|Only this test case/);
+  expect(await within(await screen.findByRole("tooltip")).findByRole("link", { name: "Also failed in 2 other test cases in this run · failing for more than 50 runs" })).toBeInTheDocument();
 });
