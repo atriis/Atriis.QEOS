@@ -109,3 +109,24 @@ test("an unsafe next never leaves the app", async () => {
   renderWithInvitation("?token=tok-123&next=%2F%2Fevil.example");
   expect(await screen.findByText("PICKER")).toBeInTheDocument();
 });
+
+const SSO_ONLY_403 = { detail: { code: "sso_only", message: "Sign-in is through Microsoft only." } };
+
+test("in SSO-only mode an old verification link points to sign-in", async () => {
+  server.use(
+    http.get("/api/v1/auth/methods", () => HttpResponse.json({ password: false, providers: ["microsoft"] })),
+    http.get("/api/v1/auth/verify-email", () => HttpResponse.json(SSO_ONLY_403, { status: 403 })),
+  );
+  renderPage();
+  expect(await screen.findByText("Sign-in is through Microsoft only.")).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /register/i })).not.toBeInTheDocument();
+});
+
+test("a 403 sso_only gives the same notice when /auth/methods was unavailable", async () => {
+  server.use(
+    http.get("/api/v1/auth/methods", () => HttpResponse.error()),
+    http.get("/api/v1/auth/verify-email", () => HttpResponse.json(SSO_ONLY_403, { status: 403 })),
+  );
+  renderPage();
+  expect(await screen.findByText("Sign-in is through Microsoft only.")).toBeInTheDocument();
+});

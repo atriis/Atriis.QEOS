@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { Link, Navigate, useSearchParams } from "react-router-dom";
 import { verifyEmail } from "../api/auth";
 import { safeNext, takeAfterVerify } from "../auth/redirect";
+import SsoOnlyNotice from "../components/SsoOnlyNotice";
+import { isSsoOnly, isSsoOnlyError, useAuthMethods } from "../auth/useAuthMethods";
 import AuthShell from "../components/AuthShell";
 import ErrorBanner from "../components/ErrorBanner";
 
@@ -41,6 +43,9 @@ export default function VerifyEmailPage() {
       cancelled = true;
     };
   }, [token, nextParam]);
+  const methods = useAuthMethods();
+
+  if (isSsoOnly(methods) || isSsoOnlyError(error)) return <SsoOnlyNotice providers={methods?.providers} />;
 
   if (!token) {
     return (

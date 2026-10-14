@@ -2,6 +2,8 @@ import { FormEvent, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { MailCheck } from "lucide-react";
 import { requestPasswordReset } from "../api/auth";
+import SsoOnlyNotice from "../components/SsoOnlyNotice";
+import { isSsoOnly, isSsoOnlyError, useAuthMethods } from "../auth/useAuthMethods";
 import AuthShell from "../components/AuthShell";
 import TextField from "../components/TextField";
 import ErrorBanner from "../components/ErrorBanner";
@@ -12,6 +14,7 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
+  const methods = useAuthMethods();
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -26,6 +29,8 @@ export default function ForgotPasswordPage() {
       setBusy(false);
     }
   }
+
+  if (isSsoOnly(methods) || isSsoOnlyError(error)) return <SsoOnlyNotice providers={methods?.providers} />;
 
   if (sentTo !== null) {
     return (

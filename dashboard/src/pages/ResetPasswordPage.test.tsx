@@ -72,3 +72,22 @@ test("a link without a token says so instead of showing a form", () => {
   expect(screen.getByText(/link is incomplete/i)).toBeInTheDocument();
   expect(screen.queryByLabelText(/^new password/i)).not.toBeInTheDocument();
 });
+
+const SSO_ONLY_403 = { detail: { code: "sso_only", message: "Sign-in is through Microsoft only." } };
+
+test("in SSO-only mode an old reset link points to sign-in", async () => {
+  server.use(http.get("/api/v1/auth/methods", () => HttpResponse.json({ password: false, providers: ["microsoft"] })));
+  renderPage("/reset-password?token=t");
+  expect(await screen.findByText("Sign-in is through Microsoft only.")).toBeInTheDocument();
+  expect(screen.queryByLabelText(/^new password/i)).not.toBeInTheDocument();
+});
+
+test("a 403 sso_only gives the same notice when /auth/methods was unavailable", async () => {
+  server.use(
+    http.get("/api/v1/auth/methods", () => HttpResponse.error()),
+    http.post("/api/v1/auth/reset-password", () => HttpResponse.json(SSO_ONLY_403, { status: 403 })),
+  );
+  renderPage("/reset-password?token=t");
+  await fill("securepassword123", "securepassword123");
+  expect(await screen.findByText("Sign-in is through Microsoft only.")).toBeInTheDocument();
+});

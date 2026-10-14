@@ -56,3 +56,23 @@ test("links back to sign in", async () => {
   await userEvent.click(screen.getByRole("link", { name: /back to sign in/i }));
   expect(await screen.findByText("LOGIN")).toBeInTheDocument();
 });
+
+const SSO_ONLY_403 = { detail: { code: "sso_only", message: "Sign-in is through Microsoft only." } };
+
+test("in SSO-only mode the page points to sign-in instead of a form", async () => {
+  server.use(http.get("/api/v1/auth/methods", () => HttpResponse.json({ password: false, providers: ["microsoft"] })));
+  renderPage();
+  expect(await screen.findByText("Sign-in is through Microsoft only.")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /send reset link/i })).not.toBeInTheDocument();
+});
+
+test("a 403 sso_only gives the same notice when /auth/methods was unavailable", async () => {
+  server.use(
+    http.get("/api/v1/auth/methods", () => HttpResponse.error()),
+    http.post("/api/v1/auth/forgot-password", () => HttpResponse.json(SSO_ONLY_403, { status: 403 })),
+  );
+  renderPage();
+  await userEvent.type(screen.getByLabelText(/email/i), "ann@example.com");
+  await userEvent.click(screen.getByRole("button", { name: /send reset link/i }));
+  expect(await screen.findByText("Sign-in is through Microsoft only.")).toBeInTheDocument();
+});

@@ -97,3 +97,28 @@ test("an unsafe next is ignored", async () => {
   await screen.findByText(/check your email to complete/i);
   expect(localStorage.getItem("qeos.afterVerify")).toBeNull();
 });
+
+const SSO_ONLY = { password: false, providers: ["microsoft"] };
+const SSO_ONLY_403 = { detail: { code: "sso_only", message: "Sign-in is through Microsoft only." } };
+
+test("in SSO-only mode the page points to sign-in instead of a form", async () => {
+  server.use(http.get("/api/v1/auth/methods", () => HttpResponse.json(SSO_ONLY)));
+  renderPage();
+  expect(await screen.findByText("Sign-in is through Microsoft only.")).toBeInTheDocument();
+  expect(screen.queryByLabelText(/password/i)).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole("link", { name: "Go to sign in" }));
+  expect(await screen.findByText("LOGIN")).toBeInTheDocument();
+});
+
+test("a 403 sso_only gives the same notice when /auth/methods was unavailable", async () => {
+  server.use(
+    http.get("/api/v1/auth/methods", () => HttpResponse.error()),
+    http.post("/api/v1/auth/register", () => HttpResponse.json(SSO_ONLY_403, { status: 403 })),
+  );
+  renderPage();
+  await userEvent.type(screen.getByLabelText(/email/i), "pedro@example.com");
+  await userEvent.type(screen.getByLabelText(/password/i), "UmaPasswordForte123");
+  await userEvent.click(screen.getByRole("button", { name: /create account/i }));
+  expect(await screen.findByText("Sign-in is through Microsoft only.")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 1, name: "Sign in with Microsoft" })).toBeInTheDocument();
+});

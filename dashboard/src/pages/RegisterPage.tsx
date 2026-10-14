@@ -2,6 +2,8 @@ import { FormEvent, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { register } from "../api/auth";
 import { rememberAfterVerify, safeNext, withNext } from "../auth/redirect";
+import SsoOnlyNotice from "../components/SsoOnlyNotice";
+import { isSsoOnly, isSsoOnlyError, useAuthMethods } from "../auth/useAuthMethods";
 import AuthShell from "../components/AuthShell";
 import ErrorBanner from "../components/ErrorBanner";
 import TextField from "../components/TextField";
@@ -17,6 +19,7 @@ export default function RegisterPage() {
   const [params] = useSearchParams();
   const next = safeNext(params.get("next"));
   const loginLink = withNext("/login", next);
+  const methods = useAuthMethods();
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -32,6 +35,8 @@ export default function RegisterPage() {
       setBusy(false);
     }
   }
+
+  if (isSsoOnly(methods) || isSsoOnlyError(error)) return <SsoOnlyNotice providers={methods?.providers} />;
 
   if (done) {
     return (

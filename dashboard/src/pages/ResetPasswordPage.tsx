@@ -3,6 +3,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import { ArrowRight, CircleCheck } from "lucide-react";
 import { resetPassword } from "../api/auth";
 import { ApiError } from "../api/http";
+import SsoOnlyNotice from "../components/SsoOnlyNotice";
+import { isSsoOnly, isSsoOnlyError, useAuthMethods } from "../auth/useAuthMethods";
 import AuthShell from "../components/AuthShell";
 import ErrorBanner from "../components/ErrorBanner";
 import NewPasswordFields from "../components/NewPasswordFields";
@@ -22,6 +24,7 @@ export default function ResetPasswordPage() {
   useEffect(() => {
     if (params.has("token")) setParams({}, { replace: true });
   }, [params, setParams]);
+  const methods = useAuthMethods();
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -40,6 +43,8 @@ export default function ResetPasswordPage() {
       setBusy(false);
     }
   }
+
+  if (isSsoOnly(methods) || isSsoOnlyError(error)) return <SsoOnlyNotice providers={methods?.providers} />;
 
   if (!token) {
     return (
