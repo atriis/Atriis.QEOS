@@ -13,7 +13,7 @@ from src.ingestion.schemas.run import (
     ChangedFileOut, ComponentOut, FailureGroupsOut, ResultOut, RunComparison, RunDetail, RunOut, RunSummary,
 )
 from src.ingestion.schemas.impact import RunImpactOut
-from src.ingestion.service import impact_read, run_service
+from src.ingestion.service import failed_steps_service, impact_read, run_service
 
 project_router = APIRouter()  # mounted at /projects/{project_id}/runs
 router = APIRouter()          # mounted at /runs
@@ -55,6 +55,21 @@ def get_run_summary(
     if run is None or run.project_id != access.project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return RunSummary.from_run(run)
+
+
+@project_router.get("/{run_id}/failed-steps")
+def get_failed_steps(
+    run_id: int,
+    db: Session = Depends(get_db),
+    access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
+):
+    """Each failed Cucumber step of the run across its test cases, with error groups and since when it fails
+    (spec 2026-10-14 §3.3). A plain dict, so absent fields stay absent (plan ruling R10)."""
+    run = run_service.get_run(db, run_id)
+    # A run of another project is indistinguishable from a missing one
+    if run is None or run.project_id != access.project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    return failed_steps_service.failed_steps(db, access.project_id, run)
 
 
 @project_router.get("/{run_id}/impact", response_model=RunImpactOut)
