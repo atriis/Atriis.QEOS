@@ -45,7 +45,7 @@ yet.
   a failure notification (Slack, Teams, email) or when a flaky ticket lands;
   managers open it in weekly reviews or read the weekly summary.
 - Microservices behind one NGINX gateway: auth-service (JWT, MFA, Google and
-  Microsoft SSO), organization-service (orgs, members, roles, invitations),
+  Microsoft SSO, an optional Microsoft-only sign-in mode with a superuser break-glass), organization-service (orgs, members, roles, invitations),
   project-service (projects, repositories, settings), ingestion-service (runs,
   results, analytics, report, notifications), test-management-service (cases,
   suites, Gherkin sync, runs from QEOS), `dashboard/` (React SPA).

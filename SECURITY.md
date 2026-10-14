@@ -89,7 +89,9 @@ details.
   sign-in is logged at WARNING with user id, email, IP and time; no password,
   token or client id is ever logged. auth-service refuses to start when a
   provider the mode lists is not configured. Turning the mode on ends every refresh session of every
-  non-superuser once (access tokens expire within 60 minutes).
+  non-superuser once (access tokens expire within 60 minutes). A superuser can allow one account to
+  link Microsoft at its next Microsoft sign-in (7 days, logged at WARNING, used once); it is never
+  matched on the email alone.
 - **Access control.** Organisation roles (owner, admin, member, viewer,
   billing_manager) checked on every request; project access follows the
   organisation role; non-members get 404.
@@ -231,6 +233,9 @@ details.
 - Refresh tokens and notification webhook URLs are stored in plain text in
   their service's database.
 - Rate limits are per gateway instance (no shared store).
+- SSO-only mode: someone removed from Entra ID keeps an existing QEOS session
+  until its refresh token expires (30 days) unless deactivated in QEOS; SCIM
+  deprovisioning is not built (ADR-031).
 - Planned, not built: SAML, GitHub sign-in (answers 501), an audit log,
   secrets management (Vault), a GitHub App instead of personal tokens for Run
   from QEOS, and per-action permissions. Monitoring: the Prometheus, Alertmanager and exporter

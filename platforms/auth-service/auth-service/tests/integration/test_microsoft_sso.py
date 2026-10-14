@@ -297,3 +297,90 @@ def test_an_unverified_email_without_a_upn_is_refused(client, db, microsoft_key)
 def test_a_small_clock_difference_is_tolerated(client, microsoft_key):
     soon = datetime.now(timezone.utc) + timedelta(seconds=30)
     assert sign_in(client, ms_token(microsoft_key, nbf=soon)).status_code == 200
+
+
+# The one-time link allowance (ADR-031). The test client closes the shared session after each
+# request, which detaches loaded users: ids are kept before a request and rows re-read after it.
+
+def _allow(db, email, minutes=7 * 24 * 60):
+    user = db.query(User).filter(User.email == email).one()
+    user.microsoft_link_allowed_until = datetime.now(timezone.utc) + timedelta(minutes=minutes)
+    db.commit()
+    return user.id, user.microsoft_link_allowed_until
+
+
+def test_an_allowed_account_is_linked_at_its_next_microsoft_sign_in(client, db, microsoft_key, register_and_verify, caplog):
+    register_and_verify("ann@example.com")
+    ann_id, _ = _allow(db, "ann@example.com")
+
+    with caplog.at_level(logging.WARNING, logger="src.auth.api.v1.endpoints.sso"):
+        response = sign_in(client, ms_token(microsoft_key))
+    assert response.status_code == 200, response.text
+    link = db.query(OAuthAccount).one()
+    assert (link.user_id, link.provider, link.provider_user_id) == (ann_id, "microsoft", f"{TENANT}:{OID}")
+    assert db.get(User, ann_id).microsoft_link_allowed_until is None  # used once
+    assert db.query(User).count() == 1
+    assert "one-time allowance" in caplog.text
+    # From now on the identity finds the account by itself
+    assert sign_in(client, ms_token(microsoft_key)).status_code == 200
+
+
+def test_an_expired_allowance_keeps_the_409(client, db, microsoft_key, register_and_verify):
+    register_and_verify("ann@example.com")
+    _allow(db, "ann@example.com", minutes=-1)
+    response = sign_in(client, ms_token(microsoft_key))
+    assert response.status_code == 409
+    assert db.query(OAuthAccount).count() == 0
+
+
+def test_the_allowance_belongs_to_its_account_not_to_the_next_token(client, db, microsoft_key, register_and_verify):
+    register_and_verify("ann@example.com")
+    ann_id, allowed_until = _allow(db, "ann@example.com")
+
+    other = sign_in(client, ms_token(microsoft_key, oid="00000000-0000-0000-0000-000000000002",
+                                     email="bob@example.com", preferred_username="bob@example.com"))
+    assert other.status_code == 200, other.text
+    bob = db.query(User).filter(User.email == "bob@example.com").one()
+    assert db.query(OAuthAccount).one().user_id == bob.id  # Bob's own new account
+    assert db.get(User, ann_id).microsoft_link_allowed_until == allowed_until  # untouched, still Ann's
+
+
+def test_an_allowance_does_not_replace_an_existing_link(client, db, microsoft_key, register_and_verify):
+    register_and_verify("ann@example.com")
+    ann_id, _ = _allow(db, "ann@example.com")
+    db.add(OAuthAccount(user_id=ann_id, provider="microsoft", provider_user_id=f"{TENANT}:someone-else"))
+    db.commit()
+
+    response = sign_in(client, ms_token(microsoft_key))
+    assert response.status_code == 409
+    assert response.json() == {"detail": "This account is linked to a different Microsoft identity"}
+    assert db.get(User, ann_id).microsoft_link_allowed_until is not None
+    assert db.query(OAuthAccount).count() == 1
+
+
+def test_an_allowance_on_an_inactive_account_does_not_link(client, db, microsoft_key, register_and_verify):
+    register_and_verify("ann@example.com")
+    ann_id, _ = _allow(db, "ann@example.com")
+    db.get(User, ann_id).is_active = False
+    db.commit()
+    response = sign_in(client, ms_token(microsoft_key))
+    assert response.status_code == 409
+    assert db.query(OAuthAccount).count() == 0
+    assert db.get(User, ann_id).microsoft_link_allowed_until is not None
+
+
+def test_a_token_from_another_tenant_never_uses_the_allowance(client, db, microsoft_key, register_and_verify):
+    register_and_verify("ann@example.com")
+    ann_id, _ = _allow(db, "ann@example.com")
+    response = sign_in(client, ms_token(microsoft_key, tid="12345678-0000-0000-0000-000000000000"))
+    assert response.status_code == 400
+    assert db.get(User, ann_id).microsoft_link_allowed_until is not None
+    assert db.query(OAuthAccount).count() == 0
+
+
+def test_the_allowance_works_in_sso_only_mode(client, db, microsoft_key, register_and_verify, monkeypatch):
+    register_and_verify("ann@example.com")  # before the switch: registration is off afterwards
+    _allow(db, "ann@example.com")
+    monkeypatch.setattr(settings, "AUTH_SSO_ONLY", True)
+    monkeypatch.setattr(settings, "AUTH_SSO_PROVIDERS", "microsoft")
+    assert sign_in(client, ms_token(microsoft_key)).status_code == 200

@@ -9,6 +9,7 @@ import logging
 from src.auth.service.sso_service import SSOService, SSOConfigurationError, SSOIdentityError
 from src.auth.service.auth_service import AuthService
 from src.auth.service.user_service import UserService
+from src.auth.service.sso_readiness import valid_allowance
 from src.auth.schemas.auth import GoogleLoginRequest, MicrosoftLoginRequest, Token
 from src.auth.schemas.user import UserCreate  # used when SSO creates a first-time user
 from src.auth.models.oauth import OAuthAccount
@@ -141,7 +142,27 @@ def _link_or_create_user(db: Session, identity: dict, email: str, provider: str,
     # that account to whoever presented a Google token for the address first. Every producer
     # of such a row is either that seeding or a half-failed create, so there is no legitimate
     # case left to serve. Adopting SSO on an existing account needs an authenticated link
-    # endpoint, which is not built.
+    # (POST /users/me/link/{provider}) or, for Microsoft, a superuser's allowance:
+    #
+    # A superuser allowed this account to link at its next Microsoft sign-in (ADR-031). Not a match on
+    # the email alone: the allowance names this account, the token is from an allowed tenant (checked
+    # by verify_microsoft_credential) and the account holds no Microsoft link yet (checked above).
+    # Used once.
+    if provider == "microsoft" and user.is_active and valid_allowance(user) is not None:
+        db.add(OAuthAccount(user_id=user.id, provider=provider, provider_user_id=provider_user_id))
+        user.microsoft_link_allowed_until = None
+        try:
+            db.commit()
+        except IntegrityError:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"This {label} account is already linked",
+            )
+        db.refresh(user)
+        logger.warning("Microsoft identity linked to user %s (%s) through the one-time allowance", user.id, user.email)
+        return user
+
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail=existing_account_detail,

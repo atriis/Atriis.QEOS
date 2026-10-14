@@ -75,7 +75,10 @@ Grafana; its `/monitoring?next=` page does the same when the gateway sends a coo
   Security page.
   Superusers: `GET /users/sso-readiness` (active users, how many linked Microsoft, the
   unlinked list) and `POST /users/{id}/allow-microsoft-link` (a one-time 7-day link
-  allowance, logged at WARNING; 404 unknown, 409 linked or inactive).
+  allowance, logged at WARNING; 404 unknown, 409 linked or inactive), used at the
+  next `/sso/microsoft` from an allowed tenant and then cleared.
+  Off-to-on: non-superuser refresh sessions revoked once (`auth_mode_state`,
+  migration 008, row lock).
 - Every service accepts only access tokens as sessions (MFA challenge, refresh
   and service tokens are rejected). `/internal/v1/users[/{id}]` (HTTP Basic,
   INTERNAL_API_PASSWORD; not routed by the gateway) serves organization-service.

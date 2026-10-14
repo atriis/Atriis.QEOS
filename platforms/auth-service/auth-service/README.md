@@ -199,7 +199,7 @@ set it to any address). The address must be one the user model accepts; otherwis
 ### SSO Authentication
 - `POST /api/v1/sso/google` - Authenticate with a Google ID token
 - `POST /api/v1/sso/github` - **501, not implemented**
-- `POST /api/v1/sso/microsoft` - Authenticate with a Microsoft (Entra ID) ID token from an allowed tenant
+- `POST /api/v1/sso/microsoft` - Authenticate with a Microsoft (Entra ID) ID token from an allowed tenant. An account that holds the token's address but no Microsoft link is linked only when a superuser allowed it (`allow-microsoft-link`, valid 7 days, cleared when used); otherwise 409.
 - `POST /api/v1/users/me/link/microsoft` - Link a Microsoft identity to the signed-in account (requires `current_password` when the account has one)
 
 ### SSO-only mode (ADR-031)

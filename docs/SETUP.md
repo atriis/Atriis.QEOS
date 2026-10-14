@@ -526,8 +526,38 @@ principal name. Personal Microsoft accounts are not supported.
 
 Account rules: the first sign-in with a new address creates an account without a password.
 An address that already has a password account is **not** linked automatically: the answer
-is 409. The `POST /api/v1/users/me/link/{google|microsoft}` API links them for a signed-in
-user. The dashboard has no button for this.
+is 409. A signed-in user links it with `POST /api/v1/users/me/link/{google|microsoft}`, or a
+superuser allows that one account to link at its next Microsoft sign-in (below).
+
+**Microsoft-only sign-in (SSO-only mode, ADR-031)**
+
+For a company deployment where people sign in only with their Microsoft work account:
+
+1. Configure Microsoft as above and check that signing in with Microsoft works.
+2. Ask everyone with a password account to link Microsoft (`POST /api/v1/users/me/link/microsoft`).
+3. Check readiness as a superuser: `GET /api/v1/users/sso-readiness` lists the active users who have not
+   linked. For someone who missed it, `POST /api/v1/users/{id}/allow-microsoft-link` lets that account
+   link at its next Microsoft sign-in, for 7 days.
+4. In `.env`: `AUTH_SSO_ONLY=true` (and `AUTH_SSO_PROVIDERS=microsoft`, the default). Then
+   `docker compose up -d --wait auth-service`.
+
+At that restart, every session of everyone who is not a superuser ends (once; later restarts do not);
+access tokens already issued run out within 60 minutes. Registration, email verification and password
+recovery answer 403. auth-service refuses to start if Microsoft is not configured, and warns in its log
+when there is no active superuser.
+
+**Break-glass:** active superusers keep password sign-in (two-factor authentication still applies).
+Every such sign-in is logged at WARNING as `break-glass sign-in` with user id, email, IP and time:
+`docker compose logs auth-service | grep break-glass`.
+
+**New colleagues:** they sign in once with Microsoft (that creates their account), then an owner or
+admin adds them to the organization or project; members are added by existing account.
+
+**Known limitation:** someone removed from Entra ID cannot get a new Microsoft token, but a QEOS session
+they already hold lasts until its refresh token expires (30 days). Deactivate them in QEOS to end it at
+once. Automatic deprovisioning (SCIM) is not built.
+
+To turn the mode off: `AUTH_SSO_ONLY=false`, restart auth-service.
 
 **Verify (section 3):** the sign-in page shows the Google / Microsoft buttons, and signing in
 lands on the project list. `docker compose logs auth-service` shows no "not configured".
@@ -540,6 +570,7 @@ lands on the project list. `docker compose logs auth-service` shows no "not conf
 | No verification email | SMTP not configured. Take the link from the auth-service log. |
 | SSO button visible but sign-in fails with 503 | The dashboard has the `VITE_*` id but auth-service does not. Set `AZURE_CLIENT_ID`/`AZURE_ALLOWED_TENANTS` in `.env` (Microsoft) or add the override file above (Google), then recreate auth-service. |
 | auth-service exits at start with "AUTH_SSO_ONLY=true but …" | A provider in `AUTH_SSO_PROVIDERS` is not configured or not valid (`microsoft`, `google`). The log names the missing setting. |
+| 403 "Sign-in is through Microsoft only." on sign-in, register or reset | SSO-only mode is on. Sign in with Microsoft; administrators use their password (superusers only). |
 | SSO button missing | The `VITE_*` value was set after the build. Rebuild with `--build`. |
 | Google: "origin not allowed" | Add the exact origin, including the port, to Authorized JavaScript origins. |
 | Invitee sees "not found" on the link | The link was already used, revoked, or is older than 7 days. Invite again. |

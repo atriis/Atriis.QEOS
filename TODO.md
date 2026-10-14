@@ -188,9 +188,10 @@ Reliability and operations
 ### Microsoft SSO
 - [x] Sign in with Microsoft (Entra ID) ID tokens from an allowlist of tenants; link to an existing account
 - [x] Signing-key fetch hardened for Google and Microsoft (timeout, throttled refresh); outages answer 503
+- [x] SSO-only mode (`AUTH_SSO_ONLY`, ADR-031): Microsoft sign-in only, active superusers keep a logged password break-glass, non-superuser sessions revoked once per switch, readiness and a one-time 7-day link allowance
 - [ ] Personal Microsoft accounts (outlook.com)
 - [ ] Map Entra groups / app roles to organization roles
-- [ ] SCIM provisioning and deprovisioning
+- [ ] SCIM provisioning and deprovisioning (ends the sessions of people removed from Entra; today they last until the refresh token expires, ADR-031)
 - [ ] GitHub SSO
 - [ ] Single sign-out
 - [x] MFA for password accounts: TOTP enrollment (QR + otpauth URI), verification on login, recovery codes; SSO sign-ins defer MFA to the identity provider
