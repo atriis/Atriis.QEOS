@@ -198,7 +198,7 @@ def sso_sign_in(db: Session, identity: dict, label: str, *, existing_account_det
     }
 
 
-@router.post("/google", response_model=Token)
+@router.post("/google", response_model=Token, dependencies=[Depends(deps.sso_provider_allowed("google"))])
 def google_login(
     *,
     db: Session = Depends(deps.get_db),
@@ -214,7 +214,7 @@ def google_login(
     return tokens
 
 
-@router.post("/microsoft", response_model=Token)
+@router.post("/microsoft", response_model=Token, dependencies=[Depends(deps.sso_provider_allowed("microsoft"))])
 def microsoft_login(
     *,
     db: Session = Depends(deps.get_db),
@@ -236,7 +236,8 @@ def microsoft_login(
 # (Azure was replaced by /sso/microsoft.)
 
 
-@router.post("/github", response_model=Token)
+# GitHub is never a valid SSO-only provider, so the mode answers its 403 before the 501
+@router.post("/github", response_model=Token, dependencies=[Depends(deps.sso_provider_allowed("github"))])
 def github_login():
     raise HTTPException(
         status_code=status.HTTP_501_NOT_IMPLEMENTED,

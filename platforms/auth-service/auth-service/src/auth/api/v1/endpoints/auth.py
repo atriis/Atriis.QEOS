@@ -16,7 +16,7 @@ from src.auth.schemas.auth import (
     PasswordResetConfirm, RefreshTokenRequest, ResendVerificationRequest, ChangePasswordRequest,
 )
 from src.auth.service import mfa_service
-from src.auth.service.auth_mode import available_providers
+from src.auth.service.auth_mode import available_providers, client_ip, log_break_glass, sso_only_error
 from src.auth.schemas.user import RegisterRequest
 from src.auth.models.pending_registration import PendingRegistration
 from src.auth.models.password_reset import PasswordReset
@@ -49,7 +49,7 @@ def auth_methods():
     return AuthMethods(password=not settings.AUTH_SSO_ONLY, providers=available_providers())
 
 
-@router.post("/register", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/register", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(deps.password_routes_enabled)])
 def register_user(
     user_in: RegisterRequest,
     db: Session = Depends(deps.get_db)
@@ -91,7 +91,7 @@ def register_user(
     return {"message": "Check your email to complete registration"}
 
 
-@router.get("/verify-email", response_model=Token)
+@router.get("/verify-email", response_model=Token, dependencies=[Depends(deps.password_routes_enabled)])
 def verify_email(token: str, response: Response, db: Session = Depends(deps.get_db)):
     """
     Complete registration: turn a valid, unexpired PendingRegistration into a User and
@@ -173,7 +173,7 @@ def verify_email(token: str, response: Response, db: Session = Depends(deps.get_
     }
 
 
-@router.post("/resend-verification")
+@router.post("/resend-verification", dependencies=[Depends(deps.password_routes_enabled)])
 def resend_verification(request: ResendVerificationRequest, db: Session = Depends(deps.get_db)):
     """
     Resend a verification link. Always answers the same way regardless of whether a
@@ -241,14 +241,21 @@ def _issue_tokens(db: Session, user: User, response: Response) -> dict:
 def login_access_token(
     *,
     db: Session = Depends(deps.get_db),
+    http_request: Request,
     response: Response,
     form_data: LoginRequest
 ):
     """
     Token login. With MFA enabled the response is a five-minute challenge
     instead of a session: {"mfa_required": true, "mfa_token": ...}.
+
+    SSO-only mode (ADR-031): the password is checked first, as always; then only an active superuser
+    goes on. Everyone else gets the same 403 whether the password was right or wrong, so the answer
+    tells nobody who is a superuser or which passwords are valid.
     """
     user = AuthService.authenticate_user(db, form_data.email, form_data.password)
+    if settings.AUTH_SSO_ONLY and not (user and user.is_active and user.is_superuser):
+        raise sso_only_error()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -260,6 +267,8 @@ def login_access_token(
 
     if user.mfa_enabled:
         return {"mfa_required": True, "mfa_token": mfa_service.create_mfa_token(user)}
+    if settings.AUTH_SSO_ONLY:
+        log_break_glass(user, client_ip(http_request))
     return _issue_tokens(db, user, response)
 
 
@@ -267,6 +276,7 @@ def login_access_token(
 def mfa_verify(
     *,
     db: Session = Depends(deps.get_db),
+    http_request: Request,
     response: Response,
     request: MfaVerifyRequest
 ):
@@ -282,8 +292,14 @@ def mfa_verify(
     user = UserService.get_user_by_id(db, user_id)
     if not user or not user.is_active or not user.mfa_enabled:
         raise invalid
+    if settings.AUTH_SSO_ONLY and not user.is_superuser:
+        # A challenge issued just before the switch (it lives five minutes) must not finish an
+        # ordinary password sign-in; refused before the code is checked, so no recovery code is spent
+        raise sso_only_error()
     if not mfa_service.check_code(db, user, request.code):
         raise invalid
+    if settings.AUTH_SSO_ONLY:
+        log_break_glass(user, client_ip(http_request))
     return _issue_tokens(db, user, response)
 
 
@@ -478,7 +494,7 @@ def _hash_reset_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-@router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED)
+@router.post("/forgot-password", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(deps.password_routes_enabled)])
 def initiate_password_reset(request: PasswordResetRequest, db: Session = Depends(deps.get_db)):
     user = db.query(User).filter(User.email == request.email).first()
     # SSO-only accounts have no password to reset; they sign in with their provider
@@ -502,7 +518,7 @@ def initiate_password_reset(request: PasswordResetRequest, db: Session = Depends
     return {"message": FORGOT_PASSWORD_MESSAGE}
 
 
-@router.post("/reset-password")
+@router.post("/reset-password", dependencies=[Depends(deps.password_routes_enabled)])
 def reset_password(request: PasswordResetConfirm, db: Session = Depends(deps.get_db)):
     now = datetime.now(timezone.utc)
     reset = db.query(PasswordReset).filter(
@@ -534,6 +550,8 @@ def change_password(
     db: Session = Depends(deps.get_db),
     current_user: User = Depends(deps.get_current_active_user),
 ):
+    if settings.AUTH_SSO_ONLY and not current_user.is_superuser:
+        raise sso_only_error()
     if not current_user.hashed_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

@@ -81,6 +81,14 @@ details.
 - **SSO.** Google and Microsoft ID tokens verified against the providers'
   signing keys; Microsoft sign-in limited to the tenants in
   `AZURE_ALLOWED_TENANTS`.
+- **SSO-only mode (ADR-031).** `AUTH_SSO_ONLY=true` turns off registration,
+  email verification, password recovery and password sign-in for everyone but
+  active superusers (break-glass; MFA still applies). A refused password
+  sign-in answers the same 403 whether the password was right or wrong, so it
+  reveals neither superuser status nor password validity. Every break-glass
+  sign-in is logged at WARNING with user id, email, IP and time; no password,
+  token or client id is ever logged. auth-service refuses to start when a
+  provider the mode lists is not configured.
 - **Access control.** Organisation roles (owner, admin, member, viewer,
   billing_manager) checked on every request; project access follows the
   organisation role; non-members get 404.

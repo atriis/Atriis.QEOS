@@ -67,6 +67,10 @@ Grafana; its `/monitoring?next=` page does the same when the gateway sends a coo
   provider to an existing account.
 - SSO-only mode (ADR-031): `AUTH_SSO_ONLY`, `AUTH_SSO_PROVIDERS`. Public
   `GET /auth/methods` → `{password, providers}` tells the dashboard what to show.
+  In the mode, registration, verification and recovery answer 403
+  `{"detail": {"code": "sso_only", ...}}`; `/auth/login` lets only active
+  superusers through (same 403 for every other case, MFA kept, logged as
+  break-glass); unlisted providers answer the same 403.
 - Every service accepts only access tokens as sessions (MFA challenge, refresh
   and service tokens are rejected). `/internal/v1/users[/{id}]` (HTTP Basic,
   INTERNAL_API_PASSWORD; not routed by the gateway) serves organization-service.

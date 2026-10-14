@@ -202,6 +202,14 @@ set it to any address). The address must be one the user model accepts; otherwis
 - `POST /api/v1/sso/microsoft` - Authenticate with a Microsoft (Entra ID) ID token from an allowed tenant
 - `POST /api/v1/users/me/link/microsoft` - Link a Microsoft identity to the signed-in account (requires `current_password` when the account has one)
 
+### SSO-only mode (ADR-031)
+With `AUTH_SSO_ONLY=true`, every refusal answers `403 {"detail": {"code": "sso_only", "message": "Sign-in is through Microsoft only."}}` (the names come from `AUTH_SSO_PROVIDERS`):
+- `POST /auth/register`, `GET /auth/verify-email`, `POST /auth/resend-verification`, `POST /auth/forgot-password`, `POST /auth/reset-password`: always.
+- `POST /auth/login`: the password is checked first; an active superuser goes on (MFA still asks for its code); everyone else gets the same 403, right or wrong password, so the answer reveals neither superuser status nor password validity. Each successful password sign-in is logged at WARNING: `break-glass sign-in: user_id=… email=… ip=… at=…`.
+- `POST /auth/mfa/verify`: refuses a non-superuser's challenge (one issued just before the switch) without spending its code.
+- `POST /auth/change-password` and a password in `PUT /users/me`: superusers only.
+- `/sso/{provider}` and `/users/me/link/{provider}` for a provider not in `AUTH_SSO_PROVIDERS` (GitHub always).
+
 ### User Management
 - `GET /api/v1/users/me` - Get current user's profile. `monitoring_url` is `"/grafana/"` for a superuser while `MONITORING_ENABLED` is true, otherwise `null`; the dashboard shows its Monitoring item only when it is set.
 - `PUT /api/v1/users/me` - Update current user's profile. Accepts `UserSelfUpdate` only: password (with `current_password`), full_name, avatar_url, department, job_title. Unknown fields are rejected with 422 rather than silently ignored, so `email`, `is_active` and `is_superuser` all fail loudly. Changing a password revokes every session; an SSO account cannot gain a password here.

@@ -11,6 +11,7 @@ from src.auth.models.user import User as UserModel
 from src.auth.models.oauth import OAuthAccount
 from src.auth.service.auth_service import AuthService
 from src.auth.config import settings
+from src.auth.service.auth_mode import sso_only_error
 from src.auth.utils.grafana_session import MONITORING_URL
 from src.auth.utils.password import verify_password
 from sqlalchemy.exc import IntegrityError
@@ -59,6 +60,9 @@ def update_user_me(
     Update own user.
     """
     changing_password = user_in.password is not None
+    if changing_password and settings.AUTH_SSO_ONLY and not current_user.is_superuser:
+        # The same rule as /auth/change-password in SSO-only mode (ADR-031)
+        raise sso_only_error()
     if changing_password:
         if current_user.hashed_password is None:
             # An SSO account has no password to confirm, so setting a first one used to be
@@ -143,7 +147,7 @@ def _link_identity(db: Session, current_user: UserModel, credential: str, curren
     return current_user
 
 
-@router.post("/me/link/google", response_model=User)
+@router.post("/me/link/google", response_model=User, dependencies=[Depends(deps.sso_provider_allowed("google"))])
 def link_google_account(
     *,
     db: Session = Depends(deps.get_db),
@@ -155,7 +159,7 @@ def link_google_account(
                           verify_google_credential, "Google")
 
 
-@router.post("/me/link/microsoft", response_model=User)
+@router.post("/me/link/microsoft", response_model=User, dependencies=[Depends(deps.sso_provider_allowed("microsoft"))])
 def link_microsoft_account(
     *,
     db: Session = Depends(deps.get_db),

@@ -4,7 +4,10 @@ Settings: AUTH_SSO_ONLY, AUTH_SSO_PROVIDERS. Messages name a setting, never its 
 tenant ids stay out of the log.
 """
 import logging
+from datetime import datetime, timezone
+from typing import Optional
 
+from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from src.auth.config import settings
@@ -95,3 +98,30 @@ def warn_if_no_break_glass(db: Session) -> None:
         logger.warning(
             "SSO-only mode is on and there is no active superuser: nobody can use the break-glass password sign-in"
         )
+
+
+def sso_only_detail() -> dict:
+    """The one body every refusal in the mode carries; the names come from AUTH_SSO_PROVIDERS."""
+    names = " or ".join(PROVIDER_LABELS[name] for name in sso_only_providers()) or "single sign-on"
+    return {"code": "sso_only", "message": f"Sign-in is through {names} only."}
+
+
+def sso_only_error() -> HTTPException:
+    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=sso_only_detail())
+
+
+def client_ip(request: Request) -> Optional[str]:
+    """The caller's address. The gateway overwrites X-Forwarded-For with the address it saw
+    (gateway/nginx.conf.template), so its first entry is trusted; without it, the socket peer."""
+    first = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+    if first:
+        return first
+    return request.client.host if request.client else None
+
+
+def log_break_glass(user: User, ip: Optional[str]) -> None:
+    """Every password sign-in that succeeds in SSO-only mode. Identity and where from, never a secret."""
+    logger.warning(
+        "break-glass sign-in: user_id=%s email=%s ip=%s at=%s",
+        user.id, user.email, ip or "unknown", datetime.now(timezone.utc).isoformat(),
+    )

@@ -6,6 +6,7 @@ from src.auth.db.session import SessionLocal, get_db
 from src.auth.models.user import User
 from src.auth.utils.tokens import decode_token, is_access_token
 from src.auth.config import settings
+from src.auth.service.auth_mode import sso_only_error, sso_only_providers
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_STR}/auth/login")
 # Same scheme, but a missing header yields None instead of a 401: for logout, which must clear its
@@ -64,3 +65,17 @@ async def get_current_active_superuser(
             detail="The user doesn't have enough privileges",
         )
     return current_user
+
+
+def password_routes_enabled() -> None:
+    """Registration, email verification and password recovery are off in SSO-only mode (ADR-031)."""
+    if settings.AUTH_SSO_ONLY:
+        raise sso_only_error()
+
+
+def sso_provider_allowed(provider: str):
+    """A provider's sign-in and link routes answer the SSO-only 403 when the mode does not list it."""
+    def _check() -> None:
+        if settings.AUTH_SSO_ONLY and provider not in sso_only_providers():
+            raise sso_only_error()
+    return _check
