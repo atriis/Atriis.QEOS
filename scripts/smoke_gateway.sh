@@ -346,9 +346,9 @@ body_lacks "... the token itself is not stored" "$FAKE_TOKEN"
 
 # ---- failed steps: the step definition and pattern from collector 0.8.0 (spec 2026-10-14) ----
 STEP_BODY="{\"run\":{\"ci_provider\":\"local\",\"branch\":\"smoke-step\",\"started_at\":\"$NOW\",\"finished_at\":\"$NOW\"},\"results\":[{\"name\":\"step-lisb0n\",\"status\":\"failed\",\"message\":\"Invalid city 'Lisb0n'\",\"failed_step\":{\"text\":\"When I search Lisb0n\",\"line\":4,\"definition\":\"features/step_definitions/search.js:12\",\"pattern\":\"When I search {\u2026}\",\"from_a_newer_collector\":1}}]}"
-check "upload a failed step with its definition (and a field from a newer collector)" 201 POST "$BASE/api/v1/collect/runs" \n  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "$STEP_BODY"
+check "upload a failed step with its definition (and a field from a newer collector)" 201 POST "$BASE/api/v1/collect/runs" \
+  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "$STEP_BODY"
 STEP_RUN_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
-
 
 # ---- analytics, through the gateway's overlap route ----
 check "analytics trends -> ingestion-service (overlap route)" 200 GET \
