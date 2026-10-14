@@ -37,6 +37,13 @@ export function isSsoOnlyError(error: unknown): boolean {
   return error instanceof ApiError && error.code === "sso_only";
 }
 
+/** The provider names inside the server's 403 message ("Sign-in is through Google or Microsoft only."), for when
+ *  /auth/methods was unavailable; undefined when the error is not that refusal or the message has another shape. */
+export function ssoOnlyNames(error: unknown): string | undefined {
+  if (!isSsoOnlyError(error)) return undefined;
+  return /through (.+) only\.?$/.exec((error as ApiError).detail)?.[1];
+}
+
 const LABELS: Record<string, string> = { microsoft: "Microsoft", google: "Google" };
 
 export function providerNames(providers: readonly string[]): string {

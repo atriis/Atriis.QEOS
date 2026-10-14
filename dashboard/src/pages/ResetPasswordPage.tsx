@@ -4,7 +4,7 @@ import { ArrowRight, CircleCheck } from "lucide-react";
 import { resetPassword } from "../api/auth";
 import { ApiError } from "../api/http";
 import SsoOnlyNotice from "../components/SsoOnlyNotice";
-import { isSsoOnly, isSsoOnlyError, useAuthMethods } from "../auth/useAuthMethods";
+import { isSsoOnly, isSsoOnlyError, ssoOnlyNames, useAuthMethods } from "../auth/useAuthMethods";
 import AuthShell from "../components/AuthShell";
 import ErrorBanner from "../components/ErrorBanner";
 import NewPasswordFields from "../components/NewPasswordFields";
@@ -44,7 +44,7 @@ export default function ResetPasswordPage() {
     }
   }
 
-  if (isSsoOnly(methods) || isSsoOnlyError(error)) return <SsoOnlyNotice providers={methods?.providers} />;
+  if (isSsoOnly(methods) || isSsoOnlyError(error)) return <SsoOnlyNotice providers={methods?.providers} names={ssoOnlyNames(error)} />;
 
   if (!token) {
     return (

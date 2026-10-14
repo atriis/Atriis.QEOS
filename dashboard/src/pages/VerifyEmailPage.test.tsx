@@ -115,7 +115,7 @@ const SSO_ONLY_403 = { detail: { code: "sso_only", message: "Sign-in is through 
 test("in SSO-only mode an old verification link points to sign-in", async () => {
   server.use(
     http.get("/api/v1/auth/methods", () => HttpResponse.json({ password: false, providers: ["microsoft"] })),
-    http.get("/api/v1/auth/verify-email", () => HttpResponse.json(SSO_ONLY_403, { status: 403 })),
+    http.get("/api/v1/auth/verify-email", () => new Promise<Response>(() => {})),
   );
   renderPage();
   expect(await screen.findByText("Sign-in is through Microsoft only.")).toBeInTheDocument();
@@ -129,4 +129,16 @@ test("a 403 sso_only gives the same notice when /auth/methods was unavailable", 
   );
   renderPage();
   expect(await screen.findByText("Sign-in is through Microsoft only.")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { level: 1, name: "Sign in with Microsoft" })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "Go to sign in" })).toBeInTheDocument();
+});
+
+test("a 403 sso_only names the providers the server named when /auth/methods was unavailable", async () => {
+  server.use(
+    http.get("/api/v1/auth/methods", () => HttpResponse.error()),
+    http.get("/api/v1/auth/verify-email", () => HttpResponse.json({ detail: { code: "sso_only", message: "Sign-in is through Google only." } }, { status: 403 })),
+  );
+  renderPage();
+  expect(await screen.findByRole("heading", { level: 1, name: "Sign in with Google" })).toBeInTheDocument();
+  expect(screen.queryByText(/Microsoft/)).not.toBeInTheDocument();
 });

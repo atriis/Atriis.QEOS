@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { register } from "../api/auth";
 import { rememberAfterVerify, safeNext, withNext } from "../auth/redirect";
 import SsoOnlyNotice from "../components/SsoOnlyNotice";
-import { isSsoOnly, isSsoOnlyError, useAuthMethods } from "../auth/useAuthMethods";
+import { isSsoOnly, isSsoOnlyError, ssoOnlyNames, useAuthMethods } from "../auth/useAuthMethods";
 import AuthShell from "../components/AuthShell";
 import ErrorBanner from "../components/ErrorBanner";
 import TextField from "../components/TextField";
@@ -36,7 +36,7 @@ export default function RegisterPage() {
     }
   }
 
-  if (isSsoOnly(methods) || isSsoOnlyError(error)) return <SsoOnlyNotice providers={methods?.providers} />;
+  if (isSsoOnly(methods) || isSsoOnlyError(error)) return <SsoOnlyNotice providers={methods?.providers} names={ssoOnlyNames(error)} />;
 
   if (done) {
     return (

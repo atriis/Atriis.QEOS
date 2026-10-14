@@ -4,8 +4,9 @@ import { providerNames } from "../auth/useAuthMethods";
 
 /** What Register, Forgot password, Reset password and Verify email show in SSO-only mode (ADR-031),
  *  for bookmarks and old emails: no form, the way to sign in. */
-export default function SsoOnlyNotice({ providers = ["microsoft"] }: { providers?: readonly string[] }) {
-  const names = providerNames(providers);
+export default function SsoOnlyNotice({ providers, names: named }: { providers?: readonly string[]; names?: string }) {
+  // /auth/methods first, then what the server's 403 said, Microsoft only when neither is known
+  const names = providers ? providerNames(providers) : (named ?? "Microsoft");
   return (
     <AuthShell title={`Sign in with ${names}`} subtitle={false}>
       <div className="card">

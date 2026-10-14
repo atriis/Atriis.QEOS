@@ -122,3 +122,16 @@ test("a 403 sso_only gives the same notice when /auth/methods was unavailable", 
   expect(await screen.findByText("Sign-in is through Microsoft only.")).toBeInTheDocument();
   expect(screen.getByRole("heading", { level: 1, name: "Sign in with Microsoft" })).toBeInTheDocument();
 });
+
+test("a 403 sso_only names the providers the server named when /auth/methods was unavailable", async () => {
+  server.use(
+    http.get("/api/v1/auth/methods", () => HttpResponse.error()),
+    http.post("/api/v1/auth/register", () => HttpResponse.json({ detail: { code: "sso_only", message: "Sign-in is through Google only." } }, { status: 403 })),
+  );
+  renderPage();
+  await userEvent.type(screen.getByLabelText(/email/i), "pedro@example.com");
+  await userEvent.type(screen.getByLabelText(/password/i), "UmaPasswordForte123");
+  await userEvent.click(screen.getByRole("button", { name: /create account/i }));
+  expect(await screen.findByRole("heading", { level: 1, name: "Sign in with Google" })).toBeInTheDocument();
+  expect(screen.queryByText(/Microsoft/)).not.toBeInTheDocument();
+});
