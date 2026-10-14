@@ -5,6 +5,7 @@ import pyotp
 import pytest
 
 from src.auth.config import settings
+from src.auth.models.oauth import OAuthAccount
 from src.auth.models.pending_registration import PendingRegistration
 from src.auth.models.user import User
 from src.auth.service import mfa_service
@@ -200,3 +201,31 @@ def test_microsoft_is_refused_when_only_google_is_listed(client, sso_only, monke
     response = client.post("/api/v1/sso/microsoft", json={"credential": "x"})
     assert response.status_code == 403
     assert response.json() == {"detail": {"code": "sso_only", "message": "Sign-in is through Google only."}}
+
+
+ME = "/api/v1/users/me"
+
+
+def test_users_me_reports_links_the_mode_and_the_password(client, db, make_user, auth_header, monkeypatch):
+    ann = make_user("ann@example.com")
+    ann_id = ann.id
+    header = auth_header(ann)
+    db.add_all([
+        OAuthAccount(user_id=ann_id, provider="microsoft", provider_user_id="tenant:oid"),
+        OAuthAccount(user_id=ann_id, provider="google", provider_user_id="g-1"),
+    ])
+    db.commit()
+
+    me = client.get(ME, headers=header).json()
+    assert me["linked_providers"] == ["google", "microsoft"]
+    assert me["sso_only"] is False and me["has_password"] is True
+
+    monkeypatch.setattr(settings, "AUTH_SSO_ONLY", True)
+    assert client.get(ME, headers=header).json()["sso_only"] is True
+
+
+def test_users_me_for_a_passwordless_unlinked_account(client, make_user, auth_header):
+    bob = make_user("bob@example.com", password=None)
+    me = client.get(ME, headers=auth_header(bob)).json()
+    assert me["linked_providers"] == [] and me["has_password"] is False
+    assert "hashed_password" not in me

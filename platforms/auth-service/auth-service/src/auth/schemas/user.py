@@ -100,3 +100,7 @@ class UserMe(User):
     # GET /users/me only: "/grafana/" for a superuser while MONITORING_ENABLED, else null (ADR-027).
     # The dashboard shows its Monitoring item only when this is set.
     monitoring_url: Optional[str] = None
+    # SSO-only mode (ADR-031): the Security page's Microsoft card and Password card read these
+    linked_providers: List[str] = []
+    sso_only: bool = False
+    has_password: bool = False

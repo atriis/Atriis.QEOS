@@ -71,6 +71,8 @@ Grafana; its `/monitoring?next=` page does the same when the gateway sends a coo
   `{"detail": {"code": "sso_only", ...}}`; `/auth/login` lets only active
   superusers through (same 403 for every other case, MFA kept, logged as
   break-glass); unlisted providers answer the same 403.
+  `GET /users/me` carries `linked_providers`, `sso_only` and `has_password` for the
+  Security page.
 - Every service accepts only access tokens as sessions (MFA challenge, refresh
   and service tokens are rejected). `/internal/v1/users[/{id}]` (HTTP Basic,
   INTERNAL_API_PASSWORD; not routed by the gateway) serves organization-service.

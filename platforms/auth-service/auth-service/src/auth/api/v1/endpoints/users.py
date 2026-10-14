@@ -38,15 +38,25 @@ def read_users(
 
 @router.get("/me", response_model=UserMe)
 def read_user_me(
+    db: Session = Depends(deps.get_db),
     current_user: UserModel = Depends(deps.get_current_active_user),
 ):
     """
     Get current user. `monitoring_url` is set only for a superuser while monitoring is on (ADR-027);
+    `linked_providers`, `sso_only` and `has_password` drive the Security page (ADR-031).
     get_current_active_user has already refused an inactive user.
     """
     me = User.model_validate(current_user, from_attributes=True)
     offered = settings.MONITORING_ENABLED and current_user.is_superuser
-    return UserMe(**me.model_dump(), monitoring_url=MONITORING_URL if offered else None)
+    providers = sorted({row.provider for row in db.query(OAuthAccount.provider).filter(
+        OAuthAccount.user_id == current_user.id)})
+    return UserMe(
+        **me.model_dump(),
+        monitoring_url=MONITORING_URL if offered else None,
+        linked_providers=providers,
+        sso_only=settings.AUTH_SSO_ONLY,
+        has_password=current_user.hashed_password is not None,
+    )
 
 
 @router.put("/me", response_model=User)
