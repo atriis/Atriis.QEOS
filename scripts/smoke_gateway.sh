@@ -356,6 +356,10 @@ check "latest-results -> the failed step's definition and key" 200 POST \
   -d "{\"keys\":[\"${STEP_KEY:-0000000000000000000000000000000000000000000000000000000000000000}\"]}"
 body_has "... with the step definition" '"definition":"features/step_definitions/search.js:12"'
 body_has "... and the step key" '"key":"'
+check "failed-steps of that run -> ingestion-service" 200 GET   "$BASE/api/v1/projects/$PROJECT_ID/runs/${STEP_RUN_ID:-0}/failed-steps" "${AUTH[@]}"
+body_has "... grouped by its step definition" '"by":"definition"'
+body_has "... in one test case" '"cases":1'
+body_has "... with its error shape" "\"shape\":\"Invalid city '"
 
 # ---- analytics, through the gateway's overlap route ----
 check "analytics trends -> ingestion-service (overlap route)" 200 GET \

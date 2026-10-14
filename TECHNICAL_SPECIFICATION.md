@@ -137,7 +137,7 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   results.
 - **Read**: runs list per project (filters: branch, failing/passing, environment, CI, commit
   prefix, PR, author, started-at range, scope), run detail with status filter and changed
-  files, run summary, failures grouped by error signature, comparison of two
+  files, failed steps across test cases (`GET /projects/{id}/runs/{run_id}/failed-steps`: by step definition or text, errors by shape, failing since on the run's branch, 50 runs / 90 days), run summary, failures grouped by error signature, comparison of two
   runs. Access: user JWT + project role via project-service.
 - **Analytics** (read roles): trends (`bucket=day|week|month`, Monday weeks,
   any IANA tz, ≤365 d), per-test list (sort/search/limit≤200/offset),
