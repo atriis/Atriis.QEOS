@@ -1,5 +1,6 @@
 """SSO-only mode (ADR-031) at the HTTP boundary."""
 import logging
+from datetime import datetime, timedelta, timezone
 
 import pyotp
 import pytest
@@ -229,3 +230,102 @@ def test_users_me_for_a_passwordless_unlinked_account(client, make_user, auth_he
     me = client.get(ME, headers=auth_header(bob)).json()
     assert me["linked_providers"] == [] and me["has_password"] is False
     assert "hashed_password" not in me
+
+
+READINESS = "/api/v1/users/sso-readiness"
+
+
+def allow_url(user_id):
+    return f"/api/v1/users/{user_id}/allow-microsoft-link"
+
+
+def _link_microsoft(db, user_id, oid="oid-1"):
+    db.add(OAuthAccount(user_id=user_id, provider="microsoft", provider_user_id=f"tenant:{oid}"))
+    db.commit()
+
+
+def _aware(value):
+    parsed = datetime.fromisoformat(value)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def test_readiness_counts_active_users_and_lists_the_unlinked(client, db, make_user, auth_header):
+    root = make_user("root@example.com", superuser=True)
+    ann = make_user("ann@example.com")
+    bob = make_user("bob@example.com")
+    make_user("gone@example.com", active=False)
+    root_id, ann_id, headers = root.id, ann.id, auth_header(root)
+    _link_microsoft(db, bob.id)
+    db.add(OAuthAccount(user_id=ann_id, provider="google", provider_user_id="g-1"))  # not a Microsoft link
+    db.commit()
+
+    # Declared before /users/{user_id}: otherwise "sso-readiness" is parsed as an id and this is a 422
+    response = client.get(READINESS, headers=headers)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["active_users"] == 3 and body["linked"] == 1
+    assert body["unlinked"] == [
+        {"id": ann_id, "email": "ann@example.com", "full_name": None, "is_superuser": False, "link_allowed_until": None},
+        {"id": root_id, "email": "root@example.com", "full_name": None, "is_superuser": True, "link_allowed_until": None},
+    ]
+
+
+def test_readiness_and_allow_are_for_superusers_only(client, db, make_user, auth_header):
+    ann = make_user("ann@example.com")
+    ann_id, headers = ann.id, auth_header(ann)
+    assert client.get(READINESS, headers=headers).status_code == 403
+    assert client.get(READINESS).status_code == 401
+    assert client.post(allow_url(ann_id), headers=headers).status_code == 403
+    assert db.get(User, ann_id).microsoft_link_allowed_until is None
+
+
+def test_allowing_a_link_sets_seven_days_and_is_logged(client, db, make_user, auth_header, caplog):
+    root = make_user("root@example.com", superuser=True)
+    ann = make_user("ann@example.com")
+    ann_id, headers = ann.id, auth_header(root)
+    before = datetime.now(timezone.utc)
+    with caplog.at_level(logging.WARNING, logger="src.auth.service.sso_readiness"):
+        response = client.post(allow_url(ann_id), headers=headers)
+    assert response.status_code == 200, response.text
+    entry = response.json()
+    assert (entry["id"], entry["email"], entry["is_superuser"]) == (ann_id, "ann@example.com", False)
+    until = _aware(entry["link_allowed_until"])
+    assert timedelta(days=7) - timedelta(minutes=1) < until - before < timedelta(days=7) + timedelta(minutes=1)
+    assert "Microsoft link allowed" in caplog.text
+    assert "root@example.com" in caplog.text and "ann@example.com" in caplog.text and until.date().isoformat() in caplog.text
+
+    listed = client.get(READINESS, headers=headers).json()["unlinked"]
+    assert next(u for u in listed if u["id"] == ann_id)["link_allowed_until"] is not None
+
+
+def test_an_expired_allowance_reads_as_none(client, db, make_user, auth_header):
+    root = make_user("root@example.com", superuser=True)
+    ann = make_user("ann@example.com")
+    ann_id, headers = ann.id, auth_header(root)
+    ann.microsoft_link_allowed_until = datetime.now(timezone.utc) - timedelta(minutes=1)
+    db.commit()
+    listed = client.get(READINESS, headers=headers).json()["unlinked"]
+    assert next(u for u in listed if u["id"] == ann_id)["link_allowed_until"] is None
+
+
+def test_allow_an_unknown_user_is_404(client, make_user, auth_header):
+    root = make_user("root@example.com", superuser=True)
+    response = client.post(allow_url(999999), headers=auth_header(root))
+    assert response.status_code == 404
+    assert response.json() == {"detail": "User not found"}
+
+
+@pytest.mark.parametrize("case, detail", [
+    ("linked", "User has already linked Microsoft"),
+    ("inactive", "User is inactive"),
+])
+def test_allow_a_linked_or_inactive_user_is_409(client, db, make_user, auth_header, case, detail):
+    root = make_user("root@example.com", superuser=True)
+    ann = make_user("ann@example.com", active=(case != "inactive"))
+    ann_id, headers = ann.id, auth_header(root)
+    if case == "linked":
+        _link_microsoft(db, ann_id)
+    response = client.post(allow_url(ann_id), headers=headers)
+    assert response.status_code == 409
+    assert response.json() == {"detail": detail}
+    assert db.get(User, ann_id).microsoft_link_allowed_until is None

@@ -104,3 +104,19 @@ class UserMe(User):
     linked_providers: List[str] = []
     sso_only: bool = False
     has_password: bool = False
+
+
+class SsoReadinessEntry(BaseModel):
+    # One active user without a Microsoft link (ADR-031). link_allowed_until: set only while a
+    # superuser's one-time allowance is valid; an expired one reads as null.
+    id: int
+    email: str
+    full_name: Optional[str] = None
+    is_superuser: bool
+    link_allowed_until: Optional[datetime] = None
+
+
+class SsoReadiness(BaseModel):
+    active_users: int
+    linked: int
+    unlinked: List[SsoReadinessEntry]

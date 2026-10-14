@@ -73,6 +73,9 @@ Grafana; its `/monitoring?next=` page does the same when the gateway sends a coo
   break-glass); unlisted providers answer the same 403.
   `GET /users/me` carries `linked_providers`, `sso_only` and `has_password` for the
   Security page.
+  Superusers: `GET /users/sso-readiness` (active users, how many linked Microsoft, the
+  unlinked list) and `POST /users/{id}/allow-microsoft-link` (a one-time 7-day link
+  allowance, logged at WARNING; 404 unknown, 409 linked or inactive).
 - Every service accepts only access tokens as sessions (MFA challenge, refresh
   and service tokens are rejected). `/internal/v1/users[/{id}]` (HTTP Basic,
   INTERNAL_API_PASSWORD; not routed by the gateway) serves organization-service.

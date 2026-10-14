@@ -217,6 +217,8 @@ Sessions: the table `auth_mode_state` (migration 008, one row) records the mode 
 - `PUT /api/v1/users/me` - Update current user's profile. Accepts `UserSelfUpdate` only: password (with `current_password`), full_name, avatar_url, department, job_title. Unknown fields are rejected with 422 rather than silently ignored, so `email`, `is_active` and `is_superuser` all fail loudly. Changing a password revokes every session; an SSO account cannot gain a password here.
 - `POST /api/v1/users/me/link/google` - Link a Google identity to the current authenticated account. Requires `current_password` unless the account is passwordless. Refuses if that identity is linked elsewhere, or if the caller already has a Google link.
 - `GET /api/v1/users/` - List all users (SUPERUSER ONLY)
+- `GET /api/v1/users/sso-readiness` - SUPERUSER ONLY (ADR-031). `{"active_users", "linked", "unlinked": [{"id", "email", "full_name", "is_superuser", "link_allowed_until"}]}`: active users without a Microsoft link, by email, superusers included; `link_allowed_until` is null unless a valid allowance exists.
+- `POST /api/v1/users/{user_id}/allow-microsoft-link` - SUPERUSER ONLY. Lets that account link Microsoft at its next Microsoft sign-in, for 7 days; logged at WARNING (who, whom, until). Returns the readiness entry. `404` unknown user; `409` already linked or inactive.
 - `GET /api/v1/users/{user_id}` - Get a user by id (own account, or any account for a superuser)
 
 There is no endpoint that grants superuser through the API. It is either bootstrapped once at startup from `FIRST_SUPERUSER`/`FIRST_SUPERUSER_PASSWORD` (permanent no-op once any superuser exists) or set directly in the database.

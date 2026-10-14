@@ -5,11 +5,12 @@ from src.auth.api import deps
 from src.auth.service.user_service import UserService
 # UserInDB carries hashed_password; aliasing it as the response model leaked every user's
 # bcrypt hash through /users/me, /users/ and /users/{id}. User is the public shape.
-from src.auth.schemas.user import UserSelfUpdate, UserUpdate, User, UserMe
+from src.auth.schemas.user import UserSelfUpdate, UserUpdate, User, UserMe, SsoReadiness, SsoReadinessEntry
 from src.auth.schemas.auth import LinkGoogleRequest, LinkMicrosoftRequest
 from src.auth.models.user import User as UserModel
 from src.auth.models.oauth import OAuthAccount
 from src.auth.service.auth_service import AuthService
+from src.auth.service import sso_readiness
 from src.auth.config import settings
 from src.auth.service.auth_mode import sso_only_error
 from src.auth.utils.grafana_session import MONITORING_URL
@@ -179,6 +180,33 @@ def link_microsoft_account(
     """Link a Microsoft (Entra ID) identity to the current, authenticated account."""
     return _link_identity(db, current_user, request.credential, request.current_password,
                           verify_microsoft_credential, "Microsoft")
+
+
+@router.get("/sso-readiness", response_model=SsoReadiness)
+def read_sso_readiness(
+    db: Session = Depends(deps.get_db),
+    current_user: UserModel = Depends(deps.get_current_active_superuser),
+):
+    """Who has linked Microsoft yet (ADR-031). Superusers only. Declared before /{user_id}, which would
+    otherwise take "sso-readiness" as an id."""
+    return sso_readiness.readiness(db)
+
+
+@router.post("/{user_id}/allow-microsoft-link", response_model=SsoReadinessEntry)
+def allow_microsoft_link(
+    user_id: int,
+    db: Session = Depends(deps.get_db),
+    current_user: UserModel = Depends(deps.get_current_active_superuser),
+):
+    """Let one account link Microsoft at its next Microsoft sign-in, for 7 days (ADR-031)."""
+    user = UserService.get_user_by_id(db, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User is inactive")
+    if sso_readiness.has_microsoft_link(db, user.id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="User has already linked Microsoft")
+    return sso_readiness.allow_microsoft_link(db, current_user, user)
 
 
 @router.get("/{user_id}", response_model=User)
