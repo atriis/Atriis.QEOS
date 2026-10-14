@@ -24,7 +24,8 @@ def stored(db, make_key):
             RunResult(run_id=run.id, test_key="0" * 64, name=f"{name} ok", status="passed", duration_ms=3),
             RunResult(run_id=run.id, test_key="1" * 64, name=f"{name} bad", status="failed", duration_ms=4,
                       message="password=[REDACTED:password]", redacted=True,
-                      failed_step_text="When I log in", failed_step_line=7),
+                      failed_step_text="When I log in", failed_step_line=7,
+                      failed_step_definition="steps/login.js:3", failed_step_pattern="When I log in"),
             RunChangedFile(run_id=run.id, path="src/app.py", status="modified", additions=1, deletions=0),
             RunComponent(run_id=run.id, name="shop-api", sha="def5678"),
         ])
@@ -59,6 +60,8 @@ def test_an_owner_downloads_every_run_and_result_of_the_project(client, auth, pr
     assert results[1]["message"] == "password=[REDACTED:password]"
     assert (results[1]["failed_step_text"], results[1]["failed_step_line"]) == ("When I log in", 7)
     assert results[0]["failed_step_text"] is None and results[0]["failed_step_line"] is None
+    assert (results[1]["failed_step_definition"], results[1]["failed_step_pattern"]) == ("steps/login.js:3", "When I log in")
+    assert results[0]["failed_step_definition"] is None and results[0]["failed_step_pattern"] is None
     assert "theirs" not in response.text
 
 

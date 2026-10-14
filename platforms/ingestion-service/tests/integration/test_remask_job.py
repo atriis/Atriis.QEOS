@@ -24,7 +24,8 @@ def session_factory(db):
 def add_run(db, make_key):
     keys = {}
 
-    def _add(project_id=1, results=(), ci_run_url=None, failed_steps=None):
+    def _add(project_id=1, results=(), ci_run_url=None, failed_steps=None, definitions=None,
+             patterns=None):
         if project_id not in keys:
             keys[project_id] = make_key(project_id=project_id)[0]
         run = Run(project_id=project_id, api_key_id=keys[project_id].id, request_hash="h", ci_provider="local",
@@ -35,7 +36,9 @@ def add_run(db, make_key):
         for i, (message, details) in enumerate(results):
             db.add(RunResult(run_id=run.id, test_key=f"{i:064d}", name=f"t{i}", status="failed",
                              duration_ms=1, message=message, details=details,
-                             failed_step_text=(failed_steps or {}).get(i)))
+                             failed_step_text=(failed_steps or {}).get(i),
+                             failed_step_definition=(definitions or {}).get(i),
+                             failed_step_pattern=(patterns or {}).get(i)))
         db.commit()
         return run.id
 
@@ -138,3 +141,21 @@ def test_failed_step_text_is_cut_back_to_its_column_length(db, session_factory, 
     row = results(db, run_id)[0]
     assert len(row.failed_step_text) == FAILED_STEP_TEXT_LENGTH
     assert "password=[RED" in row.failed_step_text and "ab" not in row.failed_step_text[985:]
+
+
+def test_step_definition_and_pattern_are_masked(db, session_factory, add_run, capsys):
+    run_id = add_run(results=[("plain", None)], failed_steps={0: "When I log in"},
+                     definitions={0: f"steps/login.js:3 {SECRET}"}, patterns={0: f"When I use {SECRET}"})
+    run_job(session_factory)
+    row = results(db, run_id)[0]
+    assert SECRET not in row.failed_step_definition and SECRET not in row.failed_step_pattern
+    assert row.failed_step_text == "When I log in" and row.redacted is True
+    assert summary(capsys)["kinds"] == {"github_token": 1}
+
+
+def test_masking_that_lengthens_the_definition_is_cut_to_its_column(db, session_factory, add_run):
+    from src.ingestion.models.run import FAILED_STEP_DEFINITION_LENGTH
+
+    run_id = add_run(results=[("plain", None)], definitions={0: "x" * 480 + f" {SECRET}"})
+    run_job(session_factory)
+    assert len(results(db, run_id)[0].failed_step_definition) <= FAILED_STEP_DEFINITION_LENGTH
