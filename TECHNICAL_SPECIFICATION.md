@@ -147,7 +147,7 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   runs and shows, but its failures do not fail a run or alert), latest-keys,
   latest-results (each test's latest result with its failed step, or with `run_id` its result in
   that run, which a Last runs bar opens; the result payload's optional
-  `failed_step` `{text 1-1000, line 1-1,000,000}` is stored masked) and
+  `failed_step` `{text 1-1000, line 1-1,000,000, definition 1-500, pattern 1-1000}` is stored masked; unknown fields in it are ignored) and
   run-strip (each test's own last results, for case lists), duration-estimate (Run from QEOS),
   test impact (ADR-029; every role that reads runs): `POST /analytics/impact`
   scores any change (1–5,000 paths of 1–1,000 characters, optional branch)
@@ -210,7 +210,7 @@ Alembic jobs. Only the owning service writes its database; cross-domain
 reads go through APIs (blueprint principle, enforced in practice).
 
 Key ingestion tables: test_runs (+ change summary columns), test_results
-(message/details masked+truncated, `failed_step_text`/`failed_step_line` masked, `(test_key, run_id)` index),
+(message/details masked+truncated, `failed_step_text`/`failed_step_line`/`failed_step_definition`/`failed_step_pattern` (text fields masked; partial index on the definition), `(test_key, run_id)` index),
 run_changed_files, run_components, muted_tests (quarantine), flaky_daily /
 flaky_rollup_days (daily flip aggregates + computed-day markers), impact_pairs /
 impact_test_base (test impact statistics, rebuilt nightly) and run_impact (the

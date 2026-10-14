@@ -130,7 +130,7 @@ details.
   headers, cookies, passwords in URLs and command lines, JWTs, cloud and vendor
   tokens, private keys, key=value secrets, email addresses, card numbers) are
   masked before storage. Projects can add their own patterns, which run on RE2
-  so that no pattern can stall ingestion.
+  so that no pattern can stall ingestion. The failed Cucumber step's text, step definition and pattern are masked the same way, at upload and by the re-mask job.
 - **Gateway.** TLS 1.2/1.3. Per-IP rate limits: 20 requests/s on the API,
   10/s on uploads, and 5/s on sign-in, registration, password and MFA
   endpoints. 10 MB body cap. `X-Forwarded-For` is replaced, not appended, and

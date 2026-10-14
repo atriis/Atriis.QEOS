@@ -133,7 +133,25 @@ def test_failed_step_is_optional_and_validated():
 
 
 @pytest.mark.parametrize("step", [{"text": ""}, {"text": "x" * 1001}, {"text": "x", "line": 0},
-                                  {"text": "x", "line": 1_000_001}, {"text": "x", "extra": 1}])
+                                  {"text": "x", "line": 1_000_001}, {"text": "x", "definition": ""},
+                                  {"text": "x", "definition": "d" * 501}, {"text": "x", "pattern": ""},
+                                  {"text": "x", "pattern": "p" * 1001}])
 def test_invalid_failed_step_is_rejected(step):
     with pytest.raises(ValidationError):
         RunUpload.model_validate(body(results=[{"name": "t", "status": "failed", "failed_step": step}]))
+
+
+def test_failed_step_definition_and_pattern_are_optional_free_text():
+    step = {"text": "When I search Lisbon", "definition": "steps/search.js:12\x00", "pattern": "When I search {…}"}
+    parsed = RunUpload.model_validate(body(results=[{"name": "t", "status": "failed", "failed_step": step}]))
+    got = parsed.results[0].failed_step
+    assert got.definition == "steps/search.js:12�" and got.pattern == "When I search {…}"
+    plain = RunUpload.model_validate(body(results=[{"name": "t", "status": "failed", "failed_step": {"text": "x"}}]))
+    assert plain.results[0].failed_step.definition is None and plain.results[0].failed_step.pattern is None
+
+
+def test_unknown_failed_step_fields_are_ignored():
+    """Forward compatibility (spec 2026-10-14 §3.1): a newer collector's field never costs the upload."""
+    step = {"text": "When x", "line": 3, "hook": "before", "location": {"uri": "f.feature"}}
+    parsed = RunUpload.model_validate(body(results=[{"name": "t", "status": "failed", "failed_step": step}]))
+    assert parsed.results[0].failed_step.model_dump() == {"text": "When x", "line": 3, "definition": None, "pattern": None}

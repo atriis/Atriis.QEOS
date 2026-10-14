@@ -97,14 +97,18 @@ class RunIn(BaseModel):
 
 
 class FailedStepIn(BaseModel):
-    """The Cucumber step that failed (spec 2026-10-13 §2)."""
-    model_config = ConfigDict(extra="forbid")
+    """The Cucumber step that failed (spec 2026-10-13 §2), and from collector 0.8.0 its step definition and its text
+    with the matched arguments as {…} (spec 2026-10-14 §3.1). Unknown fields are ignored, not refused: a newer
+    collector's addition must never cost the upload."""
+    model_config = ConfigDict(extra="ignore")
 
     text: Annotated[str, StringConstraints(min_length=1, max_length=1000)]
     line: Optional[int] = Field(None, ge=1, le=1_000_000)
+    definition: Optional[Annotated[str, StringConstraints(min_length=1, max_length=500)]] = None
+    pattern: Optional[Annotated[str, StringConstraints(min_length=1, max_length=1000)]] = None
 
     # Free text like message/details: replaced, never rejected
-    _clean_text = field_validator("text", mode="after")(_replace_unstorable)
+    _clean_text = field_validator("text", "definition", "pattern", mode="after")(_replace_unstorable)
 
 
 class ResultIn(BaseModel):
