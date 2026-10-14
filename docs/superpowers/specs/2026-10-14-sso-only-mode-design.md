@@ -43,7 +43,8 @@ switching the mode from the dashboard.
 
 At startup, with `AUTH_SSO_ONLY=true`, auth-service **refuses to start** when a listed provider is not
 configured (Microsoft: `AZURE_CLIENT_ID` and at least one allowed tenant; Google: `GOOGLE_CLIENT_ID`), and
-logs which setting is missing. An unknown provider name also stops start-up.
+logs which setting is missing. An unknown provider name also stops start-up. When the mode is on and no
+active superuser exists, start-up continues but logs a WARNING: nobody could use the break-glass sign-in.
 
 docker-compose.yml forwards both settings to auth-service from `.env`, and now also `AZURE_CLIENT_ID`,
 `AZURE_TENANT_ID` and `AZURE_ALLOWED_TENANTS` (today they need an override file, SETUP §3.8), so the mode and
@@ -82,7 +83,9 @@ id, email, IP and time.
 
 A one-row table `auth_mode_state (id=1, sso_only BOOLEAN, applied_at)` records the mode last applied
 (migration 008). At start-up, when `AUTH_SSO_ONLY=true` and the stored value is `false` (or there is no row),
-auth-service revokes every non-revoked session of every user who is not a superuser, then stores `true`.
+auth-service revokes every non-revoked session of every user who is not a superuser, then stores `true`,
+in one transaction that locks the row (`SELECT … FOR UPDATE`), so two auth-service processes starting
+together revoke once.
 When the mode is off it stores `false`. So each off-to-on change revokes once, and restarts do not.
 
 Access tokens already issued keep working until they expire (at most `ACCESS_TOKEN_EXPIRE_MINUTES`); the
@@ -97,10 +100,12 @@ next refresh is refused because its session is revoked.
  "unlinked": [{"id": 7, "email": "ana@…", "full_name": "Ana", "link_allowed_until": null}]}
 ```
 
-`unlinked` lists active users without a Microsoft `OAuthAccount`, sorted by email.
+`unlinked` lists active users without a Microsoft `OAuthAccount`, sorted by email, superusers included
+(each entry has `is_superuser`): they keep the break-glass, but should link too.
 
 `POST /api/v1/users/{id}/allow-microsoft-link` (superusers only) sets `users.microsoft_link_allowed_until`
-to now + 7 days (migration 008 adds the column) and returns the readiness entry. 404 for an unknown user,
+to now + 7 days (migration 008 adds the column), logs it at WARNING (who allowed whom, until when), and
+returns the readiness entry. 404 for an unknown user,
 409 when the user is already linked or inactive.
 
 `POST /sso/microsoft`: when the identity is new, an account with the same email exists, is not linked and
@@ -152,11 +157,12 @@ the layout before it is built.
 
 ## 5. Testing
 
-- **auth-service:** start-up refusal (missing Microsoft settings, unknown provider); `/auth/methods` in both
+- **auth-service:** start-up refusal (missing Microsoft settings, unknown provider); the no-superuser warning; `/auth/methods` in both
   modes; each password route's 403; superuser break-glass with and without MFA; a non-superuser's 403 is
   identical for a right and a wrong password; the break-glass log line; Google refused when not listed;
   session revocation once per off-to-on change and not on restart, superuser sessions kept; readiness counts
-  and list; allowance set, expiry, 404/409, consumed on sign-in, refused after expiry; `linked_providers`
+  and list (superusers included); allowance set and logged, expiry, 404/409, consumed on sign-in, refused after
+  expiry; `linked_providers`
   and `sso_only` on `/users/me`; Microsoft sign-in otherwise unchanged; migration 008 up and down.
 - **Dashboard:** login page in both modes and the break-glass disclosure; the four pages' notice (from
   `/auth/methods` and from a 403 `sso_only`); link button success, password prompt and error; Password card
@@ -167,7 +173,8 @@ the layout before it is built.
 ## 6. Documentation
 
 ADR-031 (SSO-only mode). SETUP §3.8: link everyone first, check readiness, set `AUTH_SSO_ONLY=true`,
-restart; break-glass; the known limitation. SECURITY (sign-in surface, break-glass, logging). auth-service
+restart; break-glass; the known limitation; a new colleague signs in once with Microsoft before they can be
+added to an organization or project (members are added by existing account). SECURITY (sign-in surface, break-glass, logging). auth-service
 README (settings, endpoints, 403 code). PRODUCT, TODO (SCIM later), TECHNICAL_SPECIFICATION, DESIGN (login
 and Security cards), `.env.example`.
 
