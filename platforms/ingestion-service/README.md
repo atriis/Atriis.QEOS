@@ -111,11 +111,13 @@ can sync cases without a user login. See ADR-024.
   Every project role may read it; 404 for an unknown run or a run of another project. The
   dashboard's search uses it to check that a run exists.
 - `GET /api/v1/projects/<id>/runs/<run_id>/failed-steps` — the run's failed Cucumber steps across its test cases (spec
-  2026-10-14). A step is its step definition (`failed_step_definition`, collector 0.8.0), else its text without case
+  2026-10-14). Only results with a recorded failed step (`failed_step_text`, collector 0.6.0 and later) count: JUnit
+  and pytest failures, and Cucumber rows stored before 0.6.0, never appear here (unlike `latest-results`, which falls
+  back to `details`). A run without failed steps answers `{"steps": []}`. A step is its step definition (`failed_step_definition`, collector 0.8.0), else its text without case
   or extra spaces (`"by": "definition" | "text"`); each test counts with its last row in the run. Per step: `key`
-  (the `failed_step.key` of `latest-results`), `pattern` (the most frequent, else the text), `definition`, `cases`
-  (distinct tests), `errors` grouped by shape (the first error line with quoted values, numbers, UUIDs and hex as
-  `…`; one real `example`; at most 50 `tests` `{test_key, name, text}` with `more` beyond) and `since` `{run_id,
+  (the `failed_step.key` of `latest-results`), `pattern` (the most frequent, else the text), `definition` (absent when
+  `by` is `text`), `cases` (distinct tests), `errors` grouped by shape (the first error line with quoted values,
+  numbers, UUIDs and hex as `…`; one real `example`, `null` when the tests have no message; at most 50 `tests` `{test_key, name, text}` with `more` beyond) and `since` `{run_id,
   started_at, runs, capped}`: walking back through earlier runs of the project on the run's branch (every branch when
   the run has none) that ran one of those tests (skipped results are not counted), the streak goes on while one of
   them failed at this step, at most 50 runs or 90 days (`capped`). `last_passed` `{run_id, started_at}` is the run

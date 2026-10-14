@@ -113,6 +113,29 @@ def test_a_run_without_failed_steps_answers_an_empty_list(client, auth, project_
     assert get(client, auth, run) == []
 
 
+def test_junit_and_pytest_failures_are_not_failed_steps(client, auth, project_role, seed_run, db):
+    """Only Cucumber results with a recorded failed step count: the details fallback of the case page does not apply."""
+    project_role("viewer")
+    run = seed_run(T0, results=(("surefire", "failed", 5), ("pytest", "errored", 5)))
+    for row in db.query(RunResult).filter_by(run_id=run.id):
+        row.message = "expected 3 but was 2"
+        row.details = ("org.opentest4j.AssertionFailedError: expected 3 but was 2\n\tat Foo.test(Foo.java:9)"
+                       if row.name == "surefire" else "def test_div():\n>   assert div(6, 2) == 4")
+    db.commit()
+    assert get(client, auth, run) == []
+
+
+def test_earlier_rows_without_step_text_do_not_continue_the_streak(client, auth, project_role, seed_run, step_run, db):
+    project_role("viewer")
+    old = seed_run(T0, results=(("lisbon", "failed", 5),))
+    row = db.query(RunResult).filter_by(run_id=old.id).one()
+    row.message, row.details = "boom", "When I search Lisbon\nboom"  # the details fallback would read this as the step
+    db.commit()
+    run = step_run(T0 + timedelta(hours=1), {"lisbon": failing("When I search Lisbon")})
+    (step,) = get(client, auth, run)
+    assert step["since"]["run_id"] == run.id and step["since"]["runs"] == 1 and "last_passed" not in step
+
+
 def test_since_walks_back_while_the_step_keeps_failing_and_names_the_run_that_passed(
         client, auth, project_role, step_run):
     project_role("viewer")
@@ -241,6 +264,34 @@ def test_several_steps_cost_a_bounded_number_of_queries(client, auth, project_ro
     # nothing (another engine) fails here
 
 
+def test_the_history_query_loads_no_message_or_details(client, auth, project_role, step_run, db):
+    project_role("viewer")
+    step_run(T0, {"lisbon": failing("When I search Lisbon", message="x" * 500)})
+    run = step_run(T0 + timedelta(hours=1), {"lisbon": failing("When I search Lisbon")})
+    sql, engine = [], db.get_bind()
+
+    def record(_conn, _cursor, statement, *_):
+        sql.append(statement.lower())
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        get(client, auth, run)
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    history = [s for s in sql if "partition by test_results.run_id" in s]
+    assert history, "the history statement was not heard"
+    assert not any("test_results.message" in s or "test_results.details" in s for s in history)
+    assert not any("test_results.details" in s for s in sql)  # the run's own rows need no details either
+
+
+def test_a_long_error_message_is_cut_in_the_database(client, auth, project_role, step_run):
+    project_role("viewer")
+    message = "Invalid city 'Lisb0n'\n" + "at x\n" * 5000
+    run = step_run(T0, {"lisbon": failing("When I search Lisbon", message=message)})
+    (step,) = get(client, auth, run)
+    assert step["errors"][0]["shape"] == "Invalid city '…'"
+
+
 def test_tests_with_different_histories_walk_the_union_of_their_runs(client, auth, project_role, step_run):
     """One step failing in lisbon and porto; each test's own 50-run window differs (lisbon ran in 55 earlier runs,
     porto in 5), the walk is over the union of their runs, newest first:
@@ -284,6 +335,15 @@ def test_exactly_50_runs_with_nothing_before_is_not_capped(client, auth, project
     runs = [step_run(T0 + timedelta(minutes=i), {"lisbon": failing("When I search Lisbon")}) for i in range(50)]
     (step,) = get(client, auth, runs[-1])
     assert step["since"]["runs"] == 50 and step["since"]["capped"] is False and step["since"]["run_id"] == runs[0].id
+
+
+def test_exactly_50_runs_whose_50th_earlier_run_passed_names_it(client, auth, project_role, step_run):
+    project_role("viewer")
+    passed = step_run(T0, {"lisbon": "passed"})
+    runs = [step_run(T0 + timedelta(minutes=i + 1), {"lisbon": failing("When I search Lisbon")}) for i in range(50)]
+    (step,) = get(client, auth, runs[-1])
+    assert step["since"]["runs"] == 50 and step["since"]["capped"] is False and step["since"]["run_id"] == runs[0].id
+    assert step["last_passed"]["run_id"] == passed.id
 
 
 def test_the_walk_stops_at_90_days(client, auth, project_role, step_run):

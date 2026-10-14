@@ -25,7 +25,8 @@ comparison, failures grouped by cause, flaky-test detection with quarantine,
 and a filterable, printable Report per period. It also keeps a test-case
 catalogue in sync with the team's Gherkin features and starts runs in the
 team's own GitHub Actions, and shows a failing scenario's failed step in red
-where the team reads it, and on each run which step failed across how many test cases and since when. Success: a team answers "what is broken, what is
+where the team reads it, and on each run which step failed across how many
+test cases and since when. Success: a team answers "what is broken, what is
 flaky, what is getting worse" from one place instead of scrolling CI logs.
 
 ## Positioning

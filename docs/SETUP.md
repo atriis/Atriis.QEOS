@@ -1143,7 +1143,7 @@ stack on `https://localhost:8443`, add `--ca-file qeos-ca.crt` ([4.1.3](#413-col
   one extra line in the failed-step tooltip): each failed Cucumber step is listed once, the one in the
   most test cases first. A row shows the step, "failed in N test cases" and "failing since run #430,
   14 Oct (5 runs) · last passed in run #429" (or "new in this run"; "failing for more than 50 runs"
-  or "for more than 90 days" when the streak is longer than QEOS counts). Open a row to see its errors
+  or "failing for more than 90 days" when the streak is longer than QEOS counts). Open a row to see its errors
   grouped by shape (quoted values, numbers, UUIDs and hex in the first error line are folded together), each with the
   test cases that hit it and the text they ran; a test case links to the case as of that run. "Failing
   since" counts only runs on the same branch as the run (every branch when the run has none). The

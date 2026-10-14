@@ -22,6 +22,7 @@ COUNTED = ("passed", "failed", "errored")
 MAX_TESTS = 50   # per error group
 MAX_RUNS = 50    # the streak, this run included
 MAX_DAYS = 90
+MESSAGE_CHARS = 2000  # of an error message read from the database; error_shape reads at most this much
 
 
 def failed_steps(db: Session, project_id: int, run: Run) -> dict:
@@ -37,14 +38,19 @@ def failed_steps(db: Session, project_id: int, run: Run) -> dict:
 
 
 def _failing_rows(db: Session, run_id: int) -> List[dict]:
+    # Only the first MESSAGE_CHARS of the message come over (the error shape and example read its first line), and
+    # no details. Only rows with a stored failed step count: JUnit and pytest failures have none, and the case page's
+    # fallback to details' first line would show their exception and code lines as steps.
     ranked = _latest_ranked(
         [Run.id == run_id],
-        RunResult.name, RunResult.status, RunResult.message, RunResult.details, RunResult.failed_step_text,
-        RunResult.failed_step_line, RunResult.failed_step_definition, RunResult.failed_step_pattern,
+        RunResult.name, RunResult.status, func.substr(RunResult.message, 1, MESSAGE_CHARS).label("message"),
+        RunResult.failed_step_text, RunResult.failed_step_line, RunResult.failed_step_definition,
+        RunResult.failed_step_pattern,
     )
     rows = []
-    for r in db.execute(select(ranked).where(ranked.c.position == 1)).mappings():
-        step = failed_step_of(r["status"], r["message"], r["details"], r["failed_step_text"], r["failed_step_line"],
+    stored = select(ranked).where(ranked.c.position == 1, ranked.c.failed_step_text.is_not(None))
+    for r in db.execute(stored).mappings():
+        step = failed_step_of(r["status"], r["message"], None, r["failed_step_text"], r["failed_step_line"],
                               r["failed_step_definition"], r["failed_step_pattern"])
         if step is not None:
             rows.append({"test_key": r["test_key"], "name": r["name"], "message": r["message"], "step": step})
@@ -107,8 +113,7 @@ class _History:
     def _last_rows(self, *filters):
         """Each test's last row in each run within the scope, kept only when it ran (not skipped)."""
         last = (
-            select(RunResult.run_id, RunResult.test_key, RunResult.status, RunResult.message, RunResult.details,
-                   RunResult.failed_step_text, RunResult.failed_step_definition, Run.started_at,
+            select(RunResult.run_id, RunResult.test_key, RunResult.status, RunResult.failed_step_text, RunResult.failed_step_definition, Run.started_at,
                    func.row_number().over(partition_by=(RunResult.run_id, RunResult.test_key),
                                           order_by=RunResult.id.desc()).label("last"))
             .join(Run, Run.id == RunResult.run_id)
@@ -149,20 +154,24 @@ class _History:
                 by_run[run_id].append(result)
         candidates = sorted(by_run, key=lambda run_id: (self.started[run_id], run_id), reverse=True)[:MAX_RUNS]
         run = self.run
-        since_id, since_at, runs, last_passed, stopped = run.id, run.started_at, 1, None, False
-        for run_id in candidates[:MAX_RUNS - 1]:
+        since_id, since_at, runs, last_passed, stopped, full = run.id, run.started_at, 1, None, False, False
+        for run_id in candidates:
             then = by_run[run_id]
             if any(_key_of(r) in keys for r in then):
+                if runs == MAX_RUNS:  # one more than the cap: the streak is longer than we count
+                    full = True
+                    break
                 since_id, since_at, runs = run_id, self.started[run_id], runs + 1
                 continue
             stopped = True
             if any(r.status == "passed" for r in then):
                 last_passed = {"run_id": run_id, "started_at": as_utc(self.started[run_id])}
             break
-        capped = not stopped and (len(candidates) == MAX_RUNS or self._ran_before_window(tests))
+        capped = full or (not stopped and self._ran_before_window(tests))
         return {"run_id": since_id, "started_at": as_utc(since_at), "runs": runs, "capped": capped}, last_passed
 
 
 def _key_of(row) -> Optional[str]:
-    step = failed_step_of(row.status, row.message, row.details, row.failed_step_text, None, row.failed_step_definition)
+    """The step key of a history row: only rows with a stored failed step have one (no message or details are loaded)."""
+    step = failed_step_of(row.status, None, None, row.failed_step_text, None, row.failed_step_definition)
     return step["key"] if step else None
