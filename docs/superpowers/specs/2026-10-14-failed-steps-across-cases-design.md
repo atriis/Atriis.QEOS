@@ -93,7 +93,7 @@ Every project role (as the run endpoints); a run of another project is 404. Answ
 ## 4. Dashboard
 
 ### 4.1 Run page: "Failed steps"
-A section under the run's results, shown when the run has a failed step:
+A section under the run's "Failures by cause", above the results table (so the 100-row table never buries it), shown when the run has a failed step:
 - One row per step, sorted by test cases: the pattern in mono, "failed in 12 test cases", then
   "failing since run #430, 14 Oct (5 runs) · last passed in run #429" (or "new in this run" when `runs` is 1,
   or "failing for more than 50 runs").
