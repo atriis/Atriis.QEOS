@@ -110,6 +110,17 @@ def _step_definition(step: dict) -> Optional[str]:
     return location.strip()[:DEFINITION_LENGTH]
 
 
+def _code_point_offset(name: str, utf16_offset: int) -> Optional[int]:
+    """The index into name (code points) of a UTF-16 code unit offset; None when it falls inside a surrogate pair or
+    past the end."""
+    units = 0
+    for index, char in enumerate(name):
+        if units == utf16_offset:
+            return index
+        units += 2 if ord(char) > 0xFFFF else 1
+    return len(name) if units == utf16_offset else None
+
+
 def _step_pattern(step: dict, keyword: str, name: str) -> str:
     """The step text with each match.arguments value (offsets into the name, after the keyword) replaced by {…}; the
     text itself when there are no arguments or they do not fit the text."""
@@ -125,9 +136,13 @@ def _step_pattern(step: dict, keyword: str, name: str) -> str:
         value, offset = argument.get("val"), argument.get("offset")
         if value is None or value == "":
             continue  # an optional group that matched nothing
-        if (not isinstance(value, str) or not isinstance(offset, int) or isinstance(offset, bool) or offset < 0
-                or name[offset:offset + len(value)] != value):
+        if not isinstance(value, str) or not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
             return text
+        if name[offset:offset + len(value)] != value:
+            # cucumber-jvm/js count offsets in UTF-16 code units, Python in code points: they differ after an emoji
+            offset = _code_point_offset(name, offset)
+            if offset is None or name[offset:offset + len(value)] != value:
+                return text
         spans.append((offset, offset + len(value)))
     spans.sort()
     if any(start < previous_end for (_, previous_end), (start, _) in zip(spans, spans[1:])):

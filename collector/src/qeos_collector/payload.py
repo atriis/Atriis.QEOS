@@ -145,7 +145,7 @@ def build_parts(run: dict, results: List[dict], idempotency_key: str,
 def _without_stages(body: bytes) -> bytes:
     payload = json.loads(body)
     payload["run"].pop("stages", None)
-    return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8", errors="replace")
 
 
 def summarize(results: Sequence[dict]) -> Dict[str, int]:
@@ -162,7 +162,7 @@ def _fit(run: dict, chunk: List[dict], changes: "dict | None" = None,
         payload["changes"] = changes
     if components:
         payload["components"] = components
-    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8", errors="replace")
     if len(body) <= MAX_PART_BYTES or len(chunk) == 1:
         return [(body, len(chunk))]
     middle = len(chunk) // 2

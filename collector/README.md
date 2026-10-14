@@ -521,9 +521,9 @@ showing up, but its failures stop counting. With `--gate`, the collector decides
   scenario, a failed step fails the scenario, and undefined/pending steps leave it skipped.
   A failed scenario also carries `failed_step` (`{"text": "When I search", "line": 5}`, text cut to
   1000 characters, `line` omitted when the report has none); the other formats send none.
-  collector 0.6.0 sends `failed_step`; it needs a platform with ingestion migration 021, so upgrade the platform first (an older platform answers 422 and a 0.6.0 or 0.7.0 run is not stored).
+  collector 0.6.0 sends `failed_step`; it needs a platform with ingestion migration 021, so upgrade the platform first (an older platform answers 422 and the run is not stored; this holds for 0.8.0 too, which still sends `failed_step`).
   From 0.8.0 it also carries `definition`, the step definition that ran the step (Cucumber's `match.location`, cut to 500 characters, left out when the report has none), and `pattern`, the step text with each matched argument replaced by `{…}` (`When I search {…}`, cut to 1000 characters; the text itself when the report lists no arguments, as cucumber-js's does, or they do not fit the text). QEOS uses them to group one step's failures across test cases.
-  Collector 0.8.0 works with older platforms too: a platform from before these fields answers 422 naming `failed_step`, and the collector then sends the upload once more without `definition` and `pattern`, under the same Idempotency-Key, and logs one line saying the platform is older than the collector. No other 422 is retried; uploads saved with `--spool` get the same retry when they are resent.
+  Collector 0.8.0 also works with a platform that has migration 021 but not 022 (the one that adds these two fields): that platform answers 422 naming `failed_step.definition` or `failed_step.pattern`, and the collector then sends the upload once more without `definition` and `pattern`, under the same Idempotency-Key, and logs one line saying the platform is older than the collector. No other 422 is retried (a platform without migration 021 refuses `failed_step` itself, so there is nothing to strip); uploads saved with `--spool` get the same retry when they are resent.
 - Playwright's JSON reporter (`--reporter=json`): every retry attempt is kept as its own
   result (a flaky spec shows as fail+pass in one run), project name as suite, spec file as
   class, `timedOut` counts as failed and `interrupted` as errored.
@@ -540,7 +540,7 @@ showing up, but its failures stop counting. With `--gate`, the collector decides
 - `HTTPS_PROXY` and `NO_PROXY` are honoured.
 - Redirects are not followed, so the key is never sent anywhere but `QEOS_URL`.
 - Retries: connection errors, timeouts and 5xx answers are retried after 1, 2, 4 and 8 seconds;
-  429 waits for `Retry-After` (at most 10 s). At most 5 attempts and 2 minutes per run.
+  429 waits for `Retry-After` (at most 10 s). At most 5 attempts and 2 minutes per run. The one other retry is the 422 about `failed_step.definition` or `failed_step.pattern` above, sent once more without those two fields.
 - The API key is never printed.
 
 ## Develop

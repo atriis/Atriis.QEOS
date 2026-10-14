@@ -195,7 +195,7 @@ def _first_line(text: str) -> str:
 
 
 def _cut(text: str) -> str:
-    data = text.encode("utf-8")
+    data = text.encode("utf-8", errors="replace")  # a lone surrogate (a cut emoji in a report) must not abort the parse
     if len(data) <= MAX_TEXT_BYTES:
         return text
     # errors="ignore" drops only the character the cut split in two

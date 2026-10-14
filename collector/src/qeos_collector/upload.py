@@ -263,7 +263,7 @@ def without_step_details(body: bytes) -> Optional[bytes]:
                     removed = True
     if not removed:
         return None
-    return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8", errors="replace")
 
 
 def _explain(status: int, body: bytes, headers: Mapping[str, str]) -> str:

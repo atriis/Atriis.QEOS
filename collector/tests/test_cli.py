@@ -147,6 +147,26 @@ def test_dry_run_prints_the_json_and_needs_no_key(report, capsys):
     assert "qeos: dry run: 1 part(s), nothing uploaded" in captured.err
 
 
+def test_a_lone_surrogate_in_a_cucumber_report_is_replaced_not_fatal(tmp_path, capsys):
+    """A string cut in the middle of an emoji (an escaped lone surrogate) must not lose the upload."""
+    step = {"keyword": "When ", "name": "I pay \ud83d", "line": 5,
+            "match": {"location": "steps.js:\ud83d1"},
+            "result": {"status": "failed", "error_message": "boom \ud83d"}}
+    report = tmp_path / "cucumber.json"
+    report.write_text(json.dumps([{"uri": "f.feature", "name": "F",
+                                   "elements": [{"type": "scenario", "name": "S", "steps": [step]}]}]),
+                      encoding="utf-8")
+    assert run(["upload", str(report), "--dry-run"], {}) == 0
+
+    captured = capsys.readouterr()
+    assert "unexpected error" not in captured.err
+    result = json.loads(captured.out)["results"][0]
+    assert result["message"] == "boom ?"
+    assert result["failed_step"]["text"] == "When I pay ?"
+    assert result["failed_step"]["pattern"] == "When I pay ?"
+    assert result["failed_step"]["definition"] == "steps.js:?1"
+
+
 def test_parts_are_uploaded_in_order_and_a_failure_names_what_was_stored(platform, report, monkeypatch, capsys):
     monkeypatch.setattr(payload, "MAX_RESULTS_PER_PART", 1)
     platform.reply(201, RECEIPT)

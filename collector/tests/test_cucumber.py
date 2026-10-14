@@ -263,3 +263,36 @@ def test_a_long_pattern_is_cut_to_1000(tmp_path):
     assert got["pattern"] == "When I type {…}"
     long = failed_step_of(tmp_path, "When ", name, 5, "failed", "e", location="s.js:1", arguments=[])
     assert len(long["pattern"]) == 1000
+
+
+def test_a_non_dict_match_gives_no_definition_and_the_text_as_pattern(tmp_path):
+    for odd in ("x", ["a"], None, 3):
+        entry = step("When ", "I search Lisbon", 5, "failed", "e")
+        entry["match"] = odd
+        got = parse_cucumber(tmp_path, steps=[entry])[0]["failed_step"]
+        assert "definition" not in got and got["pattern"] == "When I search Lisbon", odd
+
+
+def test_an_empty_argument_value_is_skipped(tmp_path):
+    got = failed_step_of(tmp_path, "When ", "I search Porto", 5, "failed", "e", location="s.js:1",
+                         arguments=[{"val": "", "offset": 3}, {"val": "Porto", "offset": 9}])
+    assert got["pattern"] == "When I search {…}"
+
+
+def test_non_ascii_text_with_arguments_becomes_a_pattern(tmp_path):
+    got = failed_step_of(tmp_path, "Então ", "vejo São Paulo e Brasília", 5, "failed", "e", location="s.js:1",
+                         arguments=[{"val": "São Paulo", "offset": 5}, {"val": "Brasília", "offset": 17}])
+    assert got["pattern"] == "Então vejo {…} e {…}"
+
+
+def test_utf16_offsets_after_an_emoji_still_give_the_pattern(tmp_path):
+    # cucumber-jvm/js count offsets in UTF-16 code units: the emoji is two of them
+    got = failed_step_of(tmp_path, "When ", "I send 😀 to Lisbon", 5, "failed", "e", location="s.js:1",
+                         arguments=[{"val": "Lisbon", "offset": 13}])
+    assert got["pattern"] == "When I send 😀 to {…}"
+
+
+def test_offsets_that_fit_neither_unit_fall_back_to_the_text(tmp_path):
+    got = failed_step_of(tmp_path, "When ", "I send 😀 to Lisbon", 5, "failed", "e", location="s.js:1",
+                         arguments=[{"val": "Lisbon", "offset": 40}])
+    assert got["pattern"] == "When I send 😀 to Lisbon"
