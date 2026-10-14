@@ -1,3 +1,5 @@
+import { useQueries } from "@tanstack/react-query";
+import type { LatestResult } from "../api/analytics";
 import { searchCases } from "../api/cases";
 import { type FailedStepSince, type RunFailedStep, getRunFailedSteps } from "../api/runs";
 import { plural } from "./words";
@@ -54,4 +56,20 @@ export async function casesByTestKey(projectId: number, keys: string[]): Promise
     if (res.items.length === 0 || (page + 1) * SEARCH_PAGE >= res.total) break;
   }
   return found;
+}
+
+/** The tooltip's spread line and the link to the step's row on the run page. */
+export interface StepSpread { text: string; href: string }
+
+/** For a page's failed-step tooltips: one failed-steps request per run among `results` (shared by every card and
+ *  with the run page), then each result's line, once its run has answered (plan ruling R8). */
+export function useStepSpread(projectId: number, results: (LatestResult | null | undefined)[]) {
+  const runIds = [...new Set(results.flatMap((r) => (r?.failed_step?.key ? [r.run_id] : [])))].sort((a, b) => a - b);
+  const answers = useQueries({ queries: runIds.map((runId) => failedStepsQuery(projectId, runId)) });
+  return (result: LatestResult | null | undefined): StepSpread | undefined => {
+    const key = result?.failed_step?.key;
+    if (!result || !key) return undefined;
+    const step = answers[runIds.indexOf(result.run_id)]?.data?.steps.find((s) => s.key === key);
+    return step ? { text: spreadText(step), href: stepHref(projectId, result.run_id, key) } : undefined;
+  };
 }

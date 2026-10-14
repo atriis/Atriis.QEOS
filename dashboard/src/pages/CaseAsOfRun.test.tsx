@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { http, HttpResponse } from "msw";
@@ -108,4 +108,69 @@ test("a feature opened as of a run marks each failed scenario and names those no
   expect(screen.getByText("Not in run #5")).toBeInTheDocument();
   expect(screen.getByText("1 failed · 1 not in run")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Show latest" })).toHaveAttribute("href", "/projects/42/cases/feature?path=f.feature");
+});
+
+const STEP_KEY = "a1b2c3d4e5f60718";
+let stepRequests: string[] = [];
+function withSteps(answer: object) {
+  stepRequests = [];
+  server.use(http.get(`${P}/runs/:runId/failed-steps`, ({ params }) => {
+    stepRequests.push(String(params.runId));
+    return HttpResponse.json(answer);
+  }));
+}
+const spreadStep = (cases: number, runs: number) => ({ steps: [{
+  key: STEP_KEY, by: "definition", pattern: "When I search {…}", cases, errors: [],
+  since: { run_id: runs === 1 ? 5 : 430, started_at: "2026-10-01T10:00:00Z", runs, capped: false } }] });
+const keyed = { ...failedInRun, failed_step: { ...failedInRun.failed_step, key: STEP_KEY } };
+
+test("the tooltip says how many other test cases failed at the step, linking to its row on the run page", async () => {
+  setup({ results: { [KEY.toLowerCase()]: keyed } });
+  withSteps(spreadStep(12, 5));
+  renderAt("/projects/42/cases/7?run=5");
+  await waitFor(() => expect(document.querySelector(".gk-failed")).not.toBeNull());
+  act(() => (document.querySelector(".gk-failed") as HTMLElement).focus());
+  const tip = await screen.findByRole("tooltip");
+  const link = await within(tip).findByRole("link", { name: "Also failed in 11 other test cases in this run · failing since run #430" });
+  expect(link).toHaveAttribute("href", `/projects/42/runs/5#step-${STEP_KEY}`);
+  expect(stepRequests).toEqual(["5"]);
+});
+
+test("only this test case, new in this run", async () => {
+  setup({ results: { [KEY.toLowerCase()]: keyed } });
+  withSteps(spreadStep(1, 1));
+  renderAt("/projects/42/cases/7?run=5");
+  await waitFor(() => expect(document.querySelector(".gk-failed")).not.toBeNull());
+  act(() => (document.querySelector(".gk-failed") as HTMLElement).focus());
+  expect(await within(await screen.findByRole("tooltip")).findByRole("link", { name: "Only this test case · new in this run" })).toBeInTheDocument();
+});
+
+test("without a step key (an older server) the tooltip has no spread line and asks nothing", async () => {
+  setup({ results: { [KEY.toLowerCase()]: failedInRun } });
+  withSteps(spreadStep(12, 5));
+  renderAt("/projects/42/cases/7?run=5");
+  await waitFor(() => expect(document.querySelector(".gk-failed")).not.toBeNull());
+  act(() => (document.querySelector(".gk-failed") as HTMLElement).focus());
+  expect(await screen.findByRole("tooltip")).not.toHaveTextContent(/Also failed|Only this test case/);
+  expect(stepRequests).toEqual([]);
+});
+
+test("a feature page asks once per run for all its cards", async () => {
+  setup({ results: { [KEY.toLowerCase()]: keyed, [OTHER.toLowerCase()]: { ...keyed, failed_step: { text: "Then it is saved", line: 8, key: STEP_KEY } } } });
+  withSteps(spreadStep(2, 5));
+  renderAt("/projects/42/cases/feature?path=f.feature&run=5");
+  await waitFor(() => expect(document.querySelectorAll(".gk-failed").length).toBe(2));
+  await waitFor(() => expect(stepRequests).toEqual(["5"]));
+});
+
+test("a failed failed-steps request leaves the tooltip as it was", async () => {
+  setup({ results: { [KEY.toLowerCase()]: keyed } });
+  stepRequests = [];
+  server.use(http.get(`${P}/runs/:runId/failed-steps`, () => HttpResponse.json({ detail: "x" }, { status: 500 })));
+  renderAt("/projects/42/cases/7?run=5");
+  await waitFor(() => expect(document.querySelector(".gk-failed")).not.toBeNull());
+  act(() => (document.querySelector(".gk-failed") as HTMLElement).focus());
+  const tip = await screen.findByRole("tooltip");
+  expect(tip).toHaveTextContent("boom");
+  expect(tip).not.toHaveTextContent(/Also failed|Only this test case/);
 });

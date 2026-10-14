@@ -7,6 +7,7 @@ import { getHistory, getLatestResults, getTests } from "../api/analytics";
 import FailedStepTip from "../components/FailedStepTip";
 import LastResultPill from "../components/LastResultPill";
 import RunContextNote from "../components/RunContextNote";
+import { useStepSpread } from "../lib/failedSteps";
 import { runParam, statusWord, useScrollToFailure } from "../lib/runContext";
 import { featureDetailQuery } from "../lib/featureQueries";
 import { locateFailedStep, matchesStep, scenarioSteps, stepLines } from "../lib/failedStep";
@@ -236,6 +237,7 @@ function CaseEditor() {
     return index != null && shown[index] ? shown[index].line : null;
   }, [c, latest.data, feature.data, feature.isPending, wantsFeature]);
   useScrollToFailure(runId, failedLine != null);
+  const spreadOf = useStepSpread(id, [latest.data]);
 
   if (number !== null && existing.error != null) {
     return (
@@ -311,7 +313,7 @@ function CaseEditor() {
               <GherkinBlock
                 text={c?.gherkin ?? ""}
                 failed={failedLine != null && latest.data
-                  ? { line: failedLine, tip: <FailedStepTip projectId={id} result={latest.data} /> }
+                  ? { line: failedLine, tip: <FailedStepTip projectId={id} result={latest.data} spread={spreadOf(latest.data)} /> }
                   : undefined}
               />
             </>

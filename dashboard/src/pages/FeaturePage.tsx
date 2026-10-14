@@ -10,6 +10,7 @@ import ErrorBanner from "../components/ErrorBanner";
 import { featureLabel } from "../components/FeatureList";
 import FailedTipAnchor from "../components/FailedTipAnchor";
 import FailedStepTip from "../components/FailedStepTip";
+import { type StepSpread, useStepSpread } from "../lib/failedSteps";
 import GherkinBlock from "../components/GherkinBlock";
 import LastResultPill from "../components/LastResultPill";
 import RunContextNote from "../components/RunContextNote";
@@ -49,10 +50,10 @@ function statusCounts(statuses: (string | undefined)[], none = "no runs"): strin
 }
 
 /** A step the scenario inherits (its Background, feature- or rule-level) failed: named on the card, with the same tip as a failed line. */
-function BackgroundFailure({ projectId, step, result }: { projectId: number; step: string; result: LatestResult }) {
+function BackgroundFailure({ projectId, step, result, spread }: { projectId: number; step: string; result: LatestResult; spread?: StepSpread }) {
   return (
     <p className="scenario-bg-failure">
-      <FailedTipAnchor className="scenario-bg-failure-line" tip={<FailedStepTip projectId={projectId} result={result} />}>
+      <FailedTipAnchor className="scenario-bg-failure-line" tip={<FailedStepTip projectId={projectId} result={result} spread={spread} />}>
         <XCircle size={14} aria-hidden="true" />
         Failed in Background: {step}
       </FailedTipAnchor>
@@ -107,6 +108,7 @@ export default function FeaturePage() {
 
   const results = latest.data ?? {};
   const resultOf = (c: FeatureCase) => (c.automated_test_key ? results[c.automated_test_key.toLowerCase()] : undefined);
+  const spreadOf = useStepSpread(id, cases.map(resultOf));
   const split = useMemo(() => {
     if (!source) return null;
     return splitFeature(source.text, [...source.lines.values()]);
@@ -198,11 +200,11 @@ export default function FeaturePage() {
                 {lastRuns(c.automated_test_key, { hideEmpty: latest.isSuccess, href: caseAsOfRun(id, c.number) })}
               </div>
             </div>
-            {failure?.background != null && <BackgroundFailure projectId={id} step={failure.background} result={failure.result} />}
+            {failure?.background != null && <BackgroundFailure projectId={id} step={failure.background} result={failure.result} spread={spreadOf(failure.result)} />}
             <div className="feature-source">
               <GherkinBlock text={block.text} label={`${c.key} Gherkin`} numbered startLine={block.start}
                 failed={failure?.line != null
-                  ? { line: failure.line, tip: <FailedStepTip projectId={id} result={failure.result} /> }
+                  ? { line: failure.line, tip: <FailedStepTip projectId={id} result={failure.result} spread={spreadOf(failure.result)} /> }
                   : undefined} />
             </div>
           </article>

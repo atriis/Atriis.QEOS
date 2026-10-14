@@ -211,7 +211,9 @@ export function getFlaky(
 
 export interface LatestResult {
   status: string; run_id: number; branch: string | null; environment: string | null;
-  started_at: string; message: string | null; failed_step?: { text: string; line?: number };
+  started_at: string; message: string | null;
+  /** `key` names the step across the run's test cases (the run page's `#step-<key>`); `definition`/`pattern` from collector 0.8.0. */
+  failed_step?: { text: string; line?: number; definition?: string; pattern?: string; key?: string };
 }
 
 /** Each test's latest result on any branch, with the failed step; at most 500 keys per call. With `runId`, each test's
