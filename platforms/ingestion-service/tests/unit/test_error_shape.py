@@ -28,3 +28,30 @@ def test_only_the_first_non_empty_line_counts_and_spaces_collapse():
 
 def test_no_message_is_the_empty_shape():
     assert error_shape(None) == "" and error_shape("   \n") == ""
+
+
+def test_different_http_statuses_are_different_shapes():
+    assert error_shape("Request failed with status 500") != error_shape("Request failed with status 404")
+
+
+def test_expected_and_actual_status_codes_are_both_kept():
+    assert error_shape("expected 200 got 500") == "expected 200 got 500"
+
+
+def test_http_followed_by_a_status_is_kept():
+    assert error_shape("HTTP 503 Service Unavailable") == "HTTP 503 Service Unavailable"
+
+
+def test_other_numbers_are_still_replaced():
+    assert error_shape("Timeout after 30012 ms") == "Timeout after … ms"
+
+
+def test_a_number_that_is_not_a_status_code_after_a_keyword_is_replaced():
+    assert error_shape("expected 20 got 7") == "expected … got …"
+
+
+def test_values_of_different_length_near_the_cut_share_a_shape():
+    prefix = "x" * 290
+    a = error_shape(f"{prefix} 123e4567-e89b-12d3-a456-426614174000 tail")
+    b = error_shape(f"{prefix} 7 tail")
+    assert a == b and len(a) <= 300
