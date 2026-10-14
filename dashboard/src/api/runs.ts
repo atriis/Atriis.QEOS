@@ -219,3 +219,29 @@ export interface RunSummary {
 export function getRunSummary(projectId: number, runId: number, init: { signal?: AbortSignal } = {}): Promise<RunSummary> {
   return apiFetch(`/api/v1/projects/${projectId}/runs/${runId}/summary`, init);
 }
+
+/** A test case that failed at a step, with the text it ran ("When I search Lisb0n"). */
+export interface FailedStepTest { test_key: string; name: string; text: string }
+
+/** One step's failures that share an error shape (quoted values, numbers and ids as "…"); `shape` "" means no message. */
+export interface FailedStepError { shape: string; example: string | null; cases: number; tests: FailedStepTest[]; more?: number }
+
+export interface FailedStepSince { run_id: number; started_at: string; runs: number; capped: boolean }
+
+/** A step that failed in the run, across its test cases (spec 2026-10-14 §3.3). */
+export interface RunFailedStep {
+  key: string;
+  by: "definition" | "text";
+  pattern: string;
+  definition?: string;
+  cases: number;
+  errors: FailedStepError[];
+  since: FailedStepSince;
+  last_passed?: { run_id: number; started_at: string };
+}
+
+export function getRunFailedSteps(
+  projectId: number, runId: number, init: { signal?: AbortSignal } = {},
+): Promise<{ steps: RunFailedStep[] }> {
+  return apiFetch(`/api/v1/projects/${projectId}/runs/${runId}/failed-steps`, init);
+}

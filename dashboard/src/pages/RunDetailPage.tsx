@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { RunStatusFilter, getRun, listRuns } from "../api/runs";
 import { formatDuration } from "../api/analytics";
 import ErrorBanner from "../components/ErrorBanner";
+import FailedSteps from "../components/FailedSteps";
 import FailureGroups from "../components/FailureGroups";
 import FilterBar from "../components/FilterBar";
 import ImpactCard from "../components/ImpactCard";
@@ -148,6 +149,7 @@ export default function RunDetailPage() {
           </div>
 
           {run.failed + run.errored > 0 && <FailureGroups runId={run.id} projectId={projectId} />}
+          {run.failed + run.errored > 0 && <FailedSteps projectId={Number(projectId)} runId={run.id} />}
 
           {/* The impact card is on every run, so a run without changed files says "No change data" (spec §2.1) */}
           <div className="run-change-cards">
