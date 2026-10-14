@@ -124,7 +124,7 @@ export default function AreaSection({ projectId, gate, query, caseAreas, onReset
                       <Tooltip contentStyle={{ background: "var(--surface-1)", border: "1px solid var(--border)", borderRadius: 6 }} />
                       <Bar dataKey="rate" name="Pass rate (%)" fill="var(--series-1)" radius={[0, 4, 4, 0]}>
                         <LabelList dataKey="failures" position="right" fill="var(--text-secondary)" fontSize={12}
-                          formatter={(v: number) => `${formatCount(v)} failures`} />
+                          formatter={(v) => `${formatCount(Number(v))} failures`} />
                       </Bar>
                     </BarChart>
                   </ResponsiveContainer>
