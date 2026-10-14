@@ -77,7 +77,8 @@ Every project role (as the run endpoints); a run of another project is 404. Answ
 
 - `cases`: distinct tests of the run that failed at this step; steps sorted by `cases`, then pattern.
 - `tests` per error group: at most 50, with `"more": n` beyond.
-- **`since`:** walk back through earlier runs (by start time) of this project that contain any of the step's
+- **`since`:** walk back through earlier runs (by start time) of this project **on the same branch as the run**
+  (every branch when the run has no branch; user decision 2026-10-14) that contain any of the step's
   failing tests in this run. The streak continues while at least one of them failed at this step key, and stops
   at the first run where none did. `since` is the oldest run of the streak, `runs` its length including this run.
   The walk covers at most **50 runs or 90 days**; past that `capped: true` ("failing for more than 50 runs").

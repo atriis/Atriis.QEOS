@@ -65,7 +65,7 @@ COL_PY=$WT/collector/.venv/Scripts/python.exe
 - **R12 422 retry:** triggered when any entry of the 422 `detail` list has `"failed_step"` in its `loc` and the body actually holds `definition` or `pattern`; the second request reuses the Idempotency-Key, does not sleep, counts as an attempt, and later 429/5xx retries keep the stripped body.
 - **R13 `pattern` always sent:** as the spec states literally (equal to the text when there are no usable arguments), so existing collector test expectations gain `pattern`.
 - **R14 Export:** the NDJSON export already writes every column; the new columns are asserted in its test.
-- **R15 Branches:** the streak walks runs of every branch of the project (spec §3.3 says "this project"); not narrowed.
+- **R15 Branches (user decision 2026-10-14):** the streak walks only earlier runs **on the same branch as the run**; a run with no branch walks every branch.
 
 ## File map
 
@@ -1541,6 +1541,23 @@ def test_impact_subset_runs_count_like_any_run(client, auth, project_role, step_
     assert step["since"]["run_id"] == subset.id
 
 
+def test_only_runs_of_the_same_branch_join_the_streak(client, auth, project_role, step_run):
+    project_role("viewer")
+    step_run(T0, {"lisbon": failing("When I search Lisbon")}, branch="feature/x")
+    step_run(T0 + timedelta(hours=1), {"lisbon": failing("When I search Lisbon")}, branch="main")
+    run = step_run(T0 + timedelta(hours=2), {"lisbon": failing("When I search Lisbon")}, branch="main")
+    (step,) = get(client, auth, run)
+    assert step["since"]["runs"] == 2 and step["since"]["run_id"] != run.id
+
+
+def test_a_run_without_a_branch_walks_every_branch(client, auth, project_role, step_run):
+    project_role("viewer")
+    step_run(T0, {"lisbon": failing("When I search Lisbon")}, branch="feature/x")
+    run = step_run(T0 + timedelta(hours=1), {"lisbon": failing("When I search Lisbon")}, branch=None)
+    (step,) = get(client, auth, run)
+    assert step["since"]["runs"] == 2
+
+
 def test_another_projects_runs_never_join_the_streak(client, auth, project_role, step_run):
     project_role("viewer")
     step_run(T0, {"lisbon": failing("When I search Lisbon")}, project_id=2)
@@ -1612,7 +1629,7 @@ from collections import Counter, defaultdict
 from datetime import timedelta
 from typing import Dict, List, Optional, Tuple
 
-from sqlalchemy import and_, exists, or_, select
+from sqlalchemy import and_, exists, or_, select, true
 from sqlalchemy.orm import Session
 
 from src.ingestion.analytics.failed_steps import error_shape, step_key
@@ -1704,9 +1721,11 @@ def _streak(db: Session, project_id: int, run: Run, key: str, rows: List[dict]) 
     keys = {key} | {step_key(None, r["step"]["text"])[0] for r in rows}
     cutoff = run.started_at - timedelta(days=MAX_DAYS)
     earlier = or_(Run.started_at < run.started_at, and_(Run.started_at == run.started_at, Run.id < run.id))
+    # Same branch as the run (user decision 2026-10-14, ruling R15); a run without a branch walks every branch
+    same_branch = Run.branch == run.branch if run.branch else true()
     candidates = db.execute(
         select(Run.id, Run.started_at)
-        .where(Run.project_id == project_id, earlier, Run.started_at >= cutoff, _ran(tests))
+        .where(Run.project_id == project_id, earlier, Run.started_at >= cutoff, same_branch, _ran(tests))
         .order_by(Run.started_at.desc(), Run.id.desc())
         .limit(MAX_RUNS)
     ).all()
@@ -1819,7 +1838,7 @@ body_has "... with its error shape" "\"shape\":\"Invalid city '"
   (the `failed_step.key` of `latest-results`), `pattern` (the most frequent, else the text), `definition`, `cases`
   (distinct tests), `errors` grouped by shape (the first error line with quoted values, numbers, UUIDs and hex as
   `…`; one real `example`; at most 50 `tests` `{test_key, name, text}` with `more` beyond) and `since` `{run_id,
-  started_at, runs, capped}`: walking back through earlier runs of the project (any branch) that ran one of those
+  started_at, runs, capped}`: walking back through earlier runs of the project on the run's branch (every branch when the run has none) that ran one of those
   tests (skipped results are not counted), the streak goes on while one of them failed at this step, at most 50 runs
   or 90 days (`capped`). `last_passed` `{run_id, started_at}` is the run that ended the streak when one of the tests
   passed in it. Steps are sorted by `cases`, then pattern. Every project role; 404 for an unknown run or a run of
