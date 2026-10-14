@@ -90,6 +90,8 @@ jobs:
     needs: [test, build]
     runs-on: ubuntu-latest
     permissions:
+      # contents: read too: a job's permissions replace the workflow's, and checkout of a private repository needs it
+      contents: read
       packages: write
     steps:
       - uses: actions/checkout@v7
