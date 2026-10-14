@@ -212,8 +212,9 @@ details.
 - **Production package** (`deploy/`). A Caddy TLS edge with Let's Encrypt and
   HSTS is the only published service. Secrets are generated into a mode-600
   `.env`, and databases are backed up daily.
-- **Supply chain.** CodeQL analysis and Dependabot updates for pip, npm and
-  GitHub Actions.
+- **Supply chain.** Dependabot updates for pip, npm and GitHub Actions. CodeQL analysis
+  runs once GitHub Code Security is enabled for the repository and the repository variable
+  `CODEQL_ENABLED` is `true`; until then the CodeQL workflow is skipped, not failed.
 
 ## Known limitations
 

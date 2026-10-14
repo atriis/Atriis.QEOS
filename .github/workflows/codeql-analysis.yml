@@ -12,6 +12,9 @@ on:
 jobs:
   analyze:
     name: Analyze
+    # A private organization repository needs GitHub Code Security for code scanning; without it the
+    # upload fails on every push. Set the repository variable CODEQL_ENABLED=true once it is enabled.
+    if: vars.CODEQL_ENABLED == 'true'
     runs-on: ubuntu-latest
     permissions:
       # required for all workflows
