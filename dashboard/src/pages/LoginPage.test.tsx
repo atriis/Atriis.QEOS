@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Link, MemoryRouter, Routes, Route, useLocation } from "react-router-dom";
 import { http, HttpResponse } from "msw";
@@ -252,4 +252,87 @@ test("a double-encoded next stays an in-app path: it is never decoded into //evi
   await google("g-cred");
   expect((await screen.findByTestId("where")).textContent).toBe("/%2F%2Fevil.example");
   expect(window.location.hostname).not.toBe("evil.example");
+});
+
+function methods(body: unknown, init?: ResponseInit) {
+  server.use(http.get("/api/v1/auth/methods", () => HttpResponse.json(body as object, init)));
+}
+
+test("SSO-only: the Microsoft button and one line, no register or forgot-password links", async () => {
+  vi.mocked(microsoftEnabled).mockReturnValue(true);
+  methods({ password: false, providers: ["microsoft"] });
+  renderLogin();
+  expect(await screen.findByText("Sign-in is through your Microsoft work account.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Sign in with Microsoft" })).toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /create account/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /forgot password/i })).not.toBeInTheDocument();
+  const disclosure = screen.getByText("Administrator sign-in").closest("details")!;
+  expect(disclosure).not.toHaveAttribute("open");
+  expect(within(disclosure).getByLabelText(/email/i)).toBeInTheDocument();
+});
+
+test("SSO-only: an administrator signs in with the password form inside the disclosure", async () => {
+  methods({ password: false, providers: ["microsoft"] });
+  server.use(http.post("/api/v1/auth/login", () =>
+    HttpResponse.json({ access_token: "acc", refresh_token: "r", token_type: "bearer" })));
+  renderLogin();
+  await userEvent.click(await screen.findByText("Administrator sign-in"));
+  await userEvent.type(screen.getByLabelText(/email/i), "root@example.com");
+  await userEvent.type(screen.getByLabelText(/password/i), "pw");
+  await userEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
+  expect(await screen.findByText("PICKER")).toBeInTheDocument();
+});
+
+test("SSO-only: a refusal from the server shows in the card", async () => {
+  methods({ password: false, providers: ["microsoft"] });
+  server.use(http.post("/api/v1/auth/login", () => HttpResponse.json(
+    { detail: { code: "sso_only", message: "Sign-in is through Microsoft only." } }, { status: 403 })));
+  renderLogin();
+  await userEvent.click(await screen.findByText("Administrator sign-in"));
+  await userEvent.type(screen.getByLabelText(/email/i), "ann@example.com");
+  await userEvent.type(screen.getByLabelText(/password/i), "pw");
+  await userEvent.click(screen.getByRole("button", { name: /^sign in$/i }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Sign-in is through Microsoft only.");
+});
+
+test("SSO-only hides a provider the mode does not list", async () => {
+  vi.mocked(googleEnabled).mockReturnValue(true);
+  vi.mocked(microsoftEnabled).mockReturnValue(true);
+  methods({ password: false, providers: ["microsoft"] });
+  renderLogin();
+  await screen.findByText("Sign-in is through your Microsoft work account.");
+  expect(screen.queryByTestId("google-button")).not.toBeInTheDocument();
+});
+
+test("normal mode is unchanged when /auth/methods says password", async () => {
+  vi.mocked(microsoftEnabled).mockReturnValue(true);
+  let asked = false;
+  server.use(http.get("/api/v1/auth/methods", () => {
+    asked = true;
+    return HttpResponse.json({ password: true, providers: ["microsoft"] });
+  }));
+  renderLogin();
+  await waitFor(() => expect(asked).toBe(true));
+  expect(screen.getByRole("link", { name: /forgot password/i })).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /create account/i })).toBeInTheDocument();
+  expect(screen.queryByText("Administrator sign-in")).not.toBeInTheDocument();
+});
+
+test.each<[string, () => Response]>([
+  ["a server error", () => HttpResponse.json({ detail: "boom" }, { status: 500 })],
+  ["a network error", () => HttpResponse.error()],
+  ["an older server's 404", () => HttpResponse.json({ detail: "Not Found" }, { status: 404 })],
+  ["an answer of the wrong shape", () => HttpResponse.json({})],
+])("when /auth/methods gives %s, the normal form stays", async (_name, answer) => {
+  let asked = false;
+  server.use(http.get("/api/v1/auth/methods", () => {
+    asked = true;
+    return answer();
+  }));
+  renderLogin();
+  await waitFor(() => expect(asked).toBe(true));
+  await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+  expect(screen.getByLabelText(/email/i)).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: /forgot password/i })).toBeInTheDocument();
+  expect(screen.queryByText("Administrator sign-in")).not.toBeInTheDocument();
 });

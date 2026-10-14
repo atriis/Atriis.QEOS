@@ -16,6 +16,8 @@ export const server = setupServer(
   http.get("/api/v1/projects/:projectId/run-requests", () => HttpResponse.json({ total: 0, items: [] })),
   // The shell's user menu asks who is signed in; tests about the account override
   http.get("/api/v1/users/me", () => HttpResponse.json({ id: 1, email: "tester@example.com", mfa_enabled: false })),
+  // Sign-in methods (ADR-031): password sign-in on, no SSO; SSO-only tests override
+  http.get("/api/v1/auth/methods", () => HttpResponse.json({ password: true, providers: [] })),
   // The Cases KPI tiles (and Overview) read these; tests about them override
   http.get("/api/v1/projects/:projectId/analytics/trends", () => HttpResponse.json({ tz: "UTC", bucket: "week", days: [] })),
   // The report's default branch reads the project's repositories; tests about it override

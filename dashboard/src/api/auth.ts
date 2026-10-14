@@ -125,3 +125,13 @@ export async function logout(): Promise<void> {
     clearTokens();
   }
 }
+
+/** GET /auth/methods (public, ADR-031): `password: false` means SSO-only mode; `providers` are the ones offered. */
+export interface AuthMethods {
+  password: boolean;
+  providers: string[];
+}
+
+export function getAuthMethods(): Promise<AuthMethods> {
+  return apiFetch("/api/v1/auth/methods");
+}

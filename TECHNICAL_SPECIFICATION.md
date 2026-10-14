@@ -253,7 +253,7 @@ proxied.
 React 19 + Vite + TypeScript, TanStack Query, Recharts (lazy chunks for
 chart views). Access token in memory; session restored at boot via the
 httpOnly cookie; 401s refresh once (auth/sso endpoints excluded). Views:
-login (password/MFA step/SSO buttons when VITE_* client ids are baked),
+login (password/MFA step/SSO buttons when VITE_* client ids are baked; SSO-only layout from /auth/methods with a superuser disclosure),
 register, verify email, forgot/reset password, org→project picker,
 organization (members, invitations) and invitation accept, overview (a
 customisable grid of 15 code-split widgets and three templates over the
