@@ -2,6 +2,7 @@
 import logging
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.dialects import postgresql
 
 from src.auth.api.main import _apply_auth_mode
@@ -204,3 +205,32 @@ def test_the_state_row_is_read_with_a_row_lock():
 def test_the_start_up_hook_records_the_mode(client, db):
     # The client fixture started the app: its hook ran against this run's database
     assert db.get(AuthModeState, 1).sso_only is False
+
+
+@pytest.fixture
+def no_state_table(db):
+    # A database nobody migrated: the table 008 creates is not there. Put back after the test.
+    engine = db.get_bind()
+    AuthModeState.__table__.drop(bind=engine)
+    try:
+        yield
+    finally:
+        AuthModeState.__table__.create(bind=engine, checkfirst=True)
+
+
+def test_an_unmigrated_database_is_tolerated_while_the_mode_is_off(db, no_state_table, monkeypatch, caplog):
+    monkeypatch.setattr(settings, "AUTH_SSO_ONLY", False)
+    with caplog.at_level(logging.WARNING, logger=LOGGER):
+        assert apply_auth_mode(db) == 0
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "auth_mode_state" in warnings[0].getMessage() and "alembic upgrade head" in warnings[0].getMessage()
+    assert db.execute(text("SELECT 1")).scalar() == 1  # the session is usable after the rollback
+
+
+def test_an_unmigrated_database_stops_start_up_while_the_mode_is_on(db, no_state_table, monkeypatch):
+    monkeypatch.setattr(settings, "AUTH_SSO_ONLY", True)
+    with pytest.raises(RuntimeError) as err:
+        apply_auth_mode(db)
+    assert "not migrated" in str(err.value) and "alembic upgrade head" in str(err.value)
+    assert "revoke sessions safely" in str(err.value)

@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import HTTPException, Request, status
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import inspect, select
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from src.auth.config import settings
@@ -135,12 +135,30 @@ def _state_select():
     return select(AuthModeState).where(AuthModeState.id == STATE_ROW_ID).with_for_update()
 
 
+def _state_table_missing(db: Session) -> bool:
+    return not inspect(db.get_bind()).has_table(AuthModeState.__tablename__)
+
+
 def apply_auth_mode(db: Session) -> int:
     """Record the mode; on an off-to-on change, revoke every refresh session of every user who is not a
     superuser. One transaction holding the state row's lock, so two processes starting together revoke
     once and a restart with the mode already on revokes nothing. Returns the number of sessions revoked."""
     wanted = bool(settings.AUTH_SSO_ONLY)
-    state = db.execute(_state_select()).scalar_one_or_none()
+    try:
+        state = db.execute(_state_select()).scalar_one_or_none()
+    except (ProgrammingError, OperationalError):
+        db.rollback()
+        if not _state_table_missing(db):
+            raise  # a database error that is not the missing table
+        if wanted:
+            raise RuntimeError(
+                "AUTH_SSO_ONLY=true but the database is not migrated (the auth_mode_state table is missing): "
+                "run `alembic upgrade head`; SSO-only mode cannot revoke sessions safely without it"
+            )
+        logger.warning(
+            "the auth_mode_state table is missing: the database is not migrated, run `alembic upgrade head`"
+        )
+        return 0
     if state is None:
         # Only a database migrated without 008's seed row (the test schema is built from the models)
         state = AuthModeState(id=STATE_ROW_ID, sso_only=False)
