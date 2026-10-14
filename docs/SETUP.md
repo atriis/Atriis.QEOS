@@ -525,9 +525,11 @@ is logged by auth-service, so you can copy it from there. The account email is t
 principal name. Personal Microsoft accounts are not supported.
 
 Account rules: the first sign-in with a new address creates an account without a password.
-An address that already has a password account is **not** linked automatically: the answer
-is 409. A signed-in user links it with `POST /api/v1/users/me/link/{google|microsoft}`, or a
-superuser allows that one account to link at its next Microsoft sign-in (below).
+An address that already has an account is **not** linked automatically: the answer is 409.
+Addresses match whatever their letter case (`Ann@Example.com` is `ann@example.com`'s account).
+A signed-in user links it with `POST /api/v1/users/me/link/{google|microsoft}`, or a
+superuser allows that one account to link at its next Microsoft sign-in (below); in SSO-only
+mode the 409 tells the person to ask an administrator for that.
 
 **Microsoft-only sign-in (SSO-only mode, ADR-031)**
 

@@ -2,6 +2,7 @@ from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from jwt import PyJWKClientConnectionError
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from src.auth.api import deps
@@ -13,9 +14,10 @@ from src.auth.service.sso_readiness import valid_allowance
 from src.auth.schemas.auth import GoogleLoginRequest, MicrosoftLoginRequest, Token
 from src.auth.schemas.user import UserCreate  # used when SSO creates a first-time user
 from src.auth.models.oauth import OAuthAccount
+from src.auth.models.user import User
 from src.auth.config import settings
 from src.auth.utils.refresh_cookie import set_refresh_cookie
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +78,12 @@ MICROSOFT_EXISTING_ACCOUNT = (
     "An account with this email already exists. Sign in to it and link Microsoft "
     "with POST /api/v1/users/me/link/microsoft."
 )
+# In SSO-only mode an ordinary user cannot sign in with a password to link, so only a superuser's
+# allowance (ADR-031) can attach this identity to the account.
+MICROSOFT_EXISTING_ACCOUNT_SSO_ONLY = (
+    "An account with this email already exists but is not linked to Microsoft. "
+    "Ask an administrator to allow linking at your next Microsoft sign-in."
+)
 
 
 def _link_or_create_user(db: Session, identity: dict, email: str, provider: str, provider_user_id: str,
@@ -84,7 +92,14 @@ def _link_or_create_user(db: Session, identity: dict, email: str, provider: str,
 
     Reached only when no OAuthAccount matches this provider and `sub`.
     """
-    user = UserService.get_user_by_email(db, email)
+    # Case-insensitive: providers send addresses in whatever case the directory holds (Entra UPNs are
+    # often Ann.Silva@...), and an exact match missed the account and created a second, empty one.
+    # Two accounts that differ only in case are ambiguous: neither is linked, and none is created.
+    matches = db.query(User).filter(func.lower(User.email) == email.lower()).limit(2).all()
+    if len(matches) > 1:
+        logger.warning("%s sign-in for %s matches more than one account by case; not linked", label, email)
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=existing_account_detail)
+    user = matches[0] if matches else None
 
     if user is None:
         user_in = UserCreate(
@@ -147,10 +162,18 @@ def _link_or_create_user(db: Session, identity: dict, email: str, provider: str,
     # A superuser allowed this account to link at its next Microsoft sign-in (ADR-031). Not a match on
     # the email alone: the allowance names this account, the token is from an allowed tenant (checked
     # by verify_microsoft_credential) and the account holds no Microsoft link yet (checked above).
-    # Used once.
+    # Used once: the allowance is cleared by one conditional UPDATE, and only the request that changed
+    # the row links. Two concurrent first sign-ins can both read a valid allowance; the row lock
+    # serializes their UPDATEs and the second finds nothing to consume, so it gets the 409.
     if provider == "microsoft" and user.is_active and valid_allowance(user) is not None:
+        claimed = db.query(User).filter(
+            User.id == user.id,
+            User.microsoft_link_allowed_until > datetime.now(timezone.utc),
+        ).update({User.microsoft_link_allowed_until: None}, synchronize_session=False)
+        if claimed != 1:
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=existing_account_detail)
         db.add(OAuthAccount(user_id=user.id, provider=provider, provider_user_id=provider_user_id))
-        user.microsoft_link_allowed_until = None
         try:
             db.commit()
         except IntegrityError:
@@ -246,7 +269,10 @@ def microsoft_login(
     Authenticate with a Microsoft (Entra ID) ID token from an allowed tenant.
     """
     identity = verify_microsoft_credential(request.credential)
-    tokens = sso_sign_in(db, identity, "Microsoft", existing_account_detail=MICROSOFT_EXISTING_ACCOUNT)
+    existing_account_detail = (
+        MICROSOFT_EXISTING_ACCOUNT_SSO_ONLY if settings.AUTH_SSO_ONLY else MICROSOFT_EXISTING_ACCOUNT
+    )
+    tokens = sso_sign_in(db, identity, "Microsoft", existing_account_detail=existing_account_detail)
     set_refresh_cookie(response, tokens["refresh_token"])
     return tokens
 

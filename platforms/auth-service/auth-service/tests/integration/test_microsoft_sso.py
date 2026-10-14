@@ -384,3 +384,77 @@ def test_the_allowance_works_in_sso_only_mode(client, db, microsoft_key, registe
     monkeypatch.setattr(settings, "AUTH_SSO_ONLY", True)
     monkeypatch.setattr(settings, "AUTH_SSO_PROVIDERS", "microsoft")
     assert sign_in(client, ms_token(microsoft_key)).status_code == 200
+
+
+# Final review #1: Entra addresses are often mixed case, while the account may be lower case.
+def test_the_allowance_matches_the_address_whatever_its_case(client, db, microsoft_key, register_and_verify):
+    register_and_verify("ann@example.com")
+    ann_id, _ = _allow(db, "ann@example.com")
+
+    response = sign_in(client, ms_token(microsoft_key, email="Ann@Example.com", preferred_username="Ann@Example.com"))
+    assert response.status_code == 200, response.text
+    assert db.query(User).count() == 1  # no second, empty account
+    assert db.query(OAuthAccount).one().user_id == ann_id
+    assert db.get(User, ann_id).microsoft_link_allowed_until is None
+
+
+def test_a_case_variant_of_an_existing_address_is_not_a_new_account(client, db, microsoft_key, register_and_verify):
+    register_and_verify("ann@example.com")
+    response = sign_in(client, ms_token(microsoft_key, email="Ann@Example.com", preferred_username="Ann@Example.com"))
+    assert response.status_code == 409
+    assert db.query(User).count() == 1
+    assert db.query(OAuthAccount).count() == 0
+
+
+def test_two_accounts_that_differ_only_in_case_are_never_linked(client, db, microsoft_key, register_and_verify):
+    register_and_verify("ann@example.com")
+    register_and_verify("Ann@example.com")
+    _allow(db, "ann@example.com")
+    _allow(db, "Ann@example.com")
+
+    response = sign_in(client, ms_token(microsoft_key, email="ANN@example.com", preferred_username="ANN@example.com"))
+    assert response.status_code == 409
+    assert db.query(User).count() == 2
+    assert db.query(OAuthAccount).count() == 0
+
+
+# Final review #2: in the mode an ordinary user cannot sign in to link, so the 409 must not ask them to
+def test_the_existing_account_409_in_normal_mode_points_at_the_link_endpoint(client, db, microsoft_key, register_and_verify):
+    register_and_verify("ann@example.com")
+    response = sign_in(client, ms_token(microsoft_key))
+    assert response.status_code == 409
+    assert response.json() == {"detail": (
+        "An account with this email already exists. Sign in to it and link Microsoft "
+        "with POST /api/v1/users/me/link/microsoft."
+    )}
+
+
+def test_the_existing_account_409_in_sso_only_mode_asks_for_an_administrator(client, db, microsoft_key, register_and_verify, monkeypatch):
+    register_and_verify("ann@example.com")  # before the switch: registration is off afterwards
+    monkeypatch.setattr(settings, "AUTH_SSO_ONLY", True)
+    monkeypatch.setattr(settings, "AUTH_SSO_PROVIDERS", "microsoft")
+    response = sign_in(client, ms_token(microsoft_key))
+    assert response.status_code == 409
+    assert response.json() == {"detail": (
+        "An account with this email already exists but is not linked to Microsoft. "
+        "Ask an administrator to allow linking at your next Microsoft sign-in."
+    )}
+    assert db.query(OAuthAccount).count() == 0
+
+
+# Final review #3: "used once" must hold when two first sign-ins race. A request that read a valid
+# allowance which another request has since consumed finds nothing to consume, and does not link.
+def test_an_allowance_consumed_after_it_was_read_does_not_link(client, db, microsoft_key, register_and_verify, monkeypatch):
+    from src.auth.api.v1.endpoints import sso as sso_endpoint
+
+    register_and_verify("ann@example.com")
+    ann_id, _ = _allow(db, "ann@example.com")
+    db.get(User, ann_id).microsoft_link_allowed_until = None  # the other request's UPDATE won
+    db.commit()
+    # ... after this request had already read the allowance as valid
+    monkeypatch.setattr(sso_endpoint, "valid_allowance",
+                        lambda user, now=None: datetime.now(timezone.utc) + timedelta(days=1))
+
+    response = sign_in(client, ms_token(microsoft_key))
+    assert response.status_code == 409
+    assert db.query(OAuthAccount).count() == 0
