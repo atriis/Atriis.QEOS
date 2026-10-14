@@ -82,6 +82,8 @@ class Run(Base):
 
 
 FAILED_STEP_TEXT_LENGTH = 1000
+FAILED_STEP_DEFINITION_LENGTH = 500
+FAILED_STEP_PATTERN_LENGTH = 1000
 
 
 class RunResult(Base):
@@ -107,6 +109,10 @@ class RunResult(Base):
     # The Cucumber step that failed, as the collector reported it (spec 2026-10-13); masked like message
     failed_step_text = Column(String(FAILED_STEP_TEXT_LENGTH), nullable=True)
     failed_step_line = Column(Integer, nullable=True)  # its line in the .feature file
+    # From collector 0.8.0 (spec 2026-10-14): the step definition that ran the step (Cucumber match.location) and the
+    # step text with its matched arguments as {…}; both masked like the text
+    failed_step_definition = Column(String(FAILED_STEP_DEFINITION_LENGTH), nullable=True)
+    failed_step_pattern = Column(String(FAILED_STEP_PATTERN_LENGTH), nullable=True)
 
     __table_args__ = (
         CheckConstraint("status IN ('passed','failed','skipped','errored')", name="chk_test_results_status"),
@@ -116,4 +122,8 @@ class RunResult(Base):
         Index("ix_test_results_failing", "run_id", "test_key",
               postgresql_where=text("status IN ('failed','errored')"),
               sqlite_where=text("status IN ('failed','errored')")),
+        # Migration 022: failed steps across test cases look rows up by step definition
+        Index("ix_test_results_failed_step_definition", "failed_step_definition",
+              postgresql_where=text("failed_step_definition IS NOT NULL"),
+              sqlite_where=text("failed_step_definition IS NOT NULL")),
     )

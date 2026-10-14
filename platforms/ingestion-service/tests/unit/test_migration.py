@@ -431,3 +431,62 @@ def test_failed_step_downgrade_drops_the_columns(tmp_path):
         assert "scope" in {column["name"] for column in inspect(engine).get_columns("test_runs")}  # 020 is still there
     finally:
         engine.dispose()
+
+
+def test_failed_step_definition_and_pattern_columns(migrated_engine):
+    """Migration 022 (spec 2026-10-14 §3.1)."""
+    columns = {c["name"]: c for c in inspect(migrated_engine).get_columns("test_results")}
+    assert columns["failed_step_definition"]["type"].length == 500
+    assert columns["failed_step_pattern"]["type"].length == 1000
+    assert columns["failed_step_definition"]["nullable"] and columns["failed_step_pattern"]["nullable"]
+    indexes = {ix["name"]: ix["column_names"] for ix in inspect(migrated_engine).get_indexes("test_results")}
+    assert indexes["ix_test_results_failed_step_definition"] == ["failed_step_definition"]
+    with migrated_engine.connect() as conn:
+        sql = conn.execute(text(
+            "SELECT sql FROM sqlite_master WHERE name = 'ix_test_results_failed_step_definition'")).scalar()
+    assert "FAILED_STEP_DEFINITION IS NOT NULL" in sql.upper()
+
+
+def test_model_declares_the_definition_index():
+    assert "ix_test_results_failed_step_definition" in {ix.name for ix in Base.metadata.tables["test_results"].indexes}
+
+
+def test_failed_step_definition_downgrade_drops_the_columns(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'downgrade_022.db').as_posix()}"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(SERVICE_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "021")
+    engine = create_engine(url)
+    try:
+        columns = {column["name"] for column in inspect(engine).get_columns("test_results")}
+        assert not {"failed_step_definition", "failed_step_pattern"} & columns
+        assert "failed_step_text" in columns  # 021 is still there
+        assert "ix_test_results_failed_step_definition" not in {
+            ix["name"] for ix in inspect(engine).get_indexes("test_results")}
+    finally:
+        engine.dispose()
+
+
+def test_failed_step_definition_postgres_path_is_rerunnable(monkeypatch):
+    """On PostgreSQL the columns are IF NOT EXISTS and the index is built CONCURRENTLY, IF NOT EXISTS (as 016)."""
+    import importlib.util
+    from unittest.mock import MagicMock
+
+    spec = importlib.util.spec_from_file_location(
+        "m022", SERVICE_ROOT / "alembic" / "versions" / "022_failed_step_definition.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    fake = MagicMock()
+    fake.get_bind.return_value.dialect.name = "postgresql"
+    monkeypatch.setattr(module, "op", fake)
+    module.upgrade()
+    executed = " ".join(str(call.args[0]) for call in fake.execute.call_args_list)
+    assert "ADD COLUMN IF NOT EXISTS failed_step_definition VARCHAR(500)" in executed
+    assert "ADD COLUMN IF NOT EXISTS failed_step_pattern VARCHAR(1000)" in executed
+    assert fake.create_index.call_args.kwargs["postgresql_concurrently"] is True
+    assert fake.create_index.call_args.kwargs["if_not_exists"] is True
+    module.downgrade()
+    assert fake.drop_index.call_args.kwargs["postgresql_concurrently"] is True
+    assert fake.drop_index.call_args.kwargs["if_exists"] is True
