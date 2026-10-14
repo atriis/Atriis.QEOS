@@ -37,11 +37,8 @@ describe.each([
   test.each(["--status-errored", "--status-failed", "--status-passed", "--status-skipped"])("%s reaches 3:1 on the card surface", (n) => {
     expect(ratio(t(n), t("--surface-1"))).toBeGreaterThanOrEqual(3);
   });
-  test("skipped yellow: the mark reaches 3:1 on the card and the page, the edge reaches 3:1 on the card and on the fill", () => {
+  test("skipped yellow (also the run bar's solid fill) reaches 3:1 on the page", () => {
     expect(ratio(t("--status-skipped"), t("--page"))).toBeGreaterThanOrEqual(3);
-    expect(ratio(t("--status-skipped-edge"), t("--status-skipped-fill"))).toBeGreaterThanOrEqual(3);
-    if (_name === "light") expect(ratio(t("--status-skipped-edge"), t("--surface-1"))).toBeGreaterThanOrEqual(3);
-    else expect(ratio(t("--status-skipped-fill"), t("--surface-1"))).toBeGreaterThanOrEqual(3);
   });
   test("errored also reaches 3:1 on the page", () => {
     expect(ratio(t("--status-errored"), t("--page"))).toBeGreaterThanOrEqual(3);

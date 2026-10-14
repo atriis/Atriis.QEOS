@@ -65,10 +65,10 @@ test("summary only names kinds that occur", () => {
   expect(stripSummary(["passed", "passed"])).toBe("Last 2 runs: 2 passed");
 });
 
-test("the skeleton is ten hidden bars with a hidden-text label", () => {
+test("while loading, the strip keeps its space but shows no bars, only a hidden-text label", () => {
   const { container } = render(<RunStripSkeleton />);
-  expect(container.querySelectorAll(".run-bar.bar-loading")).toHaveLength(10);
-  container.querySelectorAll(".run-bar").forEach((b) => expect(b).toHaveAttribute("aria-hidden", "true"));
+  expect(container.querySelector(".run-strip")).not.toBeNull();
+  expect(container.querySelectorAll(".run-bar")).toHaveLength(0);
   expect(screen.getByText("Loading last runs")).toHaveClass("sr-only");
 });
 

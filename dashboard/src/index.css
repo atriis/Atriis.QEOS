@@ -34,12 +34,9 @@
   --status-rerun-stripe: #5c3f00;
   /* 4.65:1 on white, 4.22 on --page (the old #ec835a was 2.64, under the 3:1 non-text rule) */
   --status-errored: #c4501f;
-  /* Skipped is yellow everywhere. One family: --status-skipped is the mark (dot ring, chart stripes): 4.92:1 on white,
-     4.58 on --page; --skipped-text is the word on a pill: 6.85:1 on white. The run bar is the bright --status-skipped-fill
-     (1.5:1 on white), so its dashed --status-skipped-edge carries the boundary: 8.67:1 on white, 5.66 on the fill. */
+  /* Skipped is yellow everywhere. One family: --status-skipped is the mark (run bar, dot ring, chart stripes): 4.92:1 on
+     white, 4.58 on --page; --skipped-text is the word on a pill: 6.85:1 on white. */
   --status-skipped: #a16207;
-  --status-skipped-fill: #facc15;
-  --status-skipped-edge: #713f12;
   --skipped-text: #854d0e;
   /* Error text on surfaces; the status colour stays the validated chart/dot hue. */
   --danger-text: #c23434;
@@ -365,8 +362,7 @@ table.data th button.sort-button:focus-visible { outline: 2px solid var(--accent
 .bar-passed { background: var(--status-passed); }
 .bar-failed { background: var(--status-failed); clip-path: polygon(0 3px, 50% 0, 100% 3px, 100% 100%, 0 100%); }
 .bar-rerun { background: repeating-linear-gradient(135deg, var(--status-rerun) 0 2px, var(--status-rerun-stripe) 2px 4px); }
-.bar-skipped { background: var(--status-skipped-fill); outline: 1px dashed var(--status-skipped-edge); outline-offset: -1px; }
-.bar-loading { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border-strong); }
+.bar-skipped { background: var(--status-skipped); }
 .run-legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); list-style: none; margin: 0 0 var(--space-2); padding: 0; font-size: 12.5px; color: var(--text-secondary); }
 .run-legend li { display: inline-flex; align-items: center; gap: 6px; }
 .run-legend .run-bar { height: 14px; }

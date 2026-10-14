@@ -59,10 +59,10 @@ export default function RunStrip({ projectId, entries, href }: {
   );
 }
 
+/** While the strips load: the strip's space is kept (no row jumps) but stays empty, so paging never flashes grey bars. */
 export function RunStripSkeleton() {
   return (
     <div className="run-strip">
-      {Array.from({ length: 10 }, (_, i) => <span key={i} className="run-bar bar-loading" aria-hidden="true" />)}
       <span className="sr-only">Loading last runs</span>
     </div>
   );
