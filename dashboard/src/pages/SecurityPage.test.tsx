@@ -1,18 +1,25 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { http, HttpResponse } from "msw";
 import { server } from "../test/server";
 import { getAccessToken, setAccessToken } from "../auth/tokens";
+import { microsoftEnabled } from "../auth/ssoProviders";
 import SecurityPage from "./SecurityPage";
 
 vi.mock("qrcode", () => ({
   default: { toCanvas: vi.fn(async () => {}) },
 }));
 
+vi.mock("../auth/ssoProviders", () => ({
+  microsoftEnabled: vi.fn(() => false),
+  getMicrosoftCredential: vi.fn(async () => "ms-id-token"),
+}));
+
 let mfaOn = false;
 beforeEach(() => {
   mfaOn = false;
+  vi.mocked(microsoftEnabled).mockReturnValue(false);
   server.use(http.get("/api/v1/users/me", () => HttpResponse.json({ id: 1, email: "a@b.co", mfa_enabled: mfaOn })));
 });
 
@@ -64,7 +71,7 @@ test("a wrong confirm code surfaces the error", async () => {
 });
 
 async function fillChange(current: string, next: string, confirm = next) {
-  await userEvent.type(screen.getByLabelText(/current password/i), current);
+  await userEvent.type(await screen.findByLabelText(/current password/i), current);
   await userEvent.type(screen.getByLabelText(/^new password/i), next);
   await userEvent.type(screen.getByLabelText(/confirm new password/i), confirm);
   await userEvent.click(screen.getByRole("button", { name: /change password/i }));
@@ -175,4 +182,106 @@ test("recovery codes can be copied and must be acknowledged before they go away"
   await userEvent.click(screen.getByRole("button", { name: /i saved these codes/i }));
   expect(screen.queryByText("aaaa-1111")).not.toBeInTheDocument();
   expect(screen.getByText("Two-factor authentication: On")).toBeInTheDocument();
+});
+
+type MeBody = Record<string, unknown>;
+function meIs(body: MeBody) {
+  server.use(http.get("/api/v1/users/me", () => HttpResponse.json({ id: 1, email: "a@b.co", mfa_enabled: false, ...body })));
+}
+async function microsoftCard() {
+  return (await screen.findByRole("heading", { name: "Microsoft account" })).closest("form")!;
+}
+
+test("a password account links Microsoft after confirming its password", async () => {
+  vi.mocked(microsoftEnabled).mockReturnValue(true);
+  let linked = false;
+  server.use(
+    http.get("/api/v1/users/me", () => HttpResponse.json({ id: 1, email: "a@b.co", mfa_enabled: false,
+      has_password: true, sso_only: false, linked_providers: linked ? ["microsoft"] : [] })),
+    http.post("/api/v1/users/me/link/microsoft", async ({ request }) => {
+      expect(await request.json()).toEqual({ credential: "ms-id-token", current_password: "my-password-1" });
+      linked = true;
+      return HttpResponse.json({ id: 1, email: "a@b.co" });
+    }),
+  );
+  renderSecurity();
+  const card = await microsoftCard();
+  await userEvent.type(within(card).getByLabelText(/your qeos password/i), "my-password-1");
+  await userEvent.click(within(card).getByRole("button", { name: "Link Microsoft account" }));
+  expect(await within(card).findByText(/microsoft account linked/i)).toBeInTheDocument();
+  expect(await within(card).findByText("Linked to Microsoft")).toBeInTheDocument();
+  expect(within(card).queryByRole("button", { name: "Link Microsoft account" })).not.toBeInTheDocument();
+});
+
+test("a passwordless account links without a password prompt", async () => {
+  vi.mocked(microsoftEnabled).mockReturnValue(true);
+  meIs({ has_password: false, linked_providers: ["google"] });
+  server.use(http.post("/api/v1/users/me/link/microsoft", async ({ request }) => {
+    expect(await request.json()).toEqual({ credential: "ms-id-token" });
+    return HttpResponse.json({ id: 1, email: "a@b.co" });
+  }));
+  renderSecurity();
+  const card = await microsoftCard();
+  expect(within(card).queryByLabelText(/your qeos password/i)).not.toBeInTheDocument();
+  await userEvent.click(within(card).getByRole("button", { name: "Link Microsoft account" }));
+  expect(await within(card).findByText(/microsoft account linked/i)).toBeInTheDocument();
+});
+
+test("a link refusal is shown in the card", async () => {
+  vi.mocked(microsoftEnabled).mockReturnValue(true);
+  meIs({ has_password: true, linked_providers: [] });
+  server.use(http.post("/api/v1/users/me/link/microsoft", () =>
+    HttpResponse.json({ detail: "This Microsoft account is already linked to a different user" }, { status: 409 })));
+  renderSecurity();
+  const card = await microsoftCard();
+  await userEvent.type(within(card).getByLabelText(/your qeos password/i), "my-password-1");
+  await userEvent.click(within(card).getByRole("button", { name: "Link Microsoft account" }));
+  expect(await within(card).findByRole("alert")).toHaveTextContent("already linked to a different user");
+});
+
+test("a linked account says so and offers no button", async () => {
+  vi.mocked(microsoftEnabled).mockReturnValue(true);
+  meIs({ has_password: true, linked_providers: ["microsoft"] });
+  renderSecurity();
+  const card = await microsoftCard();
+  expect(within(card).getByText("Linked to Microsoft")).toBeInTheDocument();
+  expect(within(card).queryByRole("button")).not.toBeInTheDocument();
+});
+
+test("without Microsoft configured and outside the mode there is no Microsoft card", async () => {
+  meIs({ has_password: true, linked_providers: [], sso_only: false });
+  renderSecurity();
+  await screen.findByText(/two-factor authentication: off/i);
+  expect(screen.queryByRole("heading", { name: "Microsoft account" })).not.toBeInTheDocument();
+});
+
+test("in SSO-only mode the Password card is hidden for a non-superuser", async () => {
+  meIs({ has_password: true, linked_providers: ["microsoft"], sso_only: true, is_superuser: false });
+  renderSecurity();
+  await screen.findByRole("heading", { name: "Microsoft account" });
+  expect(screen.queryByRole("heading", { name: "Password" })).not.toBeInTheDocument();
+});
+
+test("in SSO-only mode a superuser keeps the Password card", async () => {
+  meIs({ has_password: true, linked_providers: [], sso_only: true, is_superuser: true });
+  server.use(http.get("/api/v1/users/sso-readiness", () => HttpResponse.json({ active_users: 1, linked: 0, unlinked: [] })));
+  renderSecurity();
+  await screen.findByRole("heading", { name: "Microsoft account" });
+  expect(screen.getByRole("heading", { name: "Password" })).toBeInTheDocument();
+});
+
+test("the Password card waits for the account, so an SSO-only non-superuser never sees it flash", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  server.use(http.get("/api/v1/users/me", async () => {
+    await gate;
+    return HttpResponse.json({ id: 1, email: "a@b.co", mfa_enabled: false, has_password: true,
+      linked_providers: ["microsoft"], sso_only: true, is_superuser: false });
+  }));
+  renderSecurity();
+  expect(screen.getByText(/checking two-factor status/i)).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Password" })).not.toBeInTheDocument();
+  release();
+  await screen.findByRole("heading", { name: "Microsoft account" });
+  expect(screen.queryByRole("heading", { name: "Password" })).not.toBeInTheDocument();
 });

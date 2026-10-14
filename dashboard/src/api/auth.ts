@@ -71,9 +71,22 @@ export async function mfaVerify(mfaToken: string, code: string): Promise<void> {
   setAccessToken(tokens.access_token);
 }
 
-/** The signed-in account; `mfa_enabled` says whether two-factor sign-in is on, and `monitoring_url` is set
- *  only for a superuser while monitoring is on (ADR-027). */
-export function getMe(): Promise<{ id: number; email: string; mfa_enabled: boolean; full_name?: string | null; monitoring_url?: string | null }> {
+/** The signed-in account (GET /users/me). `monitoring_url` is set only for a superuser while monitoring is on
+ *  (ADR-027); `linked_providers`, `sso_only` and `has_password` drive the Security page (ADR-031). The newer
+ *  fields are optional so an older server's answer still types. */
+export interface Me {
+  id: number;
+  email: string;
+  mfa_enabled: boolean;
+  full_name?: string | null;
+  monitoring_url?: string | null;
+  is_superuser?: boolean;
+  linked_providers?: string[];
+  sso_only?: boolean;
+  has_password?: boolean;
+}
+
+export function getMe(): Promise<Me> {
   return apiFetch("/api/v1/users/me");
 }
 
@@ -134,4 +147,12 @@ export interface AuthMethods {
 
 export function getAuthMethods(): Promise<AuthMethods> {
   return apiFetch("/api/v1/auth/methods");
+}
+
+/** Links the Microsoft identity behind `credential` to the signed-in account; an account with a password
+ *  must confirm it. */
+export async function linkMicrosoft(credential: string, currentPassword?: string): Promise<void> {
+  const body: Record<string, string> = { credential };
+  if (currentPassword) body.current_password = currentPassword;
+  await apiFetch("/api/v1/users/me/link/microsoft", { method: "POST", body: JSON.stringify(body) });
 }

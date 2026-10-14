@@ -534,7 +534,7 @@ superuser allows that one account to link at its next Microsoft sign-in (below).
 For a company deployment where people sign in only with their Microsoft work account:
 
 1. Configure Microsoft as above and check that signing in with Microsoft works.
-2. Ask everyone with a password account to link Microsoft (`POST /api/v1/users/me/link/microsoft`).
+2. Ask everyone with a password account to link Microsoft: account menu → Security → Microsoft account → Link Microsoft account (they confirm their QEOS password, then sign in with Microsoft).
 3. Check readiness as a superuser: `GET /api/v1/users/sso-readiness` lists the active users who have not
    linked. For someone who missed it, `POST /api/v1/users/{id}/allow-microsoft-link` lets that account
    link at its next Microsoft sign-in, for 7 days.

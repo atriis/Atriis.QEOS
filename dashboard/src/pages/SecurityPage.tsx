@@ -2,7 +2,8 @@ import { FormEvent, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import QRCode from "qrcode";
 import { CircleCheck, CircleSlash } from "lucide-react";
-import { changePassword, getMe, mfaConfirm, mfaDisable, mfaEnroll } from "../api/auth";
+import { changePassword, getMe, linkMicrosoft, mfaConfirm, mfaDisable, mfaEnroll, type Me } from "../api/auth";
+import { getMicrosoftCredential, microsoftEnabled } from "../auth/ssoProviders";
 import { downloadCsv } from "../lib/csv";
 import ErrorBanner from "../components/ErrorBanner";
 import NewPasswordFields from "../components/NewPasswordFields";
@@ -86,6 +87,72 @@ function ChangePasswordCard() {
   );
 }
 
+/** Link a Microsoft work account (ADR-031). Every user in SSO-only mode; otherwise only when this build has
+ *  Microsoft sign-in. */
+function MicrosoftAccountCard({ me, onLinked }: { me: Me; onLinked: () => void }) {
+  const linked = me.linked_providers?.includes("microsoft") ?? false;
+  const needsPassword = me.has_password === true;
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  async function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    setError(null);
+    setBusy(true);
+    try {
+      const credential = await getMicrosoftCredential();
+      await linkMicrosoft(credential, needsPassword ? password : undefined);
+      setPassword("");
+      setDone(true);
+      onLinked();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form className="card form-stack" onSubmit={onSubmit}>
+      <h3>Microsoft account</h3>
+      {done && (
+        <p className="success-note" role="status">
+          <CircleCheck size={18} aria-hidden="true" />
+          <span>Microsoft account linked. You can sign in with Microsoft from now on.</span>
+        </p>
+      )}
+      {linked ? (
+        <p className="mfa-status">
+          <CircleCheck size={16} aria-hidden="true" /> <strong>Linked to Microsoft</strong>
+        </p>
+      ) : (
+        <>
+          <p className="muted">
+            {me.sso_only ? "Sign-in here is through Microsoft. " : ""}
+            Link your Microsoft work account to sign in with it.
+          </p>
+          {error != null && <ErrorBanner error={error} />}
+          {needsPassword && (
+            <TextField label="Your QEOS password" type="password" required autoComplete="current-password"
+              value={password} onChange={setPassword} />
+          )}
+          {microsoftEnabled() ? (
+            <div>
+              <button className="primary" type="submit" disabled={busy}>
+                {busy ? "Linking…" : "Link Microsoft account"}
+              </button>
+            </div>
+          ) : (
+            <p className="muted">This build has no Microsoft sign-in configured. Ask your administrator.</p>
+          )}
+        </>
+      )}
+    </form>
+  );
+}
+
 export default function SecurityPage() {
   const [step, setStep] = useState<Step>("idle");
   const [secret, setSecret] = useState("");
@@ -95,8 +162,12 @@ export default function SecurityPage() {
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
   const [known, setKnown] = useState<Known>("unknown");
+  const [me, setMe] = useState<Me | null>(null);
   const loadStatus = () =>
-    getMe().then((me) => setKnown(me.mfa_enabled ? "on" : "off")).catch(() => {
+    getMe().then((account) => {
+      setMe(account);
+      setKnown(account.mfa_enabled ? "on" : "off");
+    }).catch(() => {
       // The line stays "unknown" rather than guessing
     });
   useEffect(() => {
@@ -187,7 +258,12 @@ export default function SecurityPage() {
     <div className="page" style={{ maxWidth: 560 }}>
       <PageHeader title="Security" actions={<Link to="/">Back to projects</Link>} />
       <h2 className="sr-only">Sign-in settings</h2>
-      <ChangePasswordCard />
+      {me !== null && (me.sso_only === true || microsoftEnabled()) && (
+        <MicrosoftAccountCard me={me} onLinked={() => void loadStatus()} />
+      )}
+      {/* SSO-only mode: only superusers keep a password (ADR-031). Rendered once the account has loaded, so a
+          non-superuser never sees it flash. */}
+      {me !== null && !(me.sso_only === true && me.is_superuser !== true) && <ChangePasswordCard />}
       <div className="card">
         <h3>Two-factor authentication (TOTP)</h3>
         {error != null && <ErrorBanner error={error} />}
