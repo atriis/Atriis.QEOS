@@ -147,3 +147,25 @@ test("the stylesheet keeps a collapsed panel hidden (an author display would ove
   const css = readFileSync(resolve(__dirname, "../index.css"), "utf8");
   expect(css).toMatch(/\.step-errors\[hidden\]\s*\{\s*display:\s*none/);
 });
+
+test("following a step's link moves focus to its row, a plain load leaves focus alone", async () => {
+  setup();
+  renderAt(`/projects/42/runs/61#step-${LOGIN}`);
+  const button = await screen.findByRole("button", { name: "Given I log in" });
+  await waitFor(() => expect(button).toHaveFocus());
+});
+
+test("a load without a hash does not take focus", async () => {
+  setup();
+  renderAt();
+  const button = await screen.findByRole("button", { name: "Given I log in" });
+  expect(button).not.toHaveFocus();
+  expect(document.body).toHaveFocus();
+});
+
+test("a malformed anchor does not break the section", async () => {
+  setup();
+  renderAt("/projects/42/runs/61#step-%E0");
+  expect(await screen.findByRole("heading", { name: "Failed steps" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Given I log in" })).toHaveAttribute("aria-expanded", "false");
+});

@@ -25,7 +25,7 @@ export default function FailedSteps({ projectId, runId }: { projectId: number; r
     staleTime: 60_000,
   });
   const { hash, key: locationKey } = useLocation();
-  const target = hash.startsWith(ANCHOR) ? decodeURIComponent(hash.slice(ANCHOR.length)) : null;
+  const target = hash.startsWith(ANCHOR) ? hash.slice(ANCHOR.length) : null  // keys are hex: nothing to decode;
   const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(new Map());
   const scrolled = useRef<string | null>(null);
   // Following the same link again reopens its row and scrolls back to it, even after the user collapsed it
@@ -42,7 +42,10 @@ export default function FailedSteps({ projectId, runId }: { projectId: number; r
   useEffect(() => {
     if (target == null || scrolled.current === target || !steps?.some((s) => s.key === target)) return;
     scrolled.current = target;
-    document.getElementById(stepAnchor(target))?.scrollIntoView?.({ block: "start" });
+    const row = document.getElementById(stepAnchor(target));
+    row?.scrollIntoView?.({ block: "start" });
+    // Following a step link lands on its row for keyboard and screen reader users too (never on a load without a hash)
+    row?.querySelector<HTMLButtonElement>(".step-head")?.focus({ preventScroll: true });
   }, [target, steps, locationKey]);
 
   const hrefOf = (t: FailedStepTest) => {
