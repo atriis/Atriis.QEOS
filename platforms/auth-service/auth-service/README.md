@@ -184,6 +184,7 @@ set it to any address). The address must be one the user model accepts; otherwis
 ## API Endpoints
 
 ### Authentication
+- `GET /api/v1/auth/methods` - Public. `{"password": true|false, "providers": [...]}`: `password` is `false` in SSO-only mode (the superuser break-glass is not advertised); `providers` lists the configured providers (`microsoft`, `google`), limited to `AUTH_SSO_PROVIDERS` in the mode. No per-user data. The dashboard's sign-in and recovery pages read it (ADR-031).
 - `POST /api/v1/auth/register` - Begin registration. Creates an unclaimed, expiring pending record and emails a verification link -- returns `202`, not a user. The address is not reserved until verified.
 - `GET /api/v1/auth/verify-email?token=...` - Complete registration: creates the account and returns `Token` (auto-login). `400` if the token is invalid or expired; `409` if the address was claimed by another path (e.g. Google SSO) in the meantime.
 - `POST /api/v1/auth/resend-verification` - Resend the verification link. Always answers identically regardless of whether the address has a pending registration, a completed account, or neither. Declines to act (same response, nothing sent) when more than one unexpired registration attempt exists for the address -- which of them is legitimate isn't knowable from this endpoint alone.

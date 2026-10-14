@@ -1,6 +1,6 @@
 # src/services/auth-service/src/auth/schemas/auth.py
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional
+from typing import List, Optional
 
 class LoginRequest(BaseModel):
     email: EmailStr
@@ -28,6 +28,12 @@ class LinkMicrosoftRequest(BaseModel):
     credential: str
     # Same rule as LinkGoogleRequest: required when the account has a password
     current_password: Optional[str] = None
+
+class AuthMethods(BaseModel):
+    # GET /auth/methods (public, ADR-031). password is false in SSO-only mode: the superuser
+    # break-glass is not advertised. providers: configured, limited to AUTH_SSO_PROVIDERS in the mode.
+    password: bool
+    providers: List[str]
 
 class Token(BaseModel):
     access_token: str

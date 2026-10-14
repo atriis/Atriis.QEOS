@@ -12,10 +12,11 @@ from src.auth.service.auth_service import AuthService
 from src.auth.service.user_service import UserService
 from src.auth.service.email_sender import EmailSender
 from src.auth.schemas.auth import (
-    LoginRequest, MfaCodeRequest, MfaVerifyRequest, Token, PasswordResetRequest,
+    AuthMethods, LoginRequest, MfaCodeRequest, MfaVerifyRequest, Token, PasswordResetRequest,
     PasswordResetConfirm, RefreshTokenRequest, ResendVerificationRequest, ChangePasswordRequest,
 )
 from src.auth.service import mfa_service
+from src.auth.service.auth_mode import available_providers
 from src.auth.schemas.user import RegisterRequest
 from src.auth.models.pending_registration import PendingRegistration
 from src.auth.models.password_reset import PasswordReset
@@ -39,6 +40,13 @@ from src.auth.config import settings
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+@router.get("/methods", response_model=AuthMethods)
+def auth_methods():
+    """Public: how people sign in to this deployment (ADR-031). No secrets, no per-user data; the
+    dashboard's login and recovery pages read it."""
+    return AuthMethods(password=not settings.AUTH_SSO_ONLY, providers=available_providers())
 
 
 @router.post("/register", status_code=status.HTTP_202_ACCEPTED)

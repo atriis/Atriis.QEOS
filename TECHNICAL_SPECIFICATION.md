@@ -65,6 +65,8 @@ Grafana; its `/monitoring?next=` page does the same when the gateway sends a coo
   signing-key fetch hardened (timeout, throttled refresh; outages ⇒ 503).
   `/sso/github` is an honest 501. `/users/me/link/google|microsoft` links a
   provider to an existing account.
+- SSO-only mode (ADR-031): `AUTH_SSO_ONLY`, `AUTH_SSO_PROVIDERS`. Public
+  `GET /auth/methods` → `{password, providers}` tells the dashboard what to show.
 - Every service accepts only access tokens as sessions (MFA challenge, refresh
   and service tokens are rejected). `/internal/v1/users[/{id}]` (HTTP Basic,
   INTERNAL_API_PASSWORD; not routed by the gateway) serves organization-service.

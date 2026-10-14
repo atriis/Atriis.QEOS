@@ -130,6 +130,9 @@ check "/api/v1/users/me with a bad token -> auth-service" 401 GET "$BASE/api/v1/
 # The stack has no Microsoft configuration: 503 proves the request reached auth-service
 check "/api/v1/sso/microsoft -> auth-service (not configured)" 503 POST "$BASE/api/v1/sso/microsoft" \
   -H "Content-Type: application/json" -d '{"credential":"not-a-token"}'
+# Public: how people sign in (ADR-031). The default stack is not in SSO-only mode
+check "/api/v1/auth/methods without a token -> auth-service" 200 GET "$BASE/api/v1/auth/methods"
+body_has "/auth/methods offers password sign-in on the default stack" '"password":true'
 check "/api/v1/organizations/999999/members/me for a non-member -> organization-service" 404 GET \
   "$BASE/api/v1/organizations/999999/members/me" "${AUTH[@]}"
 check "/api/v1/organizations/999999/projects -> project-service (overlap route)" 404 GET \
