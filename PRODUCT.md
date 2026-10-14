@@ -146,5 +146,5 @@ yet.
 - WCAG AA: chart and table contrast meets AA; status is never conveyed by
   color alone (labels/legends always present); colorblind-validated status
   palette (passed #0ca30c, failed #d03b3b, errored #c4501f light / #ec835a
-  dark, skipped #74879a light / #6f8396 dark; DESIGN.md holds the tokens).
+  dark, skipped yellow #a16207 light / #facc15 dark; DESIGN.md holds the tokens).
 - Dark and light mode are both first-class, following the OS preference.

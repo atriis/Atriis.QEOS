@@ -2,7 +2,7 @@ import { formatDuration } from "../api/analytics";
 import { RunRequest } from "../api/runRequests";
 import { Run } from "../api/runs";
 
-export type RunTone = "queued" | "running" | "passed" | "failed" | "cancelled" | "error";
+export type RunTone = "queued" | "running" | "passed" | "failed" | "cancelled" | "skipped" | "error";
 export const RESULTS_WAIT_MS = 5 * 60_000;
 /** Results are looked up from this long before the request, so clock skew never hides them. */
 export const MATCH_SLACK_MS = 10 * 60_000;
@@ -46,7 +46,7 @@ function describeState(r: RunRequest, nameOf: (id: number | null) => string, now
       return { text: `Didn't start: ${r.error ?? "unknown error"}`, tone: "error" };
     case "completed":
       if (r.conclusion === "success") return { text: "Passed", tone: "passed" };
-      if (r.conclusion === "skipped") return { text: "Skipped", tone: "cancelled" };
+      if (r.conclusion === "skipped") return { text: "Skipped", tone: "skipped" };
       return { text: "Failed", tone: "failed" };
   }
 }

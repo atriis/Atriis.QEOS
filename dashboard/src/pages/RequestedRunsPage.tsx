@@ -16,7 +16,7 @@ import { tableCardClass, useIsWide } from "../lib/useIsWide";
 
 const PAGE = 50;
 const PILL_TONE: Record<RunTone, PillTone> = {
-  queued: "queued", running: "running", passed: "passed", failed: "failed", cancelled: "cancelled", error: "errored",
+  queued: "queued", running: "running", passed: "passed", failed: "failed", cancelled: "cancelled", skipped: "skipped", error: "errored",
 };
 
 /** The status word goes in the pill; what follows it ("1 test · started by …", the error) sits beside it */

@@ -34,11 +34,13 @@
   --status-rerun-stripe: #5c3f00;
   /* 4.65:1 on white, 4.22 on --page (the old #ec835a was 2.64, under the 3:1 non-text rule) */
   --status-errored: #c4501f;
-  --status-skipped: #74879a;
-  /* Skipped run bar: yellow fill (1.5:1 on white, so the dashed edge carries the shape: 7.2:1 on white, 4.8:1 on
-     the fill); 11.5:1 on the dark --surface-1 */
+  /* Skipped is yellow everywhere. One family: --status-skipped is the mark (dot ring, chart stripes): 4.92:1 on white,
+     4.58 on --page; --skipped-text is the word on a pill: 6.85:1 on white. The run bar is the bright --status-skipped-fill
+     (1.5:1 on white), so its dashed --status-skipped-edge carries the boundary: 8.67:1 on white, 5.66 on the fill. */
+  --status-skipped: #a16207;
   --status-skipped-fill: #facc15;
-  --status-skipped-edge: #854d0e;
+  --status-skipped-edge: #713f12;
+  --skipped-text: #854d0e;
   /* Error text on surfaces; the status colour stays the validated chart/dot hue. */
   --danger-text: #c23434;
   /* Readable status text for pills (the status hues are for marks): 5.02 / 5.55 on white, 4.54 / 5.02 on a hovered row */
@@ -113,7 +115,8 @@
     --gk-string: #9fd98f;
     --gk-param: #ff9db0;
     --gk-param-bg: rgba(255, 157, 176, 0.16);
-    --status-skipped: #6f8396;
+    --status-skipped: #facc15; /* 11.35:1 on --surface-1 */
+    --skipped-text: #facc15;
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
   }
@@ -426,6 +429,7 @@ table.data.cases-table { table-layout: fixed; }
 .pill-failed { color: var(--danger-text); border-color: color-mix(in srgb, var(--status-failed) 45%, transparent); }
 .pill-errored { color: var(--errored-text); border-color: color-mix(in srgb, var(--status-errored) 45%, transparent); }
 .pill-running { color: var(--accent-text); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.pill-skipped { color: var(--skipped-text); border-color: color-mix(in srgb, var(--status-skipped) 55%, transparent); }
 .pill-queued, .pill-cancelled, .pill-neutral { color: var(--text-secondary); }
 
 /* ---- Filter chips: quick filters, applied filters, "+ Filter", "Clear all" ---- */
@@ -964,6 +968,7 @@ input[readonly] { background: var(--surface-2); }
 .run-panel-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 .run-tone-running .run-panel-state svg { color: var(--accent); }
 .run-tone-passed .run-panel-state svg { color: var(--status-passed); }
+.run-tone-skipped .run-panel-state svg { color: var(--status-skipped); }
 .run-tone-failed .run-panel-state svg, .run-tone-error .run-panel-state svg { color: var(--status-failed); }
 @media (prefers-reduced-motion: no-preference) {
   .run-tone-running .run-panel-state svg { animation: run-spin 1.2s linear infinite; }

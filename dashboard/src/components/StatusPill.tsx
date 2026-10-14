@@ -1,7 +1,7 @@
 import type { RunVerdict } from "./RunStatusBadge";
-import { AlertTriangle, Ban, Check, CheckCircle2, Clock, Loader2, XCircle, type LucideIcon } from "lucide-react";
+import { AlertTriangle, Ban, Check, CheckCircle2, CircleDashed, Clock, Loader2, XCircle, type LucideIcon } from "lucide-react";
 
-export type PillTone = "passed" | "failed" | "errored" | "running" | "queued" | "cancelled" | "ready" | "neutral";
+export type PillTone = "passed" | "failed" | "errored" | "running" | "queued" | "cancelled" | "skipped" | "ready" | "neutral";
 
 /** The icon beside the word wherever a status colour is used (Never Alone): the shape differs per tone too. */
 const ICON: Record<PillTone, LucideIcon | null> = {
@@ -12,6 +12,7 @@ const ICON: Record<PillTone, LucideIcon | null> = {
   running: Loader2,
   queued: Clock,
   cancelled: Ban,
+  skipped: CircleDashed,
   neutral: null,
 };
 

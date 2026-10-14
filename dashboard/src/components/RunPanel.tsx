@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, CircleAlert, CircleSlash, CircleX, Clock, ExternalLink, LoaderCircle } from "lucide-react";
+import { CheckCircle2, CircleAlert, CircleDashed, CircleSlash, CircleX, Clock, ExternalLink, LoaderCircle } from "lucide-react";
 import { ApiError } from "../api/http";
 import { getProject } from "../api/orgs";
 import { listRuns } from "../api/runs";
@@ -17,7 +17,7 @@ const RECENT_MS = 60 * 60_000;
 const RESULTS_POLL_MS = 10_000;
 const TICK_MS = 30_000;
 const ICONS: Record<RunTone, typeof Clock> = {
-  queued: Clock, running: LoaderCircle, passed: CheckCircle2, failed: CircleX, cancelled: CircleSlash, error: CircleAlert,
+  queued: Clock, running: LoaderCircle, passed: CheckCircle2, failed: CircleX, cancelled: CircleSlash, skipped: CircleDashed, error: CircleAlert,
 };
 
 interface Props {
