@@ -17,7 +17,7 @@ release is supported.
 ## Reporting a Vulnerability
 
 Contact the maintainer privately through GitHub
-([@carneiru](https://github.com/carneiru)). GitHub's private vulnerability
+([@AtriisPedroCarneiro](https://github.com/AtriisPedroCarneiro)). GitHub's private vulnerability
 reporting is not enabled on this repository yet. If the issue is confirmed,
 we will open a pull request to address the vulnerability.
 
