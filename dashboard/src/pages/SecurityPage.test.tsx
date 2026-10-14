@@ -371,3 +371,21 @@ test("a refused allow refreshes the list so the stale row goes", async () => {
   expect(within(card).getByRole("alert")).toHaveTextContent("User has already linked Microsoft");
   expect(reads).toBe(2);
 });
+
+// Final review #5: a build without Microsoft sign-in cannot submit the link, so it asks for no password
+test("without Microsoft sign-in in the build, the card shows the state and asks for nothing", async () => {
+  meIs({ has_password: true, linked_providers: [], sso_only: true, is_superuser: false });
+  renderSecurity();
+  const card = await microsoftCard();
+  expect(within(card).getByText(/no microsoft sign-in configured/i)).toBeInTheDocument();
+  expect(within(card).queryByLabelText(/your qeos password/i)).not.toBeInTheDocument();
+  expect(within(card).queryByRole("button")).not.toBeInTheDocument();
+});
+
+// Final review #6: a failed /users/me must not take password change away in normal mode
+test("the Password card is shown when the account cannot be loaded", async () => {
+  server.use(http.get("/api/v1/users/me", () => HttpResponse.json({ detail: "boom" }, { status: 500 })));
+  renderSecurity();
+  expect(await screen.findByRole("heading", { name: "Password" })).toBeInTheDocument();
+  expect(screen.getByText(/checking two-factor status/i)).toBeInTheDocument();
+});

@@ -137,16 +137,19 @@ function MicrosoftAccountCard({ me, onLinked }: { me: Me; onLinked: () => void }
             Link your Microsoft work account to sign in with it.
           </p>
           {error != null && <ErrorBanner error={error} />}
-          {needsPassword && (
-            <TextField label="Your QEOS password" type="password" required autoComplete="current-password"
-              value={password} onChange={setPassword} />
-          )}
+          {/* Without Microsoft sign-in in this build the link cannot be submitted: no field asks for a password */}
           {microsoftEnabled() ? (
-            <div>
-              <button className="primary" type="submit" disabled={busy}>
-                {busy ? "Linking…" : "Link Microsoft account"}
-              </button>
-            </div>
+            <>
+              {needsPassword && (
+                <TextField label="Your QEOS password" type="password" required autoComplete="current-password"
+                  value={password} onChange={setPassword} />
+              )}
+              <div>
+                <button className="primary" type="submit" disabled={busy}>
+                  {busy ? "Linking…" : "Link Microsoft account"}
+                </button>
+              </div>
+            </>
           ) : (
             <p className="muted">This build has no Microsoft sign-in configured. Ask your administrator.</p>
           )}
@@ -256,12 +259,15 @@ export default function SecurityPage() {
   const [busy, setBusy] = useState(false);
   const [known, setKnown] = useState<Known>("unknown");
   const [me, setMe] = useState<Me | null>(null);
+  const [meFailed, setMeFailed] = useState(false);
   const loadStatus = () =>
     getMe().then((account) => {
       setMe(account);
+      setMeFailed(false);
       setKnown(account.mfa_enabled ? "on" : "off");
     }).catch(() => {
       // The line stays "unknown" rather than guessing
+      setMeFailed(true);
     });
   useEffect(() => {
     void loadStatus();
@@ -354,9 +360,10 @@ export default function SecurityPage() {
       {me !== null && (me.sso_only === true || microsoftEnabled()) && (
         <MicrosoftAccountCard me={me} onLinked={() => void loadStatus()} />
       )}
-      {/* SSO-only mode: only superusers keep a password (ADR-031). Rendered once the account has loaded, so a
-          non-superuser never sees it flash. */}
-      {me !== null && !(me.sso_only === true && me.is_superuser !== true) && <ChangePasswordCard />}
+      {/* SSO-only mode: only superusers keep a password (ADR-031). Hidden while the account loads, so a
+          non-superuser never sees it flash. If the account cannot be loaded it is shown, as before the mode
+          existed: the server still refuses a non-superuser in the mode, and the card shows that refusal. */}
+      {(me !== null ? !(me.sso_only === true && me.is_superuser !== true) : meFailed) && <ChangePasswordCard />}
       <div className="card">
         <h3>Two-factor authentication (TOTP)</h3>
         {error != null && <ErrorBanner error={error} />}
