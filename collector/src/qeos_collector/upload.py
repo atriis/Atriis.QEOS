@@ -133,7 +133,10 @@ def upload_part(
             else:
                 # Spec 2026-10-14 §2: a server from before collector 0.8.0 forbids the two new fields. Once, and only
                 # for that: nothing was stored, so the same Idempotency-Key is reused
-                stripped = None if downgraded or status != 422 or not _names_failed_step(body)                     else without_step_details(payload)
+                stripped = (
+                    None if downgraded or status != 422 or not _names_step_details(body)
+                    else without_step_details(payload)
+                )
                 if stripped is None:
                     raise UploadError(_explain(status, body, response_headers))
                 payload, downgraded = stripped, True
@@ -231,14 +234,15 @@ def _json(body: bytes) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _names_failed_step(body: bytes) -> bool:
-    """A validation error inside a result's failed_step (FastAPI's 422: {"detail": [{"loc": [...]}, ...]})."""
+def _names_step_details(body: bytes) -> bool:
+    """A 422 forbidding failed_step.definition or .pattern as an extra field (FastAPI: {"detail": [{"loc": [...]}]})."""
     try:
         detail = json.loads(body).get("detail")
     except (ValueError, AttributeError):
         return False
     return isinstance(detail, list) and any(
-        isinstance(error, dict) and isinstance(error.get("loc"), list) and "failed_step" in error["loc"]
+        isinstance(error, dict) and isinstance(error.get("loc"), list)
+        and error["loc"][-2:-1] == ["failed_step"] and error["loc"][-1] in STEP_DETAILS
         for error in detail
     )
 

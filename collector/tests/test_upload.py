@@ -376,3 +376,12 @@ def test_without_step_details_strips_only_the_two_fields():
     assert body["results"][0]["failed_step"] == {"text": "When I search Lisbon", "line": 4}
     assert upload.without_step_details(PART.body) is None
     assert upload.without_step_details(b"not json") is None
+
+
+def test_a_422_about_another_failed_step_field_is_not_retried(platform):
+    platform.reply(422, {"detail": [{"type": "string_too_long", "loc": ["body", "results", 0, "failed_step", "text"],
+                                     "msg": "too long"}]})
+    warnings = []
+    with pytest.raises(UploadError):
+        send_step(platform, warnings)
+    assert len(platform.requests) == 1 and warnings == []
