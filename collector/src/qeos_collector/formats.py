@@ -201,6 +201,10 @@ def _attachment_text(attachment: object) -> Optional[str]:
     data = attachment.get("data") if attachment.get("data") is not None else attachment.get("body")
     if not isinstance(data, str) or not data:
         return None
+    # cucumber's message formats name the encoding; the classic JSON never does and always base64-encodes
+    encoding = attachment.get("contentEncoding") or attachment.get("content_encoding")
+    if isinstance(encoding, str) and encoding.strip().upper() == "IDENTITY":
+        return data
     try:
         raw = base64.b64decode(data, validate=True)
     except (binascii.Error, ValueError):

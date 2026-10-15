@@ -439,3 +439,31 @@ def test_no_text_means_no_log(tmp_path):
 def test_odd_attachment_shapes_are_skipped(tmp_path, embeddings):
     step = {"keyword": "When ", "name": "a", "result": {"status": "passed"}, "embeddings": embeddings}
     assert log_of(tmp_path, [step]) is None
+
+
+# --- contentEncoding (spec 2026-10-15 §4.2) ---------------------------------------------------------------------
+
+
+def encoded_step(data, encoding, key="contentEncoding"):
+    return {"keyword": "When ", "name": "a", "result": {"status": "passed"},
+            "attachments": [{"body": data, "media_type": "text/plain", key: encoding}]}
+
+
+def test_identity_keeps_a_base64_looking_line_as_text(tmp_path):
+    assert log_of(tmp_path, [encoded_step("Finished", "IDENTITY")]) == "Finished"
+
+
+def test_base64_encoding_decodes(tmp_path):
+    assert log_of(tmp_path, [encoded_step(b64('tripId="1"'), "BASE64")]) == 'tripId="1"'
+
+
+def test_the_snake_case_spelling_and_lowercase_count(tmp_path):
+    assert log_of(tmp_path, [encoded_step("Done", "identity", key="content_encoding")]) == "Done"
+
+
+def test_an_unknown_encoding_is_treated_as_absent(tmp_path):
+    assert log_of(tmp_path, [encoded_step(b64("guessed"), "GZIP")]) == "guessed"
+
+
+def test_invalid_base64_under_base64_encoding_is_kept_as_text(tmp_path):
+    assert log_of(tmp_path, [encoded_step("not base64!", "BASE64")]) == "not base64!"
