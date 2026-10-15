@@ -39,6 +39,7 @@ instead.
    - [4.7 Retention, legal hold and export](#47-retention-legal-hold-and-export)
    - [4.8 Ctrl K search and KPI tiles](#48-ctrl-k-search-and-kpi-tiles)
    - [4.9 Security operations](#49-security-operations)
+   - [4.10 Log values](#410-log-values)
 5. [Wiring a real test repository end to end](#5-wiring-a-real-test-repository-end-to-end)
 6. [Production](#6-production)
 7. [Upgrades and maintenance](#7-upgrades-and-maintenance)
@@ -1600,6 +1601,26 @@ revoked and live 60 minutes. Refresh sessions last 30 days. MFA: [3.7](#37-two-f
 sign-in, MFA, registration and password routes, and 10/s on uploads. Internal APIs and
 `/metrics` are not routed by the gateway. The collector never follows redirects, so the key goes
 only to `QEOS_URL`.
+
+---
+
+### 4.10 Log values
+
+**What it does.** Values your tests log, such as the trip a booking scenario created
+(`INFO 20:23:24 [App] Trip id captured from booking flow tripId="3960562"`), show on every Last runs bar's
+tooltip, on the test case page and on the feature page's scenario cards (ADR-032).
+
+**What the test repository must do.** The log has to reach the report:
+- Cucumber JSON (cucumber-js): attach each log line to the running scenario with `this.log(text)`. A logger that only
+  prints to the console is not enough: console lines cannot be tied to a scenario. A common way: a `Before` hook
+  hands `this.log` to the logger, which attaches every line it prints, and an `After` hook takes it back.
+- JUnit XML: the test case's `<system-out>` is used as is.
+- Collector **0.9.0** or later sends the log (`log` on each result, cut to 64 KB). Older collectors send none; 0.9.0
+  against an older QEOS retries once without it.
+
+**Verify (4.10):** after a run, open `test-results/cucumber-report.json` and check that the steps carry
+`embeddings` with `"mime_type": "text/x.cucumber.log+plain"`; `qeos-collector upload "test-results/*.json" --dry-run`
+prints each result's `log`.
 
 ---
 

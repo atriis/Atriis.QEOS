@@ -27,6 +27,9 @@ MAX_DETAIL_CHARS = 500
 STEP_DETAILS = ("definition", "pattern")
 OLDER_PLATFORM = ("the platform is older than this collector and refused the failed step's definition and pattern: "
                   "sent again without them (upgrade QEOS to group failed steps across test cases)")
+LOG_FIELD = "log"
+OLDER_PLATFORM_LOG = ("the platform is older than this collector and refused the results' log: sent again without "
+                      "it (upgrade QEOS to see log values)")
 
 
 def _ignore(message: str) -> None:
@@ -131,16 +134,13 @@ def upload_part(
             elif status >= 500:
                 problem, wait = f"the platform answered {status}", _backoff(attempt, rand)
             else:
-                # Spec 2026-10-14 §2: a server from before collector 0.8.0 forbids the two new fields. Once, and only
-                # for that: nothing was stored, so the same Idempotency-Key is reused
-                stripped = (
-                    None if downgraded or status != 422 or not _names_step_details(body)
-                    else without_step_details(payload)
-                )
+                # A server from before this collector forbids its newer fields (spec 2026-10-14 §2: the failed step's
+                # definition and pattern; log values §2.2: `log`). Once, and only for those: nothing was stored, so
+                # the same Idempotency-Key is reused
+                stripped = None if downgraded or status != 422 else _downgrade(payload, body, warn)
                 if stripped is None:
                     raise UploadError(_explain(status, body, response_headers))
                 payload, downgraded = stripped, True
-                warn(OLDER_PLATFORM)
                 continue
         if attempt >= MAX_ATTEMPTS:
             raise UploadError(f"{problem}; gave up after {attempt} attempts", retryable=True)
@@ -234,17 +234,37 @@ def _json(body: bytes) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _names_step_details(body: bytes) -> bool:
-    """A 422 forbidding failed_step.definition or .pattern as an extra field (FastAPI: {"detail": [{"loc": [...]}]})."""
+def _refused_fields(body: bytes) -> Tuple[bool, bool]:
+    """(step details, log): which of this collector's newer fields a 422 forbids (FastAPI: {"detail": [{"loc": …}]})."""
     try:
         detail = json.loads(body).get("detail")
     except (ValueError, AttributeError):
-        return False
-    return isinstance(detail, list) and any(
-        isinstance(error, dict) and isinstance(error.get("loc"), list)
-        and error["loc"][-2:-1] == ["failed_step"] and error["loc"][-1] in STEP_DETAILS
-        for error in detail
-    )
+        return False, False
+    if not isinstance(detail, list):
+        return False, False
+    locs = [error["loc"] for error in detail if isinstance(error, dict) and isinstance(error.get("loc"), list)]
+    step = any(loc[-2:-1] == ["failed_step"] and loc[-1] in STEP_DETAILS for loc in locs)
+    log = any(len(loc) >= 3 and loc[-1] == LOG_FIELD and loc[-3] == "results" for loc in locs)
+    return step, log
+
+
+def _downgrade(payload: bytes, body: bytes, warn: Callable[[str], None]) -> Optional[bytes]:
+    """The payload without the newer fields the 422 names, one warning per kind; None when there is nothing to strip."""
+    step, log = _refused_fields(body)
+    stripped, notes = None, []
+    if step:
+        without = without_step_details(payload)
+        if without is not None:
+            payload = stripped = without
+            notes.append(OLDER_PLATFORM)
+    if log:
+        without = without_log(payload)
+        if without is not None:
+            payload = stripped = without
+            notes.append(OLDER_PLATFORM_LOG)
+    for note in notes:
+        warn(note)
+    return stripped
 
 
 def without_step_details(body: bytes) -> Optional[bytes]:
@@ -261,6 +281,22 @@ def without_step_details(body: bytes) -> Optional[bytes]:
                 if name in step:
                     del step[name]
                     removed = True
+    if not removed:
+        return None
+    return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8", errors="replace")
+
+
+def without_log(body: bytes) -> Optional[bytes]:
+    """The body without the results' `log`; None when no result has one (nothing to retry without)."""
+    try:
+        data = json.loads(body)
+    except ValueError:
+        return None
+    removed = False
+    for result in (data.get("results") if isinstance(data, dict) else None) or []:
+        if isinstance(result, dict) and LOG_FIELD in result:
+            del result[LOG_FIELD]
+            removed = True
     if not removed:
         return None
     return json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8", errors="replace")

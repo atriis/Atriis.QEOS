@@ -385,3 +385,64 @@ def test_a_422_about_another_failed_step_field_is_not_retried(platform):
     with pytest.raises(UploadError):
         send_step(platform, warnings)
     assert len(platform.requests) == 1 and warnings == []
+
+
+LOG_PART = Part(body=json.dumps({"run": {}, "results": [
+    {"name": "t", "status": "passed", "log": 'INFO tripId="3960562"'},
+    {"name": "u", "status": "passed"}]}).encode("utf-8"), idempotency_key="gh-1-1-log", count=2)
+LOG_422 = {"detail": [{"type": "extra_forbidden", "loc": ["body", "results", 0, "log"],
+                       "msg": "Extra inputs are not permitted"}]}
+
+
+def test_an_older_platform_gets_the_upload_again_without_the_log(platform):
+    platform.reply(422, LOG_422)
+    platform.reply(201, RECEIPT)
+    warnings = []
+    assert send_step(platform, warnings, part=LOG_PART) == (201, RECEIPT)
+    first, second = (json.loads(r["body"]) for r in platform.requests)
+    assert first["results"][0]["log"] == 'INFO tripId="3960562"'
+    assert second["results"] == [{"name": "t", "status": "passed"}, {"name": "u", "status": "passed"}]
+    assert {r["headers"]["Idempotency-Key"] for r in platform.requests} == {"gh-1-1-log"}
+    assert len(warnings) == 1 and "log" in warnings[0] and "older than this collector" in warnings[0]
+
+
+def test_a_platform_older_than_both_fields_gets_one_retry_without_either(platform):
+    body = json.loads(STEP_PART.body)
+    body["results"][0]["log"] = "INFO x"
+    part = Part(body=json.dumps(body, ensure_ascii=False).encode("utf-8"), idempotency_key="gh-1-1-both", count=1)
+    platform.reply(422, {"detail": OLD_422["detail"] + LOG_422["detail"]})
+    platform.reply(201, RECEIPT)
+    warnings = []
+    assert send_step(platform, warnings, part=part)[0] == 201
+    second = json.loads(platform.requests[1]["body"])["results"][0]
+    assert "log" not in second and second["failed_step"] == {"text": "When I search Lisbon", "line": 4}
+    assert len(platform.requests) == 2 and len(warnings) == 2
+
+
+def test_the_retry_without_the_log_happens_once(platform):
+    platform.reply(422, LOG_422)
+    platform.reply(422, LOG_422)
+    with pytest.raises(UploadError) as err:
+        send_step(platform, [], part=LOG_PART)
+    assert len(platform.requests) == 2 and err.value.retryable is False
+
+
+def test_a_422_naming_the_log_of_a_part_without_one_is_not_retried(platform):
+    platform.reply(422, LOG_422)
+    with pytest.raises(UploadError):
+        send_step(platform, [], part=PART)
+    assert len(platform.requests) == 1
+
+
+def test_a_422_about_something_else_keeps_the_log(platform):
+    platform.reply(422, {"detail": [{"type": "string_too_long", "loc": ["body", "results", 0, "name"], "msg": "x"}]})
+    with pytest.raises(UploadError):
+        send_step(platform, [], part=LOG_PART)
+    assert len(platform.requests) == 1
+
+
+def test_without_log_strips_only_the_log():
+    body = json.loads(upload.without_log(LOG_PART.body))
+    assert body["results"] == [{"name": "t", "status": "passed"}, {"name": "u", "status": "passed"}]
+    assert upload.without_log(PART.body) is None
+    assert upload.without_log(b"not json") is None
