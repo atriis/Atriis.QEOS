@@ -131,7 +131,9 @@ test("hosted CI runners on localhost get a warning, not a silent snippet", async
   expect(github).toHaveTextContent("url: ${{ vars.QEOS_URL }}");
   expect(github).toHaveTextContent("patterns: test-results/cucumber-report.json");
   expect(github).not.toHaveTextContent("localhost:3000");
-  expect(github.textContent?.startsWith("- name: Upload results to QEOS")).toBe(true);
+  expect(github.textContent?.startsWith("# QEOS: uploads this run's results")).toBe(true);
+  expect(github).toHaveTextContent("repository variable QEOS_URL (this QEOS address) and the repository secret QEOS_API_KEY");
+  expect(github).toHaveTextContent("download-artifact into a folder uploads <folder>/**/cucumber-report.json instead");
   expect(screen.getByText(/In the repository, Settings/)).toHaveTextContent("variable QEOS_URL (this QEOS address), secret QEOS_API_KEY");
   expect(screen.getByRole("note")).toHaveTextContent(/cannot reach localhost/i);
 
@@ -201,7 +203,8 @@ test("the GitHub sync snippet is the standalone workflow with the first_sync inp
   await userEvent.selectOptions(screen.getByLabelText(/ci platform/i), "github");
   await userEvent.selectOptions(screen.getByLabelText(/what to add/i), "sync");
   const snippet = screen.getByTestId("ci-snippet");
-  expect(snippet).toHaveTextContent("qeos-sync-cases.yml");
+  expect(snippet.textContent?.startsWith("# QEOS: keeps the test cases equal to the .feature files")).toBe(true);
+  expect(snippet).toHaveTextContent("Commit as .github/workflows/qeos-sync-cases.yml on the default branch");
   expect(snippet).toHaveTextContent("name: QEOS sync test cases");
   expect(snippet).toHaveTextContent('paths: ["tests/features/**"]');
   expect(snippet).toHaveTextContent("first_sync");
