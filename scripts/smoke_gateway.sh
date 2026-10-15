@@ -361,6 +361,8 @@ body_has "... with the step definition" '"definition":"features/step_definitions
 body_has "... and the step key" '"key":"'
 check "failed-steps of that run -> ingestion-service" 200 GET   "$BASE/api/v1/projects/$PROJECT_ID/runs/${STEP_RUN_ID:-0}/failed-steps" "${AUTH[@]}"
 body_has "... grouped by its step definition" '"by":"definition"'
+body_has "... in one test case" '"cases":1'
+body_has "... with its error shape" "\"shape\":\"Invalid city '"
 
 # ---- log values: a pattern from Settings, a value read from an uploaded log (ADR-032) ----
 check "add a log-value pattern -> ingestion-service" 201 POST "$BASE/api/v1/projects/$PROJECT_ID/log-patterns" \
@@ -375,8 +377,6 @@ check "latest-results -> the log value" 200 POST \
   "$BASE/api/v1/projects/$PROJECT_ID/analytics/latest-results" "${AUTH[@]}" -H "Content-Type: application/json" \
   -d "{\"keys\":[\"${LOG_KEY:-0000000000000000000000000000000000000000000000000000000000000000}\"]}"
 body_has "... with the value and its link template" '"values":[{"name":"smoke_trip","values":["3960562"],"link_template":"https://backoffice.example.com/trips/{value}"}]'
-body_has "... in one test case" '"cases":1'
-body_has "... with its error shape" "\"shape\":\"Invalid city '"
 
 # ---- analytics, through the gateway's overlap route ----
 check "analytics trends -> ingestion-service (overlap route)" 200 GET \
