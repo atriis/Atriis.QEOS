@@ -297,3 +297,14 @@ test("a rebuilt file with a Background in the case's Gherkin still reddens the f
   expect(document.querySelector(".gk-failed")).toHaveTextContent("Then b");
   expect(screen.queryByText(/Failed in Background/)).not.toBeInTheDocument();
 });
+
+test("a scenario card shows its log values under its pill", async () => {
+  server.use(http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
+    [KEY]: result("passed", { values: [{ name: "trip_id", values: ["3960562", "3960563"], link_template: null }] }),
+  } })));
+  renderAt();
+  const cards = await screen.findAllByRole("article");
+  const line = await within(cards[0]).findByRole("group", { name: "Log values of TC-12" });
+  expect(line).toHaveTextContent(/trip_id:\s*3960562,\s*3960563/);
+  expect(within(cards[1]).queryByRole("group", { name: /Log values/ })).toBeNull();
+});

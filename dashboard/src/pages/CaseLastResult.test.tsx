@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { http, HttpResponse } from "msw";
@@ -133,4 +134,27 @@ test("the red line waits for the feature file instead of jumping from a provisio
   expect(document.querySelector(".gk-failed")).toBeNull();
   release();
   await waitFor(() => expect(document.querySelector(".gk-failed")).not.toBeNull());
+});
+
+test("the log values show under the pill, each copyable, linked by its template", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  setup(kase(), result({ status: "passed", values: [
+    { name: "route_key", values: ["wasToBos"], link_template: null },
+    { name: "trip_id", values: ["3960562"], link_template: "https://backoffice.example.com/trips/{value}" },
+  ] }));
+  renderCase();
+  const line = await screen.findByRole("group", { name: "Log values" });
+  expect(line).toHaveTextContent(/route_key:\s*wasToBos/);
+  expect(within(line).getByRole("link", { name: /3960562/ })).toHaveAttribute("href", "https://backoffice.example.com/trips/3960562");
+  await userEvent.click(within(line).getByRole("button", { name: "Copy route_key wasToBos" }));
+  expect(writeText).toHaveBeenCalledWith("wasToBos");
+  expect(await within(line).findByText("Copied")).toBeInTheDocument();
+});
+
+test("no log values, no line", async () => {
+  setup(kase(), result({ status: "passed", values: [] }));
+  renderCase();
+  await screen.findByText(/passed/i, { selector: ".badge *, .badge" });
+  expect(screen.queryByRole("group", { name: "Log values" })).toBeNull();
 });

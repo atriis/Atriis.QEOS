@@ -6,6 +6,7 @@ import { Case, CaseInput, PRIORITIES, Priority, STATUSES, CaseStatus, Step, crea
 import { getHistory, getLatestResults, getTests } from "../api/analytics";
 import FailedStepTip from "../components/FailedStepTip";
 import LastResultPill from "../components/LastResultPill";
+import LogValuesLine from "../components/LogValuesLine";
 import RunContextNote from "../components/RunContextNote";
 import { useStepSpread } from "../lib/failedSteps";
 import { runParam, statusWord, useScrollToFailure } from "../lib/runContext";
@@ -310,6 +311,7 @@ function CaseEditor() {
             <>
               <h2>Gherkin</h2>
               {key != null && latest.isSuccess && (runId == null || latest.data != null) && <LastResultPill result={latest.data} />}
+              {key != null && latest.data != null && <LogValuesLine values={latest.data.values} />}
               <GherkinBlock
                 text={c?.gherkin ?? ""}
                 failed={failedLine != null && latest.data
@@ -320,6 +322,7 @@ function CaseEditor() {
           ) : (
             <>
           {key != null && latest.isSuccess && (runId == null || latest.data != null) && <LastResultPill result={latest.data} />}
+          {key != null && latest.data != null && <LogValuesLine values={latest.data.values} />}
           <h2 id={`${ids}-steps`}>Steps</h2>
           <ol className="steps" aria-labelledby={`${ids}-steps`}>
             {draft.steps.map((s, i) => (

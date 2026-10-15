@@ -28,3 +28,24 @@ export function mergeValues(lists: (LogValueGroup[] | undefined)[]): LogValueGro
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([name, values]) => ({ name, values }));
 }
+
+const PLACEHOLDER = "{value}";
+
+/** The link for a value from its pattern's template, or null. Checked again here, whatever the server stored: only
+ *  an https template with a host, no credentials and {value} once after the host. The value is URL-encoded, so it
+ *  cannot change the host or the path's structure; "." and ".." (a path segment that would move up) get no link. */
+export function linkFor(template: string | null | undefined, value: string): string | null {
+  if (!template || template.split(PLACEHOLDER).length !== 2 || value === "." || value === "..") return null;
+  // {value} must come after the host: "https://" + host, then a "/", "?" or "#", before it
+  if (!/^https:\/\/[^/?#]+[/?#]/i.test(template.slice(0, template.indexOf(PLACEHOLDER)))) return null;
+  let base: URL;
+  let built: URL;
+  try {
+    base = new URL(template.replace(PLACEHOLDER, "x"));
+    built = new URL(template.replace(PLACEHOLDER, encodeURIComponent(value)));
+  } catch {
+    return null;
+  }
+  if (base.protocol !== "https:" || !base.hostname || base.username || base.password) return null;
+  return built.origin === base.origin ? built.href : null;
+}

@@ -62,6 +62,11 @@ yet.
   results, against 11.3 s live — see the ingestion README).
 - Collection: a project can switch off collection of runs a person started by hand in CI
   (Settings › Collection, owners and admins); the platform answers 202 and counts what it skipped.
+- Log values (ADR-032): per-project regular expressions (Settings › Log values, up to 20) pick values such as a trip
+  id out of each result's masked log; every Last runs bar's tooltip, the test case page and the feature page's cards
+  show them, copyable and optionally linked to an https page. Logs are stored masked and cut to 64 KB; adding a
+  pattern re-scans the runs of the last 90 days. Needs collector 0.9.0 and a test repository that attaches its log
+  lines to the scenario.
 - Access model: organization membership grants project access; roles are
   owner/admin/member/viewer/billing_manager (viewers and billing managers
   read only).

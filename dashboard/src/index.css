@@ -1156,6 +1156,17 @@ button.switch.switch-compact { gap: var(--space-2); padding: var(--space-1) var(
 .scenario-card-head h2 { display: flex; align-items: center; gap: var(--space-3); flex: 1 1 260px; min-width: 0; margin: 0; font-size: 15px; }
 .scenario-card-title { min-width: 0; overflow-wrap: anywhere; }
 .scenario-card-status { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+/* Log values under a last-result pill (ADR-032): label, then per pattern its values as copyable 24px chips */
+.log-values { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: var(--space-2) 0 var(--space-3); font-size: 13px; }
+.scenario-card > .log-values { margin: 0; padding: 0 var(--space-4) var(--space-3); }
+.log-values-label { font-weight: 600; color: var(--text-secondary); }
+.log-values-group, .log-values-item { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.log-values-name, .log-values-sep { color: var(--text-secondary); }
+.log-value { display: inline-flex; align-items: center; min-height: 24px; padding: 0 2px 0 8px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-1); }
+.log-value-text { font-family: var(--font-mono); font-size: 12.5px; overflow-wrap: anywhere; }
+.log-value-copy { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--text-secondary); }
+.log-value-copy:hover { background: var(--hover-strong); color: var(--text-primary); }
+.log-values-note { color: var(--text-secondary); font-size: 12.5px; }
 .scenario-card > .feature-source { border-top: 1px solid var(--border); border-radius: 0 0 var(--radius-sm) var(--radius-sm); overflow: hidden; }
 .scenario-bg-failure { position: relative; margin: 0; padding: 0 var(--space-4) var(--space-3); max-width: none; }
 .scenario-bg-failure-line { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--danger-text); font-size: 13px; font-weight: 600; cursor: help; border-radius: 2px; overflow-wrap: anywhere; }
