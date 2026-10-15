@@ -7,6 +7,7 @@ import { getHistory, getLatestResults, getTests } from "../api/analytics";
 import FailedStepTip from "../components/FailedStepTip";
 import LastResultPill from "../components/LastResultPill";
 import LogValuesLine from "../components/LogValuesLine";
+import LogPanel from "../components/LogPanel";
 import RunContextNote from "../components/RunContextNote";
 import { useStepSpread } from "../lib/failedSteps";
 import { runParam, statusWord, useScrollToFailure } from "../lib/runContext";
@@ -312,6 +313,7 @@ function CaseEditor() {
               <h2>Gherkin</h2>
               {key != null && latest.isSuccess && (runId == null || latest.data != null) && <LastResultPill result={latest.data} />}
               {key != null && latest.data != null && <LogValuesLine values={latest.data.values} projectId={id} />}
+              {key != null && latest.data?.result_id != null && <LogPanel projectId={id} runId={latest.data.run_id} resultId={latest.data.result_id} name={c?.key ?? "this case"} />}
               <GherkinBlock
                 text={c?.gherkin ?? ""}
                 failed={failedLine != null && latest.data
@@ -323,6 +325,7 @@ function CaseEditor() {
             <>
           {key != null && latest.isSuccess && (runId == null || latest.data != null) && <LastResultPill result={latest.data} />}
           {key != null && latest.data != null && <LogValuesLine values={latest.data.values} projectId={id} />}
+          {key != null && latest.data?.result_id != null && <LogPanel projectId={id} runId={latest.data.run_id} resultId={latest.data.result_id} name={c?.key ?? "this case"} />}
           <h2 id={`${ids}-steps`}>Steps</h2>
           <ol className="steps" aria-labelledby={`${ids}-steps`}>
             {draft.steps.map((s, i) => (
