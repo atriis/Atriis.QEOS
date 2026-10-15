@@ -98,7 +98,9 @@ can sync cases without a user login. See ADR-024.
 
 - `GET /api/v1/projects/<id>/runs?limit=&offset=` — newest first, with counts. Optional filters,
   combined with AND: `branch`, `branch_contains` (case-insensitive substring of the branch, at
-  most 255 characters; `%` and `_` match themselves; combines with `branch`),
+  most 255 characters; `%` and `_` match themselves; combines with `branch`), `value` (1–200 characters, exact and
+  case-sensitive: runs with a result holding that log value) with an optional `pattern` (the pattern's name; needs
+  `value`, else 422),
   `status=failing|passing` (failing means at least one failed or errored result), `environment`,
   `ci_provider`, `commit` (hex prefix of 4+ characters, any case), `pr`, `author`
   (case-insensitive substring; `%` and `_` match themselves), `scope` (`full` hides runs of only the
@@ -190,6 +192,11 @@ read from that stored text, so a value hidden by masking is never captured.
 - **Values:** at upload, each result's log is matched with the project's patterns; one row per distinct value per
   pattern per result (`log_values`, in order of first appearance), at most 20 per pattern, each cut to 200
   characters. A pattern stops reading a log after 1,000 matches.
+- **Reading and searching:** `GET /api/v1/projects/{id}/runs/{run_id}/results/{result_id}/log` (every role) →
+  `{"log": …, "values": [{name, values}]}`, the stored masked log of one result with its values, read on demand (the
+  run payload never carries it); 404 for a run of another project or a result of another run. `GET …/runs?value=`
+  and `GET /api/v1/runs/{run_id}?value=` (with an optional `pattern`) find the runs, and a run's results, holding
+  exactly that value (`ix_log_values_value`, migration 024).
 - **Past runs:** adding a pattern queues a re-scan of the logs stored in the last 90 days. It runs in the service
   after the response, in batches of `LOG_SCAN_BATCH_SIZE` (500), one scan per project at a time (an advisory lock),
   replacing each result's values, so it is safe to repeat; a pattern added during a scan makes it pass again. A scan

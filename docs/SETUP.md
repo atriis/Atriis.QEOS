@@ -1624,6 +1624,12 @@ button explains the rule and offers examples. Paste a few log lines and choose *
 Owners, admins and members can do this; at most 20 patterns per project. Adding a pattern scans the runs of the last
 90 days ("Scanning past runs…"); older runs get no values for it. A value hidden by masking is never captured.
 
+**Reading and searching.** Every value chip copies its value, opens the pattern's link when there is one, and
+links to the runs that hold it ("runs"). The **Log** button next to a result (run page rows, the test case page,
+the feature page's cards) opens the result's whole masked log with the values marked, to copy or download. On
+the Runs page, **More filters → Log value** (with an optional pattern) lists the runs holding a value; opening one
+of them shows only the results that hold it, with "Show all results" to widen.
+
 **What the test repository must do.** The log has to reach the report:
 - Cucumber JSON (cucumber-js): attach each log line to the running scenario with `this.log(text)`. A logger that only
   prints to the console is not enough: console lines cannot be tied to a scenario. A common way: a `Before` hook

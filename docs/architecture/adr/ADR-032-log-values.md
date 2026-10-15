@@ -32,4 +32,8 @@ scenario (lines interleave, runs are parallel), and the Cucumber report carried 
 - Logs older than 90 days get no values for a new pattern; a log over 64 KB loses its end, and a pattern stops
   reading a log after 1,000 matches.
 - Older collectors send no `log`; collector 0.9.0 against an older platform retries once without it.
-- Not done: searching runs by value, showing the whole log, values on the run page.
+- Follow-ups (spec `docs/superpowers/specs/2026-10-15-log-values-follow-ups-design.md`): the whole masked log is
+  readable on demand (`GET …/runs/{run_id}/results/{result_id}/log`, never in the run payload), with its values
+  marked in the dashboard, copyable and downloadable; runs and a run's rows are searchable by an exact value
+  (`value`, `pattern`; index `ix_log_values_value`, migration 024); a crashed re-scan is reported `queued`.
+- Not done: searching by a partial value, value chips on the run page's rows.

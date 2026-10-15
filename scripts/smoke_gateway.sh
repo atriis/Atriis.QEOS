@@ -377,6 +377,13 @@ check "latest-results -> the log value" 200 POST \
   "$BASE/api/v1/projects/$PROJECT_ID/analytics/latest-results" "${AUTH[@]}" -H "Content-Type: application/json" \
   -d "{\"keys\":[\"${LOG_KEY:-0000000000000000000000000000000000000000000000000000000000000000}\"]}"
 body_has "... with the value and its link template" '"values":[{"name":"smoke_trip","values":["3960562"],"link_template":"https://backoffice.example.com/trips/{value}"}]'
+LOG_RUN_ID="$(sed -n 's/.*"run_id":\([0-9]*\).*/\1/p' "$TMP/body" | head -1)"
+LOG_RESULT_ID="$(sed -n 's/.*"result_id":\([0-9]*\).*/\1/p' "$TMP/body" | head -1)"
+check "the result's whole log -> ingestion-service" 200 GET \
+  "$BASE/api/v1/projects/$PROJECT_ID/runs/${LOG_RUN_ID:-0}/results/${LOG_RESULT_ID:-0}/log" "${AUTH[@]}"
+body_has "... masked text with its values" '"values":[{"name":"smoke_trip","values":["3960562"]}]'
+check "runs searched by the log value" 200 GET "$BASE/api/v1/projects/$PROJECT_ID/runs?value=3960562&pattern=smoke_trip" "${AUTH[@]}"
+body_has "... lists the run that holds it" '"branch":"smoke-log"'
 
 # ---- analytics, through the gateway's overlap route ----
 check "analytics trends -> ingestion-service (overlap route)" 200 GET \
