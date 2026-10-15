@@ -1,5 +1,6 @@
 import { type Case, type CaseQuery, type CaseStatus, type Priority, type FeatureGroup, getFeatureDetail, listCases } from "../api/cases";
 import type { StripEntry, StripStatus } from "../api/analytics";
+import { mergeValues } from "./logValues";
 import type { CaseRowData } from "../components/CaseTable";
 
 /** A page of the Feature view. */
@@ -18,15 +19,20 @@ export const fileLabel = (path: string) => path.slice(path.lastIndexOf("/") + 1)
 const WORST: StripStatus[] = ["failed", "rerun", "passed", "skipped"];
 
 /** A feature's strip from its scenarios' strips: the newest `limit` runs any scenario was in, oldest to newest, each
- *  with the worst status present (failed > rerun > passed > skipped). Exact when every strip holds that test's last
+ *  with the worst status present (failed > rerun > passed > skipped), and their log values merged per pattern. Exact when every strip holds that test's last
  *  `limit` results: a run among the newest `limit` with any scenario is among each of its scenarios' newest `limit`. */
 export function mergeStrips(perTest: StripEntry[][], limit = 10): StripEntry[] {
   const byRun = new Map<number, StripEntry>();
+  const valuesByRun = new Map<number, StripEntry["values"][]>();
   for (const entry of perTest.flat()) {
+    valuesByRun.set(entry.run_id, [...(valuesByRun.get(entry.run_id) ?? []), entry.values]);
     const seen = byRun.get(entry.run_id);
     if (!seen || WORST.indexOf(entry.status) < WORST.indexOf(seen.status)) byRun.set(entry.run_id, entry);
   }
-  const runs = [...byRun.values()].sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at) || a.run_id - b.run_id);
+  // A feature's bar lists the log values of every scenario in that run, per pattern, without duplicates
+  const runs = [...byRun.values()]
+    .map((entry) => ({ ...entry, values: mergeValues(valuesByRun.get(entry.run_id) ?? []) }))
+    .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at) || a.run_id - b.run_id);
   return runs.slice(-limit);
 }
 

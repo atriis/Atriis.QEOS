@@ -1,6 +1,7 @@
 import { useRef, useState, type KeyboardEvent } from "react";
 import { Link } from "react-router-dom";
 import type { StripEntry, StripStatus } from "../api/analytics";
+import { valueLines } from "../lib/logValues";
 import { dateFormat } from "../lib/words";
 
 export type { StripEntry, StripStatus };
@@ -46,7 +47,10 @@ export default function RunStrip({ projectId, entries, href }: {
   return (
     <div className="run-strip" role="group" aria-label={stripSummary(entries.map((e) => e.status))} onKeyDown={move}>
       {entries.map((e, i) => {
-        const label = `Run #${e.run_id}, ${dateFormat.format(new Date(e.started_at))}: ${WORD[e.status]}`;
+        // Today's line, then one line per pattern with values in that run (ADR-032): the same text for the tooltip
+        // and the link's name, whatever the status
+        const label = [`Run #${e.run_id}, ${dateFormat.format(new Date(e.started_at))}: ${WORD[e.status]}`,
+          ...valueLines(e.values)].join("\n");
         return (
           <Link key={e.run_id} className="run-bar-link" to={to(e.run_id)} aria-label={label} title={label}
             tabIndex={i === active ? 0 : -1} onFocus={() => setPicked(i)}

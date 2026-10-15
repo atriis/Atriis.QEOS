@@ -109,7 +109,13 @@ export function getLatestKeys(
 
 export type StripStatus = "passed" | "failed" | "rerun" | "skipped";
 /** One result in a test's strip: the run it was in and the test's status there. */
-export interface StripEntry { run_id: number; started_at: string; branch: string | null; status: StripStatus }
+/** One pattern's values in a result or a run (log values, ADR-032): patterns in name order, values in log order. */
+export interface LogValueGroup { name: string; values: string[] }
+/** One result in a test's strip: the run it was in, the test's status there and its log values (absent from an older
+ *  server). */
+export interface StripEntry {
+  run_id: number; started_at: string; branch: string | null; status: StripStatus; values?: LogValueGroup[];
+}
 
 /** Each test's own last results (oldest to newest), only runs it was in; keyed by lowercase test key. */
 export function getRunStrip(
@@ -214,6 +220,8 @@ export interface LatestResult {
   started_at: string; message: string | null;
   /** `key` names the step across the run's test cases (the run page's `#step-<key>`); `definition`/`pattern` from collector 0.8.0. */
   failed_step?: { text: string; line?: number; definition?: string; pattern?: string; key?: string };
+  /** Log values of this result, each pattern with its link template (ADR-032); absent from an older server. */
+  values?: (LogValueGroup & { link_template: string | null })[];
 }
 
 /** Each test's latest result on any branch, with the failed step; at most 500 keys per call. With `runId`, each test's

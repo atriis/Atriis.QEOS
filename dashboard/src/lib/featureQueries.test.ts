@@ -48,3 +48,13 @@ test("the client-side grouping fills test_keys with its cases' distinct keys, so
   expect(rows[0].test_keys).toEqual(["a".repeat(64), "b".repeat(64)]);
   expect(rows[1].test_keys).toEqual([]);
 });
+
+test("mergeStrips joins a run's values over its scenarios, per pattern, duplicates removed", () => {
+  const a = { ...at(1, "passed"), values: [{ name: "trip_id", values: ["1"] }] };
+  const b = { ...at(1, "failed"), values: [{ name: "trip_id", values: ["1", "2"] }, { name: "route_key", values: ["r"] }] };
+  const c = at(2, "passed"); // an older server: no values
+  const merged = mergeStrips([[a, c], [b]]);
+  expect(merged[0].status).toBe("failed");
+  expect(merged[0].values).toEqual([{ name: "route_key", values: ["r"] }, { name: "trip_id", values: ["1", "2"] }]);
+  expect(merged[1].values).toEqual([]);
+});
