@@ -4,11 +4,12 @@ from src.ingestion.models.changes import RunChangedFile
 from src.ingestion.models.component import RunComponent
 from src.ingestion.models.impact import ImpactPair, ImpactTestBase, RunImpact
 from src.ingestion.models.job_heartbeat import JobHeartbeat
+from src.ingestion.models.log_pattern import LogPattern, LogValue
 from src.ingestion.models.masking_pattern import MaskingPattern
 from src.ingestion.models.muted import MutedTest
 from src.ingestion.models.notification_channel import NotificationChannel
 from src.ingestion.models.flaky_rollup import FlakyDaily, FlakyRollupDay
 from src.ingestion.models.run import Run, RunResult
 
-__all__ = ["ApiKey", "CollectionSettings", "FlakyDaily", "FlakyRollupDay", "ImpactPair", "ImpactTestBase", "JobHeartbeat", "MaskingPattern", "MutedTest",
+__all__ = ["ApiKey", "CollectionSettings", "FlakyDaily", "FlakyRollupDay", "ImpactPair", "ImpactTestBase", "JobHeartbeat", "LogPattern", "LogValue", "MaskingPattern", "MutedTest",
            "NotificationChannel", "Run", "RunChangedFile", "RunComponent", "RunImpact", "RunResult"]

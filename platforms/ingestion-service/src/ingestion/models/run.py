@@ -3,6 +3,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.orm import deferred
 from sqlalchemy.sql import func
 
 from src.ingestion.db.base import Base
@@ -113,6 +114,10 @@ class RunResult(Base):
     # step text with its matched arguments as {…}; both masked like the text
     failed_step_definition = Column(String(FAILED_STEP_DEFINITION_LENGTH), nullable=True)
     failed_step_pattern = Column(String(FAILED_STEP_PATTERN_LENGTH), nullable=True)
+    # The result's log (ADR-032, migration 023): its text attachments or system-out as the collector sent them, masked
+    # like details and cut at 64 KB. Deferred: run pages load results by the thousand and never show it; the export,
+    # the re-mask job and the log-value scan ask for it (undefer or the column itself)
+    log = deferred(Column(Text, nullable=True))
 
     __table_args__ = (
         CheckConstraint("status IN ('passed','failed','skipped','errored')", name="chk_test_results_status"),

@@ -15,3 +15,9 @@ class CollectionSettings(Base):
     last_discarded_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), nullable=True)
     updated_by = Column(Integer, nullable=True)
+    # The log-value re-scan (ADR-032, migration 023). Adding a pattern bumps log_scan_requested; a pass that finishes
+    # sets log_scan_done to the number it started from. A scan is queued or running while requested > done;
+    # log_scan_started_at is the current pass's start (None between passes)
+    log_scan_requested = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    log_scan_done = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    log_scan_started_at = Column(DateTime(timezone=True), nullable=True)

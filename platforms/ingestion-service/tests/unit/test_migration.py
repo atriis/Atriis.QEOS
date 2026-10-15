@@ -490,3 +490,89 @@ def test_failed_step_definition_postgres_path_is_rerunnable(monkeypatch):
     module.downgrade()
     assert fake.drop_index.call_args.kwargs["postgresql_concurrently"] is True
     assert fake.drop_index.call_args.kwargs["if_exists"] is True
+
+
+def test_log_values_tables_and_columns(migrated_engine):
+    """Migration 023 (ADR-032): the result's log, the patterns, their values and the re-scan counters."""
+    inspector = inspect(migrated_engine)
+    assert "log" in {c["name"] for c in inspector.get_columns("test_results")}
+    scan = {c["name"]: c for c in inspector.get_columns("collection_settings")}
+    assert {"log_scan_requested", "log_scan_done", "log_scan_started_at"} <= set(scan)
+    assert not scan["log_scan_requested"]["nullable"] and scan["log_scan_started_at"]["nullable"]
+    patterns = {c["name"]: c for c in inspector.get_columns("log_patterns")}
+    assert patterns["name"]["type"].length == 32 and patterns["pattern"]["type"].length == 256
+    assert patterns["link_template"]["type"].length == 500 and patterns["link_template"]["nullable"]
+    values = {c["name"]: c for c in inspector.get_columns("log_values")}
+    assert values["value"]["type"].length == 200 and not values["position"]["nullable"]
+    indexes = {ix["name"]: ix["column_names"] for ix in inspector.get_indexes("log_values")}
+    assert indexes["ix_log_values_result_id"] == ["result_id"]
+    assert indexes["ix_log_values_pattern_id"] == ["pattern_id"]
+    cascades = {fk["referred_table"]: fk["options"].get("ondelete") for fk in inspector.get_foreign_keys("log_values")}
+    assert cascades == {"test_results": "CASCADE", "log_patterns": "CASCADE"}
+
+
+def test_a_log_pattern_name_is_unique_per_project(migrated_engine):
+    insert = "INSERT INTO log_patterns (project_id, name, pattern) VALUES (:project, 'trip_id', 'x')"
+    with migrated_engine.begin() as conn:
+        conn.execute(text(insert), {"project": 1})
+        conn.execute(text(insert), {"project": 2})
+    with pytest.raises(IntegrityError):
+        with migrated_engine.begin() as conn:
+            conn.execute(text(insert), {"project": 1})
+
+
+def test_scan_counters_default_to_zero(migrated_engine):
+    with migrated_engine.begin() as conn:
+        conn.execute(text("INSERT INTO collection_settings (project_id) VALUES (5)"))
+        row = conn.execute(text(
+            "SELECT log_scan_requested, log_scan_done, log_scan_started_at FROM collection_settings")).one()
+    assert tuple(row) == (0, 0, None)
+
+
+def test_model_declares_the_log_value_indexes():
+    assert {"ix_log_values_result_id", "ix_log_values_pattern_id"} <= {
+        ix.name for ix in Base.metadata.tables["log_values"].indexes}
+
+
+def test_log_values_downgrade_drops_them(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'downgrade_023.db').as_posix()}"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(SERVICE_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "022")
+    engine = create_engine(url)
+    try:
+        inspector = inspect(engine)
+        assert not {"log_patterns", "log_values"} & set(inspector.get_table_names())
+        results = {c["name"] for c in inspector.get_columns("test_results")}
+        assert "log" not in results and "failed_step_definition" in results  # 022 is still there
+        assert not {"log_scan_requested", "log_scan_done", "log_scan_started_at"} & {
+            c["name"] for c in inspector.get_columns("collection_settings")}
+    finally:
+        engine.dispose()
+
+
+def test_log_values_postgres_path_adds_the_log_without_a_rewrite(monkeypatch):
+    """On PostgreSQL the nullable log column is IF NOT EXISTS (metadata only, as 022)."""
+    import importlib.util
+    from unittest.mock import MagicMock
+
+    spec = importlib.util.spec_from_file_location("m023", SERVICE_ROOT / "alembic" / "versions" / "023_log_values.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    fake = MagicMock()
+    fake.get_bind.return_value.dialect.name = "postgresql"
+    monkeypatch.setattr(module, "op", fake)
+    module.upgrade()
+    executed = " ".join(str(call.args[0]) for call in fake.execute.call_args_list)
+    assert "ALTER TABLE test_results ADD COLUMN IF NOT EXISTS log TEXT" in executed
+    assert {call.args[0] for call in fake.create_table.call_args_list} == {"log_patterns", "log_values"}
+    module.downgrade()
+    executed = " ".join(str(call.args[0]) for call in fake.execute.call_args_list)
+    assert "ALTER TABLE test_results DROP COLUMN IF EXISTS log" in executed
+
+
+def test_the_log_is_loaded_only_when_asked():
+    """Run pages load results by the thousand and never show the log."""
+    assert RunResult.__mapper__.attrs["log"].deferred is True
