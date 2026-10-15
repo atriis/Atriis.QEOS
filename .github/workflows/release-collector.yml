@@ -58,8 +58,6 @@ jobs:
         run: |
           python scripts/build_zipapp.py --out dist/qeos-collector.pyz
           python dist/qeos-collector.pyz --version
-          # The same file under the name before the QEOS rename, so .../latest/download/qav-collector.pyz keeps working
-          cp dist/qeos-collector.pyz dist/qav-collector.pyz
       - uses: actions/upload-artifact@v7
         with:
           name: collector-dist
@@ -105,14 +103,10 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#collector-v}"
           image="ghcr.io/${GITHUB_REPOSITORY_OWNER}/qeos-collector"
-          # Also pushed under the name before the QEOS rename, so pinned users keep getting updates
-          legacy="ghcr.io/${GITHUB_REPOSITORY_OWNER}/qav-collector"
-          docker build collector -t "$image:$version" -t "$image:latest" -t "$legacy:$version" -t "$legacy:latest"
+          docker build collector -t "$image:$version" -t "$image:latest"
           docker run --rm "$image:$version" --version
           docker push "$image:$version"
           docker push "$image:latest"
-          docker push "$legacy:$version"
-          docker push "$legacy:latest"
 
   float:
     name: Move the floating major tag
