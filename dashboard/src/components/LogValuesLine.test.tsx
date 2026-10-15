@@ -28,13 +28,14 @@ test("nothing at all without values", () => {
   expect(none).toBeEmptyDOMElement();
 });
 
-test("with an https template a value is a new-tab link with the value encoded", () => {
+test("with an https template a small link beside the value opens it in a new tab, the value encoded", () => {
   render(<LogValuesLine values={[{ name: "route_key", values: ["a/b c"], link_template: "https://backoffice.example.com/routes/{value}" }]} />);
-  const link = screen.getByRole("link", { name: /a\/b c/ });
+  const link = screen.getByRole("link", { name: "Open route_key a/b c (opens in a new tab)" });
   expect(link).toHaveAttribute("href", "https://backoffice.example.com/routes/a%2Fb%20c");
   expect(link).toHaveAttribute("target", "_blank");
   expect(link).toHaveAttribute("rel", "noopener noreferrer");
-  expect(link).toHaveAccessibleName("a/b c (opens in a new tab)");
+  // The value itself still copies
+  expect(screen.getByRole("button", { name: "Copy route_key a/b c" })).toHaveTextContent("a/b c");
 });
 
 test("a template that is not https, as an old row or a tampered answer might hold, gives no link", () => {
@@ -78,4 +79,13 @@ test("with a project each value links to the runs holding it, the value encoded"
 test("without a project there is no runs link", () => {
   render(<LogValuesLine values={PLAIN} />);
   expect(screen.queryByRole("link")).toBeNull();
+});
+
+test("values are plain clickable text: one button per value, no icon buttons, a comma between values", () => {
+  render(<LogValuesLine values={PLAIN} />);
+  const group = screen.getByRole("group", { name: "Log values" });
+  const buttons = within(group).getAllByRole("button");
+  expect(buttons.map((b) => b.textContent)).toEqual(["wasToBos", "3960562", "3960563"]);
+  buttons.forEach((b) => expect(b).toHaveAttribute("title", "Click to copy"));
+  expect(group).toHaveTextContent(/trip_id:\s*3960562,\s*3960563/);
 });
