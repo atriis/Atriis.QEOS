@@ -260,7 +260,10 @@ features:
 
 GitHub Actions, through the action (from 0.9.2: `command: import-features`). The action installs the
 collector from its own checkout, so it works while `Atriis.QEOS` is private, where `pip install git+https://…`
-fails on a runner with `could not read Username for 'https://github.com'`:
+fails on a runner with `could not read Username for 'https://github.com'`. That holds for a private or internal
+repository of the same organization, with Atriis.QEOS → Settings → Actions → Access set to the organization; a
+public repository cannot use a private action at all (`Unable to resolve action`), and needs Atriis.QEOS checked
+out with a token instead (docs/SETUP.md 4.1.3):
 
 ```yaml
 on:

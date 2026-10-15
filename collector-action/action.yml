@@ -17,7 +17,8 @@ inputs:
       upload (default): upload the reports in patterns, or run the tests with impact.
       import-features: keep the test cases equal to the .feature files in patterns
       (qeos-collector import-features; collector 0.9.2 or later). The action installs
-      the collector from its own checkout, so it works from a private Atriis.QEOS.
+      the collector from its own checkout, so it works from a private Atriis.QEOS for private or
+      internal repositories of the organization (a public repository cannot use a private action).
     required: false
     default: "upload"
   patterns:

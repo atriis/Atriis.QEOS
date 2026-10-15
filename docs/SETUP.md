@@ -661,9 +661,23 @@ qeos-collector upload "reports/**/*.xml" --ca-file ~/qeos-ca.crt
 - **While `Atriis.QEOS` is private**, `pip install … git+https://github.com/atriis/Atriis.QEOS…` works only
   where git has credentials for it (your machine, a runner with a token in the URL:
   `git+https://x-access-token:<token>@github.com/…`). On GitHub Actions use the action for uploads
-  and for the test-case sync (`command: import-features`): GitHub downloads it with the
+  and for the test-case sync (`command: import-features`). GitHub downloads it with the
   repository's own access once Atriis.QEOS → Settings → Actions → **Access** allows the
-  organization's repositories.
+  organization's repositories, but only for a **private or internal** test repository in the
+  same organization.
+  A **public** repository can never use an action from a private one, whatever that setting says:
+  the step fails at "Set up job" with `Unable to resolve action atriis/atriis.qeos, not found`.
+  Make the test repository private (or internal), or check Atriis.QEOS out with a token and use the
+  action from that checkout:
+  ```yaml
+  - uses: actions/checkout@v4
+    with:
+      repository: atriis/Atriis.QEOS
+      ref: collector-v0                        # the floating tag: action and collector follow each release
+      token: ${{ secrets.QEOS_REPO_TOKEN }}    # fine-grained token: Atriis.QEOS only, Contents: Read
+      path: .qeos
+  - uses: ./.qeos/collector-action
+  ```
 - `check` tests, in order: the URL, TLS trust, the API key (it names the project), and that the
   files match and parse. It exits 2 on the first failure. It also prints whether the key may read
   test suggestions (`Test suggestions: allowed` or `not allowed`, [4.1.1](#411-api-keys)).
@@ -1093,7 +1107,9 @@ picked, such as `MyRepo/tests/features/...`).
    import-features`, from `collector-v0.9.2`) installs the collector from its own checkout, which
    GitHub downloads with the repository's access; `pip install "qeos-collector @ git+https://…"`
    cannot, while `Atriis.QEOS` is private: the runner has no credentials for it and the step
-   fails with `could not read Username for 'https://github.com'`.
+   fails with `could not read Username for 'https://github.com'`. A **public** test repository
+   cannot use the private action at all: see the token checkout under
+   [4.1.3](#413-collector-cli-any-machine).
 3. Run it once by hand: **Actions → QEOS sync test cases → Run workflow**. Tick `first_sync`
    only if the project already has imported cases under other paths (see below).
 

@@ -291,7 +291,7 @@ jobs:
           print("impact first: 2 stages, 1 upload")
           PY
 
-      # command: import-features, as consumers use it from a private Atriis.QEOS (pip from git+https has no
+      # command: import-features, as private consumers use it from a private Atriis.QEOS (pip from git+https has no
       # credentials on a runner; the action installs from its own checkout). --branch names this branch, so the
       # sync is not skipped on a pull request; --dry-run asks the stand-in for the plan
       - name: Run the action with command import-features
