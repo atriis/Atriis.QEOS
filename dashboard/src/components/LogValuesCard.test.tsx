@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { server } from "../test/server";
 import { setAccessToken } from "../auth/tokens";
-import LogValuesCard from "./LogValuesCard";
+import LogValuesCard, { scanPollInterval } from "./LogValuesCard";
 
 const BASE = "/api/v1/projects/42/log-patterns";
 const LINK = "https://backoffice.example.com/trips/{value}";
@@ -216,4 +216,17 @@ test("viewers read the patterns but cannot change them", async () => {
   expect(within(row).queryByRole("button")).not.toBeInTheDocument();
   expect(screen.queryByLabelText(/^regular expression/i)).not.toBeInTheDocument();
   expect(screen.getByText(/only owners, admins and members/i)).toBeInTheDocument();
+});
+
+test("a queued scan says it waits", async () => {
+  server.use(http.get(BASE, () => list([TRIP], { state: "queued", since: null })));
+  renderCard();
+  expect(await screen.findByText("Scan queued; it runs when a pattern is added or the service restarts.")).toBeInTheDocument();
+});
+
+test("the list is polled every 3 s while running, every 30 s while queued, never while idle", () => {
+  expect(scanPollInterval("running")).toBe(3000);
+  expect(scanPollInterval("queued")).toBe(30_000);
+  expect(scanPollInterval("idle")).toBe(false);
+  expect(scanPollInterval(undefined)).toBe(false);
 });

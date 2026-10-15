@@ -18,7 +18,7 @@ import { oneOf, useUrlState } from "../lib/useUrlState";
 import PageHeader from "../components/PageHeader";
 import { tableCardClass, useIsWide } from "../lib/useIsWide";
 
-const DEFAULTS = { status: "" } as const;
+const DEFAULTS = { status: "", value: "", pattern: "" } as const;
 const STATUSES = ["passed", "failed", "errored", "skipped"] as const;
 // The API returns every result of the run (no limit/offset), so the table pages on the client.
 const PAGE = 100;
@@ -32,10 +32,13 @@ export default function RunDetailPage() {
   const id = Number(runId);
   const { values, offset, update, setOffset } = useUrlState(DEFAULTS, PAGE);
   const status: RunStatusFilter | "" = oneOf(values.status, STATUSES, "" as never);
+  // Rows scoped to a log value (spec 2026-10-15 §3.2): the counts stay the run's
+  const scoped: { value?: string; pattern?: string } =
+    values.value ? { value: values.value, ...(values.pattern ? { pattern: values.pattern } : {}) } : {};
 
   const query = useQuery({
-    queryKey: ["run", id, status],
-    queryFn: () => getRun(id, status || undefined),
+    queryKey: ["run", id, status, scoped.value ?? "", scoped.pattern ?? ""],
+    queryFn: () => getRun(id, status || undefined, scoped),
     // Keep the page (and the focused select) mounted while a new filter loads, but never show another run's data
     placeholderData: (previous, previousQuery) => (previousQuery?.queryKey[1] === id ? previous : undefined),
   });
@@ -198,9 +201,18 @@ export default function RunDetailPage() {
             </label>
           </FilterBar>
           <p role="status" className="muted">{query.isPlaceholderData && "Updating results…"}</p>
+          {scoped.value && (
+            <p className="muted log-scope-note">
+              {run.results.length === 0
+                ? `No results in this run hold ${scoped.pattern ? `${scoped.pattern} ` : ""}${scoped.value}.`
+                : `${run.results.length} of ${run.total} results hold ${scoped.pattern ? `${scoped.pattern} ` : ""}${scoped.value}`}
+              {" "}
+              <Link to={`/projects/${projectId}/runs/${run.id}${status ? `?status=${status}` : ""}`}>Show all results</Link>
+            </p>
+          )}
 
           {run.results.length === 0 ? (
-            <p className="muted">No {status || ""} results in this run.</p>
+            !scoped.value && <p className="muted">No {status || ""} results in this run.</p>
           ) : (
             <div className={tableCardClass(card.wide)} ref={cardRef} tabIndex={0} role="region" aria-label="Test results">
               <table className="data">

@@ -404,3 +404,27 @@ test("each row offers the result's log, fetched only when opened", async () => {
   expect(await screen.findByText("INFO boom happened")).toBeInTheDocument();
   expect(fetched).toBe(1);
 });
+
+test("with ?value the rows are the results holding it, under a note with a way back to all", async () => {
+  const seen: string[] = [];
+  server.use(http.get("/api/v1/runs/61", ({ request }) => {
+    const q = new URL(request.url).searchParams;
+    seen.push(`${q.get("value")}|${q.get("pattern")}`);
+    return HttpResponse.json(detail(q.get("value") ? [result] : [result, { ...result, id: 2, name: "test_other" }]));
+  }));
+  renderDetail("/projects/42/runs/61?value=3960562&pattern=trip_id");
+  expect(await screen.findByText("1 of 24 results hold trip_id 3960562")).toBeInTheDocument();
+  await waitFor(() => expect(seen).toContain("3960562|trip_id"));
+  expect(screen.queryByText("test_other")).toBeNull();
+  await userEvent.click(screen.getByRole("link", { name: "Show all results" }));
+  expect(await screen.findByText("test_other")).toBeInTheDocument();
+  expect(screen.getByTestId("where")).toHaveTextContent("/projects/42/runs/61");
+});
+
+test("a value no result holds says so, once, with the way back", async () => {
+  server.use(http.get("/api/v1/runs/61", () => HttpResponse.json(detail([]))));
+  renderDetail("/projects/42/runs/61?value=nothing");
+  expect(await screen.findByText("No results in this run hold nothing.")).toBeInTheDocument();
+  expect(screen.queryByText("No results in this run.")).toBeNull();
+  expect(screen.getByRole("link", { name: "Show all results" })).toBeInTheDocument();
+});

@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { listRuns, RunFilters, RunScope, SCOPES } from "../api/runs";
+import { listLogPatterns } from "../api/logPatterns";
 import { RUNS_PAGE_SIZE } from "../lib/runQueries";
 import { formatDuration } from "../api/analytics";
 import ErrorBanner from "../components/ErrorBanner";
@@ -30,8 +31,8 @@ const DEFAULT_SORT: SortState<SortKey> = { key: "started", dir: "desc" };
 
 // URL keys, in URL order. "from" and "to" are local calendar days
 // (YYYY-MM-DD); the rest go to the API unchanged.
-const KEYS = ["status", "branch", "environment", "ci_provider", "commit", "pr", "author", "scope", "from", "to"] as const;
-const ADVANCED = ["environment", "ci_provider", "commit", "pr", "author", "scope", "from", "to"] as const;
+const KEYS = ["status", "branch", "environment", "ci_provider", "commit", "pr", "author", "scope", "from", "to", "value", "pattern"] as const;
+const ADVANCED = ["environment", "ci_provider", "commit", "pr", "author", "scope", "from", "to", "value", "pattern"] as const;
 type Key = (typeof KEYS)[number];
 type Values = Record<Key, string>;
 
@@ -47,14 +48,15 @@ const QUICK: QuickChip[] = [
 ];
 const FILTER_NAMES: Record<Key, string> = {
   status: "Status", branch: "Branch", environment: "Environment", ci_provider: "CI", commit: "Commit",
-  pr: "Pull request", author: "Author", scope: "Runs", from: "From", to: "To",
+  pr: "Pull request", author: "Author", scope: "Runs", from: "From", to: "To", value: "Log value", pattern: "Pattern",
 };
 function appliedFilters(v: Values): AppliedFilter[] {
-  return KEYS.filter((k) => v[k] !== "").map((k) => {
+  // The log value and its pattern are one filter ("Log value trip_id: 3960562"); removing it drops both keys
+  return KEYS.filter((k) => v[k] !== "" && k !== "pattern").map((k) => {
     const scope = k === "scope" ? asScope(v[k]) : undefined;
     return {
       key: k,
-      name: FILTER_NAMES[k],
+      name: k === "value" && v.pattern ? `Log value ${v.pattern}` : FILTER_NAMES[k],
       value: k === "status" ? (v[k] === "failing" ? "With failures" : v[k] === "passing" ? "All green" : v[k])
         : k === "ci_provider" ? CI_LABELS[v[k]] ?? v[k] : k === "pr" ? `#${v[k]}`
         : scope ? SCOPE_LABELS[scope] : v[k],
@@ -83,6 +85,8 @@ function toFilters(v: Values): RunFilters {
     pr: v.pr ? Number(v.pr) : undefined,
     author: v.author || undefined,
     scope: asScope(v.scope),
+    value: v.value || undefined,
+    pattern: v.value ? v.pattern || undefined : undefined,
     since: dayStart(v.from),
     // People read "to" as inclusive, so the API gets the start of the next day
     until: dayStart(v.to, 1),
@@ -194,6 +198,7 @@ export default function RunsPage() {
         if (v) next.set(k, v);
         else next.delete(k);
       }
+      if (patch.value === "") next.delete("pattern");
       next.delete("offset");
       return next;
     });
@@ -201,6 +206,16 @@ export default function RunsPage() {
   const moreRef = useRef<HTMLDetailsElement>(null);
   // Controlled, so removing the last advanced filter does not fold it under the reader; a new one opens it
   const [moreOpen, setMoreOpen] = useState(advancedActive > 0);
+  // The pattern names for the Log value filter (spec 2026-10-15 §3.2), read once More filters is open or a pattern
+  // is already in the URL; a project without patterns offers none
+  const patterns = useQuery({
+    queryKey: ["log-patterns", id], queryFn: () => listLogPatterns(id), staleTime: 60_000,
+    enabled: moreOpen || applied.pattern !== "",
+  });
+  const patternOptions = (patterns.data?.patterns ?? []).map((p) => ({ value: p.name, label: p.name }));
+  // While the value filter is on, each run opens scoped to the results holding it
+  const runSearch = applied.value
+    ? `?${new URLSearchParams({ value: applied.value, ...(applied.pattern ? { pattern: applied.pattern } : {}) })}` : "";
   const hadAdvanced = useRef(advancedActive > 0);
   useEffect(() => {
     if (advancedActive > 0 && !hadAdvanced.current) setMoreOpen(true);
@@ -270,6 +285,15 @@ export default function RunsPage() {
               To
               <input type="date" value={form.to} min={form.from || undefined} onChange={(e) => set("to", e.target.value)} />
             </label>
+            <label>
+              Log value
+              <input value={form.value} onChange={(e) => set("value", e.target.value)} maxLength={200}
+                spellCheck={false} autoComplete="off" placeholder="3960562" />
+            </label>
+            {patternOptions.length > 0 && (
+              <FilterSelect label="Pattern" value={form.pattern} emptyLabel="Any pattern" onChange={(v) => set("pattern", v)}
+                options={patternOptions} />
+            )}
           </FilterBar>
         </details>
       </form>
@@ -311,7 +335,7 @@ export default function RunsPage() {
               {rows.map((r) => (
                 <tr key={r.id} className={fresh.has(r.id) ? "row-new" : undefined}>
                   <td>
-                    <Link to={`${r.id}`}>#{r.id}</Link>
+                    <Link to={`${r.id}${runSearch}`}>#{r.id}</Link>
                     {isSubset(r) && (
                       <>{" "}<StatusPill tone="neutral" label="Suggested only"
                         note={stoppedAfterStage1(r) ? "stopped after stage 1" : undefined} /></>

@@ -301,3 +301,39 @@ test("the scope filter option and its chip both read Full runs only", async () =
   expect(screen.getByRole("button", { name: "Full runs only" })).toHaveAttribute("aria-pressed", "true");
   expect(screen.queryByText(/Full suite only/)).not.toBeInTheDocument();
 });
+
+test("the value filter round-trips through the URL, shows one chip and carries into each run link", async () => {
+  const seen: string[] = [];
+  server.use(
+    http.get("/api/v1/projects/42/log-patterns", () => HttpResponse.json({
+      patterns: [{ id: 1, name: "trip_id", pattern: "x", link_template: null, created_at: null }], scan: { state: "idle", since: null } })),
+    http.get("/api/v1/projects/42/runs", ({ request }) => {
+      const q = new URL(request.url).searchParams;
+      seen.push(`${q.get("value")}|${q.get("pattern")}`);
+      return HttpResponse.json([run(61)]);
+    }),
+  );
+  renderRuns("/projects/42/runs?value=a%20b%26c&pattern=trip_id");
+  const chip = await screen.findByRole("button", { name: "Remove filter Log value trip_id: a b&c" });
+  await waitFor(() => expect(seen).toContain("a b&c|trip_id"));
+  expect(screen.getByRole("link", { name: /#61/ })).toHaveAttribute("href", "/projects/42/runs/61?value=a+b%26c&pattern=trip_id");
+
+  await userEvent.click(chip);
+  await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(""));
+  await waitFor(() => expect(seen.at(-1)).toBe("null|null"));
+});
+
+test("the value filter is typed in More filters with a pattern from the project's list", async () => {
+  server.use(
+    http.get("/api/v1/projects/42/log-patterns", () => HttpResponse.json({
+      patterns: [{ id: 1, name: "trip_id", pattern: "x", link_template: null, created_at: null }], scan: { state: "idle", since: null } })),
+    http.get("/api/v1/projects/42/runs", () => HttpResponse.json([])),
+  );
+  renderRuns();
+  await screen.findByRole("heading", { level: 1, name: "Runs" });
+  await userEvent.click(screen.getByText(/More filters/));
+  await userEvent.type(screen.getByLabelText("Log value"), "3960562");
+  await userEvent.selectOptions(await screen.findByLabelText("Pattern"), "trip_id");
+  await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+  await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("value=3960562&pattern=trip_id"));
+});

@@ -11,7 +11,7 @@ export interface LogPattern {
 }
 
 export interface LogScan {
-  state: "idle" | "running";
+  state: "idle" | "queued" | "running";
   since: string | null;
 }
 

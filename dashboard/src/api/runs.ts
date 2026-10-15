@@ -113,6 +113,9 @@ export interface RunFilters {
   until?: string; // ISO instant, exclusive
   /** "full" hides runs of only the suggested tests. */
   scope?: RunScope;
+  /** Runs with a result holding exactly this log value (spec 2026-10-15 §3.1), under `pattern` when given. */
+  value?: string;
+  pattern?: string;
 }
 
 export function listRuns(
@@ -196,8 +199,14 @@ export function getFailureGroups(
   return apiFetch(`/api/v1/runs/${runId}/failure-groups`);
 }
 
-export function getRun(runId: number, status?: RunStatusFilter, init: { signal?: AbortSignal } = {}): Promise<RunDetail> {
-  const q = buildQuery({ status });
+export function getRun(
+  runId: number,
+  status?: RunStatusFilter,
+  extra: { value?: string; pattern?: string } = {},
+  init: { signal?: AbortSignal } = {},
+): Promise<RunDetail> {
+  // With `value`, only the results holding that log value come back; the run's counts are unchanged
+  const q = buildQuery({ status, ...extra });
   return apiFetch(`/api/v1/runs/${runId}${q}`, init);
 }
 

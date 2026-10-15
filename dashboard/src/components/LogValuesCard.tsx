@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "../api/http";
-import { addLogPattern, listLogPatterns, previewLogPattern, removeLogPattern } from "../api/logPatterns";
+import { addLogPattern, listLogPatterns, previewLogPattern, removeLogPattern, type LogScan } from "../api/logPatterns";
 import { plural } from "../lib/words";
 import ConfirmButton from "./ConfirmButton";
 import ErrorBanner from "./ErrorBanner";
@@ -18,6 +18,13 @@ const FIELDS = ["name", "pattern", "link_template"] as const;
 type Field = (typeof FIELDS)[number];
 /** While past runs are scanned the list is read again this often, so "Scanning past runs…" goes away by itself. */
 const SCAN_POLL_MS = 3000;
+/** A queued scan waits for the next add or restart: a slow poll is enough to notice when it starts. */
+const QUEUED_POLL_MS = 30_000;
+
+/** How often the list is read again for a scan state: 3 s running, 30 s queued, not at all when idle. */
+export function scanPollInterval(state: LogScan["state"] | undefined): number | false {
+  return state === "running" ? SCAN_POLL_MS : state === "queued" ? QUEUED_POLL_MS : false;
+}
 const HELP_LABEL = "How values are captured";
 
 /** Settings card for log-value patterns (ADR-032), next to Masking and built like it. */
@@ -38,7 +45,7 @@ export default function LogValuesCard({ projectId, canEdit }: Props) {
   const patterns = useQuery({
     queryKey,
     queryFn: () => listLogPatterns(projectId),
-    refetchInterval: (query) => (query.state.data?.scan.state === "running" ? SCAN_POLL_MS : false),
+    refetchInterval: (query) => scanPollInterval(query.state.data?.scan.state),
   });
   const preview = useMutation({
     mutationFn: (input: { name: string; pattern: string; sample: string }) =>
@@ -137,6 +144,9 @@ export default function LogValuesCard({ projectId, canEdit }: Props) {
         </table>
       )}
       {patterns.data?.scan.state === "running" && <p className="muted" role="status">Scanning past runs…</p>}
+      {patterns.data?.scan.state === "queued" && (
+        <p className="muted" role="status">Scan queued; it runs when a pattern is added or the service restarts.</p>
+      )}
       {remove.error != null && <ErrorBanner error={remove.error} />}
 
       {canEdit === false && <p className="muted">Only owners, admins and members can add or remove patterns.</p>}
