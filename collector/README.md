@@ -8,7 +8,7 @@ Cucumber).
 ## Install
 
 ```bash
-pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.9.1#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.9.2#subdirectory=collector"
 ```
 
 ### Renamed from `qav-collector` (0.4.0)
@@ -69,7 +69,7 @@ instead of storing it twice.
           QEOS_URL: https://qeos.example.com
           QEOS_API_KEY: ${{ secrets.QEOS_API_KEY }}
         run: |
-          pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.9.1#subdirectory=collector"
+          pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.9.2#subdirectory=collector"
           qeos-collector upload "reports/**/*.xml"
 ```
 
@@ -80,7 +80,7 @@ test:
   script:
     - pytest --junitxml=reports/junit.xml
   after_script:
-    - pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.9.1#subdirectory=collector"
+    - pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.9.2#subdirectory=collector"
     - qeos-collector upload "reports/**/*.xml"
   variables:
     QEOS_URL: https://qeos.example.com
@@ -98,7 +98,7 @@ post {
   always {
     withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')]) {
       sh '''
-        pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.9.1#subdirectory=collector"
+        pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.9.2#subdirectory=collector"
         QEOS_URL=https://qeos.example.com qeos-collector upload "target/surefire-reports/*.xml"
       '''
     }
@@ -117,7 +117,7 @@ mass-archive guard is the backstop.
 steps:
   - script: mvn test   # or pytest --junitxml=reports/junit.xml, dotnet test --logger trx, …
   - script: |
-      pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.9.1#subdirectory=collector"
+      pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.9.2#subdirectory=collector"
       qeos-collector upload "**/TEST-*.xml"
     displayName: Upload test results to QEOS
     condition: always()        # report results even when the tests failed
@@ -258,23 +258,26 @@ features:
 | 1 | Network or TLS failure; 401/403/404, 409 or 413 from the platform; or parse errors with `--strict` |
 | 2 | A configuration error: no URL, no key, no file matched, a file that is not UTF-8 text |
 
-GitHub Actions:
+GitHub Actions, through the action (from 0.9.2: `command: import-features`). The action installs the
+collector from its own checkout, so it works while `Atriis.QEOS` is private, where `pip install git+https://…`
+fails on a runner with `could not read Username for 'https://github.com'`:
 
 ```yaml
 on:
   push:
-    branches: [master]
+    paths: ["tests/features/**"]
 jobs:
   import-features:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - run: pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.9.1#subdirectory=collector"
-      - run: qeos-collector import-features
+      - uses: atriis/Atriis.QEOS/collector-action@collector-v0
+        with:
+          url: ${{ vars.QEOS_URL }}
+          command: import-features
+          patterns: "tests/features/**/*.feature"
+          # extra-args: --allow-mass-archive   # first sync after a dashboard import only
         env:
-          QEOS_URL: ${{ vars.QEOS_URL }}
           QEOS_API_KEY: ${{ secrets.QEOS_API_KEY }}
 ```
 

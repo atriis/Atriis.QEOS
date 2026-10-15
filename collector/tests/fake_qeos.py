@@ -1,8 +1,10 @@
 """A stand-in QEOS for CI's collector-action job: `python fake_qeos.py PORT SUGGESTED_JSON UPLOADS_FILE`.
 
 POST /api/v1/collect/impact answers with the suggestion in SUGGESTED_JSON (a JSON list of [suite, uri, name]);
-POST /api/v1/collect/runs appends the body to UPLOADS_FILE (one JSON line each) and answers 201. Binds 127.0.0.1
-only, so the collector's http:// localhost rule applies."""
+POST /api/v1/collect/runs appends the body to UPLOADS_FILE (one JSON line each) and answers 201;
+POST /api/v1/collect/token grants an import token for project 1, and POST /api/v1/projects/1/cases/import
+appends the import body to UPLOADS_FILE as well and answers as a dry run would (every file created).
+Binds 127.0.0.1 only, so the collector's http:// localhost rule applies."""
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -32,6 +34,17 @@ class Handler(BaseHTTPRequestHandler):
                       "failed": failed, "skipped": 0, "errored": 0, "quarantined": 0, "blocking": failed,
                       "created_at": "2026-10-13T10:00:00Z"}
             status = 201
+        elif self.path == "/api/v1/collect/token":
+            answer, status = {"project_id": 1, "token": "fake-import-token"}, 200
+        elif self.path.startswith("/api/v1/projects/1/cases/import"):
+            with open(UPLOADS, "a", encoding="utf-8") as handle:
+                handle.write(body.decode("utf-8") + "\n")
+            files = json.loads(body)["files"]
+            answer = {"summary": {"created": len(files), "updated": 0, "moved": 0, "reactivated": 0,
+                                  "archived": 0, "unchanged": 0, "skipped": 0},
+                      "items": [{"action": "created", "path": f["path"], "scenario": None} for f in files],
+                      "errors": [], "warnings": []}
+            status = 200
         else:
             answer, status = {"detail": "Not Found"}, 404
         data = json.dumps(answer).encode()

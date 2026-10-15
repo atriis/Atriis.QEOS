@@ -1,19 +1,30 @@
 name: QEOS collector
 description: >-
-  Upload test reports as one run to a QEOS platform, or run a Cucumber test
-  command with the scenarios a change likely affects first (impact: first or only).
-  Provide the project API key as the QEOS_API_KEY environment variable on the
-  step - never as an input, so it stays out of the action log.
-  QAV_API_KEY, the name before the QEOS rename, still works with a deprecation warning.
+  Upload test reports as one run to a QEOS platform, run a Cucumber test
+  command with the scenarios a change likely affects first (impact: first or only),
+  or keep the project's test cases in sync with the repository's .feature files
+  (command: import-features). Provide the project API key as the QEOS_API_KEY
+  environment variable on the step - never as an input, so it stays out of the
+  action log. QAV_API_KEY, the name before the QEOS rename, still works with a
+  deprecation warning.
 
 inputs:
   url:
     description: Platform URL (e.g. https://qeos.example.com)
     required: true
+  command:
+    description: >-
+      upload (default): upload the reports in patterns, or run the tests with impact.
+      import-features: keep the test cases equal to the .feature files in patterns
+      (qeos-collector import-features; collector 0.9.2 or later). The action installs
+      the collector from its own checkout, so it works from a private Atriis.QEOS.
+    required: false
+    default: "upload"
   patterns:
     description: >-
       Report glob patterns, space separated (** matches directories), uploaded when
       impact is off. Default: the patterns list in .qeos.yml. Not used with impact.
+      With command import-features: the .feature globs (default: features in .qeos.yml, else **/*.feature).
     required: false
     default: ""
   environment:
@@ -53,8 +64,25 @@ runs:
       run: python -m pip install --quiet "$GITHUB_ACTION_PATH/../collector"
     # Inputs reach the scripts only as environment variables, never as ${{ }} text inside them, so no input is ever
     # parsed as shell code; extra-args goes to the collector as one string (QEOS_ACTION_EXTRA_ARGS), which it splits itself
+    - name: The command input must be upload or import-features
+      if: inputs.command != 'upload' && inputs.command != 'import-features'
+      shell: bash
+      run: |
+        echo "::error::the command input must be upload or import-features"
+        exit 2
+    - name: Sync test cases from .feature files
+      if: inputs.command == 'import-features'
+      shell: bash
+      env:
+        QEOS_ACTION_URL: ${{ inputs.url }}
+        QEOS_ACTION_PATTERNS: ${{ inputs.patterns }}
+        QEOS_ACTION_EXTRA_ARGS: ${{ inputs.extra-args }}
+      run: |
+        set -f  # the patterns are split on spaces, never expanded by the shell: the collector expands them
+        # shellcheck disable=SC2086
+        qeos-collector import-features $QEOS_ACTION_PATTERNS --url "$QEOS_ACTION_URL"
     - name: Upload test results
-      if: inputs.impact == 'off'
+      if: inputs.command == 'upload' && inputs.impact == 'off'
       shell: bash
       env:
         QEOS_ACTION_URL: ${{ inputs.url }}
@@ -67,7 +95,7 @@ runs:
         qeos-collector upload $QEOS_ACTION_PATTERNS --url "$QEOS_ACTION_URL" \
           ${QEOS_ACTION_ENVIRONMENT:+--environment "$QEOS_ACTION_ENVIRONMENT"}
     - name: Run the tests, the likely affected ones first
-      if: inputs.impact != 'off'
+      if: inputs.command == 'upload' && inputs.impact != 'off'
       shell: bash
       env:
         QEOS_IMPACT_MODE: ${{ inputs.impact }}

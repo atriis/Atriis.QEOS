@@ -291,6 +291,32 @@ jobs:
           print("impact first: 2 stages, 1 upload")
           PY
 
+      # command: import-features, as consumers use it from a private Atriis.QEOS (pip from git+https has no
+      # credentials on a runner; the action installs from its own checkout). --branch names this branch, so the
+      # sync is not skipped on a pull request; --dry-run asks the stand-in for the plan
+      - name: Run the action with command import-features
+        uses: ./collector-action
+        env:
+          QEOS_API_KEY: qeos_ci_placeholder_key
+        with:
+          url: http://127.0.0.1:18080
+          command: import-features
+          patterns: collector/tests/fixtures/sync/*.feature
+          extra-args: --dry-run --branch ${{ github.head_ref || github.ref_name }}
+
+      - name: The .feature file was sent to the import
+        run: |
+          python - <<'PY'
+          import json, os
+          temp = os.environ["RUNNER_TEMP"]
+          lines = [json.loads(line) for line in open(f"{temp}/qeos-uploads.jsonl", encoding="utf-8")]
+          body = lines[-1]
+          assert body["full"] is True, body
+          assert [f["path"] for f in body["files"]] == ["collector/tests/fixtures/sync/shop.feature"], body["files"]
+          assert "Opens the shop" in body["files"][0]["content"], body["files"][0]
+          print("import-features: 1 file sent")
+          PY
+
       - name: Logs of the impact first check
         if: failure()
         run: |

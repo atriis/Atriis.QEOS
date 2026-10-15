@@ -212,7 +212,11 @@ test("the GitHub sync snippet is the standalone workflow with the first_sync inp
   expect(snippet).toHaveTextContent('paths: ["tests/features/**"]');
   expect(snippet).toHaveTextContent("first_sync");
   expect(snippet).toHaveTextContent("--allow-mass-archive");
-  expect(snippet).toHaveTextContent("QEOS_URL: ${{ vars.QEOS_URL }}");
+  // through the action, which installs from its own checkout: pip from git+https cannot read a private Atriis.QEOS
+  expect(snippet).toHaveTextContent("uses: atriis/Atriis.QEOS/collector-action@collector-v0");
+  expect(snippet).toHaveTextContent("command: import-features");
+  expect(snippet).not.toHaveTextContent("pip install");
+  expect(snippet).toHaveTextContent("url: ${{ vars.QEOS_URL }}");
   expect(snippet).not.toHaveTextContent("localhost:3000"); // the address lives in the variable, never in the file
   expect(screen.getByText(/commit this as/i)).toHaveTextContent("run it once by hand");
 
