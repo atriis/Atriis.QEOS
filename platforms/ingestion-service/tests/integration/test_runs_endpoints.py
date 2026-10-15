@@ -365,3 +365,93 @@ def test_summary_for_non_member_is_404(client, auth, project_role, make_run):
     run = make_run()
     project_role(status_code=404, body={"detail": "Project not found"})
     assert client.get(f"/api/v1/projects/1/runs/{run.id}/summary", headers=auth()).status_code == 404
+
+
+# --- log values: runs with a value, a run's rows holding it (spec 2026-10-15 §3) ---------------------------------
+
+
+def with_value(db, run, name, value, project_id=1, result_index=0):
+    """Gives one of the run's results a captured log value under pattern `name` (created on first use)."""
+    from src.ingestion.models import LogPattern, LogValue
+
+    pattern = db.query(LogPattern).filter_by(project_id=project_id, name=name).first()
+    if pattern is None:
+        pattern = LogPattern(project_id=project_id, name=name, pattern="x")
+        db.add(pattern)
+        db.flush()
+    result = db.query(RunResult).filter_by(run_id=run.id).order_by(RunResult.id).all()[result_index]
+    db.add(LogValue(result_id=result.id, pattern_id=pattern.id, position=0, value=value))
+    db.commit()
+    return result
+
+
+def test_list_filters_by_log_value(client, auth, project_role, make_run, db):
+    hit = make_run(minutes_ago=2)
+    other = make_run(minutes_ago=1)
+    with_value(db, hit, "trip_id", "3960562")
+    with_value(db, other, "trip_id", "3960563")
+    project_role("viewer")
+    body = client.get("/api/v1/projects/1/runs?value=3960562", headers=auth()).json()
+    assert [r["id"] for r in body] == [hit.id]
+    assert client.get("/api/v1/projects/1/runs?value=396056", headers=auth()).json() == []  # exact, not a prefix
+
+
+def test_list_filters_by_log_value_and_pattern(client, auth, project_role, make_run, db):
+    trip = make_run(minutes_ago=2)
+    route = make_run(minutes_ago=1)
+    with_value(db, trip, "trip_id", "42")
+    with_value(db, route, "route_key", "42")
+    project_role("viewer")
+    both = client.get("/api/v1/projects/1/runs?value=42", headers=auth()).json()
+    assert {r["id"] for r in both} == {trip.id, route.id}
+    only = client.get("/api/v1/projects/1/runs?value=42&pattern=trip_id", headers=auth()).json()
+    assert [r["id"] for r in only] == [trip.id]
+
+
+def test_pattern_without_value_is_422(client, auth, project_role, make_run):
+    run = make_run()
+    project_role("viewer")
+    assert client.get("/api/v1/projects/1/runs?pattern=trip_id", headers=auth()).status_code == 422
+    assert client.get(f"/api/v1/runs/{run.id}?pattern=trip_id", headers=auth()).status_code == 422
+
+
+@pytest.mark.parametrize("value", ["", "a" * 201, "nul%00here"])
+def test_an_impossible_value_is_422(client, auth, project_role, value):
+    project_role("viewer")
+    assert client.get(f"/api/v1/projects/1/runs?value={value}", headers=auth()).status_code == 422
+
+
+def test_an_unknown_pattern_matches_nothing(client, auth, project_role, make_run, db):
+    run = make_run()
+    with_value(db, run, "trip_id", "1")
+    project_role("viewer")
+    assert client.get("/api/v1/projects/1/runs?value=1&pattern=nothing", headers=auth()).json() == []
+
+
+def test_another_projects_value_never_matches(client, auth, project_role, make_run, db):
+    theirs = make_run(project_id=2)
+    with_value(db, theirs, "trip_id", "3960562", project_id=2)
+    mine = make_run()
+    project_role("viewer")
+    assert client.get("/api/v1/projects/1/runs?value=3960562", headers=auth()).json() == []
+    assert [r["id"] for r in client.get("/api/v1/projects/1/runs", headers=auth()).json()] == [mine.id]
+
+
+def test_value_combines_with_the_other_filters(client, auth, project_role, make_run, db):
+    green = make_run(statuses=("passed",), branch="main", minutes_ago=2)
+    red = make_run(statuses=("failed",), branch="main", minutes_ago=1)
+    with_value(db, green, "trip_id", "7")
+    with_value(db, red, "trip_id", "7")
+    project_role("viewer")
+    body = client.get("/api/v1/projects/1/runs?value=7&status=failing&branch=main", headers=auth()).json()
+    assert [r["id"] for r in body] == [red.id]
+
+
+def test_get_run_scopes_its_rows_to_the_value_and_keeps_its_counts(client, auth, project_role, make_run, db):
+    run = make_run(statuses=("passed", "failed", "passed"))
+    holder = with_value(db, run, "trip_id", "3960562", result_index=1)
+    project_role("viewer")
+    body = client.get(f"/api/v1/runs/{run.id}?value=3960562", headers=auth()).json()
+    assert [r["id"] for r in body["results"]] == [holder.id]
+    assert body["total"] == 3 and body["failed"] == 1  # the run's counts describe the run
+    assert client.get(f"/api/v1/runs/{run.id}?value=3960562&pattern=route_key", headers=auth()).json()["results"] == []

@@ -35,12 +35,17 @@ def list_runs(
     since: Optional[datetime] = Query(None),
     until: Optional[datetime] = Query(None),
     scope: Optional[Literal[SCOPES]] = Query(None),  # "full" hides runs of only the suggested tests
+    # Log values (spec 2026-10-15 §3.1): exact, case-sensitive; `pattern` narrows `value` and needs it
+    value: Optional[str] = Query(None, min_length=1, max_length=200, pattern=NO_NUL),
+    pattern: Optional[str] = Query(None, pattern=run_service.PATTERN_NAME),
     db: Session = Depends(get_db),
     access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
 ):
+    if pattern is not None and value is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="pattern needs value")
     filters = run_service.RunFilters(
         branch=branch, branch_contains=branch_contains, status=status_filter, environment=environment, ci_provider=ci_provider,
-        commit=commit, pr=pr, author=author, since=since, until=until, scope=scope,
+        commit=commit, pr=pr, author=author, since=since, until=until, scope=scope, value=value, pattern=pattern,
     )
     return run_service.list_runs(db, access.project_id, limit, offset, filters)
 
@@ -111,12 +116,17 @@ def get_run_impact(
 def get_run(
     run_id: int,
     status_filter: Optional[Literal["passed", "failed", "skipped", "errored"]] = Query(None, alias="status"),
+    # Log values (spec 2026-10-15 §3.1): only the results holding `value` (under `pattern`); the counts stay the run's
+    value: Optional[str] = Query(None, min_length=1, max_length=200, pattern=NO_NUL),
+    pattern: Optional[str] = Query(None, pattern=run_service.PATTERN_NAME),
     db: Session = Depends(get_db),
     caller: Caller = Depends(get_caller),
 ):
     run = run_service.get_run(db, run_id)
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    if pattern is not None and value is None:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="pattern needs value")
     # The project comes from the run row, never from the URL
     project_id = run.project_id
     # End the read-only transaction before the HTTP access check, so a slow
@@ -125,7 +135,7 @@ def get_run(
     check_project_role(project_id, caller, READ_ROLES, "Run not found")
     run = run_service.get_run(db, run_id)
     held = run_service.quarantined_failures(db, run)
-    results = run_service.list_results(db, run.id, status_filter)
+    results = run_service.list_results(db, run.id, status_filter, value, pattern)
     changes = run_service.list_changes(db, run.id)
     components = run_service.list_components(db, run.id)
     return RunDetail(

@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.ingestion.analytics.signature import headline, signature
-from src.ingestion.models import MutedTest, Run, RunChangedFile, RunComponent, RunResult
+from src.ingestion.models import LogPattern, LogValue, MutedTest, Run, RunChangedFile, RunComponent, RunResult
 from src.ingestion.service.analytics_service import _escape_like
 
 
@@ -24,6 +24,25 @@ class RunFilters:
     since: Optional[datetime] = None  # started_at >= since
     until: Optional[datetime] = None  # started_at < until
     scope: Optional[str] = None  # one of SCOPES; "full" hides runs of only the suggested tests
+    # Log values (spec 2026-10-15 §3.1): runs with a result holding exactly `value`, under `pattern` when given
+    value: Optional[str] = None
+    pattern: Optional[str] = None
+
+
+PATTERN_NAME = r"^[a-z][a-z0-9_]{0,31}$"
+
+
+def _value_rows(value: str, pattern: Optional[str]):
+    """The log_values rows of the enclosing RunResult that hold `value` (and `pattern`): an EXISTS, correlated to
+    RunResult. Patterns belong to projects, so another project's values never match a project's runs."""
+    rows = (
+        select(LogValue.id)
+        .join(LogPattern, LogPattern.id == LogValue.pattern_id)
+        .where(LogValue.result_id == RunResult.id, LogValue.value == value)
+    )
+    if pattern is not None:
+        rows = rows.where(LogPattern.name == pattern)
+    return rows.correlate(RunResult).exists()
 
 
 def list_runs(db: Session, project_id: int, limit: int, offset: int, filters: RunFilters = RunFilters()) -> list[Run]:
@@ -53,6 +72,9 @@ def list_runs(db: Session, project_id: int, limit: int, offset: int, filters: Ru
         query = query.filter(Run.started_at < f.until)
     if f.scope is not None:
         query = query.filter(Run.scope == f.scope)
+    if f.value is not None:
+        holders = select(RunResult.id).where(RunResult.run_id == Run.id, _value_rows(f.value, f.pattern))
+        query = query.filter(holders.correlate(Run).exists())
     return query.order_by(Run.created_at.desc(), Run.id.desc()).offset(offset).limit(limit).all()
 
 
@@ -60,10 +82,13 @@ def get_run(db: Session, run_id: int) -> Optional[Run]:
     return db.get(Run, run_id)
 
 
-def list_results(db: Session, run_id: int, status: Optional[str]) -> list[RunResult]:
+def list_results(db: Session, run_id: int, status: Optional[str], value: Optional[str] = None,
+                 pattern: Optional[str] = None) -> list[RunResult]:
     query = db.query(RunResult).filter(RunResult.run_id == run_id)
     if status is not None:
         query = query.filter(RunResult.status == status)
+    if value is not None:  # only the rows holding this log value (spec 2026-10-15 §3.1)
+        query = query.filter(_value_rows(value, pattern))
     return query.order_by(RunResult.id).all()
 
 
