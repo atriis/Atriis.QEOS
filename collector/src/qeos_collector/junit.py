@@ -159,6 +159,11 @@ def _add_case(case: ET.Element, suite: str, parsed: ParsedFile) -> None:
             result["message"] = _cut(message)
         if text.strip():
             result["details"] = _cut(text)
+    # The test case's output, for log values (spec 2026-10-14 log values §2.2); blank output sends nothing
+    out = case.find("system-out")
+    log = "".join(out.itertext()) if out is not None else ""
+    if log.strip():
+        result["log"] = _cut(log)
     parsed.results.append(result)
 
 

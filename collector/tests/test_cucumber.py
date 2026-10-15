@@ -1,5 +1,6 @@
 """Cucumber JSON (cucumber-jvm/js/rb classic formatter) through the same
 dispatcher: a feature's scenarios become results in the shared shape."""
+import base64
 import json
 from datetime import datetime, timezone
 
@@ -296,3 +297,102 @@ def test_offsets_that_fit_neither_unit_fall_back_to_the_text(tmp_path):
     got = failed_step_of(tmp_path, "When ", "I send 😀 to Lisbon", 5, "failed", "e", location="s.js:1",
                          arguments=[{"val": "Lisbon", "offset": 40}])
     assert got["pattern"] == "When I send 😀 to Lisbon"
+
+
+# --- log (log values, spec 2026-10-14 §2.2) --------------------------------------------------------------------
+
+
+def b64(data):
+    raw = data if isinstance(data, bytes) else data.encode("utf-8")
+    return base64.b64encode(raw).decode("ascii")
+
+
+def logging_step(keyword, name, *texts, media="text/x.cucumber.log+plain"):
+    return {"keyword": keyword, "name": name, "line": 3, "result": {"status": "passed", "duration": 1},
+            "embeddings": [{"data": b64(text), "mime_type": media} for text in texts]}
+
+
+def log_of(tmp_path, steps, background=None, **element):
+    elements = [{"type": "background", "keyword": "Background", "name": "", "steps": background}] if background else []
+    elements.append({"type": "scenario", "keyword": "Scenario", "name": "Books a trip", "steps": steps, **element})
+    parsed = parse_file(write(tmp_path, [{"uri": "features/book.feature", "name": "Booking", "elements": elements}]))
+    return parsed.results[0].get("log")
+
+
+def test_text_attachments_become_the_log_in_step_order_background_first(tmp_path):
+    log = log_of(tmp_path,
+                 [logging_step("When ", "I book", 'INFO [App] Trip id captured tripId="3960562"', "INFO [App] Paid"),
+                  logging_step("Then ", "it confirms", "INFO [App] Confirmed")],
+                 background=[logging_step("Given ", "I sign in", "INFO [Hooks] Signed in")])
+    assert log == "\n".join(["INFO [Hooks] Signed in", 'INFO [App] Trip id captured tripId="3960562"',
+                             "INFO [App] Paid", "INFO [App] Confirmed"])
+
+
+def test_text_plain_counts_with_or_without_parameters(tmp_path):
+    log = log_of(tmp_path, [logging_step("When ", "a", "one", media="text/plain"),
+                            logging_step("When ", "b", "two", media="Text/Plain; charset=utf-8")])
+    assert log == "one\ntwo"
+
+
+def test_images_and_other_media_never_join_the_log(tmp_path):
+    step = logging_step("When ", "a", "kept")
+    step["embeddings"] += [{"data": b64(b"\x89PNG\r\n\x1a\n\x00\x00"), "mime_type": "image/png"},
+                           {"data": b64('{"a": 1}'), "mime_type": "application/json"},
+                           {"data": b64("<p>x</p>"), "mime_type": "text/html"}]
+    assert log_of(tmp_path, [step]) == "kept"
+
+
+def test_plain_text_data_is_kept_as_it_is(tmp_path):
+    step = {"keyword": "When ", "name": "a", "result": {"status": "passed"},
+            "embeddings": [{"data": 'INFO tripId="1" done', "mime_type": "text/plain"}]}
+    assert log_of(tmp_path, [step]) == 'INFO tripId="1" done'
+
+
+def test_invalid_utf8_in_an_attachment_is_replaced_not_fatal(tmp_path):
+    step = {"keyword": "When ", "name": "a", "result": {"status": "passed"},
+            "embeddings": [{"data": b64(b"trip \xff\xfe id"), "mime_type": "text/plain"}]}
+    assert log_of(tmp_path, [step]) == "trip �� id"
+
+
+def test_hook_steps_and_cucumber_jvm_scenario_hooks_count(tmp_path):
+    hook = logging_step("Before", "", "INFO [Hooks] Started")  # cucumber-js: a hidden hook step
+    hook["hidden"] = True
+    jvm = lambda text: [{"result": {"status": "passed"}, "embeddings": [{"data": b64(text), "mime_type": "text/plain"}]}]
+    log = log_of(tmp_path, [hook, logging_step("When ", "a", "INFO step")], before=jvm("jvm before"),
+                 after=jvm("jvm after"))
+    assert log == "jvm before\nINFO [Hooks] Started\nINFO step\njvm after"
+
+
+def test_attachments_under_the_newer_names_count(tmp_path):
+    step = {"keyword": "When ", "name": "a", "result": {"status": "passed"},
+            "attachments": [{"body": "from attachments", "media_type": "text/x.cucumber.log+plain"},
+                            {"data": b64("camel case"), "mediaType": "text/plain"}]}
+    assert log_of(tmp_path, [step]) == "from attachments\ncamel case"
+
+
+def test_a_failed_scenario_keeps_its_log_and_its_failed_step(tmp_path):
+    failing = logging_step("When ", "I pay", "INFO [App] Paying")
+    failing["result"] = {"status": "failed", "error_message": "boom"}
+    parsed = parse_file(write(tmp_path, [{"uri": "f.feature", "name": "F", "elements": [
+        {"type": "scenario", "name": "Pays", "steps": [failing]}]}]))
+    row = parsed.results[0]
+    assert row["status"] == "failed" and row["log"] == "INFO [App] Paying" and row["failed_step"]["text"] == "When I pay"
+
+
+def test_the_log_is_cut_to_64_kb(tmp_path):
+    assert log_of(tmp_path, [logging_step("When ", "a", "é" * 40_000)]) == "é" * 32_768
+
+
+def test_no_text_means_no_log(tmp_path):
+    assert log_of(tmp_path, [{"keyword": "When ", "name": "a", "result": {"status": "passed"}}]) is None
+    assert log_of(tmp_path, [logging_step("When ", "a", "  \n ")]) is None
+
+
+@pytest.mark.parametrize("embeddings", [
+    None, "text", {"data": "x", "mime_type": "text/plain"}, [None, 3, "x"],
+    [{"data": 5, "mime_type": "text/plain"}], [{"data": "eA=="}], [{"data": "", "mime_type": "text/plain"}],
+    [{"data": "eA==", "mime_type": 7}],
+])
+def test_odd_attachment_shapes_are_skipped(tmp_path, embeddings):
+    step = {"keyword": "When ", "name": "a", "result": {"status": "passed"}, "embeddings": embeddings}
+    assert log_of(tmp_path, [step]) is None

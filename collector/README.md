@@ -512,7 +512,8 @@ showing up, but its failures stop counting. With `--gate`, the collector decides
   anything else that writes JUnit XML. A test's status is `errored` if it has an `<error>`,
   else `failed` for `<failure>`, else `skipped` for `<skipped>`, else `passed`. Surefire's
   `flakyFailure`/`rerunFailure` elements become per-attempt results, so flaky tests show up
-  as pass+fail within one run.
+  as pass+fail within one run. From 0.9.0 a test case's `<system-out>` is sent as its `log` (cut to 64 KB; blank
+  output sends nothing), for log values in QEOS.
 - Also reads, detected by the root element: .NET TRX (`<TestRun>`, vstest/`dotnet test`),
   NUnit 3 (`<test-run>`), xUnit.net v2 (`<assemblies>`) and TestNG (`<testng-results>`).
   Formats mix freely in one upload; every file lands in the same run.
@@ -524,12 +525,13 @@ showing up, but its failures stop counting. With `--gate`, the collector decides
   collector 0.6.0 sends `failed_step`; it needs a platform with ingestion migration 021, so upgrade the platform first (an older platform answers 422 and the run is not stored; this holds for 0.8.0 too, which still sends `failed_step`).
   From 0.8.0 it also carries `definition`, the step definition that ran the step (Cucumber's `match.location`, cut to 500 characters, left out when the report has none), and `pattern`, the step text with each matched argument replaced by `{…}` (`When I search {…}`, cut to 1000 characters; the text itself when the report lists no arguments, as cucumber-js's does, or they do not fit the text). QEOS uses them to group one step's failures across test cases.
   Collector 0.8.0 also works with a platform that has migration 021 but not 022 (the one that adds these two fields): that platform answers 422 naming `failed_step.definition` or `failed_step.pattern`, and the collector then sends the upload once more without `definition` and `pattern`, under the same Idempotency-Key, and logs one line saying the platform is older than the collector. No other 422 is retried (a platform without migration 021 refuses `failed_step` itself, so there is nothing to strip); uploads saved with `--spool` get the same retry when they are resent.
+  From 0.9.0 each scenario also carries `log`: its text attachments (`text/x.cucumber.log+plain`, as cucumber-js's `this.log()` writes them, and `text/plain`; decoded from base64 when so encoded) in step order, hook and Background steps included, joined by newlines and cut to 64 KB; images and other attachments never. No text, no `log`. QEOS masks it, stores it and reads log values from it.
 - Playwright's JSON reporter (`--reporter=json`): every retry attempt is kept as its own
   result (a flaky spec shows as fail+pass in one run), project name as suite, spec file as
   class, `timedOut` counts as failed and `interrupted` as errored.
 - Skips, with a warning, files over 50 MB, files that are not well-formed XML, and files that
   declare a DOCTYPE or entities (JUnit never needs one; refusing them blocks XML entity attacks).
-- Cuts failure messages and output to 64 KB, as the platform does.
+- Cuts failure messages, output and logs to 64 KB, as the platform does.
 - More than 20,000 results (or 9 MB) are sent as several runs, `part 1 of N` and so on.
 
 ## Network and security

@@ -4,6 +4,8 @@ TestNG live here, all producing the same result-dict shape. TRX wraps its
 elements in a namespace, so matching is on the local name throughout."""
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import math
 import os
@@ -181,6 +183,53 @@ def _parse_cucumber_file(path: str, parsed: ParsedFile) -> ParsedFile:
     return parsed
 
 
+# Log lines (spec 2026-10-14 log values §2.2): text attachments only. cucumber-js writes this.log() lines as
+# text/x.cucumber.log+plain and the classic JSON formatter base64-encodes every attachment; images and other media
+# are never part of the log
+LOG_MEDIA_TYPES = ("text/x.cucumber.log+plain", "text/plain")
+
+
+def _attachment_text(attachment: object) -> Optional[str]:
+    if not isinstance(attachment, dict):
+        return None
+    media = attachment.get("mime_type") or attachment.get("media_type") or attachment.get("mediaType")
+    if not isinstance(media, str) or media.split(";", 1)[0].strip().lower() not in LOG_MEDIA_TYPES:
+        return None
+    data = attachment.get("data") if attachment.get("data") is not None else attachment.get("body")
+    if not isinstance(data, str) or not data:
+        return None
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except (binascii.Error, ValueError):
+        return data  # a formatter that wrote the text itself (it has spaces or other non-base64 characters)
+    # A cut multi-byte character or binary bytes under a text media type become U+FFFD, never a failed parse
+    return raw.decode("utf-8", errors="replace")
+
+
+def _step_texts(step: object) -> list:
+    if not isinstance(step, dict):
+        return []
+    texts = []
+    for key in ("embeddings", "attachments"):
+        attachments = step.get(key)
+        if not isinstance(attachments, list):
+            continue
+        for attachment in attachments:
+            text = _attachment_text(attachment)
+            if text is not None:
+                texts.append(text)
+    return texts
+
+
+def _scenario_log(element: dict, steps: list) -> Optional[str]:
+    """The scenario's text attachments in order: cucumber-jvm's scenario hooks (`before`), then its steps (cucumber-js
+    hook steps and Background steps included), then `after`; joined by newlines and cut to 64 KB. None without text."""
+    before = element.get("before") if isinstance(element.get("before"), list) else []
+    after = element.get("after") if isinstance(element.get("after"), list) else []
+    log = "\n".join(text.rstrip("\r\n") for step in [*before, *steps, *after] for text in _step_texts(step))
+    return _cut(log) if log.strip() else None
+
+
 def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] = None) -> None:
     """The feature's scenarios (and outline rows) as results. With `lines`, each result's scenario line too (an int,
     or None), in step with parsed.results: run-impact's discovery reads a dry run through this parser, and then a
@@ -244,6 +293,9 @@ def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] =
                     entry["definition"] = definition
                 entry["pattern"] = _step_pattern(failed_step, keyword, step_text)
                 row["failed_step"] = entry
+        log = _scenario_log(element, steps)
+        if log is not None:
+            row["log"] = log
         parsed.results.append(row)
         if lines is not None:
             line = element.get("line")

@@ -249,3 +249,18 @@ def test_surefire_rerun_attempts_become_their_own_results():
     assert attempts[0]["duration_ms"] == 0  # per-attempt time is not recorded by Surefire
     assert attempts[2]["duration_ms"] == 1500
     assert "first attempt trace" in attempts[0]["details"]
+
+
+def test_system_out_becomes_the_log(tmp_path):
+    xml = ('<testsuite name="s">'
+           '<testcase classname="C" name="books"><system-out>INFO tripId="3960562"\nINFO done\n</system-out></testcase>'
+           '<testcase classname="C" name="quiet"><system-out>   </system-out></testcase>'
+           '<testcase classname="C" name="none"/></testsuite>')
+    rows = by_name(parse_file(write(tmp_path, xml)))
+    assert rows["books"]["log"] == 'INFO tripId="3960562"\nINFO done\n'
+    assert "log" not in rows["quiet"] and "log" not in rows["none"]
+
+
+def test_a_long_system_out_is_cut_to_64_kb(tmp_path):
+    xml = f'<testsuite name="s"><testcase classname="C" name="t"><system-out>{"x" * 70_000}</system-out></testcase></testsuite>'
+    assert by_name(parse_file(write(tmp_path, xml)))["t"]["log"] == "x" * junit.MAX_TEXT_BYTES
