@@ -38,7 +38,7 @@ Things that do not rename themselves in your CI configuration:
   (rename a job override), and its variables became `QEOS_PATTERNS`, `QEOS_EXTRA_ARGS` and
   `QEOS_COLLECTOR_REF`. The `QAV_*` versions of those three still apply when the new ones are unset.
 - **Release assets:** the single-file build is `qeos-collector.pyz` and the image is
-  `ghcr.io/atriis/qeos-collector`. Releases up to 0.9.0 also published the same file as `qav-collector.pyz`
+  `ghcr.io/atriis/qeos-collector`. Releases up to 0.9.1 also published the same file as `qav-collector.pyz`
   and the same image as `ghcr.io/atriis/qav-collector`; from the next release they do not, and the
   `qav-collector` package is gone. Move a download URL or an image pin to the `qeos-collector` name.
 
