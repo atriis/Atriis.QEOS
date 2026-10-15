@@ -89,6 +89,7 @@ can sync cases without a user login. See ADR-024.
 - Up to 20,000 results per run (`422` beyond: split the run).
 - `message` and `details` over 64 KB are truncated (the result's `truncated` is true), never rejected.
 - A result may carry `failed_step` `{"text": 1-1000 characters, "line": 1-1,000,000, "definition": 1-500, "pattern": 1-1000}` (the Gherkin step that failed, sent by collector 0.6.0 and later; `definition` and `pattern` from 0.8.0). They are stored in `failed_step_text`, `failed_step_line` (migration 021), `failed_step_definition` and `failed_step_pattern` (migration 022), the text fields after masking. Out-of-range values are `422`; unknown fields inside `failed_step` are ignored (a newer collector's additions never cost the upload); omitting it is fine.
+- A result may carry `log` (a string: the scenario's text attachments or the test case's `system-out`, sent by collector 0.9.0). It is masked, cut to 64 KB and stored in `test_results.log` (migration 023); it is never rejected for its size and never returned by the run endpoints.
 - `status`: `passed`, `failed`, `skipped`, `errored` (`error` is accepted as `errored`).
 - `finished_at` may be at most 1 hour ahead of the server clock.
 - Through the gateway, uploads are limited to 10 per second per IP (burst 20).
@@ -137,7 +138,7 @@ Every project role can read; roles come from project-service.
 
 ## Masking
 
-Before a result is stored, its `message`, `details` and the failed step's `text`, `definition` and `pattern` are masked, and so are the run's commit
+Before a result is stored, its `message`, `details`, `log` and the failed step's `text`, `definition` and `pattern` are masked, and so are the run's commit
 subject (`commit_message`) and a password inside its `ci_run_url`. Each masked value becomes `[REDACTED:<kind>]`; the text around it stays
 readable. Test names, suites, classes, files and branches are never changed.
 
@@ -160,6 +161,7 @@ readable. Test names, suites, classes, files and branches are never changed.
   matches empty text is refused. They run after the built-in rules, never inside an existing
   marker, and produce `[REDACTED:<name>]`; metrics count them as `kind="custom"`.
 - Masking happens before the 64 KB cut, so a secret on the boundary is never half-stored.
+- A result's `redacted` flag covers what the run page shows (message, details, the failed step); masking in the log counts in `qav_ingest_redactions_total` only.
 - Each result has a `redacted` flag; `qav_ingest_redactions_total{kind}` counts results by kind.
 - Results stored before masking existed (or before a new rule) are re-masked on demand:
   `python -m src.ingestion.jobs.remask [--dry-run] [--project ID] [--batch-size N]`

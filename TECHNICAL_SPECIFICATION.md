@@ -126,7 +126,8 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   Optional `run.scope` (`full` default, `impact-subset`) and `run.stages` (run-impact's stages: duration, tests
   and failures per stage, `time_to_first_failure_s`, `stopped_after_stage`; migration 020), left out of the
   request hash at their defaults; a split upload keeps the `stages` on its first part that sends them. A 422
-  never echoes the submitted value (no `input` or `ctx`).
+  never echoes the submitted value (no `input` or `ctx`). Optional `results[].log` (string; masked, cut to 64 KB,
+  stored in `test_results.log`, migration 023; left out of the request hash while null).
 - **Collection settings**: `GET/PUT /projects/{id}/collection-settings` (`collect_manual`, default
   true; `discarded_count` and `last_discarded_at`; members read, owners and admins write), table
   `collection_settings` (ADR-030).

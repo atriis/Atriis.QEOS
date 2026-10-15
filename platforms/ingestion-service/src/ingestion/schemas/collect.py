@@ -125,9 +125,11 @@ class ResultIn(BaseModel):
     file: Optional[_text(1000)] = None
     owner: Optional[_text(255)] = None  # from CODEOWNERS, e.g. "@org/qa-team"
     failed_step: Optional[FailedStepIn] = None
+    # The result's log (ADR-032, collector 0.9.0): masked and cut to 64 KB by the service, never rejected
+    log: Optional[str] = None
 
     _no_unstorable = field_validator("suite", "class_name", "name", "file", "owner", mode="before")(_reject_unstorable)
-    _clean_text = field_validator("message", "details", mode="after")(_replace_unstorable)
+    _clean_text = field_validator("message", "details", "log", mode="after")(_replace_unstorable)
 
     @field_validator("status")
     @classmethod

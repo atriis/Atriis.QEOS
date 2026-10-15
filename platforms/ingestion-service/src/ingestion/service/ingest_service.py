@@ -73,8 +73,10 @@ def _request_hash(upload: RunUpload) -> str:
     for name, default in _LATER_RUN_FIELDS.items():
         if data["run"].get(name, default) == default:
             data["run"].pop(name, None)
-    # Result fields added by migrations 021 and 022: absent from the hash while null, for the same reason
+    # Result fields added by migrations 021, 022 and 023: absent from the hash while null, for the same reason
     for result in data["results"]:
+        if result.get("log") is None:
+            result.pop("log", None)
         step = result.get("failed_step")
         if step is None:
             result.pop("failed_step", None)
@@ -191,10 +193,13 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
             step_text, step_kinds = mask(step.text if step else None, patterns)
             step_definition, definition_kinds = mask(step.definition if step else None, patterns)
             step_pattern, pattern_kinds = mask(step.pattern if step else None, patterns)
+            log, log_kinds = mask(result.log, patterns)
             kinds = message_kinds | details_kinds | step_kinds | definition_kinds | pattern_kinds
-            masked_kinds.update(kinds)
+            # The log counts in the redactions metric; `redacted` stays about the text the run page shows
+            masked_kinds.update(kinds | log_kinds)
             message, cut_message = truncate_utf8(message, settings.MAX_TEXT_BYTES)
             details, cut_details = truncate_utf8(details, settings.MAX_TEXT_BYTES)
+            log = truncate_utf8(log, settings.MAX_TEXT_BYTES)[0]
             rows.append({
                 "run_id": run.id,
                 "test_key": test_key(result.suite, result.class_name, result.name),
@@ -214,6 +219,7 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
                 "failed_step_definition": (step_definition[:FAILED_STEP_DEFINITION_LENGTH]
                                            if step_definition is not None else None),
                 "failed_step_pattern": step_pattern[:FAILED_STEP_PATTERN_LENGTH] if step_pattern is not None else None,
+                "log": log,
             })
         db.execute(insert(RunResult), rows)  # one executemany, not 20,000 ORM objects
 
