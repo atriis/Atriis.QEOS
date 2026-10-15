@@ -104,9 +104,9 @@ def test_adding_a_pattern_fills_values_of_past_runs(client, auth, member, db, se
     assert client.get(URL, headers=auth()).json()["scan"]["state"] == "idle"
 
 
-def test_a_queued_scan_is_reported_as_running(client, auth, member, db):
+def test_a_queued_scan_is_reported_as_queued(client, auth, member, db):
     log_scan.request_scan(db, 1)
-    assert client.get(URL, headers=auth()).json()["scan"] == {"state": "running", "since": None}
+    assert client.get(URL, headers=auth()).json()["scan"] == {"state": "queued", "since": None}
 
 
 def test_preview_returns_the_masked_sample_and_the_values_saving_nothing(client, auth, member, db):

@@ -177,7 +177,7 @@ created. The log is masked first (built-in rules and the project's masking patte
 read from that stored text, so a value hidden by masking is never captured.
 
 - **Patterns:** `GET /api/v1/projects/{id}/log-patterns` (every role) → `{"patterns": [{id, name, pattern,
-  link_template, created_at}], "scan": {"state": "idle" | "running", "since": … | null}}`, patterns in name order.
+  link_template, created_at}], "scan": {"state": "idle" | "queued" | "running", "since": … | null}}`, patterns in name order.
   `POST …` `{name, pattern, link_template?}` and `DELETE …/{pattern_id}` (owner/admin/member). Up to 20 per
   project; the name as for masking (`^[a-z][a-z0-9_]{0,31}$`, unique); the pattern RE2, at most 256 characters,
   never matching empty text, with at most one capture group (with a group the value is the group's text, without
@@ -193,7 +193,7 @@ read from that stored text, so a value hidden by masking is never captured.
 - **Past runs:** adding a pattern queues a re-scan of the logs stored in the last 90 days. It runs in the service
   after the response, in batches of `LOG_SCAN_BATCH_SIZE` (500), one scan per project at a time (an advisory lock),
   replacing each result's values, so it is safe to repeat; a pattern added during a scan makes it pass again. A scan
-  that a restart cut short, or that failed, stays queued and runs when the service starts
+  that a restart cut short, or that failed, is reported `queued` and runs when a pattern is added or the service starts
   (`LOG_SCAN_RESUME_ON_STARTUP`, default true). Logs older than 90 days get no values for a new pattern.
 
 ## Retention

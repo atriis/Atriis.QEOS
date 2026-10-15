@@ -26,7 +26,7 @@ class LogPatternOut(BaseModel):
 
 
 class LogScanOut(BaseModel):
-    state: Literal["idle", "running"]
+    state: Literal["idle", "queued", "running"]
     since: Optional[datetime] = None
 
 

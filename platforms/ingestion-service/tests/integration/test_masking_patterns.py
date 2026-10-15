@@ -110,3 +110,14 @@ def test_remask_applies_patterns_added_after_ingest(client, db, make_key, capsys
     assert db.query(RunResult).one().message == "bad [REDACTED:customer_id]"
     report = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert report["kinds"] == {"customer_id": 1}
+
+
+def test_preview_replaces_a_nul_or_a_lone_surrogate_in_the_sample_never_500(client, auth, member):
+    """A crafted JSON body: the sample is cleaned like an uploaded log, not refused and not a 500."""
+    import json
+
+    body = json.dumps({"name": "customer_id", "pattern": r"CUST-\d{6}", "sample": "CUST-123456\x00 \ud800 end"})
+    response = client.post(f"{URL}/preview", content=body.encode("ascii"),
+                           headers={**auth(), "Content-Type": "application/json"})
+    assert response.status_code == 200, response.text
+    assert response.json()["masked"] == "[REDACTED:customer_id]\ufffd \ufffd end"

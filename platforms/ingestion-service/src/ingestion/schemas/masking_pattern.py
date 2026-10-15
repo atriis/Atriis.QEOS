@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from src.ingestion.schemas.collect import _replace_unstorable
 
 
 class MaskingPatternCreate(BaseModel):
@@ -22,6 +24,12 @@ class MaskingPatternOut(BaseModel):
 
 class MaskingPreviewIn(MaskingPatternCreate):
     sample: str = Field(max_length=10_000)
+
+    # Like an uploaded message: a NUL or a lone surrogate is replaced, never refused. Before the length check,
+    # which cannot read a lone surrogate
+    _clean_sample = field_validator("sample", mode="before")(
+        lambda value: _replace_unstorable(value) if isinstance(value, str) else value
+    )
 
 
 class MaskingPreviewOut(BaseModel):

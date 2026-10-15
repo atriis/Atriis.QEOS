@@ -52,10 +52,13 @@ def request_scan(db: Session, project_id: int) -> None:
 
 
 def scan_state(db: Session, project_id: int) -> dict:
-    """What GET …/log-patterns reports: running while a request is not finished, since the current pass started."""
+    """What GET …/log-patterns reports: idle; queued (a request waits for the next add or start-up, e.g. after a
+    failed pass); running, since the current pass started."""
     row = db.get(CollectionSettings, project_id)
     if row is None or (row.log_scan_requested or 0) <= (row.log_scan_done or 0):
         return {"state": "idle", "since": None}
+    if row.log_scan_started_at is None:
+        return {"state": "queued", "since": None}
     return {"state": "running", "since": row.log_scan_started_at}
 
 
@@ -158,7 +161,18 @@ def run_scan(session_factory: sessionmaker, project_id: int, *, lock_engine: Opt
                     return True
     except Exception:  # a background task has nobody to raise to
         logger.exception("log-value scan failed for project %s", project_id)
+        _clear_started(session_factory, project_id)  # the request stays queued; the state says so
         return False
+
+
+def _clear_started(session_factory: sessionmaker, project_id: int) -> None:
+    try:
+        with session_factory() as db:
+            db.execute(update(CollectionSettings).where(CollectionSettings.project_id == project_id)
+                       .values(log_scan_started_at=None))
+            db.commit()
+    except Exception:
+        logger.exception("the failed log-value scan pass of project %s could not be recorded", project_id)
 
 
 def resume_all(session_factory: sessionmaker) -> int:

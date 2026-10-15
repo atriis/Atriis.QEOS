@@ -139,7 +139,7 @@ a stale one is a 409 carrying the stored row; layouts are validated against
 - **Log values** (ADR-032): `GET/POST /projects/{id}/log-patterns`, `DELETE …/{pattern_id}`, `POST …/preview`;
   tables `log_patterns` (≤ 20 per project, RE2, at most one capture group, optional https `link_template`) and
   `log_values` (≤ 20 distinct values per pattern per result, 200 characters, cascading with the result and the
-  pattern); the re-scan counters `collection_settings.log_scan_requested/done/started_at` (migration 023). Values come
+  pattern); the re-scan counters `collection_settings.log_scan_requested/done/started_at` (migration 023; `GET …/log-patterns` reports the scan as `idle`, `queued` or `running`). Values come
   from the masked `test_results.log`.
 - **Read**: runs list per project (filters: branch, failing/passing, environment, CI, commit
   prefix, PR, author, started-at range, scope), run detail with status filter and changed

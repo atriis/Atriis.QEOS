@@ -52,7 +52,7 @@ def test_a_queued_scan_fills_values_for_the_last_90_days_only(db, session_factor
     logged(91, 'tripId="91"')
     trip = add_pattern(db, "trip_id", r'tripId="(\d+)"')
     log_scan.request_scan(db, 1)
-    assert log_scan.scan_state(db, 1)["state"] == "running"
+    assert log_scan.scan_state(db, 1)["state"] == "queued"  # requested, no pass yet
     assert scan(session_factory) is True
     assert values(db) == sorted((rid, trip.id, 0, str(days)) for rid, days in zip(recent, (1, 10, 89)))
     db.expire_all()
@@ -96,7 +96,7 @@ def test_one_scan_per_project_at_a_time(db, session_factory, logged):
         with log_scan._project_lock(session_factory.kw["bind"], 2) as other:
             assert other is True                # another project is not blocked
     db.expire_all()
-    assert log_scan.scan_state(db, 1)["state"] == "running"  # still queued
+    assert log_scan.scan_state(db, 1)["state"] == "queued"  # still queued, no pass could start
     assert scan(session_factory) is True
     assert len(values(db)) == 1
 
@@ -137,7 +137,7 @@ def test_a_failed_pass_stays_queued_and_the_next_run_finishes_it(db, session_fac
     monkeypatch.setattr(log_scan, "scan_pass", broken)
     assert scan(session_factory) is False
     db.expire_all()
-    assert log_scan.scan_state(db, 1)["state"] == "running"
+    assert log_scan.scan_state(db, 1) == {"state": "queued", "since": None}
     monkeypatch.setattr(log_scan, "scan_pass", real)
     assert scan(session_factory) is True
     assert len(values(db)) == 1
@@ -190,3 +190,26 @@ def test_resuming_can_be_switched_off(monkeypatch):
     monkeypatch.setattr(settings, "LOG_SCAN_RESUME_ON_STARTUP", False)
     main._resume_log_scans()
     assert not started.wait(0.2)
+
+
+def test_a_request_is_queued_until_a_pass_starts(db, logged):
+    logged(1, 'tripId="1"')
+    assert log_scan.scan_state(db, 1) == {"state": "idle", "since": None}
+    log_scan.request_scan(db, 1)
+    assert log_scan.scan_state(db, 1) == {"state": "queued", "since": None}
+
+
+def test_a_pass_in_progress_is_running_since_it_started(db, session_factory, logged, monkeypatch):
+    logged(1, 'tripId="1"')
+    add_pattern(db, "trip_id", r'tripId="(\d+)"')
+    log_scan.request_scan(db, 1)
+    real, seen = log_scan.scan_pass, []
+
+    def observing(db_, project_id, since, batch_size):
+        with session_factory() as other:
+            seen.append(log_scan.scan_state(other, project_id))
+        return real(db_, project_id, since, batch_size)
+
+    monkeypatch.setattr(log_scan, "scan_pass", observing)
+    assert scan(session_factory) is True
+    assert seen[0]["state"] == "running" and seen[0]["since"] is not None
