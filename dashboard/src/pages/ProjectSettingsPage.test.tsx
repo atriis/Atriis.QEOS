@@ -124,7 +124,13 @@ test("hosted CI runners on localhost get a warning, not a silent snippet", async
   await screen.findByText(/no api keys/i);
 
   await userEvent.selectOptions(screen.getByLabelText(/ci platform/i), "github");
-  expect(screen.getByTestId("ci-snippet")).toHaveTextContent("collector-action@collector-v0");
+  const github = screen.getByTestId("ci-snippet");
+  expect(github).toHaveTextContent("collector-action@collector-v0");
+  // the variable, guarded, so the same step is safe in a repository without QEOS; Cucumber JSON by default
+  expect(github).toHaveTextContent("if: always() && vars.QEOS_URL != ''");
+  expect(github).toHaveTextContent("url: ${{ vars.QEOS_URL }}");
+  expect(github).toHaveTextContent("patterns: test-results/cucumber-report.json");
+  expect(screen.getByText(/variable QEOS_URL/)).toHaveTextContent("http://localhost:3000");
   expect(screen.getByRole("note")).toHaveTextContent(/cannot reach localhost/i);
 
   await userEvent.selectOptions(screen.getByLabelText(/ci platform/i), "gitlab");
@@ -198,7 +204,7 @@ test("the GitHub sync snippet is the standalone workflow with the first_sync inp
   expect(snippet).toHaveTextContent('paths: ["tests/features/**"]');
   expect(snippet).toHaveTextContent("first_sync");
   expect(snippet).toHaveTextContent("--allow-mass-archive");
-  expect(snippet).toHaveTextContent("QEOS_URL: http://localhost:3000");
+  expect(snippet).toHaveTextContent("QEOS_URL: ${{ vars.QEOS_URL }} # repository variable = http://localhost:3000");
   expect(screen.getByText(/commit this as/i)).toHaveTextContent("run it once by hand");
 
   // the copy button follows the kind

@@ -55,11 +55,13 @@ function ciSnippets(origin: string): Record<string, PlatformSnippets> {
       label: "GitHub Actions",
       code: {
         upload: `# in the workflow that already runs your tests (for example .github/workflows/tests.yml), after the test step
-- uses: atriis/Atriis.QEOS/collector-action@${COLLECTOR_REF}
-  if: always()   # report results even when tests failed
+# repository variable QEOS_URL = ${origin}; repository secret QEOS_API_KEY
+- name: Upload results to QEOS
+  if: always() && vars.QEOS_URL != ''   # failing builds report too; repositories without QEOS skip cleanly
+  uses: atriis/Atriis.QEOS/collector-action@${COLLECTOR_REF}
   with:
-    url: ${origin}
-    patterns: "reports/**/*.xml"
+    url: \${{ vars.QEOS_URL }}
+    patterns: test-results/cucumber-report.json   # Cucumber JSON links results to the cases; JUnit XML works too
   env:
     QEOS_API_KEY: \${{ secrets.QEOS_API_KEY }}`,
         sync: `# .github/workflows/qeos-sync-cases.yml — on the default branch; syncs on every push that changes a .feature file
@@ -85,7 +87,7 @@ jobs:
       - run: ${PIP_INSTALL(COLLECTOR_REF)}
       - run: qeos-collector import-features "tests/features/**/*.feature" \${{ inputs.first_sync && '--allow-mass-archive' || '' }}
         env:
-          QEOS_URL: ${origin}
+          QEOS_URL: \${{ vars.QEOS_URL }}   # repository variable = ${origin}
           QEOS_API_KEY: \${{ secrets.QEOS_API_KEY }}`,
       },
     },
@@ -99,7 +101,7 @@ include:
 qeos-collector-upload:
   variables:
     QEOS_URL: ${origin}
-    QEOS_PATTERNS: "reports/**/*.xml"`,
+    QEOS_PATTERNS: "test-results/cucumber-report.json"   # Cucumber JSON links results to the cases; JUnit XML works too`,
         sync: `# .gitlab-ci.yml — set QEOS_API_KEY as a masked CI/CD variable
 # syncs test cases from .feature files; runs on the default branch only (set QEOS_IMPORT_BRANCH to change)
 # first sync after a dashboard import: run it once with --allow-mass-archive
@@ -120,7 +122,7 @@ qeos-import-features:
         upload: `# azure-pipelines.yml — after the test step; add QEOS_API_KEY as a secret pipeline variable
 - script: |
     ${PIP_INSTALL(COLLECTOR_REF)}
-    qeos-collector upload "reports/**/*.xml"
+    qeos-collector upload "test-results/cucumber-report.json"   # Cucumber JSON links results to the cases; JUnit XML works too
   displayName: Upload test results to QEOS
   condition: always()      # report results even when tests failed
   continueOnError: true    # a failed upload does not fail the pipeline
@@ -146,7 +148,8 @@ qeos-import-features:
         upload: `// Jenkinsfile — needs the qeos shared library (collector-jenkins/)
 withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')]) {
   withEnv(['QEOS_URL=${origin}']) {
-    qeosCollectorUpload(patterns: 'reports/**/*.xml', ref: '${COLLECTOR_REF}')
+    // Cucumber JSON links results to the cases; JUnit XML works too
+    qeosCollectorUpload(patterns: 'test-results/cucumber-report.json', ref: '${COLLECTOR_REF}')
   }
 }`,
         sync: `// Jenkinsfile — right after qeosCollectorUpload(ref: '${COLLECTOR_REF}'), which creates the .qeos-venv this reuses
@@ -167,7 +170,8 @@ withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')
         upload: `${PIP_INSTALL(COLLECTOR_REF)}
 ${local ? `# The local stack uses a self-signed certificate; from the Atriis.QEOS folder:
 docker compose cp gateway:/etc/nginx/certs/tls.crt qeos-ca.crt
-` : ""}QEOS_URL=${origin} QEOS_API_KEY=<your key> qeos-collector upload "reports/**/*.xml"${caFile}`,
+` : ""}# Cucumber JSON links results to the cases; JUnit XML works too
+QEOS_URL=${origin} QEOS_API_KEY=<your key> qeos-collector upload "test-results/cucumber-report.json"${caFile}`,
         sync: `${PIP_INSTALL(COLLECTOR_REF)}
 ${local ? `# The local stack uses a self-signed certificate; from the Atriis.QEOS folder:
 docker compose cp gateway:/etc/nginx/certs/tls.crt qeos-ca.crt
@@ -353,6 +357,11 @@ export default function ProjectSettingsPage() {
             )
           ) : platform === "cli" ? (
             <>Run this on any machine with Python 3.9+, from the folder holding your test reports.</>
+          ) : platform === "github" ? (
+            <>
+              In the repository, Settings → Secrets and variables → Actions: variable <code>QEOS_URL</code> ={" "}
+              <code>{window.location.origin}</code>, secret <code>QEOS_API_KEY</code>. Then paste this after your test step.
+            </>
           ) : (
             <>
               Paste this after your test step; store the API key as a CI secret named{" "}
