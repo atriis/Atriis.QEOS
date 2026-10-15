@@ -372,6 +372,9 @@ requested ones. Each group needs its own design spec before implementation.
   test runner (Playwright `retries`, pytest-rerunfailures); the platform already keeps every attempt.
 
 ### C. Results, history and evidence
+- [x] Log values (ADR-032): a project's patterns pick values (a trip id, a route) out of each result's masked log; they show on every Last runs bar's tooltip, on the test case page and on the feature page's scenario cards, copyable and optionally linked. Spec: `docs/superpowers/specs/2026-10-14-log-values-design.md`.
+- [ ] Search runs by a log value (the stored values make it possible).
+- [ ] Show a result's whole log in QEOS (it is stored, masked, 64 KB).
 - [ ] TC run history (pass/fail/duration over time) — already planned in roadmap Phases 2–3
 - [ ] View screenshots and screen recordings attached to a run
 - [ ] Playwright trace viewer and step-by-step logs per failed TC *(suggested)*

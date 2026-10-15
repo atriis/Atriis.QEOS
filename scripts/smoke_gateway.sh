@@ -361,6 +361,20 @@ body_has "... with the step definition" '"definition":"features/step_definitions
 body_has "... and the step key" '"key":"'
 check "failed-steps of that run -> ingestion-service" 200 GET   "$BASE/api/v1/projects/$PROJECT_ID/runs/${STEP_RUN_ID:-0}/failed-steps" "${AUTH[@]}"
 body_has "... grouped by its step definition" '"by":"definition"'
+
+# ---- log values: a pattern from Settings, a value read from an uploaded log (ADR-032) ----
+check "add a log-value pattern -> ingestion-service" 201 POST "$BASE/api/v1/projects/$PROJECT_ID/log-patterns" \
+  "${AUTH[@]}" -H "Content-Type: application/json" \
+  -d '{"name":"smoke_trip","pattern":"tripId=\"(\\d+)\"","link_template":"https://backoffice.example.com/trips/{value}"}'
+LOG_BODY="{\"run\":{\"ci_provider\":\"local\",\"branch\":\"smoke-log\",\"started_at\":\"$NOW\",\"finished_at\":\"$NOW\"},\"results\":[{\"name\":\"log-trip\",\"status\":\"passed\",\"log\":\"INFO [App] Trip id captured tripId=\\\"3960562\\\"\"}]}"
+check "upload a result with a log" 201 POST "$BASE/api/v1/collect/runs" \
+  -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d "$LOG_BODY"
+check "analytics tests finds the logged test" 200 GET "$BASE/api/v1/projects/$PROJECT_ID/analytics/tests?search=log-trip" "${AUTH[@]}"
+LOG_KEY="$(sed -n 's/.*"test_key":"\([0-9a-f]\{64\}\)".*/\1/p' "$TMP/body" | head -1)"
+check "latest-results -> the log value" 200 POST \
+  "$BASE/api/v1/projects/$PROJECT_ID/analytics/latest-results" "${AUTH[@]}" -H "Content-Type: application/json" \
+  -d "{\"keys\":[\"${LOG_KEY:-0000000000000000000000000000000000000000000000000000000000000000}\"]}"
+body_has "... with the value and its link template" '"values":[{"name":"smoke_trip","values":["3960562"],"link_template":"https://backoffice.example.com/trips/{value}"}]'
 body_has "... in one test case" '"cases":1'
 body_has "... with its error shape" "\"shape\":\"Invalid city '"
 

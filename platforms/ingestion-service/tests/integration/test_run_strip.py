@@ -47,7 +47,8 @@ def test_each_test_gets_only_the_runs_it_was_in_oldest_to_newest(runs, auth):
     assert tests[C] == []
     for entries in tests.values():
         assert [e["started_at"] for e in entries] == sorted(e["started_at"] for e in entries)
-    assert {"run_id", "started_at", "branch", "status"} == set(tests[A][0])
+    assert {"run_id", "started_at", "branch", "status", "values"} == set(tests[A][0])
+    assert all(entry["values"] == [] for entries in tests.values() for entry in entries)
     assert tests[A][2]["branch"] == "dev"
 
 
@@ -115,3 +116,30 @@ def test_duplicate_and_mixed_case_keys_map_to_one_lowercased_entry(runs, auth):
 
 def test_unknown_body_fields_are_422(runs, auth):
     assert runs.post(URL, json={"test_keys": [A], "extra": 1}, headers=auth()).status_code == 422
+
+
+def test_each_bar_carries_the_values_of_its_run(client, make_key, project_role, auth, db):
+    from src.ingestion.models import LogPattern
+
+    project_role("viewer", project_id=7)
+    db.add_all([LogPattern(project_id=7, name="trip_id", pattern=r'tripId="(\d+)"'),
+                LogPattern(project_id=7, name="route_key", pattern=r'routeKey="([^"]+)"')])
+    db.commit()
+    _, key = make_key(project_id=7)
+    now = datetime.now(timezone.utc)
+    upload(client, key, started=now - timedelta(hours=3), results=[
+        {"name": "A", "status": "passed", "log": 'tripId="3960562" routeKey="wasToBos" tripId="3960563"'},
+        {"name": "B", "status": "skipped", "log": 'tripId="9"'}])
+    upload(client, key, started=now - timedelta(hours=2), results=[{"name": "A", "status": "failed", "log": "no ids"}])
+    upload(client, key, started=now - timedelta(hours=1), results=[   # a re-run: both attempts' values, once each
+        {"name": "A", "status": "failed", "log": 'tripId="1"'},
+        {"name": "A", "status": "passed", "log": 'tripId="1" tripId="2"'}])
+
+    tests = strip(client, auth)["tests"]
+    assert [e["values"] for e in tests[A]] == [
+        [{"name": "route_key", "values": ["wasToBos"]}, {"name": "trip_id", "values": ["3960562", "3960563"]}],
+        [],
+        [{"name": "trip_id", "values": ["1", "2"]}],
+    ]
+    assert tests[B][0]["values"] == [{"name": "trip_id", "values": ["9"]}]  # whatever the status
+    assert tests[C] == []

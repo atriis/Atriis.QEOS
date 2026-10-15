@@ -10,6 +10,7 @@ from src.ingestion.analytics.failed_steps import step_key
 from src.ingestion.analytics.flaky import FlipCount, LatestExecution, MixedCommit
 from src.ingestion.analytics.trends import RunRow, as_utc, pass_rate
 from src.ingestion.models import MutedTest, Run, RunResult
+from src.ingestion.service import log_value_service
 
 
 def _count(*statuses: str):
@@ -341,15 +342,20 @@ def latest_results(db: Session, project_id: int, keys: List[str], run_id: Option
         filters.append(Run.id == run_id)
     ranked = _latest_ranked(
         filters,
+        RunResult.id.label("result_id"),
         RunResult.status, RunResult.message, RunResult.details, RunResult.failed_step_text,
         RunResult.failed_step_line, RunResult.failed_step_definition, RunResult.failed_step_pattern,
         Run.id.label("run_id"), Run.branch, Run.environment, Run.started_at,
     )
+    rows = list(db.execute(select(ranked).where(ranked.c.position == 1)).mappings())
+    values = log_value_service.values_by_result(db, [r["result_id"] for r in rows])
     out = {}
-    for r in db.execute(select(ranked).where(ranked.c.position == 1)).mappings():
+    for r in rows:
         entry = {"status": r["status"], "run_id": r["run_id"], "branch": r["branch"],
                  "environment": r["environment"], "started_at": as_utc(r["started_at"]),
-                 "message": r["message"][:MESSAGE_EXCERPT] if r["message"] is not None else None}
+                 "message": r["message"][:MESSAGE_EXCERPT] if r["message"] is not None else None,
+                 # Log values of this result (ADR-032), with each pattern's link template
+                 "values": values.get(r["result_id"], [])}
         step = failed_step_of(r["status"], r["message"], r["details"], r["failed_step_text"], r["failed_step_line"],
                               r["failed_step_definition"], r["failed_step_pattern"])
         if step:
@@ -395,11 +401,13 @@ def run_strip(db: Session, project_id: int, keys: List[str], limit: int = 10,
         select(per_run).where(per_run.c.rank <= limit)
         .order_by(per_run.c.test_key, per_run.c.started_at, per_run.c.run_id)
     ).all()
+    # Log values per bar (ADR-032): the test's results in that run, merged per pattern
+    values = log_value_service.values_by_test_run(db, keys, {row.run_id for row in rows})
     for row in rows:
         if row.count > 1:
             value = "rerun"
         else:
             value = "failed" if row.status in ("failed", "errored") else row.status
-        tests[row.test_key].append(
-            {"run_id": row.run_id, "started_at": row.started_at, "branch": row.branch, "status": value})
+        tests[row.test_key].append({"run_id": row.run_id, "started_at": row.started_at, "branch": row.branch,
+                                    "status": value, "values": values.get((row.test_key, row.run_id), [])})
     return {"tests": tests}

@@ -151,10 +151,10 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   min_flip_rate, branch, include_muted), branches (per-branch aggregates),
   quarantine (`PUT/DELETE /flaky/mute`, edit roles: a quarantined test still
   runs and shows, but its failures do not fail a run or alert), latest-keys,
-  latest-results (each test's latest result with its failed step, or with `run_id` its result in
+  latest-results (each test's latest result with its failed step and log values, or with `run_id` its result in
   that run, which a Last runs bar opens; the result payload's optional
   `failed_step` `{text 1-1000, line 1-1,000,000, definition 1-500, pattern 1-1000}` is stored masked; unknown fields in it are ignored) and
-  run-strip (each test's own last results, for case lists), duration-estimate (Run from QEOS),
+  run-strip (each test's own last results with their log values, for case lists), duration-estimate (Run from QEOS),
   test impact (ADR-029; every role that reads runs): `POST /analytics/impact`
   scores any change (1–5,000 paths of 1–1,000 characters, optional branch)
   against the co-failure statistics with the upload's scoring under the same

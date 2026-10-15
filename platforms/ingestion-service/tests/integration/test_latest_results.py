@@ -132,3 +132,47 @@ def test_the_step_definition_and_pattern_and_key_come_with_the_failed_step(clien
     got = client.post(URL, json={"keys": [key]}, headers=auth()).json()["results"][key]["failed_step"]
     assert got == {"text": "When I search Lisbon", "line": 14, "definition": "steps/search.js:12",
                    "pattern": "When I search {…}", "key": step_key("steps/search.js:12", "When I search Lisbon")[0]}
+
+
+LINK = "https://backoffice.example.com/trips/{value}"
+
+
+def add_values(db, run, *pairs):
+    """pairs: (LogPattern, [values]) for the run's one result."""
+    from src.ingestion.models import LogValue
+
+    row = db.query(RunResult).filter_by(run_id=run.id).one()
+    for pattern, values in pairs:
+        db.add_all([LogValue(result_id=row.id, pattern_id=pattern.id, position=i, value=v)
+                    for i, v in enumerate(values)])
+    db.commit()
+
+
+def test_the_latest_result_carries_its_values_with_their_link(client, auth, project_role, seed_run, db):
+    from src.ingestion.models import LogPattern
+
+    project_role("viewer")
+    trip = LogPattern(project_id=1, name="trip_id", pattern=r'tripId="(\d+)"', link_template=LINK)
+    route = LogPattern(project_id=1, name="route_key", pattern=r'routeKey="([^"]+)"')
+    db.add_all([trip, route])
+    db.commit()
+    older = seed_run(T0, results=(("search", "passed", 5),))
+    latest = seed_run(T0 + timedelta(hours=1), results=(("search", "failed", 5),))
+    add_values(db, older, (trip, ["1"]))
+    add_values(db, latest, (trip, ["3960562", "3960563"]), (route, ["wasToBos"]))
+    key = report_key("search")
+
+    got = client.post(URL, json={"keys": [key]}, headers=auth()).json()["results"][key]
+    assert got["values"] == [
+        {"name": "route_key", "values": ["wasToBos"], "link_template": None},
+        {"name": "trip_id", "values": ["3960562", "3960563"], "link_template": LINK},
+    ]
+    as_of = client.post(URL, json={"keys": [key], "run_id": older.id}, headers=auth()).json()["results"][key]
+    assert as_of["values"] == [{"name": "trip_id", "values": ["1"], "link_template": LINK}]
+
+
+def test_a_result_without_values_has_an_empty_list(client, auth, project_role, seed_run):
+    project_role("viewer")
+    seed_run(T0, results=(("search", "passed", 5),))
+    key = report_key("search")
+    assert client.post(URL, json={"keys": [key]}, headers=auth()).json()["results"][key]["values"] == []
