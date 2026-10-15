@@ -54,19 +54,21 @@ function ciSnippets(origin: string): Record<string, PlatformSnippets> {
     github: {
       label: "GitHub Actions",
       code: {
-        upload: `# QEOS: uploads this run's results, so the run appears under Runs and on its test cases.
-# Goes into the workflow that already runs your tests (for example .github/workflows/tests.yml), after the test step.
+        upload: `# QEOS: uploads the results, so the run appears under Runs and on its test cases.
+# Goes after the test step, in the job that runs cucumber-js.
 # Needs the repository variable QEOS_URL (this QEOS address) and the repository secret QEOS_API_KEY.
 - name: Upload results to QEOS
   if: always() && vars.QEOS_URL != ''   # failing builds report too; repositories without QEOS skip cleanly
   uses: atriis/Atriis.QEOS/collector-action@${COLLECTOR_REF}
   with:
     url: \${{ vars.QEOS_URL }}
-    # Where the report sits in THIS job: cucumber-js writes test-results/cucumber-report.json. A job that
-    # gathers shards with download-artifact into a folder uploads <folder>/**/cucumber-report.json instead.
-    patterns: test-results/cucumber-report.json   # Cucumber JSON links results to the cases; JUnit XML works too
+    patterns: test-results/cucumber-report.json   # the Cucumber JSON the test step writes (json: formatter); JUnit XML works too
   env:
-    QEOS_API_KEY: \${{ secrets.QEOS_API_KEY }}`,
+    QEOS_API_KEY: \${{ secrets.QEOS_API_KEY }}
+
+# Shards gathered with download-artifact: the same step in the job that gathers every shard's report,
+# after the last download step, with the pattern under download-artifact's path (one QEOS run):
+#     patterns: shard-reports/**/cucumber-report.json`,
         sync: `# QEOS: keeps the test cases equal to the .feature files, so Test cases follows the repository.
 # Commit as .github/workflows/qeos-sync-cases.yml on the default branch; it runs on every push that changes a .feature file.
 # Needs the repository variable QEOS_URL (this QEOS address) and the repository secret QEOS_API_KEY.
@@ -365,8 +367,8 @@ export default function ProjectSettingsPage() {
           ) : platform === "github" ? (
             <>
               In the repository, Settings → Secrets and variables → Actions: variable <code>QEOS_URL</code> (this
-              QEOS address), secret <code>QEOS_API_KEY</code>. Then paste this into the workflow that already runs
-              your tests, after the test step.
+              QEOS address), secret <code>QEOS_API_KEY</code>. Then paste this into the workflow that runs the
+              tests; the comment at the end covers a suite that gathers shard reports first.
             </>
           ) : (
             <>

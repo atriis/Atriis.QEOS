@@ -131,9 +131,12 @@ test("hosted CI runners on localhost get a warning, not a silent snippet", async
   expect(github).toHaveTextContent("url: ${{ vars.QEOS_URL }}");
   expect(github).toHaveTextContent("patterns: test-results/cucumber-report.json");
   expect(github).not.toHaveTextContent("localhost:3000");
-  expect(github.textContent?.startsWith("# QEOS: uploads this run's results")).toBe(true);
+  expect(github.textContent?.startsWith("# QEOS: uploads the results")).toBe(true);
   expect(github).toHaveTextContent("repository variable QEOS_URL (this QEOS address) and the repository secret QEOS_API_KEY");
-  expect(github).toHaveTextContent("download-artifact into a folder uploads <folder>/**/cucumber-report.json instead");
+  // the sharded layout is a trailing comment, so the whole box stays valid YAML when pasted
+  expect(github).toHaveTextContent("# Shards gathered with download-artifact: the same step in the job that gathers every shard's report,");
+  expect(github).toHaveTextContent("# patterns: shard-reports/**/cucumber-report.json");
+  expect(github).not.toHaveTextContent(/suite-runner|rerun-runner|all-results/);
   expect(screen.getByText(/In the repository, Settings/)).toHaveTextContent("variable QEOS_URL (this QEOS address), secret QEOS_API_KEY");
   expect(screen.getByRole("note")).toHaveTextContent(/cannot reach localhost/i);
 
