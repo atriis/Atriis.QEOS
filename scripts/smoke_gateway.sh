@@ -161,6 +161,9 @@ body_has "... allowed to read test suggestions" '"can_read_impact":true'
 API_KEY="$(sed -n 's/.*"key":"\(qeos_[^"]*\)".*/\1/p' "$TMP/body")"
 KEY_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
 check "collection settings -> ingestion-service" 200 GET "$BASE/api/v1/projects/$PROJECT_ID/collection-settings" "${AUTH[@]}"
+check "log-value patterns without a token -> 401" 401 GET "$BASE/api/v1/projects/$PROJECT_ID/log-patterns"
+check "log-value patterns -> ingestion-service" 200 GET "$BASE/api/v1/projects/$PROJECT_ID/log-patterns" "${AUTH[@]}"
+body_has "... with the re-scan state" '"scan":{"state":"idle"'
 # ---- test-management-service: a case through the gateway (ADR-022) ----
 check "create a test case -> test-management-service (overlap route)" 201 POST   "$BASE/api/v1/projects/$PROJECT_ID/cases" "${AUTH[@]}" -H "Content-Type: application/json"   -d '{"title":"Smoke case","labels":["smoke"]}'
 body_has "... numbered in the project" '"key":"TC-1"'

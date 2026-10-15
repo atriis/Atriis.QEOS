@@ -170,6 +170,32 @@ readable. Test names, suites, classes, files and branches are never changed.
   `results_changed`, `runs_changed`, `kinds`), and is safe to repeat: masked text is skipped.
   Text that masking makes longer than 64 KB is cut back and marked `truncated`.
 
+## Log values
+
+A project's patterns pick values out of each result's log (ADR-032), for example the trip a booking scenario
+created. The log is masked first (built-in rules and the project's masking patterns) and cut to 64 KB; values are
+read from that stored text, so a value hidden by masking is never captured.
+
+- **Patterns:** `GET /api/v1/projects/{id}/log-patterns` (every role) → `{"patterns": [{id, name, pattern,
+  link_template, created_at}], "scan": {"state": "idle" | "running", "since": … | null}}`, patterns in name order.
+  `POST …` `{name, pattern, link_template?}` and `DELETE …/{pattern_id}` (owner/admin/member). Up to 20 per
+  project; the name as for masking (`^[a-z][a-z0-9_]{0,31}$`, unique); the pattern RE2, at most 256 characters,
+  never matching empty text, with at most one capture group (with a group the value is the group's text, without
+  one the whole match). `link_template` (optional, ≤ 500 characters): an `https://` address with a host and
+  `{value}` once after the host; the dashboard URL-encodes the value into it. A refusal is 422
+  `{"detail": {"code": "name" | "pattern" | "link_template" | "limit", "message"}}`; a duplicate name is 409 with
+  `code: "name"`. No edit: delete and add again. Deleting a pattern deletes its values.
+- **Preview:** `POST …/preview` `{name, pattern, sample}` (sample ≤ 65,536 characters, owner/admin/member) → the
+  sample as it would be stored (`masked`) and the values this pattern finds in it. Nothing is saved.
+- **Values:** at upload, each result's log is matched with the project's patterns; one row per distinct value per
+  pattern per result (`log_values`, in order of first appearance), at most 20 per pattern, each cut to 200
+  characters. A pattern stops reading a log after 1,000 matches.
+- **Past runs:** adding a pattern queues a re-scan of the logs stored in the last 90 days. It runs in the service
+  after the response, in batches of `LOG_SCAN_BATCH_SIZE` (500), one scan per project at a time (an advisory lock),
+  replacing each result's values, so it is safe to repeat; a pattern added during a scan makes it pass again. A scan
+  that a restart cut short, or that failed, stays queued and runs when the service starts
+  (`LOG_SCAN_RESUME_ON_STARTUP`, default true). Logs older than 90 days get no values for a new pattern.
+
 ## Retention
 
 `python -m src.ingestion.jobs.retention [--dry-run] [--loop]` (the `ingestion-retention` compose

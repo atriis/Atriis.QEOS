@@ -136,6 +136,11 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   numbers) plus up to 20 per-project patterns on RE2 (`/masking-patterns`, with
   a preview; ADR-020); `python -m src.ingestion.jobs.remask` re-masks stored
   results.
+- **Log values** (ADR-032): `GET/POST /projects/{id}/log-patterns`, `DELETE …/{pattern_id}`, `POST …/preview`;
+  tables `log_patterns` (≤ 20 per project, RE2, at most one capture group, optional https `link_template`) and
+  `log_values` (≤ 20 distinct values per pattern per result, 200 characters, cascading with the result and the
+  pattern); the re-scan counters `collection_settings.log_scan_requested/done/started_at` (migration 023). Values come
+  from the masked `test_results.log`.
 - **Read**: runs list per project (filters: branch, failing/passing, environment, CI, commit
   prefix, PR, author, started-at range, scope), run detail with status filter and changed
   files, failed steps across test cases (`GET /projects/{id}/runs/{run_id}/failed-steps`: by step definition or text, errors by shape, failing since on the run's branch, 50 runs / 90 days), run summary, failures grouped by error signature, comparison of two
@@ -243,7 +248,7 @@ NGINX: TLS (self-signed in dev), per-IP rate zones (`api` 20 r/s; `collect`
 reset/change, resend-verification, mfa/verify and sso), 10 MB bodies (the
 Gherkin import route: `GATEWAY_IMPORT_MAX_BODY`, default 25 MB), gzip only on
 the report and case-areas, JSON error pages, request IDs, regex routes sending
-`/projects/{id}/(api-keys|runs|analytics|masking-patterns|export|notification-channels)`
+`/projects/{id}/(api-keys|runs|analytics|masking-patterns|log-patterns|export|notification-channels|collection-settings)`
 to ingestion and `/projects/{id}/(cases|case-labels|case-folders|case-features|case-areas|features|suites|ci-target|run-requests)`
 to test-management, SPA catch-all to the dashboard container with JSON 404
 preserved for unrouted `/api/` paths; `/metrics` and `/internal` are never
