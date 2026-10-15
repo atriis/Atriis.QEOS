@@ -32,6 +32,8 @@ class LogValue(Base):
         Index("ix_log_values_result_id", "result_id"),
         # A deleted pattern's values are found by pattern
         Index("ix_log_values_pattern_id", "pattern_id"),
+        # The runs search by a value (migration 024, spec 2026-10-15 §3.1): value first, the pattern narrows it
+        Index("ix_log_values_value", "value", "pattern_id"),
     )
 
     id = Column(Integer, primary_key=True)

@@ -530,7 +530,7 @@ def test_scan_counters_default_to_zero(migrated_engine):
 
 
 def test_model_declares_the_log_value_indexes():
-    assert {"ix_log_values_result_id", "ix_log_values_pattern_id"} <= {
+    assert {"ix_log_values_result_id", "ix_log_values_pattern_id", "ix_log_values_value"} <= {
         ix.name for ix in Base.metadata.tables["log_values"].indexes}
 
 
@@ -576,3 +576,24 @@ def test_log_values_postgres_path_adds_the_log_without_a_rewrite(monkeypatch):
 def test_the_log_is_loaded_only_when_asked():
     """Run pages load results by the thousand and never show the log."""
     assert RunResult.__mapper__.attrs["log"].deferred is True
+
+
+def test_log_values_are_indexed_by_value(migrated_engine):
+    """Migration 024: the runs search by a log value (spec 2026-10-15 §3.1) reads (value, pattern_id)."""
+    indexes = {ix["name"]: ix["column_names"] for ix in inspect(migrated_engine).get_indexes("log_values")}
+    assert indexes["ix_log_values_value"] == ["value", "pattern_id"]
+
+
+def test_the_value_index_downgrade_drops_it(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'downgrade_024.db').as_posix()}"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(SERVICE_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "023")
+    engine = create_engine(url)
+    try:
+        names = {ix["name"] for ix in inspect(engine).get_indexes("log_values")}
+        assert "ix_log_values_value" not in names and "ix_log_values_result_id" in names  # 023 is still there
+    finally:
+        engine.dispose()
