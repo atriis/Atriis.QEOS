@@ -342,16 +342,17 @@ test("a scenario card shows its log values under its pill", async () => {
   expect(within(cards[1]).queryByRole("group", { name: /Log values/ })).toBeNull();
 });
 
-test("a scenario card links its values to their runs and shows no Log button (the run page has the log)", async () => {
+test("a scenario card offers its result's log and links its values to their runs", async () => {
   server.use(
     http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
       [KEY]: result("passed", { result_id: 77, values: [{ name: "trip_id", values: ["3960562"], link_template: null }] }),
     } })),
+    http.get(`${P}/runs/9/results/77/log`, () => HttpResponse.json({ log: "INFO tripId=3960562", values: [] })),
   );
   renderAt();
   const cards = await screen.findAllByRole("article");
   const line = await within(cards[0]).findByRole("group", { name: "Log values of TC-12" });
   expect(within(line).getByRole("link", { name: "Runs with trip_id 3960562" })).toHaveAttribute("href", "/projects/42/runs?value=3960562&pattern=trip_id");
-  expect(within(line).getByRole("button", { name: "Copy trip_id 3960562" })).toHaveTextContent("3960562");
-  expect(within(cards[0]).queryByRole("button", { name: /^Log of/ })).toBeNull();
+  await userEvent.click(within(cards[0]).getByRole("button", { name: "Log of TC-12" }));
+  expect(await within(cards[0]).findByText(/INFO tripId=/)).toBeInTheDocument();
 });
