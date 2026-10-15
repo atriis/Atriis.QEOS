@@ -1610,6 +1610,13 @@ only to `QEOS_URL`.
 (`INFO 20:23:24 [App] Trip id captured from booking flow tripId="3960562"`), show on every Last runs bar's
 tooltip, on the test case page and on the feature page's scenario cards (ADR-032).
 
+**Setup:** Settings → **Log values** → **Add a pattern**: a name (the label in tooltips, e.g. `trip_id`), a regular
+expression (RE2; with one capture group the value is that part, e.g. `tripId="(\d+)"`; without one, the whole match)
+and, optionally, a link (`https://backoffice.example.com/trips/{value}`: each value becomes a link there). The **?**
+button explains the rule and offers examples. Paste a few log lines and choose **Preview** to see the values found.
+Owners, admins and members can do this; at most 20 patterns per project. Adding a pattern scans the runs of the last
+90 days ("Scanning past runs…"); older runs get no values for it. A value hidden by masking is never captured.
+
 **What the test repository must do.** The log has to reach the report:
 - Cucumber JSON (cucumber-js): attach each log line to the running scenario with `this.log(text)`. A logger that only
   prints to the console is not enough: console lines cannot be tied to a scenario. A common way: a `Before` hook

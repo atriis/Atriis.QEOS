@@ -278,6 +278,13 @@ input.mono { font-family: var(--font-mono); }
 /* A sub-form under a list in the same card: a rule and a smaller heading set it apart */
 .masking-form { border-top: 1px solid var(--grid); margin-top: var(--space-4); padding-top: var(--space-4); }
 .masking-form h4 { font-size: 14px; font-weight: 600; margin: 0 0 var(--space-3); }
+/* Log values card (ADR-032): the "?" beside the expression's label opens the rule and examples inline */
+.field-with-help { display: flex; flex-direction: column; gap: var(--space-1); }
+.field-with-help-head { display: flex; align-items: center; gap: var(--space-2); }
+.help-toggle { min-width: 24px; min-height: 24px; padding: 0; border-radius: 999px; font-weight: 600; line-height: 1; }
+.help-popover { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-1); padding: var(--space-3); font-size: 13px; max-width: 560px; }
+.help-popover p { margin: 0 0 var(--space-2); }
+.help-examples { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .preview-result { margin-bottom: var(--space-3); }
 .hold-status { margin-bottom: var(--space-3); }
 /* Report: figures and tables only, so it reads on screen and prints as a document */

@@ -26,6 +26,9 @@ export const server = setupServer(
   http.get("/api/v1/projects/:projectId/repositories", () => HttpResponse.json([])),
   http.get("/api/v1/projects/:projectId/analytics/flaky", () => HttpResponse.json([])),
   http.get("/api/v1/projects/:projectId/analytics/latest-keys", () => HttpResponse.json({ keys: [] })),
+  // Settings' Log values card (ADR-032): no patterns, no scan; tests about it override
+  http.get("/api/v1/projects/:projectId/log-patterns", () =>
+    HttpResponse.json({ patterns: [], scan: { state: "idle", since: null } })),
   // Play's duration estimate: no history unless a test says otherwise
   http.post("/api/v1/projects/:projectId/analytics/duration-estimate", () => HttpResponse.json({
     estimate_ms: null, upper_ms: null, tests_with_history: 0, tests_without_history: 0, environment_used: 0,

@@ -315,3 +315,10 @@ describe("the test suggestions permission", () => {
     await waitFor(() => expect(screen.queryByRole("switch", { name: "Test suggestions for key ci" })).not.toBeInTheDocument());
   });
 });
+
+test("the Log values card follows Masking", async () => {
+  renderPage();
+  await screen.findByRole("heading", { level: 2, name: "Log values" });
+  const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
+  expect(headings.indexOf("Log values")).toBe(headings.indexOf("Masking") + 1);
+});

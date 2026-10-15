@@ -9,6 +9,7 @@ import ConfirmButton from "../components/ConfirmButton";
 import ErrorBanner from "../components/ErrorBanner";
 import SecretBlock from "../components/SecretBlock";
 import DataCard from "../components/DataCard";
+import LogValuesCard from "../components/LogValuesCard";
 import MaskingCard from "../components/MaskingCard";
 import NotificationsCard from "../components/NotificationsCard";
 import RepositoriesCard from "../components/RepositoriesCard";
@@ -335,6 +336,7 @@ export default function ProjectSettingsPage() {
       {project.data != null && MANAGE_ROLES.includes(project.data.my_role ?? "") && <CiTargetCard projectId={id} />}
 
       <MaskingCard projectId={id} canEdit={project.data == null ? undefined : canEdit} />
+      <LogValuesCard projectId={id} canEdit={project.data == null ? undefined : canEdit} />
       {project.data != null && (
         <NotificationsCard projectId={id} projectName={project.data.name} canEdit={canEdit} />
       )}
