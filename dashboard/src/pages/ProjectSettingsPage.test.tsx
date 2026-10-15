@@ -124,7 +124,7 @@ test("hosted CI runners on localhost get a warning, not a silent snippet", async
   await screen.findByText(/no api keys/i);
 
   await userEvent.selectOptions(screen.getByLabelText(/ci platform/i), "github");
-  expect(screen.getByTestId("ci-snippet")).toHaveTextContent("collector-action@collector-v0.8.0");
+  expect(screen.getByTestId("ci-snippet")).toHaveTextContent("collector-action@collector-v0");
   expect(screen.getByRole("note")).toHaveTextContent(/cannot reach localhost/i);
 
   await userEvent.selectOptions(screen.getByLabelText(/ci platform/i), "gitlab");
@@ -170,7 +170,8 @@ test("the upload snippet only uploads; the sync snippet syncs test cases with th
     await userEvent.selectOptions(kind, "sync");
     const snippet = screen.getByTestId("ci-snippet");
     expect(snippet).toHaveTextContent("import-features");
-    expect(snippet).toHaveTextContent("collector-v0.8.0");
+    expect(snippet).toHaveTextContent("collector-v0");
+    expect(snippet).not.toHaveTextContent("collector-v0.");
     expect(snippet).not.toHaveTextContent("qeos-collector upload");
     if (platform === "jenkins") {
       // Groovy comments are //, never #
@@ -209,7 +210,7 @@ test("the GitHub sync snippet is the standalone workflow with the first_sync inp
   // switching back to the upload step clears the "Copied" state
   await userEvent.selectOptions(screen.getByLabelText(/what to add/i), "upload");
   expect(screen.getByRole("button", { name: /copy snippet for ci/i })).toHaveTextContent("Copy snippet");
-  expect(screen.getByTestId("ci-snippet")).toHaveTextContent("collector-action@collector-v0.8.0");
+  expect(screen.getByTestId("ci-snippet")).toHaveTextContent("collector-action@collector-v0");
 });
 
 test("Run from QEOS is shown to owners and admins", async () => {

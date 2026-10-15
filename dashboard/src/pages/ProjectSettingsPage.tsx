@@ -15,7 +15,8 @@ import NotificationsCard from "../components/NotificationsCard";
 import RepositoriesCard from "../components/RepositoriesCard";
 import PageHeader from "../components/PageHeader";
 
-const COLLECTOR_REF = "collector-v0.8.0";
+// The floating tag: the latest 0.x release, moved by release-collector.yml, so a pasted snippet never goes stale
+const COLLECTOR_REF = "collector-v0";
 
 // Mirrors EDIT_ROLES in platforms/project-service/src/project/api/deps.py
 const EDIT_ROLES = ["owner", "admin", "member"];

@@ -655,7 +655,8 @@ qeos-collector upload "reports/**/*.xml" --ca-file ~/qeos-ca.crt
 
 - Pin the tag (`collector-v0.8.0`) for strict reproducibility, or use the floating `collector-v0` (the latest
   0.x release; it moves on every stable release, so a new collector reaches your CI without an edit; the
-  GitHub Action and the Jenkins `ref` accept it). `--ca-file` is needed only for the local
+  GitHub Action and the Jenkins `ref` accept it). The snippets under Settings → **Wire up your CI** and
+  **Run from QEOS** use the floating tag. `--ca-file` is needed only for the local
   self-signed certificate or a private CA.
 - `check` tests, in order: the URL, TLS trust, the API key (it names the project), and that the
   files match and parse. It exits 2 on the first failure. It also prints whether the key may read
