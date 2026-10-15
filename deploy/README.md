@@ -91,8 +91,9 @@ In each repository that reports to QEOS:
 - secret `QEOS_API_KEY`: a key from the project's **Settings → API keys**
 - variable or env `QEOS_URL`: `https://qeos.example.com`
 
-The **Settings → Wire up your CI** card shows the ready-to-paste snippet for GitHub
-Actions, GitLab CI, Azure Pipelines, Jenkins or the plain CLI, with this address filled in. No `--ca-file`
+The **Settings → Wire up your CI** card shows the ready-to-paste snippets (the upload step and the
+test-case sync) for GitHub Actions, GitLab CI, Azure Pipelines, Jenkins or the plain CLI, with this
+address filled in. No `--ca-file`
 is needed: the certificate is a real one.
 
 ## 7. Backups

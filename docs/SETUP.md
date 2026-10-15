@@ -873,7 +873,8 @@ Pass `--ca-file` for the self-signed certificate.
 **Verify (4.1):** `qeos-collector check …` exits 0, then the project's **Overview** shows the
 run within a few seconds (the dashboard polls every 30 s). **Runs** lists it with its branch,
 commit and CI link. Settings → **Wire up your CI** always shows a ready-to-paste snippet with
-this deployment's address filled in.
+this deployment's address filled in: **What to add** switches between the upload step and the
+test-case sync ([4.2.3](#423-keeping-cases-in-sync-from-ci-import-features)).
 
 **Limits (4.1):** 20,000 results per run (the collector splits bigger uploads into `part 1 of N`
 runs); messages and output are cut at 64 KB; `finished_at` may be at most 1 hour in the future;
@@ -1049,7 +1050,9 @@ picked, such as `MyRepo/tests/features/...`).
 
    Put them at repository level. Values set on an **Environment** reach a job only when the job
    names that environment.
-2. Commit this file as `.github/workflows/qeos-sync-cases.yml` on the default branch:
+2. Commit this file as `.github/workflows/qeos-sync-cases.yml` on the default branch. Settings →
+   **Wire up your CI** → **What to add: Sync test cases** shows the same file with this
+   deployment's address filled in:
    ```yaml
    name: QEOS sync test cases
 
@@ -1100,8 +1103,8 @@ numbers are never reused. Leave `first_sync` off from then on; a push never sets
 ##### Other CI systems and the command line
 
 The same command works anywhere, with `QEOS_URL` and `QEOS_API_KEY` in the step's environment.
-The snippets under Settings → **Wire up your CI** include it for GitLab, Azure Pipelines,
-Jenkins and the CLI.
+Settings → **Wire up your CI** → **What to add: Sync test cases** shows it for GitLab, Azure
+Pipelines, Jenkins and the CLI, with the address filled in.
 
 To run it once from your own machine, from the **repository root** (the folder that contains
 `tests/`):
@@ -1667,8 +1670,9 @@ workflow that runs the suite (scheduled, per area, nightly…):
 Use `actions/checkout` with `fetch-depth: 2` if you want the changed files on each run. If
 several jobs run in parallel shards, each uploads its own run, and that is expected.
 
-**Step 4. Keep cases in sync.** Commit `.github/workflows/qeos-sync-cases.yml` from
-[4.2.3](#423-keeping-cases-in-sync-from-ci-import-features) on the default branch and keep it
+**Step 4. Keep cases in sync.** Commit `.github/workflows/qeos-sync-cases.yml` from Settings →
+**Wire up your CI** → **What to add: Sync test cases** (or from
+[4.2.3](#423-keeping-cases-in-sync-from-ci-import-features)) on the default branch and keep it
 there: every push that changes `tests/features/**` syncs the cases. Run it once by hand
 (Actions → QEOS sync test cases → Run workflow) for the first import, with `first_sync` ticked
 if the cases were already imported from the dashboard under other paths.

@@ -155,16 +155,23 @@ test.each([
   expect(isLocalOrigin(origin)).toBe(expected);
 });
 
-test("every CI snippet syncs test cases from .feature files with the pinned collector", async () => {
+test("the upload snippet only uploads; the sync snippet syncs test cases with the pinned collector", async () => {
   server.use(http.get("/api/v1/projects/42/api-keys", () => HttpResponse.json([])));
   renderPage();
   await screen.findByText(/no api keys/i);
 
+  const kind = screen.getByLabelText(/what to add/i);
+  expect(kind).toHaveValue("upload");
   for (const platform of ["github", "gitlab", "azure", "jenkins", "cli"]) {
     await userEvent.selectOptions(screen.getByLabelText(/ci platform/i), platform);
+    await userEvent.selectOptions(kind, "upload");
+    expect(screen.getByTestId("ci-snippet")).not.toHaveTextContent("import-features");
+
+    await userEvent.selectOptions(kind, "sync");
     const snippet = screen.getByTestId("ci-snippet");
     expect(snippet).toHaveTextContent("import-features");
     expect(snippet).toHaveTextContent("collector-v0.8.0");
+    expect(snippet).not.toHaveTextContent("qeos-collector upload");
     if (platform === "jenkins") {
       // Groovy comments are //, never #
       const lines = (snippet.textContent ?? "").split(/\r?\n/).map((l) => l.trim());
@@ -175,6 +182,34 @@ test("every CI snippet syncs test cases from .feature files with the pinned coll
       expect(snippet.textContent).not.toMatch(/^\s*qeos-collector/m);
     }
   }
+});
+
+test("the GitHub sync snippet is the standalone workflow with the first_sync input", async () => {
+  server.use(http.get("/api/v1/projects/42/api-keys", () => HttpResponse.json([])));
+  renderPage();
+  await screen.findByText(/no api keys/i);
+
+  await userEvent.selectOptions(screen.getByLabelText(/ci platform/i), "github");
+  await userEvent.selectOptions(screen.getByLabelText(/what to add/i), "sync");
+  const snippet = screen.getByTestId("ci-snippet");
+  expect(snippet).toHaveTextContent("qeos-sync-cases.yml");
+  expect(snippet).toHaveTextContent("name: QEOS sync test cases");
+  expect(snippet).toHaveTextContent('paths: ["tests/features/**"]');
+  expect(snippet).toHaveTextContent("first_sync");
+  expect(snippet).toHaveTextContent("--allow-mass-archive");
+  expect(snippet).toHaveTextContent("QEOS_URL: http://localhost:3000");
+  expect(screen.getByText(/commit this as/i)).toHaveTextContent("run it once by hand");
+
+  // the copy button follows the kind
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.assign(navigator, { clipboard: { writeText } });
+  await userEvent.click(screen.getByRole("button", { name: /copy snippet for ci/i }));
+  expect(writeText).toHaveBeenCalledWith(expect.stringContaining("QEOS sync test cases"));
+
+  // switching back to the upload step clears the "Copied" state
+  await userEvent.selectOptions(screen.getByLabelText(/what to add/i), "upload");
+  expect(screen.getByRole("button", { name: /copy snippet for ci/i })).toHaveTextContent("Copy snippet");
+  expect(screen.getByTestId("ci-snippet")).toHaveTextContent("collector-action@collector-v0.8.0");
 });
 
 test("Run from QEOS is shown to owners and admins", async () => {

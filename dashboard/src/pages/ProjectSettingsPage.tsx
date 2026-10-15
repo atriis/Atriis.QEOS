@@ -35,53 +35,90 @@ export function isLocalOrigin(origin: string): boolean {
 // Platforms whose default runners live on the vendor's servers, never on this machine
 const HOSTED_RUNNERS = ["github", "gitlab", "azure"];
 
-// Ready-to-paste CI wiring; the key itself always travels as a CI secret
-function ciSnippets(origin: string): Record<string, { label: string; code: string }> {
+// What the card can hand out: the upload step for an existing suite workflow, or the test-case sync
+export type SnippetKind = "upload" | "sync";
+
+type PlatformSnippets = { label: string; code: Record<SnippetKind, string> };
+
+const PIP_INSTALL = (ref: string) =>
+  `pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${ref}#subdirectory=collector"`;
+
+// Ready-to-paste CI wiring; the key itself always travels as a CI secret.
+// "upload" goes after the test step of the suite's own workflow; "sync" keeps the test cases equal to the
+// .feature files (docs/SETUP.md 4.2.3): on GitHub a workflow of its own, elsewhere a step or job.
+function ciSnippets(origin: string): Record<string, PlatformSnippets> {
+  const local = isLocalOrigin(origin);
+  const caFile = local ? " --ca-file qeos-ca.crt" : "";
   return {
     github: {
       label: "GitHub Actions",
-      code: `# .github/workflows/tests.yml — after the test step
+      code: {
+        upload: `# .github/workflows/tests.yml — after the test step
 - uses: atriis/Atriis.QEOS/collector-action@${COLLECTOR_REF}
   if: always()   # report results even when tests failed
   with:
     url: ${origin}
     patterns: "reports/**/*.xml"
   env:
-    QEOS_API_KEY: \${{ secrets.QEOS_API_KEY }}
-
-- name: Sync test cases from .feature files   # runs on the default branch only (QEOS_IMPORT_BRANCH to change)
-  run: |
-    pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${COLLECTOR_REF}#subdirectory=collector"
-    qeos-collector import-features "tests/features/**/*.feature"
-  env:
-    QEOS_URL: ${origin}
     QEOS_API_KEY: \${{ secrets.QEOS_API_KEY }}`,
+        sync: `# .github/workflows/qeos-sync-cases.yml — on the default branch; syncs on every push that changes a .feature file
+name: QEOS sync test cases
+
+on:
+  push:
+    paths: ["tests/features/**"]
+  workflow_dispatch:
+    inputs:
+      first_sync:
+        description: "First sync only: allow archiving the old dashboard-imported cases"
+        type: boolean
+        default: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: ${PIP_INSTALL(COLLECTOR_REF)}
+      - run: qeos-collector import-features "tests/features/**/*.feature" \${{ inputs.first_sync && '--allow-mass-archive' || '' }}
+        env:
+          QEOS_URL: ${origin}
+          QEOS_API_KEY: \${{ secrets.QEOS_API_KEY }}`,
+      },
     },
     gitlab: {
       label: "GitLab CI",
-      code: `# .gitlab-ci.yml — set QEOS_API_KEY as a masked CI/CD variable
+      code: {
+        upload: `# .gitlab-ci.yml — set QEOS_API_KEY as a masked CI/CD variable
 include:
   - remote: https://raw.githubusercontent.com/atriis/Atriis.QEOS/${COLLECTOR_REF}/templates/qeos-collector.gitlab-ci.yml
 
 qeos-collector-upload:
   variables:
     QEOS_URL: ${origin}
-    QEOS_PATTERNS: "reports/**/*.xml"
-
+    QEOS_PATTERNS: "reports/**/*.xml"`,
+        sync: `# .gitlab-ci.yml — set QEOS_API_KEY as a masked CI/CD variable
 # syncs test cases from .feature files; runs on the default branch only (set QEOS_IMPORT_BRANCH to change)
+# first sync after a dashboard import: run it once with --allow-mass-archive
 qeos-import-features:
   image: python:3.12
+  rules:
+    - changes: ["tests/features/**/*"]
   script:
-    - pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${COLLECTOR_REF}#subdirectory=collector"
+    - ${PIP_INSTALL(COLLECTOR_REF)}
     - qeos-collector import-features "tests/features/**/*.feature"
   variables:
     QEOS_URL: ${origin}   # QEOS_API_KEY comes from the masked CI/CD variable`,
+      },
     },
     azure: {
       label: "Azure Pipelines",
-      code: `# azure-pipelines.yml — after the test step; add QEOS_API_KEY as a secret pipeline variable
+      code: {
+        upload: `# azure-pipelines.yml — after the test step; add QEOS_API_KEY as a secret pipeline variable
 - script: |
-    pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${COLLECTOR_REF}#subdirectory=collector"
+    ${PIP_INSTALL(COLLECTOR_REF)}
     qeos-collector upload "reports/**/*.xml"
   displayName: Upload test results to QEOS
   condition: always()      # report results even when tests failed
@@ -89,44 +126,53 @@ qeos-import-features:
   env:
     QEOS_URL: ${origin}
     QEOS_API_KEY: $(QEOS_API_KEY)   # secret variables reach scripts only when mapped here
-    # a secret still named QAV_API_KEY (before the QEOS rename)? map it instead: QEOS_API_KEY: $(QAV_API_KEY)
-
+    # a secret still named QAV_API_KEY (before the QEOS rename)? map it instead: QEOS_API_KEY: $(QAV_API_KEY)`,
+        sync: `# azure-pipelines.yml — add QEOS_API_KEY as a secret pipeline variable
 # syncs test cases from .feature files; runs on the default branch only (set QEOS_IMPORT_BRANCH to change)
+# first sync after a dashboard import: run it once with --allow-mass-archive
 - script: |
-    pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${COLLECTOR_REF}#subdirectory=collector"
+    ${PIP_INSTALL(COLLECTOR_REF)}
     qeos-collector import-features "tests/features/**/*.feature"
   displayName: Sync test cases from .feature files
   env:
     QEOS_URL: ${origin}
-    QEOS_API_KEY: $(QEOS_API_KEY)`,
+    QEOS_API_KEY: $(QEOS_API_KEY)   # secret variables reach scripts only when mapped here`,
+      },
     },
     jenkins: {
       label: "Jenkins",
-      code: `// Jenkinsfile — needs the qeos shared library (collector-jenkins/)
+      code: {
+        upload: `// Jenkinsfile — needs the qeos shared library (collector-jenkins/)
 withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')]) {
   withEnv(['QEOS_URL=${origin}']) {
     qeosCollectorUpload(patterns: 'reports/**/*.xml', ref: '${COLLECTOR_REF}')
-    // syncs test cases from .feature files; runs on the default branch only (set QEOS_IMPORT_BRANCH to change)
-    // reuses the .qeos-venv that qeosCollectorUpload creates, so keep it after the upload step
+  }
+}`,
+        sync: `// Jenkinsfile — right after qeosCollectorUpload(ref: '${COLLECTOR_REF}'), which creates the .qeos-venv this reuses
+// syncs test cases from .feature files; runs on the default branch only (set QEOS_IMPORT_BRANCH to change)
+// first sync after a dashboard import: run it once with --allow-mass-archive
+withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')]) {
+  withEnv(['QEOS_URL=${origin}']) {
     sh '''
       .qeos-venv/bin/python -m qeos_collector import-features "tests/features/**/*.feature"
     '''
   }
 }`,
+      },
     },
     cli: {
       label: "Any machine (CLI)",
-      code: isLocalOrigin(origin)
-        ? `pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${COLLECTOR_REF}#subdirectory=collector"
-# The local stack uses a self-signed certificate; from the Atriis.QEOS folder:
+      code: {
+        upload: `${PIP_INSTALL(COLLECTOR_REF)}
+${local ? `# The local stack uses a self-signed certificate; from the Atriis.QEOS folder:
 docker compose cp gateway:/etc/nginx/certs/tls.crt qeos-ca.crt
-QEOS_URL=${origin} QEOS_API_KEY=<your key> qeos-collector upload "reports/**/*.xml" --ca-file qeos-ca.crt
-# syncs test cases from .feature files; runs on the default branch only (set QEOS_IMPORT_BRANCH to change)
-QEOS_URL=${origin} QEOS_API_KEY=<your key> qeos-collector import-features "tests/features/**/*.feature" --ca-file qeos-ca.crt`
-        : `pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@${COLLECTOR_REF}#subdirectory=collector"
-QEOS_URL=${origin} QEOS_API_KEY=<your key> qeos-collector upload "reports/**/*.xml"
-# syncs test cases from .feature files; runs on the default branch only (set QEOS_IMPORT_BRANCH to change)
-QEOS_URL=${origin} QEOS_API_KEY=<your key> qeos-collector import-features "tests/features/**/*.feature"`,
+` : ""}QEOS_URL=${origin} QEOS_API_KEY=<your key> qeos-collector upload "reports/**/*.xml"${caFile}`,
+        sync: `${PIP_INSTALL(COLLECTOR_REF)}
+${local ? `# The local stack uses a self-signed certificate; from the Atriis.QEOS folder:
+docker compose cp gateway:/etc/nginx/certs/tls.crt qeos-ca.crt
+` : ""}# from the repository root, so the paths match the Cucumber report; add --allow-mass-archive once for a first sync after a dashboard import
+QEOS_URL=${origin} QEOS_API_KEY=<your key> qeos-collector import-features "tests/features/**/*.feature"${caFile}`,
+      },
     },
   };
 }
@@ -156,8 +202,10 @@ export default function ProjectSettingsPage() {
   const [created, setCreated] = useState<ApiKeyCreated | null>(null);
   const local = isLocalOrigin(window.location.origin);
   const [platform, setPlatform] = useState(local ? "cli" : "github");
+  const [snippetKind, setSnippetKind] = useState<SnippetKind>("upload");
   const [snippetCopied, setSnippetCopied] = useState(false);
   const snippets = useMemo(() => ciSnippets(window.location.origin), []);
+  const snippetCode = snippets[platform].code[snippetKind];
 
   const keys = useQuery({ queryKey: ["keys", id], queryFn: () => listKeys(id) });
   // Same key as ProjectLayout, so this is served from its cache
@@ -286,7 +334,23 @@ export default function ProjectSettingsPage() {
       <div className="card">
         <h2>Wire up your CI</h2>
         <p className="muted">
-          {platform === "cli" ? (
+          {snippetKind === "sync" ? (
+            platform === "github" ? (
+              <>
+                Commit this as <code>.github/workflows/qeos-sync-cases.yml</code> on the default branch and run it
+                once by hand (Actions → Run workflow; tick <code>first_sync</code> if the cases were first imported
+                from the dashboard). After that, every push that changes a <code>.feature</code> file syncs the
+                cases; other branches skip.
+              </>
+            ) : platform === "cli" ? (
+              <>Run this from the repository root on any machine with Python 3.9+: the paths must match the test report.</>
+            ) : (
+              <>
+                Add this to the pipeline: it syncs the test cases on the default branch and skips on any other.
+                Store the API key as a CI secret named <code>QEOS_API_KEY</code>.
+              </>
+            )
+          ) : platform === "cli" ? (
             <>Run this on any machine with Python 3.9+, from the folder holding your test reports.</>
           ) : (
             <>
@@ -303,6 +367,16 @@ export default function ProjectSettingsPage() {
             ))}
           </select>
         </label>
+        <label>
+          What to add
+          <select
+            value={snippetKind}
+            onChange={(e) => { setSnippetKind(e.target.value as SnippetKind); setSnippetCopied(false); }}
+          >
+            <option value="upload">Upload results after the tests</option>
+            <option value="sync">Sync test cases from .feature files</option>
+          </select>
+        </label>
         {local && HOSTED_RUNNERS.includes(platform) && (
           <p role="note" className="note">
             Hosted {snippets[platform].label} runners cannot reach localhost, where this page is
@@ -311,14 +385,14 @@ export default function ProjectSettingsPage() {
           </p>
         )}
         <pre data-testid="ci-snippet" className="code-block" tabIndex={0} aria-label="CI configuration">
-          <code>{snippets[platform].code}</code>
+          <code>{snippetCode}</code>
         </pre>
         <button
           type="button"
           aria-label="Copy snippet for CI"
           onClick={async () => {
             try {
-              await navigator.clipboard.writeText(snippets[platform].code);
+              await navigator.clipboard.writeText(snippetCode);
               setSnippetCopied(true);
             } catch {
               setSnippetCopied(false); // clipboard blocked: the snippet stays selectable

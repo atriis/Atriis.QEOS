@@ -313,8 +313,9 @@ qeos-collector upload "reports/**/*.xml"
 
 3. Open the project: the run, its tests and the trends appear right away.
 
-**Settings → Wire up your CI** gives a ready-to-paste snippet for GitHub Actions, GitLab CI, Azure Pipelines,
-Jenkins and the CLI. [SETUP §5](docs/SETUP.md#5-wiring-a-real-test-repository-end-to-end) walks through
+**Settings → Wire up your CI** gives ready-to-paste snippets for GitHub Actions, GitLab CI, Azure Pipelines,
+Jenkins and the CLI: one to upload results after the tests, one to keep the test cases in sync with the
+`.feature` files (on GitHub, the `qeos-sync-cases.yml` workflow). [SETUP §5](docs/SETUP.md#5-wiring-a-real-test-repository-end-to-end) walks through
 a real repository end to end:
 - uploads from CI;
 - Gherkin sync;
