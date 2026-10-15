@@ -15,8 +15,10 @@ Two things people asked for next, and three small findings from the feature's re
 3. Review fixes: a crashed re-scan that stays "Scanning past runs…"; the collector guessing base64 instead of
    honouring an attachment's `contentEncoding`; the masking preview answering 500 to a sample with a lone surrogate.
 
-Not in scope: searching by a partial value, logs on the Overview or the run list, diffing two logs, values on
-the run page's rows (the run page shows the log itself; values stay on the case and feature pages).
+Not in scope: searching by a partial or case-insensitive value (exact match answers "the runs with this value";
+anything looser needs a trigram index and a different meaning), a "scan now" button for a queued re-scan, logs on
+the Overview or the run list, diffing two logs, value chips on the run page's rows (the run page shows the log
+itself, with the values marked in it; chips stay on the case and feature pages).
 
 ## 2. The whole log, on demand
 
@@ -24,8 +26,9 @@ the run page's rows (the run page shows the log itself; values stay on the case 
 
 `GET /api/v1/projects/{id}/runs/{run_id}/results/{result_id}/log` — every project role (READ_ROLES).
 
-- Answers `{"log": "<masked text>" }`, or `{"log": null}` when the result has none (an older collector, no
-  attachments, JUnit without `system-out`).
+- Answers `{"log": "<masked text>", "values": [{"name", "values"}]}`, or `{"log": null, "values": []}` when the
+  result has none (an older collector, no attachments, JUnit without `system-out`). `values` are the result's log
+  values, patterns by name, values in log order (one extra query), so the panel can highlight them.
 - 404 `"Run not found"` when the run is not the project's; 404 `"Result not found"` when the result is not in that
   run. Nothing else is read: one `SELECT log FROM test_results WHERE id = … AND run_id = …`.
 - The log is stored masked and cut at upload; the endpoint returns it as stored. No `Cache-Control` beyond the
@@ -49,8 +52,12 @@ Behaviour:
   result id, kept while the page lives); the button toggles `aria-expanded`, and the text opens inline under the
   row or pill as a `<pre class="log-full">`: monospace, wrapping, the full 64 KB. "Hide log" closes it; the button
   keeps its place (as the message toggle does today).
+- Every occurrence of one of the result's values is wrapped in `<mark>` (title: the pattern name), so the line
+  that produced a trip id stands out in 64 KB of text. Overlapping values mark the longer one; marking is text
+  only (no links inside the log).
 - A "Copy log" button copies the text and says "Copied" in a polite live region (the same pattern as the value
-  chips).
+  chips). A "Download" link saves the text as `<test name>-run-<run id>.txt` (a Blob URL built in the browser; no
+  server change).
 - `{"log": null}` shows "No log for this result." in Muted text inside the panel. A request error shows the
   usual `ErrorBanner` with a retry.
 - An older server (no endpoint, 404 on a result that exists) reads as "No log for this result."; the button is
@@ -72,6 +79,10 @@ ON p.id = v.pattern_id] WHERE r.run_id = test_runs.id AND v.value = :value [AND 
 with the existing filters (branch, status, environment, dates, …) and paging. Patterns are per project and the
 run is already filtered by project, so another project's values never match.
 
+`GET /api/v1/projects/{id}/runs/{run_id}` accepts the same `value` and `pattern`, like its `status` filter: only
+the results holding that value are returned (the run's counts are unchanged; they describe the run). The same
+EXISTS, on `test_results.id`.
+
 Migration **024** adds `ix_log_values_value` on `(value, pattern_id)`; `down_revision = "023"`. Nothing else
 changes in the tables.
 
@@ -80,7 +91,10 @@ changes in the tables.
 - Runs page: a "Log value" entry in the filter bar: a text field for the value and an optional pattern select
   (the project's pattern names, from `GET …/log-patterns`). In the URL as `?value=3960562&pattern=trip_id`;
   shown as a removable chip "Log value trip_id: 3960562" (or "Log value: 3960562") like the other filters;
-  cleared with them.
+  cleared with them. While the filter is on, each run's link carries `?value=…&pattern=…` into the run page.
+- Run page with `?value=…`: the rows are the results holding that value, under a note "3 of 120 results hold
+  trip_id 3960562" with a "Show all results" link that drops the two parameters. The counts, tiles, failed steps
+  and failure groups stay those of the whole run.
 - Each value chip on the case page and the scenario cards gains a "runs" link (accessible name "Runs with
   trip_id 3960562") to `/projects/{id}/runs?value=<encoded>&pattern=<name>`. The chip keeps its copy button and,
   when the pattern has a template, its https link.
@@ -113,24 +127,28 @@ a NUL or a lone surrogate is replaced, never a 500 and never a 422 about the sam
 
 ## 5. Testing
 
-- **Ingestion:** the log endpoint (text, null, 404 run of another project, 404 result of another run, every role
-  reads); `latest-results` carries `result_id`; the runs filter (`value`, `value`+`pattern`, `pattern` alone is
-  422, another project's value never matches, combined with `status`/`branch`, paging); migration 024 up, down
+- **Ingestion:** the log endpoint (text with its values, null with `[]`, 404 run of another project, 404 result
+  of another run, every role reads); `latest-results` carries `result_id`; the runs filter (`value`,
+  `value`+`pattern`, `pattern` alone is 422, another project's value never matches, combined with
+  `status`/`branch`, paging); the run page's `value` filter (rows scoped, counts unchanged); migration 024 up, down
   and up on PostgreSQL, the index in the model; `scan_state` `queued` after a failed pass and `running` during
   one; the masking preview sample with a lone surrogate (200, replaced).
 - **Collector:** `contentEncoding: BASE64` decodes, `IDENTITY` keeps a base64-looking line as text, absent field
   keeps today's behaviour, `content_encoding` spelling, unknown value ignored.
-- **Dashboard:** `LogPanel` (no fetch until pressed, fetch once, open/close with focus kept, copy with "Copied",
-  null text, error with retry); the run page row button; the case page and feature card buttons; the Runs page
-  filter (URL, chip, clearing, the pattern select from the patterns list); the chip's runs link (encoded value);
-  the queued card state and its poll interval; lint, typecheck, build.
+- **Dashboard:** `LogPanel` (no fetch until pressed, fetch once, open/close with focus kept, values marked
+  with the pattern name, overlapping values, copy with "Copied", download file name, null text, error with
+  retry); the run page row button; the case page and feature card buttons; the Runs page filter (URL, chip,
+  clearing, the pattern select from the patterns list, run links carrying the value); the run page scoped by
+  `?value` (note, "Show all results", counts unchanged); the chip's runs link (encoded value); the queued card
+  state and its poll interval; lint, typecheck, build.
 - **Gateway smoke:** `GET …/runs/{run}/results/{result}/log` through the gateway (200 with the smoke upload's log)
   and `GET …/runs?value=3960562` listing that run.
 
 ## 6. Documentation
 
 ADR-032 (consequences: the log is readable on demand; runs searchable by value), TECHNICAL_SPECIFICATION (endpoint,
-filter, index, `queued`), DESIGN (Log panel, the filter chip, the chip's runs link, the queued state), ingestion
+filter, the run page's `value` filter, index, `queued`), DESIGN (Log panel with marked values, copy and download,
+the filter chip, the run page scoped by a value, the chip's runs link, the queued state), ingestion
 README (endpoint, runs filter, scan states), docs/SETUP §4.10 (find the runs for a value; read the log), TODO
 (the two items done), collector README (`contentEncoding`).
 
