@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { LogValueGroup } from "../api/analytics";
 import { linkFor } from "../lib/logValues";
@@ -10,8 +10,9 @@ type Group = LogValueGroup & { link_template?: string | null };
 const NOTE_MS = 2000;
 
 /** The "Log values" line under a last-result pill (ADR-032): per pattern its values, comma-separated, patterns
- *  separated by "·". Each value copies itself; with an https link template it is also a link (new tab). Nothing when
- *  the result has no values. With `projectId`, each value also links to the runs that hold it. */
+ *  separated by "·". Each value is plain text that copies itself when clicked; beside it, small links: the
+ *  pattern's https template (new tab) when it has one and, with `projectId`, the runs that hold the value.
+ *  Nothing when the result has no values. */
 export default function LogValuesLine({ values, label = "Log values", projectId }: {
   values: Group[] | undefined; label?: string; projectId?: number;
 }) {
@@ -44,17 +45,16 @@ export default function LogValuesLine({ values, label = "Log values", projectId 
             return (
               <span key={v} className="log-values-item">
                 <span className="log-value">
-                  {href ? (
-                    <a className="log-value-text" href={href} target="_blank" rel="noopener noreferrer">
-                      {`${v} `}<span className="sr-only">(opens in a new tab)</span>
-                    </a>
-                  ) : (
-                    <code className="log-value-text">{v}</code>
-                  )}
-                  <button type="button" className="log-value-copy" aria-label={`Copy ${g.name} ${v}`} title="Copy"
+                  <button type="button" className="log-value-text" aria-label={`Copy ${g.name} ${v}`} title="Click to copy"
                     onClick={() => copy(v)}>
-                    <Copy size={14} aria-hidden="true" />
+                    {v}
                   </button>
+                  {href && (
+                    <a className="log-value-open" href={href} target="_blank" rel="noopener noreferrer"
+                      aria-label={`Open ${g.name} ${v} (opens in a new tab)`} title="Open">
+                      <ExternalLink size={12} aria-hidden="true" />
+                    </a>
+                  )}
                   {projectId != null && (
                     <Link className="log-value-runs" aria-label={`Runs with ${g.name} ${v}`}
                       to={`/projects/${projectId}/runs?value=${encodeURIComponent(v)}&pattern=${g.name}`}>
