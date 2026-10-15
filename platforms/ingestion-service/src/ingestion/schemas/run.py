@@ -107,6 +107,20 @@ class ResultOut(BaseModel):
     quarantined: bool = False  # failed or errored, and the test is in quarantine
 
 
+class LogValueOut(BaseModel):
+    """One pattern's values in a result (ADR-032), values in log order."""
+
+    name: str
+    values: list[str]
+
+
+class ResultLogOut(BaseModel):
+    """A result's whole masked log, on demand (spec 2026-10-15 §2.1): never part of the run payload."""
+
+    log: Optional[str] = None
+    values: list[LogValueOut] = []
+
+
 class ChangedFileOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

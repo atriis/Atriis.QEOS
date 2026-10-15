@@ -355,7 +355,7 @@ def latest_results(db: Session, project_id: int, keys: List[str], run_id: Option
     values = log_value_service.values_by_result(db, [r["result_id"] for r in rows])
     out = {}
     for r in rows:
-        entry = {"status": r["status"], "run_id": r["run_id"], "branch": r["branch"],
+        entry = {"status": r["status"], "run_id": r["run_id"], "result_id": r["result_id"], "branch": r["branch"],
                  "environment": r["environment"], "started_at": as_utc(r["started_at"]),
                  "message": r["message"][:MESSAGE_EXCERPT] if r["message"] is not None else None,
                  # Log values of this result (ADR-032), with each pattern's link template

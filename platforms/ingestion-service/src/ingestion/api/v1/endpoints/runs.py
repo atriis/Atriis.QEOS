@@ -10,10 +10,11 @@ from src.ingestion.api.deps import (
 from src.ingestion.api.v1.endpoints.analytics import NO_NUL
 from src.ingestion.models.run import CI_PROVIDERS, SCOPES
 from src.ingestion.schemas.run import (
-    ChangedFileOut, ComponentOut, FailureGroupsOut, ResultOut, RunComparison, RunDetail, RunOut, RunSummary,
+    ChangedFileOut, ComponentOut, FailureGroupsOut, LogValueOut, ResultLogOut, ResultOut, RunComparison, RunDetail, RunOut,
+    RunSummary,
 )
 from src.ingestion.schemas.impact import RunImpactOut
-from src.ingestion.service import failed_steps_service, impact_read, run_service
+from src.ingestion.service import failed_steps_service, impact_read, log_value_service, run_service
 
 project_router = APIRouter()  # mounted at /projects/{project_id}/runs
 router = APIRouter()          # mounted at /runs
@@ -70,6 +71,26 @@ def get_failed_steps(
     if run is None or run.project_id != access.project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
     return failed_steps_service.failed_steps(db, access.project_id, run)
+
+
+@project_router.get("/{run_id}/results/{result_id}/log", response_model=ResultLogOut)
+def get_result_log(
+    run_id: int,
+    result_id: int,
+    db: Session = Depends(get_db),
+    access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
+):
+    """A result's whole masked log, with the values its project's patterns found in it (spec 2026-10-15 §2.1).
+    Read on demand: the run payload never carries the log."""
+    run = run_service.get_run(db, run_id)
+    # A run of another project is indistinguishable from a missing one
+    if run is None or run.project_id != access.project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    found, log = run_service.result_log(db, run.id, result_id)
+    if not found:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Result not found")
+    values = log_value_service.values_by_result(db, [result_id]).get(result_id, [])
+    return ResultLogOut(log=log, values=[LogValueOut(name=v["name"], values=v["values"]) for v in values])
 
 
 @project_router.get("/{run_id}/impact", response_model=RunImpactOut)

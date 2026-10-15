@@ -192,3 +192,12 @@ def test_a_skipped_result_carries_the_step_it_stopped_at(client, auth, project_r
                                           "key": step_key(None, "When I search Lisbon")[0]}
     # A skipped row from before 0.9.1 has no stored step and shows none
     assert got[login]["status"] == "skipped" and "failed_step" not in got[login]
+
+
+def test_the_latest_result_names_its_result_id(client, auth, project_role, seed_run, db):
+    project_role("viewer")
+    run = seed_run(T0, results=(("search", "passed", 5),))
+    row = db.query(RunResult).filter_by(run_id=run.id).one()
+    key = report_key("search")
+    got = client.post(URL, json={"keys": [key]}, headers=auth()).json()["results"][key]
+    assert got["result_id"] == row.id and got["run_id"] == run.id

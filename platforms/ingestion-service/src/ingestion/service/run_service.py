@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, Optional
 
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from src.ingestion.analytics.signature import headline, signature
@@ -65,6 +65,15 @@ def list_results(db: Session, run_id: int, status: Optional[str]) -> list[RunRes
     if status is not None:
         query = query.filter(RunResult.status == status)
     return query.order_by(RunResult.id).all()
+
+
+def result_log(db: Session, run_id: int, result_id: int) -> tuple[bool, Optional[str]]:
+    """(found, log): one result's stored, masked log, read as a column (it is deferred on the model, and the run
+    payload never carries it). Not found when the result is not in that run."""
+    row = db.execute(
+        select(RunResult.log).where(RunResult.id == result_id, RunResult.run_id == run_id)
+    ).one_or_none()
+    return (False, None) if row is None else (True, row[0])
 
 
 def quarantined_failures(db: Session, run: Run) -> set:
