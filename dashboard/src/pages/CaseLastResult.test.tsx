@@ -158,7 +158,8 @@ test("the log values show under the pill, each copyable, linked by its template"
   renderCase();
   const line = await screen.findByRole("group", { name: "Log values" });
   expect(line).toHaveTextContent(/route_key:\s*wasToBos/);
-  expect(within(line).getByRole("link", { name: /3960562/ })).toHaveAttribute("href", "https://backoffice.example.com/trips/3960562");
+  // The value's own link (the template); "Runs with trip_id 3960562" is the chip's runs link
+  expect(within(line).getByRole("link", { name: /^3960562/ })).toHaveAttribute("href", "https://backoffice.example.com/trips/3960562");
   await userEvent.click(within(line).getByRole("button", { name: "Copy route_key wasToBos" }));
   expect(writeText).toHaveBeenCalledWith("wasToBos");
   expect(await within(line).findByText("Copied")).toBeInTheDocument();
@@ -169,4 +170,24 @@ test("no log values, no line", async () => {
   renderCase();
   await screen.findByText(/passed/i, { selector: ".badge *, .badge" });
   expect(screen.queryByRole("group", { name: "Log values" })).toBeNull();
+});
+
+test("the case page offers the shown result's log and links each value to its runs", async () => {
+  server.use(http.get(`${P}/runs/9/results/77/log`, () => HttpResponse.json({ log: "INFO tripId=3960562", values: [] })));
+  setup(kase(), result({ status: "passed", result_id: 77, values: [
+    { name: "trip_id", values: ["3960562"], link_template: null },
+  ] }));
+  renderCase();
+  const line = await screen.findByRole("group", { name: "Log values" });
+  expect(within(line).getByRole("link", { name: "Runs with trip_id 3960562" }))
+    .toHaveAttribute("href", "/projects/42/runs?value=3960562&pattern=trip_id");
+  await userEvent.click(screen.getByRole("button", { name: "Log of TC-7" }));
+  expect(await screen.findByText(/INFO tripId=/)).toBeInTheDocument();
+});
+
+test("without a result id there is no Log button (an older server)", async () => {
+  setup(kase(), result({ status: "passed", values: [] }));
+  renderCase();
+  await screen.findByText(/passed/i, { selector: ".badge *, .badge" });
+  expect(screen.queryByRole("button", { name: /^Log of/ })).toBeNull();
 });

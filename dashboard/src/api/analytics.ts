@@ -218,6 +218,8 @@ export function getFlaky(
 export interface LatestResult {
   status: string; run_id: number; branch: string | null; environment: string | null;
   started_at: string; message: string | null;
+  /** The id of the result shown, for its log (spec 2026-10-15 §2.1); absent from an older server. */
+  result_id?: number;
   /** `key` names the step across the run's test cases (the run page's `#step-<key>`); `definition`/`pattern` from collector 0.8.0. */
   failed_step?: { text: string; line?: number; definition?: string; pattern?: string; key?: string };
   /** Log values of this result, each pattern with its link template (ADR-032); absent from an older server. */

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy } from "lucide-react";
+import { Link } from "react-router-dom";
 import type { LogValueGroup } from "../api/analytics";
 import { linkFor } from "../lib/logValues";
 
@@ -10,8 +11,10 @@ const NOTE_MS = 2000;
 
 /** The "Log values" line under a last-result pill (ADR-032): per pattern its values, comma-separated, patterns
  *  separated by "·". Each value copies itself; with an https link template it is also a link (new tab). Nothing when
- *  the result has no values. */
-export default function LogValuesLine({ values, label = "Log values" }: { values: Group[] | undefined; label?: string }) {
+ *  the result has no values. With `projectId`, each value also links to the runs that hold it. */
+export default function LogValuesLine({ values, label = "Log values", projectId }: {
+  values: Group[] | undefined; label?: string; projectId?: number;
+}) {
   const [note, setNote] = useState("");
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
@@ -52,6 +55,12 @@ export default function LogValuesLine({ values, label = "Log values" }: { values
                     onClick={() => copy(v)}>
                     <Copy size={14} aria-hidden="true" />
                   </button>
+                  {projectId != null && (
+                    <Link className="log-value-runs" aria-label={`Runs with ${g.name} ${v}`}
+                      to={`/projects/${projectId}/runs?value=${encodeURIComponent(v)}&pattern=${g.name}`}>
+                      runs
+                    </Link>
+                  )}
                 </span>
                 {vi < g.values.length - 1 && <span aria-hidden="true">,</span>}
               </span>

@@ -14,6 +14,7 @@ import { type StepSpread, useStepSpread } from "../lib/failedSteps";
 import GherkinBlock, { toneOf } from "../components/GherkinBlock";
 import LastResultPill from "../components/LastResultPill";
 import LogValuesLine from "../components/LogValuesLine";
+import LogPanel from "../components/LogPanel";
 import RunContextNote from "../components/RunContextNote";
 import PageHeader from "../components/PageHeader";
 import RunControl from "../components/RunControl";
@@ -202,7 +203,8 @@ export default function FeaturePage() {
                 {lastRuns(c.automated_test_key, { hideEmpty: latest.isSuccess, href: caseAsOfRun(id, c.number) })}
               </div>
             </div>
-            {result != null && <LogValuesLine values={result.values} label={`Log values of ${c.key}`} />}
+            {result != null && <LogValuesLine values={result.values} label={`Log values of ${c.key}`} projectId={id} />}
+            {result?.result_id != null && <LogPanel projectId={id} runId={result.run_id} resultId={result.result_id} name={c.key} />}
             {failure?.background != null && <BackgroundFailure projectId={id} step={failure.background} result={failure.result} spread={spreadOf(failure.result)} />}
             <div className="feature-source">
               <GherkinBlock text={block.text} label={`${c.key} Gherkin`} numbered startLine={block.start}

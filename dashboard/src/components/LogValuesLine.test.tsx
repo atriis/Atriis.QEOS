@@ -1,5 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import LogValuesLine from "./LogValuesLine";
 
 const PLAIN = [
@@ -61,4 +62,20 @@ test("a blocked clipboard says so instead of claiming success", async () => {
   await userEvent.click(screen.getByRole("button", { name: "Copy route_key wasToBos" }));
   expect(await screen.findByText(/could not copy/i)).toBeInTheDocument();
   expect(screen.queryByText("Copied")).toBeNull();
+});
+
+test("with a project each value links to the runs holding it, the value encoded", () => {
+  render(
+    <MemoryRouter>
+      <LogValuesLine projectId={42} values={[{ name: "route_key", values: ["a b&c?#/x"], link_template: null }]} />
+    </MemoryRouter>,
+  );
+  const link = screen.getByRole("link", { name: "Runs with route_key a b&c?#/x" });
+  expect(link).toHaveAttribute("href", "/projects/42/runs?value=a%20b%26c%3F%23%2Fx&pattern=route_key");
+  expect(screen.getByRole("button", { name: "Copy route_key a b&c?#/x" })).toBeInTheDocument();
+});
+
+test("without a project there is no runs link", () => {
+  render(<LogValuesLine values={PLAIN} />);
+  expect(screen.queryByRole("link")).toBeNull();
 });

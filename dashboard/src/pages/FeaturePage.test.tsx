@@ -338,6 +338,21 @@ test("a scenario card shows its log values under its pill", async () => {
   renderAt();
   const cards = await screen.findAllByRole("article");
   const line = await within(cards[0]).findByRole("group", { name: "Log values of TC-12" });
-  expect(line).toHaveTextContent(/trip_id:\s*3960562,\s*3960563/);
+  expect(line).toHaveTextContent(/trip_id:\s*3960562.*3960563/); // each value is followed by its "runs" link
   expect(within(cards[1]).queryByRole("group", { name: /Log values/ })).toBeNull();
+});
+
+test("a scenario card offers its result's log and links its values to their runs", async () => {
+  server.use(
+    http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
+      [KEY]: result("passed", { result_id: 77, values: [{ name: "trip_id", values: ["3960562"], link_template: null }] }),
+    } })),
+    http.get(`${P}/runs/9/results/77/log`, () => HttpResponse.json({ log: "INFO tripId=3960562", values: [] })),
+  );
+  renderAt();
+  const cards = await screen.findAllByRole("article");
+  const line = await within(cards[0]).findByRole("group", { name: "Log values of TC-12" });
+  expect(within(line).getByRole("link", { name: "Runs with trip_id 3960562" })).toHaveAttribute("href", "/projects/42/runs?value=3960562&pattern=trip_id");
+  await userEvent.click(within(cards[0]).getByRole("button", { name: "Log of TC-12" }));
+  expect(await within(cards[0]).findByText(/INFO tripId=/)).toBeInTheDocument();
 });
