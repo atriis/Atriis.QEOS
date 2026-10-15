@@ -34,9 +34,11 @@
   --status-rerun-stripe: #5c3f00;
   /* 4.65:1 on white, 4.22 on --page (the old #ec835a was 2.64, under the 3:1 non-text rule) */
   --status-errored: #c4501f;
-  /* Skipped is yellow everywhere. One family: --status-skipped is the mark (run bar, dot ring, chart stripes): 4.92:1 on
-     white, 4.58 on --page; --skipped-text is the word on a pill: 6.85:1 on white. */
+  /* Skipped is yellow everywhere. One family: --status-skipped is the mark (dot ring, chart stripes, the run bar's edge):
+     4.92:1 on white, 4.58 on --page; --skipped-fill is the run bar's body, a bright yellow (1.95:1 on white, so the bar's
+     1px edge in --status-skipped is what reaches 3:1, WCAG 1.4.11); --skipped-text is the word on a pill: 6.85:1 on white. */
   --status-skipped: #a16207;
+  --skipped-fill: #eab308;
   --skipped-text: #854d0e;
   /* Error text on surfaces; the status colour stays the validated chart/dot hue. */
   --danger-text: #c23434;
@@ -113,6 +115,7 @@
     --gk-param: #ff9db0;
     --gk-param-bg: rgba(255, 157, 176, 0.16);
     --status-skipped: #facc15; /* 11.35:1 on --surface-1 */
+    --skipped-fill: #facc15; /* same as the edge: the bar reads as one solid */
     --skipped-text: #facc15;
     --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
@@ -362,7 +365,8 @@ table.data th button.sort-button:focus-visible { outline: 2px solid var(--accent
 .bar-passed { background: var(--status-passed); }
 .bar-failed { background: var(--status-failed); clip-path: polygon(0 3px, 50% 0, 100% 3px, 100% 100%, 0 100%); }
 .bar-rerun { background: repeating-linear-gradient(135deg, var(--status-rerun) 0 2px, var(--status-rerun-stripe) 2px 4px); }
-.bar-skipped { background: var(--status-skipped); }
+/* Bright fill with a 1px edge in the darker skipped mark: the edge carries the 3:1 non-text contrast on light surfaces */
+.bar-skipped { background: var(--skipped-fill); box-shadow: inset 0 0 0 1px var(--status-skipped); }
 .run-legend { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); list-style: none; margin: 0 0 var(--space-2); padding: 0; font-size: 12.5px; color: var(--text-secondary); }
 .run-legend li { display: inline-flex; align-items: center; gap: 6px; }
 .run-legend .run-bar { height: 14px; }
