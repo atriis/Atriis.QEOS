@@ -54,9 +54,7 @@ function ciSnippets(origin: string): Record<string, PlatformSnippets> {
     github: {
       label: "GitHub Actions",
       code: {
-        upload: `# in the workflow that already runs your tests (for example .github/workflows/tests.yml), after the test step
-# repository variable QEOS_URL = ${origin}; repository secret QEOS_API_KEY
-- name: Upload results to QEOS
+        upload: `- name: Upload results to QEOS
   if: always() && vars.QEOS_URL != ''   # failing builds report too; repositories without QEOS skip cleanly
   uses: atriis/Atriis.QEOS/collector-action@${COLLECTOR_REF}
   with:
@@ -87,7 +85,7 @@ jobs:
       - run: ${PIP_INSTALL(COLLECTOR_REF)}
       - run: qeos-collector import-features "tests/features/**/*.feature" \${{ inputs.first_sync && '--allow-mass-archive' || '' }}
         env:
-          QEOS_URL: \${{ vars.QEOS_URL }}   # repository variable = ${origin}
+          QEOS_URL: \${{ vars.QEOS_URL }}
           QEOS_API_KEY: \${{ secrets.QEOS_API_KEY }}`,
       },
     },
@@ -359,8 +357,9 @@ export default function ProjectSettingsPage() {
             <>Run this on any machine with Python 3.9+, from the folder holding your test reports.</>
           ) : platform === "github" ? (
             <>
-              In the repository, Settings → Secrets and variables → Actions: variable <code>QEOS_URL</code> ={" "}
-              <code>{window.location.origin}</code>, secret <code>QEOS_API_KEY</code>. Then paste this after your test step.
+              In the repository, Settings → Secrets and variables → Actions: variable <code>QEOS_URL</code> (this
+              QEOS address), secret <code>QEOS_API_KEY</code>. Then paste this into the workflow that already runs
+              your tests, after the test step.
             </>
           ) : (
             <>

@@ -130,7 +130,9 @@ test("hosted CI runners on localhost get a warning, not a silent snippet", async
   expect(github).toHaveTextContent("if: always() && vars.QEOS_URL != ''");
   expect(github).toHaveTextContent("url: ${{ vars.QEOS_URL }}");
   expect(github).toHaveTextContent("patterns: test-results/cucumber-report.json");
-  expect(screen.getByText(/variable QEOS_URL/)).toHaveTextContent("http://localhost:3000");
+  expect(github).not.toHaveTextContent("localhost:3000");
+  expect(github.textContent?.startsWith("- name: Upload results to QEOS")).toBe(true);
+  expect(screen.getByText(/In the repository, Settings/)).toHaveTextContent("variable QEOS_URL (this QEOS address), secret QEOS_API_KEY");
   expect(screen.getByRole("note")).toHaveTextContent(/cannot reach localhost/i);
 
   await userEvent.selectOptions(screen.getByLabelText(/ci platform/i), "gitlab");
@@ -204,7 +206,8 @@ test("the GitHub sync snippet is the standalone workflow with the first_sync inp
   expect(snippet).toHaveTextContent('paths: ["tests/features/**"]');
   expect(snippet).toHaveTextContent("first_sync");
   expect(snippet).toHaveTextContent("--allow-mass-archive");
-  expect(snippet).toHaveTextContent("QEOS_URL: ${{ vars.QEOS_URL }} # repository variable = http://localhost:3000");
+  expect(snippet).toHaveTextContent("QEOS_URL: ${{ vars.QEOS_URL }}");
+  expect(snippet).not.toHaveTextContent("localhost:3000"); // the address lives in the variable, never in the file
   expect(screen.getByText(/commit this as/i)).toHaveTextContent("run it once by hand");
 
   // the copy button follows the kind
