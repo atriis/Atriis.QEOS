@@ -54,7 +54,7 @@ function ciSnippets(origin: string): Record<string, PlatformSnippets> {
     github: {
       label: "GitHub Actions",
       code: {
-        upload: `# .github/workflows/tests.yml — after the test step
+        upload: `# in the workflow that already runs your tests (for example .github/workflows/tests.yml), after the test step
 - uses: atriis/Atriis.QEOS/collector-action@${COLLECTOR_REF}
   if: always()   # report results even when tests failed
   with:
@@ -402,6 +402,12 @@ export default function ProjectSettingsPage() {
         >
           {snippetCopied ? "Copied" : "Copy snippet"}
         </button>
+        {platform === "github" && MANAGE_ROLES.includes(project.data?.my_role ?? "") && (
+          <p className="muted">
+            Running selected tests from QEOS (Play) needs a third file, <code>qeos-run.yml</code>: see{" "}
+            <a href="#run-from-qeos">Run from QEOS</a> below.
+          </p>
+        )}
       </div>
 
       <CollectionCard

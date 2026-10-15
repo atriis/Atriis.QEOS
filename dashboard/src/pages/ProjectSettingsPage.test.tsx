@@ -187,7 +187,7 @@ test("the upload snippet only uploads; the sync snippet syncs test cases with th
 
 test("the GitHub sync snippet is the standalone workflow with the first_sync input", async () => {
   server.use(http.get("/api/v1/projects/42/api-keys", () => HttpResponse.json([])));
-  renderPage();
+  renderPage("owner");
   await screen.findByText(/no api keys/i);
 
   await userEvent.selectOptions(screen.getByLabelText(/ci platform/i), "github");
@@ -206,6 +206,9 @@ test("the GitHub sync snippet is the standalone workflow with the first_sync inp
   Object.assign(navigator, { clipboard: { writeText } });
   await userEvent.click(screen.getByRole("button", { name: /copy snippet for ci/i }));
   expect(writeText).toHaveBeenCalledWith(expect.stringContaining("QEOS sync test cases"));
+
+  // the card tells owners where the Play workflow lives; it is not one of its snippets
+  expect(screen.getByRole("link", { name: "Run from QEOS" })).toHaveAttribute("href", "#run-from-qeos");
 
   // switching back to the upload step clears the "Copied" state
   await userEvent.selectOptions(screen.getByLabelText(/what to add/i), "upload");
