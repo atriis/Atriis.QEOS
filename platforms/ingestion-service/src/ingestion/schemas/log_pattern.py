@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from src.ingestion.schemas.collect import _replace_unstorable
 
 
 class LogPatternCreate(BaseModel):
@@ -39,6 +41,12 @@ class LogPreviewIn(BaseModel):
     name: str = Field(max_length=64)
     pattern: str = Field(max_length=1024)
     sample: str = Field(max_length=65_536)
+
+    # Like an uploaded log: a NUL or a lone surrogate is replaced, never refused. Before the length check, which
+    # cannot read a lone surrogate (a 422 naming the sample, not the pattern's field)
+    _clean_sample = field_validator("sample", mode="before")(
+        lambda value: _replace_unstorable(value) if isinstance(value, str) else value
+    )
 
 
 class LogPreviewOut(BaseModel):

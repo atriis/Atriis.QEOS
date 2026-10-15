@@ -122,3 +122,27 @@ def test_a_link_template_that_could_leave_the_url_is_refused(template):
     with pytest.raises(LogPatternError) as err:
         log_values.validate_link_template(template)
     assert err.value.field == "link_template"
+
+
+def test_a_marker_dense_log_is_read_in_well_under_a_second():
+    """64 KB of masking markers and a loose pattern: the overlap check must not walk every marker per match."""
+    import time
+
+    masked = ("[REDACTED:email] 7 " * 3_400)[:65_536]
+    patterns = [pattern(r"(\d)", f"p{n}", n) for n in range(20)]
+    started = time.perf_counter()
+    got = extract(masked, patterns)
+    assert time.perf_counter() - started < 1.0
+    assert got == [(n, 0, "7") for n in range(20)]
+
+
+@pytest.mark.parametrize("regex", ["a\x00b", "trip\ud800"])
+def test_a_pattern_that_cannot_be_stored_is_refused_not_500(regex):
+    with pytest.raises(LogPatternError) as err:
+        compile_log_pattern(regex)
+    assert err.value.field == "pattern" and "NUL" in str(err.value)
+
+
+def test_a_name_with_a_trailing_newline_is_refused():
+    with pytest.raises(LogPatternError):
+        log_values.validate_name("trip\n")

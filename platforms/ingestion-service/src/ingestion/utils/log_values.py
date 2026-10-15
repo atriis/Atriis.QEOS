@@ -6,6 +6,7 @@ group's text; without, the whole match. Values come from the masked log, and a v
 never captured.
 """
 import re
+from bisect import bisect_right
 from dataclasses import dataclass
 from typing import Iterable, List, Optional, Tuple
 from urllib.parse import urlsplit
@@ -89,7 +90,10 @@ def extract(text: Optional[str], patterns: Iterable[CompiledLogPattern]) -> List
     masking marker. A pattern reads at most the first 1,000 matches."""
     if not text:
         return []
+    # Markers come sorted and never overlap, so the only marker that can touch a span [start, end) is the last one
+    # starting before end: one bisect per match, not a walk over every marker of a marker-dense log
     markers = [m.span() for m in _MARKER.finditer(text)]
+    marker_starts = [marker_start for marker_start, _ in markers]
     found: List[Tuple[Optional[int], int, str]] = []
     for pattern in patterns:
         group = 1 if pattern.regex.groups == 1 else 0
@@ -100,7 +104,8 @@ def extract(text: Optional[str], patterns: Iterable[CompiledLogPattern]) -> List
             if match.group(group) is None:  # an optional group that took no part
                 continue
             start, end = match.span(group)
-            if any(start < marker_end and marker_start < end for marker_start, marker_end in markers):
+            last = bisect_right(marker_starts, end - 1) - 1
+            if last >= 0 and markers[last][1] > start:
                 continue  # hidden by masking: never captured
             value = text[start:end].strip()[:MAX_VALUE_LENGTH]
             if value and value not in seen:

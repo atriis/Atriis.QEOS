@@ -16,9 +16,11 @@ from src.ingestion.utils.redaction import MARKER_PREFIX, marker
 MAX_PATTERN_LENGTH = 256
 MAX_PATTERNS_PER_PROJECT = 20
 
-_NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+_NAME = re.compile(r"^[a-z][a-z0-9_]{0,31}\Z")  # \Z, not $: a trailing newline is not part of a name
 # Text already masked; custom patterns only ever see what lies between these
 _EXISTING_MARKER = re.compile(re.escape(MARKER_PREFIX) + r"[a-z0-9_]{1,64}\]")
+# What the database cannot store (the set schemas/collect.py replaces in free text)
+_UNSTORABLE = re.compile("[\x00\ud800-\udfff]")
 
 
 @dataclass(frozen=True)
@@ -43,6 +45,9 @@ def compile_pattern(pattern: str) -> "re2._Regexp":
         raise ValueError("A pattern is required")
     if len(pattern) > MAX_PATTERN_LENGTH:
         raise ValueError(f"A pattern is at most {MAX_PATTERN_LENGTH} characters")
+    if _UNSTORABLE.search(pattern):
+        # RE2 compiles these, but PostgreSQL cannot store them: a 422 here, not a 500 on the insert
+        raise ValueError("A pattern must not contain NUL or unpaired surrogate characters")
     try:
         compiled = re2.compile(pattern)
     except re2.error as exc:

@@ -146,3 +146,14 @@ def test_deleting_removes_the_patterns_values_and_an_unknown_id_is_404(client, a
     db.expire_all()
     assert db.query(LogValue).count() == 0
     assert client.delete(f"{URL}/{pattern_id}", headers=auth()).status_code == 404
+
+
+def test_preview_replaces_a_nul_or_a_lone_surrogate_in_the_sample_never_500(client, auth, member):
+    """A crafted JSON body (a textarea cannot hold one): the sample is cleaned like an uploaded log."""
+    import json
+
+    body = json.dumps({"name": "trip_id", "pattern": TRIP, "sample": 'tripId="7"\x00 \ud800 end'})
+    response = client.post(f"{URL}/preview", content=body.encode("ascii"),
+                           headers={**auth(), "Content-Type": "application/json"})
+    assert response.status_code == 200, response.text
+    assert response.json() == {"masked": 'tripId="7"\ufffd \ufffd end', "values": ["7"]}
