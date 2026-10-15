@@ -1323,20 +1323,33 @@ test("with ?value the rows are the results holding it, under a note with a way b
   expect(await screen.findByText("test_other")).toBeInTheDocument();
   expect(screen.getByTestId("where")).toHaveTextContent("/projects/42/runs/61");
 });
+
+test("a value no result holds says so, once, with the way back", async () => {
+  server.use(http.get("/api/v1/runs/61", () => HttpResponse.json(detail([]))));
+  renderDetail("/projects/42/runs/61?value=nothing");
+  expect(await screen.findByText("No results in this run hold nothing.")).toBeInTheDocument();
+  expect(screen.queryByText("No results in this run.")).toBeNull();
+  expect(screen.getByRole("link", { name: "Show all results" })).toBeInTheDocument();
+});
 ```
 
 Append to `dashboard/src/components/LogValuesCard.test.tsx`:
 
 ```tsx
-test("a queued scan says it waits, and the card does not poll fast", async () => {
-  let calls = 0;
-  server.use(http.get(BASE, () => { calls++; return list([TRIP], { state: "queued", since: null }); }));
+test("a queued scan says it waits", async () => {
+  server.use(http.get(BASE, () => list([TRIP], { state: "queued", since: null })));
   renderCard();
   expect(await screen.findByText("Scan queued; it runs when a pattern is added or the service restarts.")).toBeInTheDocument();
-  await new Promise((r) => setTimeout(r, 3500));
-  expect(calls).toBe(1);
+});
+
+test("the list is polled every 3 s while running, every 30 s while queued, never while idle", () => {
+  expect(scanPollInterval("running")).toBe(3000);
+  expect(scanPollInterval("queued")).toBe(30_000);
+  expect(scanPollInterval("idle")).toBe(false);
+  expect(scanPollInterval(undefined)).toBe(false);
 });
 ```
+(add `scanPollInterval` to the test file's import: `import LogValuesCard, { scanPollInterval } from "./LogValuesCard";`)
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -1389,11 +1402,15 @@ function appliedFilters(v: Values): AppliedFilter[] {
 ```
   - in `toFilters`, add `value: v.value || undefined,` and `pattern: v.value ? v.pattern || undefined : undefined,` after `scope: asScope(v.scope),`;
   - in `patchFilters`, after `for (const [k, v] of Object.entries(patch)) { … }` and before `next.delete("offset");`, add `if (patch.value === "") next.delete("pattern");`;
-  - after `const [form, setForm] = useState<Values>(applied);` add:
+  - after the `const [moreOpen, setMoreOpen] = useState(advancedActive > 0);` line (the patterns query reads `moreOpen`) add:
 
 ```tsx
-  // The pattern names for the Log value filter (spec 2026-10-15 §3.2); a project without patterns offers none
-  const patterns = useQuery({ queryKey: ["log-patterns", id], queryFn: () => listLogPatterns(id), staleTime: 60_000 });
+  // The pattern names for the Log value filter (spec 2026-10-15 §3.2), read once More filters is open or a pattern
+  // is already in the URL; a project without patterns offers none
+  const patterns = useQuery({
+    queryKey: ["log-patterns", id], queryFn: () => listLogPatterns(id), staleTime: 60_000,
+    enabled: moreOpen || applied.pattern !== "",
+  });
   const patternOptions = (patterns.data?.patterns ?? []).map((p) => ({ value: p.name, label: p.name }));
   // While the value filter is on, each run opens scoped to the results holding it
   const runSearch = applied.value
@@ -1428,23 +1445,30 @@ function appliedFilters(v: Values): AppliedFilter[] {
 ```tsx
           {scoped.value && (
             <p className="muted log-scope-note">
-              {`${run.results.length} of ${run.total} results hold ${scoped.pattern ? `${scoped.pattern} ` : ""}${scoped.value}`}
+              {run.results.length === 0
+                ? `No results in this run hold ${scoped.pattern ? `${scoped.pattern} ` : ""}${scoped.value}.`
+                : `${run.results.length} of ${run.total} results hold ${scoped.pattern ? `${scoped.pattern} ` : ""}${scoped.value}`}
               {" "}
               <Link to={`/projects/${projectId}/runs/${run.id}${status ? `?status=${status}` : ""}`}>Show all results</Link>
             </p>
           )}
 ```
+    and change the empty state `{run.results.length === 0 ? (\n            <p className="muted">No {status || ""} results in this run.</p>` so the generic line is skipped while scoped: `{run.results.length === 0 ? (\n            !scoped.value && <p className="muted">No {status || ""} results in this run.</p>`.
 
 - [ ] **Step 6: The queued card.** In `dashboard/src/components/LogValuesCard.tsx`:
-  - after `const SCAN_POLL_MS = 3000;` add `const QUEUED_POLL_MS = 30_000;`;
-  - replace the `refetchInterval` line with:
+  - after `const SCAN_POLL_MS = 3000;` add:
 
 ```tsx
-    refetchInterval: (query) => {
-      const state = query.state.data?.scan.state;
-      return state === "running" ? SCAN_POLL_MS : state === "queued" ? QUEUED_POLL_MS : false;
-    },
+/** A queued scan waits for the next add or restart: a slow poll is enough to notice when it starts. */
+const QUEUED_POLL_MS = 30_000;
+
+/** How often the list is read again for a scan state: 3 s running, 30 s queued, not at all when idle. */
+export function scanPollInterval(state: LogScan["state"] | undefined): number | false {
+  return state === "running" ? SCAN_POLL_MS : state === "queued" ? QUEUED_POLL_MS : false;
+}
 ```
+    with `import type { LogScan } from "../api/logPatterns";` added to the imports;
+  - replace the `refetchInterval` line with `refetchInterval: (query) => scanPollInterval(query.state.data?.scan.state),`;
   - after the `Scanning past runs…` line add:
 
 ```tsx
