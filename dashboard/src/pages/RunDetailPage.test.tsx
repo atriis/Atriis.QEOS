@@ -387,3 +387,20 @@ test("an ordinary upload has no stages line", async () => {
   await screen.findByText("abcdef1");
   expect(screen.queryByText(/^Suggested tests/)).not.toBeInTheDocument();
 });
+
+test("each row offers the result's log, fetched only when opened", async () => {
+  let fetched = 0;
+  server.use(
+    http.get("/api/v1/runs/61", () => HttpResponse.json(detail([result]))),
+    http.get("/api/v1/projects/42/runs/61/results/1/log", () => {
+      fetched++;
+      return HttpResponse.json({ log: "INFO boom happened", values: [] });
+    }),
+  );
+  renderDetail();
+  const button = await screen.findByRole("button", { name: "Log of test_ok" });
+  expect(fetched).toBe(0);
+  await userEvent.click(button);
+  expect(await screen.findByText("INFO boom happened")).toBeInTheDocument();
+  expect(fetched).toBe(1);
+});

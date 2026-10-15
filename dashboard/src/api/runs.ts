@@ -1,3 +1,4 @@
+import type { LogValueGroup } from "./analytics";
 import { apiFetch, buildQuery } from "./http";
 
 // Types mirror platforms/ingestion-service/src/ingestion/schemas/run.py
@@ -244,4 +245,12 @@ export function getRunFailedSteps(
   projectId: number, runId: number, init: { signal?: AbortSignal } = {},
 ): Promise<{ steps: RunFailedStep[] }> {
   return apiFetch(`/api/v1/projects/${projectId}/runs/${runId}/failed-steps`, init);
+}
+
+/** A result's whole masked log with the values its project's patterns found in it (spec 2026-10-15 §2.1). Read on
+ *  demand: the run payload never carries it. */
+export interface ResultLog { log: string | null; values: LogValueGroup[] }
+
+export function getResultLog(projectId: number, runId: number, resultId: number): Promise<ResultLog> {
+  return apiFetch(`/api/v1/projects/${projectId}/runs/${runId}/results/${resultId}/log`);
 }

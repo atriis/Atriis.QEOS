@@ -49,3 +49,44 @@ export function linkFor(template: string | null | undefined, value: string): str
   if (base.protocol !== "https:" || !base.hostname || base.username || base.password) return null;
   return built.origin === base.origin ? built.href : null;
 }
+
+export interface LogSegment { text: string; name?: string }
+
+/** The log cut into plain text and marked values: each occurrence of a value becomes a segment named after its
+ *  pattern; on overlap the longer value wins and nothing is marked inside a mark. Linear in the text: at each
+ *  position only the values that start with that character are tried. */
+export function markValues(text: string, groups: LogValueGroup[]): LogSegment[] {
+  const byFirst = new Map<string, { value: string; name: string }[]>();
+  for (const g of groups) {
+    for (const value of g.values) {
+      if (!value) continue;
+      const list = byFirst.get(value[0]) ?? [];
+      list.push({ value, name: g.name });
+      byFirst.set(value[0], list);
+    }
+  }
+  for (const list of byFirst.values()) list.sort((a, b) => b.value.length - a.value.length);
+  if (byFirst.size === 0 || text === "") return [{ text }];
+  const out: LogSegment[] = [];
+  let plainFrom = 0;
+  let i = 0;
+  while (i < text.length) {
+    const hit = byFirst.get(text[i])?.find((c) => text.startsWith(c.value, i));
+    if (!hit) {
+      i += 1;
+      continue;
+    }
+    if (i > plainFrom) out.push({ text: text.slice(plainFrom, i) });
+    out.push({ text: hit.value, name: hit.name });
+    i += hit.value.length;
+    plainFrom = i;
+  }
+  if (plainFrom < text.length) out.push({ text: text.slice(plainFrom) });
+  return out;
+}
+
+/** "<test name>-run-<id>.txt" with anything outside letters, digits, dots, dashes and underscores as "_". */
+export function logFileName(name: string, runId: number): string {
+  const safe = name.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "");
+  return `${safe || "result"}-run-${runId}.txt`;
+}

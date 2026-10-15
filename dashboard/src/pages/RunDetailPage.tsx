@@ -9,6 +9,7 @@ import FailedSteps from "../components/FailedSteps";
 import FailureGroups from "../components/FailureGroups";
 import FilterBar from "../components/FilterBar";
 import ImpactCard from "../components/ImpactCard";
+import LogPanel from "../components/LogPanel";
 import Message from "../components/Message";
 import StatusDot from "../components/StatusDot";
 import StatusPill from "../components/StatusPill";
@@ -227,7 +228,10 @@ export default function RunDetailPage() {
                         {r.quarantined && <div className="muted">quarantined</div>}
                       </td>
                       <td className="num">{formatDuration(r.duration_ms)}</td>
-                      <td><Message text={r.message} name={r.name} /></td>
+                      <td>
+                        <Message text={r.message} name={r.name} />
+                        <LogPanel projectId={Number(projectId)} runId={run.id} resultId={r.id} name={r.name} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
