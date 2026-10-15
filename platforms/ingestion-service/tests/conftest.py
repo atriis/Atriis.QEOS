@@ -18,6 +18,10 @@ from src.ingestion.db.session import get_db
 from src.ingestion.models import ApiKey, Run, RunResult  # noqa: F401  registers tables
 from src.ingestion.models.run import FULL_SCOPE
 
+# The service resumes queued log-value scans at start-up on its own database (ADR-032); TestClient runs start-up
+# hooks, and the tests drive scans themselves
+settings.LOG_SCAN_RESUME_ON_STARTUP = False
+
 # A database file of this run's own: two runs of the suite at once (two terminals, two agents) used to share
 # ./test.db and drop each other's tables mid-test
 _DB_DIR = tempfile.mkdtemp(prefix="qeos-tests-")

@@ -1,3 +1,6 @@
+import threading
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
@@ -7,12 +10,21 @@ from starlette.middleware.cors import CORSMiddleware
 
 from src.ingestion.api.v1.api import api_router
 from src.ingestion.core.config import settings
+from src.ingestion.jobs import log_scan
 from src.ingestion.utils import metrics
 from src.ingestion.utils.job_metrics import JobHeartbeatCollector, make_heartbeat_session_factory
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    _resume_log_scans()
+    yield
+
 
 app = FastAPI(
     title=settings.APP_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=_lifespan,
 )
 
 if settings.BACKEND_CORS_ORIGINS:
@@ -30,6 +42,16 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 install_metrics(app, service="ingestion", registry=metrics.REGISTRY)
 HEARTBEATS = JobHeartbeatCollector(make_heartbeat_session_factory(settings.database_url))
 metrics.REGISTRY.register(HEARTBEATS)
+
+
+def _resume_log_scans() -> None:
+    """A log-value scan queued when the service last stopped (ADR-032) runs again, in a thread: start-up does not
+    wait for it, and the per-project lock keeps a second worker from scanning the same project."""
+    if not settings.LOG_SCAN_RESUME_ON_STARTUP:
+        return
+    from src.ingestion.db.session import SessionLocal
+
+    threading.Thread(target=log_scan.resume_all, args=(SessionLocal,), name="log-scan-resume", daemon=True).start()
 
 
 @app.exception_handler(RequestValidationError)

@@ -24,6 +24,10 @@ class Settings(BaseServiceSettings):
     RETENTION_BATCH_SIZE: int = 500
     # A deleted project's runs are kept this long after the deletion (it can still be undone)
     RETENTION_DELETED_GRACE_DAYS: int = 7
+    # The log-value re-scan (ADR-032): results per committed batch, and whether a scan queued when the service
+    # stopped runs again when it starts (off in the tests)
+    LOG_SCAN_BATCH_SIZE: int = 500
+    LOG_SCAN_RESUME_ON_STARTUP: bool = True
 
     # Public origin of the dashboard, for the run link in failure notifications. Empty: no link
     DASHBOARD_URL: str = ""
