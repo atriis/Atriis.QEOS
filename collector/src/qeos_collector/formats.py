@@ -96,6 +96,9 @@ def _attach(row: dict, message: str, details: str) -> dict:
 # A failed step fails the scenario; an unimplemented one leaves it undecided
 _CUCUMBER_FAILED = ("failed",)
 _CUCUMBER_UNDECIDED = ("undefined", "pending", "ambiguous")
+# Why a skipped scenario stopped at its step: the message sent with it (a hook skip leaves every step "skipped")
+_SKIP_REASONS = {"undefined": "Undefined step", "pending": "Pending step", "ambiguous": "Ambiguous step",
+                 "skipped": "Skipped"}
 
 # The failed step's step definition and its text with the matched arguments replaced (spec 2026-10-14 §2)
 ARGUMENT = "{…}"
@@ -272,26 +275,39 @@ def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] =
             if isinstance(result.get("duration"), (int, float)) and result.get("duration") > 0
         )
         row = _row(suite, uri, name, status, nanoseconds / 1e9)
-        failed_step = next(
-            (s for s in steps if isinstance(s, dict)
-             and str((s.get("result") or {}).get("status") or "") in _CUCUMBER_FAILED),
-            None,
-        )
-        if failed_step is not None:
-            result = failed_step.get("result") or {}
+        # The step the scenario stopped at: the failed one, or for a skipped scenario the first that did not pass
+        # (undefined, pending, ambiguous, or skipped by a hook before any step ran). Sent as failed_step either way.
+        if status == "failed":
+            stopped_at = next(
+                (s for s in steps if isinstance(s, dict)
+                 and str((s.get("result") or {}).get("status") or "") in _CUCUMBER_FAILED),
+                None,
+            )
+        elif status == "skipped":
+            stopped_at = next(
+                (s for s in steps if isinstance(s, dict) and str((s.get("result") or {}).get("status") or "") != "passed"),
+                None,
+            )
+        else:
+            stopped_at = None
+        if stopped_at is not None:
+            result = stopped_at.get("result") or {}
             message = str(result.get("error_message") or "")
-            keyword, step_text = f"{failed_step.get('keyword', '')}", f"{failed_step.get('name', '')}"
+            keyword, step_text = f"{stopped_at.get('keyword', '')}", f"{stopped_at.get('name', '')}"
             step_name = f"{keyword}{step_text}".strip()
-            _attach(row, _first_line(message), "\n".join(part for part in (step_name, message.strip()) if part))
+            # A failed step's message is its error; a skipped scenario's says why it stopped, Cucumber's text in details
+            headline = _first_line(message) if status == "failed" else _SKIP_REASONS.get(
+                str(result.get("status") or ""), "Skipped")
+            _attach(row, headline, "\n".join(part for part in (step_name, message.strip()) if part))
             if step_name:
                 entry = {"text": step_name[:STEP_TEXT_LENGTH]}
-                line = failed_step.get("line")
+                line = stopped_at.get("line")
                 if isinstance(line, int) and not isinstance(line, bool) and 1 <= line <= 1_000_000:
                     entry["line"] = line
-                definition = _step_definition(failed_step)
+                definition = _step_definition(stopped_at)
                 if definition is not None:
                     entry["definition"] = definition
-                entry["pattern"] = _step_pattern(failed_step, keyword, step_text)
+                entry["pattern"] = _step_pattern(stopped_at, keyword, step_text)
                 row["failed_step"] = entry
         log = _scenario_log(element, steps)
         if log is not None:

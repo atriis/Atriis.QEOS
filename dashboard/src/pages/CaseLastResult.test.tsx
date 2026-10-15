@@ -69,6 +69,18 @@ test("the failed step is red with its error, located through the feature file", 
   expect(screen.getByText(/failed/i, { selector: ".badge *, .badge" })).toBeInTheDocument();
 });
 
+test("a skipped result marks the step it stopped at in yellow, with the reason", async () => {
+  setup(kase(), result({ status: "skipped", message: "Undefined step", failed_step: { text: "When I search Lisbon", line: 6 } }));
+  renderCase();
+  await waitFor(() => expect(document.querySelector(".gk-failed")).not.toBeNull());
+  const line = document.querySelector(".gk-failed") as HTMLElement;
+  expect(line).toHaveClass("gk-skipped");
+  expect(line).toHaveTextContent("When I search <city>");
+  expect(line).toHaveTextContent(/skipped/i);
+  act(() => line.focus());
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("Undefined step");
+});
+
 test("without the feature file's content it matches the case's own Gherkin by text", async () => {
   setup(kase(), result({ failed_step: { text: "Then I see results" } }), { ...DETAIL, content: null, cases: [] });
   renderCase();

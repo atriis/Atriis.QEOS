@@ -146,9 +146,52 @@ def test_background_step_failure_keeps_its_own_line(tmp_path):
     assert rows[0]["failed_step"] == {"text": "Given logged in", "line": 3, "pattern": "Given logged in"}
 
 
-def test_passed_and_skipped_scenarios_have_no_failed_step(tmp_path):
+def test_a_passed_scenario_has_no_failed_step(tmp_path):
     assert "failed_step" not in parse_cucumber(tmp_path, steps=[step("Given ", "a", 1, "passed")])[0]
-    assert "failed_step" not in parse_cucumber(tmp_path, steps=[step("Given ", "a", 1, "pending")])[0]
+
+
+# --- the step that stopped a skipped scenario (same field, same shape) ----------------------------------
+
+@pytest.mark.parametrize("status, reason", [
+    ("undefined", "Undefined step"),
+    ("pending", "Pending step"),
+    ("ambiguous", "Ambiguous step"),
+])
+def test_a_skipped_scenario_names_the_step_that_stopped_it(tmp_path, status, reason):
+    rows = parse_cucumber(tmp_path, steps=[step("Given ", "a user", 4, "passed"),
+                                           step("When ", "I search Lisbon", 5, status),
+                                           step("Then ", "I see results", 6, "skipped")])
+    assert rows[0]["status"] == "skipped"
+    assert rows[0]["failed_step"] == {"text": "When I search Lisbon", "line": 5, "pattern": "When I search Lisbon"}
+    assert rows[0]["message"] == reason
+    assert rows[0]["details"] == "When I search Lisbon"
+
+
+def test_a_scenario_skipped_before_any_step_ran_names_its_first_step(tmp_path):
+    """A Before hook skipped it: every step is skipped, so the first one is where it stopped."""
+    rows = parse_cucumber(tmp_path, steps=[step("Given ", "a user", 4, "skipped"), step("When ", "x", 5, "skipped")])
+    assert rows[0]["status"] == "skipped"
+    assert rows[0]["failed_step"] == {"text": "Given a user", "line": 4, "pattern": "Given a user"}
+    assert rows[0]["message"] == "Skipped"
+
+
+def test_the_stopping_step_keeps_cucumbers_own_message_in_details(tmp_path):
+    rows = parse_cucumber(tmp_path, steps=[step("When ", "x", 5, "pending", "TODO: implement me")])
+    assert rows[0]["message"] == "Pending step"
+    assert rows[0]["details"] == "When x\nTODO: implement me"
+
+
+def test_a_skipped_scenario_without_steps_has_no_step(tmp_path):
+    rows = parse_cucumber(tmp_path, steps=[])
+    assert rows[0]["status"] == "skipped" and "failed_step" not in rows[0] and "message" not in rows[0]
+
+
+def test_the_stopping_step_carries_its_definition_and_pattern(tmp_path):
+    entry = {"keyword": "When ", "name": "I search Lisbon", "line": 5, "result": {"status": "pending"},
+             "match": {"location": "steps/search.js:12", "arguments": [{"val": "Lisbon", "offset": 9}]}}
+    rows = parse_cucumber(tmp_path, steps=[entry])
+    assert rows[0]["failed_step"] == {"text": "When I search Lisbon", "line": 5, "definition": "steps/search.js:12",
+                                      "pattern": "When I search {…}"}
 
 
 def test_missing_line_keeps_the_text_and_long_text_is_cut(tmp_path):

@@ -126,6 +126,39 @@ test("the failed step is red on its card, with the error", async () => {
   expect(screen.getByText("1 failed · 1 no runs")).toBeInTheDocument();
 });
 
+test("a skipped scenario's stopping step is yellow on its card, with the reason", async () => {
+  server.use(http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
+    [KEY2]: result("skipped", { message: "Undefined step", failed_step: { text: "Then I see an error", line: 8 } }),
+  } })));
+  renderAt();
+  const cards = await screen.findAllByRole("article");
+  await waitFor(() => expect(cards[1].querySelector(".gk-failed")).not.toBeNull());
+  const line = cards[1].querySelector(".gk-failed") as HTMLElement;
+  expect(line).toHaveClass("gk-skipped");
+  expect(line).toHaveTextContent("Then I see an error");
+  expect(line).toHaveTextContent(/skipped/i);
+  act(() => line.focus());
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("Undefined step");
+});
+
+test("a Background step that skipped the scenario is named on the card", async () => {
+  const content = ["Feature: Login", "", "  Background:", "    Given bg", "", "  Scenario: Good password", "    When a", "",
+    "  Scenario: Bad password", "    Then b"].join("\n");
+  server.use(
+    http.get(`${P}/features/detail`, () => HttpResponse.json({ ...DETAIL, content, cases: [
+      detailCase(12, { scenario_name: "Good password", line: 6, automated_test_key: KEY }),
+    ] })),
+    http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
+      [KEY]: result("skipped", { message: "Pending step", failed_step: { text: "Given bg", line: 4 } }),
+    } })),
+  );
+  renderAt();
+  const note = await screen.findByText("Skipped in Background: Given bg");
+  expect(note).toHaveClass("is-skipped");
+  act(() => note.focus());
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("Pending step");
+});
+
 test("a Background failure is named on the card", async () => {
   const content = ["Feature: Login", "", "  Background:", "    Given bg", "", "  Scenario: Good password", "    When a", "",
     "  Scenario: Bad password", "    Then b"].join("\n");

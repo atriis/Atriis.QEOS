@@ -176,3 +176,19 @@ def test_a_result_without_values_has_an_empty_list(client, auth, project_role, s
     seed_run(T0, results=(("search", "passed", 5),))
     key = report_key("search")
     assert client.post(URL, json={"keys": [key]}, headers=auth()).json()["results"][key]["values"] == []
+
+
+def test_a_skipped_result_carries_the_step_it_stopped_at(client, auth, project_role, seed_run, db):
+    """Collector 0.9.1 sends the undefined/pending step of a skipped scenario as failed_step; it comes back the same way."""
+    project_role("viewer")
+    run = seed_run(T0, results=(("search", "skipped", 0), ("login", "skipped", 0)))
+    row = db.query(RunResult).filter_by(run_id=run.id, name="search").one()
+    row.message, row.failed_step_text, row.failed_step_line = "Undefined step", "When I search Lisbon", 14
+    db.commit()
+    search, login = report_key("search"), report_key("login")
+    got = client.post(URL, json={"keys": [search, login]}, headers=auth()).json()["results"]
+    assert got[search]["status"] == "skipped" and got[search]["message"] == "Undefined step"
+    assert got[search]["failed_step"] == {"text": "When I search Lisbon", "line": 14,
+                                          "key": step_key(None, "When I search Lisbon")[0]}
+    # A skipped row from before 0.9.1 has no stored step and shows none
+    assert got[login]["status"] == "skipped" and "failed_step" not in got[login]

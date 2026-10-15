@@ -1143,7 +1143,10 @@ stack on `https://localhost:8443`, add `--ca-file qeos-ca.crt` ([4.1.3](#413-col
   failure in the Background shows as "Failed in Background" on the feature card. A Scenario
   Outline case is linked to its first example row only, so its pill and failed step come from that
   row. Hand-written cases (not imported from a .feature file) show the last-result pill but no red
-  step.
+  step. A skipped scenario is marked the same way in yellow at the step it stopped at (an undefined,
+  pending or ambiguous step, or its first step when a hook skipped it), with the reason ("Undefined
+  step") where the error would be, and "Skipped in Background" on the feature card; this needs the
+  collector 0.9.1 or later, older uploads show a skipped pill and no marked step.
 - **Failed steps across test cases** (run page, the **Failed steps** card under **Failures by cause**, and
   one extra line in the failed-step tooltip): each failed Cucumber step is listed once, the one in the
   most test cases first. A row shows the step, "failed in N test cases" and "failing since run #430,
@@ -1777,6 +1780,7 @@ qeos up -d --build --wait edge
   rules, run the `remask` job ([4.6](#46-masking)).
 - **Collector:** CI pins a tag (`collector-v0.9.0`). Upgrading the platform does not change it.
   collector 0.6.0 sends `failed_step`; it needs a platform with ingestion migration 021, so upgrade the platform first (an older platform answers 422 and the run is not stored).
+  collector 0.9.1 also sends `failed_step` on a skipped scenario (the step it stopped at); any platform with migration 021 stores it, older platforms show it as nothing new.
   Move pipelines to a new tag when the release notes ask for it.
 - **Compose project renamed to `qeos` (2026-10-11).** Containers are now `qeos-*` and local images
   `qeos/*`. Once, before the first `up` after pulling this change, stop the old project:

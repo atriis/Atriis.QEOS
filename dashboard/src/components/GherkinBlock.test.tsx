@@ -32,6 +32,22 @@ test("without failed nothing is marked", () => {
   expect(document.querySelector(".gk-failed")).toBeNull();
 });
 
+test.each([true, false])("a skipped tone marks the line as the step the scenario stopped at, in yellow (numbered=%s)", async (numbered) => {
+  render(<GherkinBlock numbered={numbered} text={"Scenario: s\n  When a\n  Then b"} failed={{ line: 2, tone: "skipped", tip: <span>Undefined step</span> }} />);
+  const line = failedLine() as HTMLElement;
+  expect(line).toHaveClass("gk-skipped");
+  expect(line).toHaveTextContent(/skipped/i);
+  expect(line).not.toHaveTextContent(/failed/i);
+  expect(line.querySelector(".sr-only")).toHaveTextContent("Skipped step:");
+  line.focus();
+  expect(await screen.findByRole("tooltip")).toHaveTextContent("Undefined step");
+});
+
+test("the failed tone has no skipped class", () => {
+  render(<GherkinBlock text={"Scenario: s\n  When a"} failed={{ line: 2, tip: <span>boom</span> }} />);
+  expect(failedLine()).not.toHaveClass("gk-skipped");
+});
+
 test("plain mode: one line per Gherkin line, no blank line after the failed one", () => {
   const text = "Scenario: s\n  Given x\n  When a\n  Then b";
   render(<GherkinBlock text={text} failed={{ line: 3, tip: <span>boom</span> }} />);

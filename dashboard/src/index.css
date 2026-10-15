@@ -1144,6 +1144,10 @@ button.switch.switch-compact { gap: var(--space-2); padding: var(--space-1) var(
 .gk-failed-mark { display: inline-flex; align-items: center; gap: 4px; margin-inline-start: var(--space-3); font-family: var(--font-sans); font-size: 12px; font-weight: 600; color: var(--danger-text); user-select: none; white-space: nowrap; }
 .gherkin.numbered .gk-failed .gk-failed-end { grid-column: 3; display: inline-flex; align-items: center; gap: var(--space-3); }
 .gherkin.numbered .gk-failed .gk-failed-mark { margin: 0; }
+/* Skipped step: the same mark in the skipped yellow, with the word "skipped" and a dashed-circle icon (never colour alone) */
+.gherkin .gk-failed.gk-skipped { background: color-mix(in srgb, var(--status-skipped) 14%, transparent); box-shadow: inset 3px 0 0 var(--status-skipped); }
+.gherkin .gk-failed.gk-skipped:focus-visible { outline-color: var(--status-skipped); }
+.gk-failed.gk-skipped .gk-failed-mark { color: var(--skipped-text); }
 .failed-tip { position: fixed; z-index: 70; width: max-content; max-width: min(420px, 90vw); padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: var(--space-1); background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-2); font-family: var(--font-sans); font-size: 13px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; max-height: min(50vh, 320px); overflow: auto; cursor: auto; user-select: text; }
 .failed-tip-meta { color: var(--text-secondary); font-size: 12px; }
 .failed-tip-spread { font-size: 12.5px; }
@@ -1171,3 +1175,5 @@ button.switch.switch-compact { gap: var(--space-2); padding: var(--space-1) var(
 .scenario-bg-failure { position: relative; margin: 0; padding: 0 var(--space-4) var(--space-3); max-width: none; }
 .scenario-bg-failure-line { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--danger-text); font-size: 13px; font-weight: 600; cursor: help; border-radius: 2px; overflow-wrap: anywhere; }
 .scenario-bg-failure-line:focus-visible { outline: 2px solid var(--status-failed); outline-offset: 2px; }
+.scenario-bg-failure-line.is-skipped { color: var(--skipped-text); }
+.scenario-bg-failure-line.is-skipped:focus-visible { outline-color: var(--status-skipped); }

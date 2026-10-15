@@ -14,7 +14,7 @@ import { featureDetailQuery } from "../lib/featureQueries";
 import { locateFailedStep, matchesStep, scenarioSteps, stepLines } from "../lib/failedStep";
 import ConfirmButton from "../components/ConfirmButton";
 import ErrorBanner from "../components/ErrorBanner";
-import GherkinBlock from "../components/GherkinBlock";
+import GherkinBlock, { toneOf } from "../components/GherkinBlock";
 import RunControl from "../components/RunControl";
 import RunPanel from "../components/RunPanel";
 import StatusDot from "../components/StatusDot";
@@ -315,7 +315,7 @@ function CaseEditor() {
               <GherkinBlock
                 text={c?.gherkin ?? ""}
                 failed={failedLine != null && latest.data
-                  ? { line: failedLine, tip: <FailedStepTip projectId={id} result={latest.data} spread={spreadOf(latest.data)} /> }
+                  ? { line: failedLine, tone: toneOf(latest.data), tip: <FailedStepTip projectId={id} result={latest.data} spread={spreadOf(latest.data)} /> }
                   : undefined}
               />
             </>

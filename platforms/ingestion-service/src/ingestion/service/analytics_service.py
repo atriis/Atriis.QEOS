@@ -310,13 +310,17 @@ def _latest_ranked(filters, *columns):
 
 
 def failed_step_of(status, message, details, step_text, step_line, definition=None, pattern=None) -> Optional[dict]:
-    """The failed step for a failed/errored result (spec 2026-10-13 §3.3). Rows stored before the collector
-    sent `failed_step` hold the step on details' first line, unless that line is just the message. From collector
-    0.8.0 the step also has its definition and pattern; `key` names the step across test cases (spec 2026-10-14)."""
-    if status not in ("failed", "errored"):
+    """The failed step for a failed/errored result (spec 2026-10-13 §3.3), or the step a skipped scenario stopped at
+    (undefined, pending, ambiguous or hook-skipped; collector 0.9.1 sends it as failed_step too). Failed/errored rows
+    stored before the collector sent `failed_step` hold the step on details' first line, unless that line is just the
+    message; a skipped row without a stored step has none. From collector 0.8.0 the step also has its definition and
+    pattern; `key` names the step across test cases (spec 2026-10-14)."""
+    if status not in ("failed", "errored", "skipped"):
         return None
     if step_text:
         step = {"text": step_text, **({"line": step_line} if step_line else {})}
+    elif status == "skipped":
+        return None
     else:
         first = (details or "").split("\n", 1)[0].strip()
         if not first or first == (message or "").split("\n", 1)[0].strip():

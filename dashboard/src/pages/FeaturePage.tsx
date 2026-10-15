@@ -1,7 +1,7 @@
 import { useMemo, useRef } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Info, XCircle } from "lucide-react";
+import { CircleDashed, Info, XCircle } from "lucide-react";
 import { type LatestResult, getLatestResults } from "../api/analytics";
 import { type Case, type FeatureCase, type FeatureDetail, listCases } from "../api/cases";
 import { MAX_RUN_CASES } from "../api/runRequests";
@@ -11,7 +11,7 @@ import { featureLabel } from "../components/FeatureList";
 import FailedTipAnchor from "../components/FailedTipAnchor";
 import FailedStepTip from "../components/FailedStepTip";
 import { type StepSpread, useStepSpread } from "../lib/failedSteps";
-import GherkinBlock from "../components/GherkinBlock";
+import GherkinBlock, { toneOf } from "../components/GherkinBlock";
 import LastResultPill from "../components/LastResultPill";
 import LogValuesLine from "../components/LogValuesLine";
 import RunContextNote from "../components/RunContextNote";
@@ -50,13 +50,14 @@ function statusCounts(statuses: (string | undefined)[], none = "no runs"): strin
   return [...n].sort((x, y) => order(x[0]) - order(y[0])).map(([k, v]) => `${v} ${k}`).join(" · ");
 }
 
-/** A step the scenario inherits (its Background, feature- or rule-level) failed: named on the card, with the same tip as a failed line. */
+/** A step the scenario inherits (its Background, feature- or rule-level) failed, or skipped the scenario: named on the card, with the same tip as a marked line. */
 function BackgroundFailure({ projectId, step, result, spread }: { projectId: number; step: string; result: LatestResult; spread?: StepSpread }) {
+  const skipped = result.status === "skipped";
   return (
     <p className="scenario-bg-failure">
-      <FailedTipAnchor className="scenario-bg-failure-line" tip={<FailedStepTip projectId={projectId} result={result} spread={spread} />}>
-        <XCircle size={14} aria-hidden="true" />
-        Failed in Background: {step}
+      <FailedTipAnchor className={skipped ? "scenario-bg-failure-line is-skipped" : "scenario-bg-failure-line"} tip={<FailedStepTip projectId={projectId} result={result} spread={spread} />}>
+        {skipped ? <CircleDashed size={14} aria-hidden="true" /> : <XCircle size={14} aria-hidden="true" />}
+        {skipped ? "Skipped in Background: " : "Failed in Background: "}{step}
       </FailedTipAnchor>
     </p>
   );
@@ -206,7 +207,7 @@ export default function FeaturePage() {
             <div className="feature-source">
               <GherkinBlock text={block.text} label={`${c.key} Gherkin`} numbered startLine={block.start}
                 failed={failure?.line != null
-                  ? { line: failure.line, tip: <FailedStepTip projectId={id} result={failure.result} spread={spreadOf(failure.result)} /> }
+                  ? { line: failure.line, tone: toneOf(failure.result), tip: <FailedStepTip projectId={id} result={failure.result} spread={spreadOf(failure.result)} /> }
                   : undefined} />
             </div>
           </article>
