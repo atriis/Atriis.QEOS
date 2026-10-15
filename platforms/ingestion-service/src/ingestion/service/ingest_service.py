@@ -11,12 +11,12 @@ from sqlalchemy.orm import Session
 
 from qeos_shared.keys import test_key
 from src.ingestion.core.config import settings
-from src.ingestion.models import ApiKey, Run, RunChangedFile, RunComponent, RunResult
+from src.ingestion.models import ApiKey, LogValue, Run, RunChangedFile, RunComponent, RunResult
 from src.ingestion.models.run import (
     FAILED_STEP_DEFINITION_LENGTH, FAILED_STEP_PATTERN_LENGTH, FAILED_STEP_TEXT_LENGTH, FULL_SCOPE,
 )
 from src.ingestion.schemas.collect import RunUpload
-from src.ingestion.service import collection_settings_service, impact_service, masking_pattern_service
+from src.ingestion.service import collection_settings_service, impact_service, log_pattern_service, log_value_service, masking_pattern_service
 from src.ingestion.utils import custom_masking, metrics
 from src.ingestion.utils.redaction import redact
 
@@ -134,6 +134,7 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
     counts = Counter(result.status for result in upload.results)
     meta = upload.run
     patterns = tuple(masking_pattern_service.compiled_for(db, key.project_id))
+    log_patterns = tuple(log_pattern_service.compiled_for(db, key.project_id))
     # Masking can lengthen the URL (the marker is longer than most passwords): cut to the column
     ci_run_url = mask(meta.ci_run_url, patterns)[0]
     if ci_run_url is not None:
@@ -221,7 +222,17 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
                 "failed_step_pattern": step_pattern[:FAILED_STEP_PATTERN_LENGTH] if step_pattern is not None else None,
                 "log": log,
             })
-        db.execute(insert(RunResult), rows)  # one executemany, not 20,000 ORM objects
+        if log_patterns and any(row["log"] for row in rows):
+            # Values need each result's id: one executemany with RETURNING, in the order the rows were sent (ADR-032)
+            result_ids = db.execute(
+                insert(RunResult).returning(RunResult.id, sort_by_parameter_order=True), rows
+            ).scalars().all()
+            values = [value for result_id, row in zip(result_ids, rows)
+                      for value in log_value_service.rows_for(result_id, row["log"], log_patterns)]
+            if values:
+                db.execute(insert(LogValue), values)
+        else:
+            db.execute(insert(RunResult), rows)  # one executemany, not 20,000 ORM objects
 
         if upload.changes is not None and upload.changes.files:
             db.execute(insert(RunChangedFile), [
