@@ -203,6 +203,15 @@ button.ghost { background: transparent; border-color: transparent; }
 .page-narrow .card input:not([type="checkbox"], [type="radio"], [type="file"]) { width: 100%; }
 .page-narrow .card button.primary { width: 100%; justify-content: center; min-height: 38px; margin-top: var(--space-1); }
 .page-narrow .card > p.muted:last-child { margin-top: var(--space-4); text-align: center; }
+/* Sign in with Microsoft: full width like the primary, label centred, the four-square mark beside the wording */
+.sso-button { width: 100%; justify-content: center; min-height: 38px; margin-top: var(--space-2); }
+.page-narrow .card .sso-button.primary { margin-top: var(--space-1); }
+.sso-mark { flex: none; }
+.sso-google { margin-top: var(--space-2); }
+.sso-admin { margin-top: var(--space-4); }
+/* "or" between the password form and the providers: a hairline each side */
+.auth-divider { display: flex; align-items: center; gap: var(--space-3); margin: var(--space-4) 0 var(--space-1); font-size: 13px; }
+.auth-divider::before, .auth-divider::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
 .page-narrow h1 { margin-bottom: var(--space-4); }
 /* Inside a tile grid the grid gap owns the spacing. */
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: var(--space-3); margin: var(--space-4) 0; }

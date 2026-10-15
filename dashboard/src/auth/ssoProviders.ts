@@ -56,7 +56,9 @@ export async function initGoogleButton(
     client_id: GOOGLE_CLIENT_ID,
     callback: (response) => onCredential(response.credential),
   });
-  gis.renderButton(container, { theme: "outline", size: "large", width: 320 });
+  // Google draws the button at a fixed pixel width (200-400): the card's, so it does not overflow a phone
+  const width = Math.min(400, Math.max(200, container.clientWidth || 320));
+  gis.renderButton(container, { theme: "outline", size: "large", width });
 }
 
 /** Opens the MSAL popup and resolves with the Entra ID token. MSAL is

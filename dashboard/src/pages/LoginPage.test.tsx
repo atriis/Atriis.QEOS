@@ -4,7 +4,7 @@ import { Link, MemoryRouter, Routes, Route, useLocation } from "react-router-dom
 import { http, HttpResponse } from "msw";
 import { server } from "../test/server";
 import { isAuthenticated } from "../auth/tokens";
-import { googleEnabled, initGoogleButton, microsoftEnabled } from "../auth/ssoProviders";
+import { getMicrosoftCredential, googleEnabled, initGoogleButton, microsoftEnabled } from "../auth/ssoProviders";
 import LoginPage from "./LoginPage";
 
 vi.mock("../auth/ssoProviders", () => ({
@@ -98,6 +98,62 @@ test("Microsoft sign-in surfaces the backend's error detail", async () => {
   renderLogin();
   await userEvent.click(screen.getByRole("button", { name: /microsoft/i }));
   expect(await screen.findByText("Tenant not allowed")).toBeInTheDocument();
+});
+
+test("the Microsoft button carries the four-square mark, decorative, and centres its label", () => {
+  vi.mocked(microsoftEnabled).mockReturnValue(true);
+  renderLogin();
+  const button = screen.getByRole("button", { name: "Sign in with Microsoft" });
+  expect(button).toHaveClass("sso-button");
+  const mark = button.querySelector("svg");
+  expect(mark).toHaveAttribute("aria-hidden", "true");
+  expect(mark?.querySelectorAll("rect")).toHaveLength(4);
+  expect(screen.getByText("or").closest(".auth-divider")).toHaveAttribute("aria-hidden", "true");
+});
+
+test("while the Microsoft window is open the button waits and cannot be clicked again", async () => {
+  vi.mocked(microsoftEnabled).mockReturnValue(true);
+  let release!: (token: string) => void;
+  vi.mocked(getMicrosoftCredential).mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+  server.use(http.post("/api/v1/sso/microsoft", () =>
+    HttpResponse.json({ access_token: "acc", refresh_token: "ref-ms", token_type: "bearer" })));
+  renderLogin();
+  await userEvent.click(screen.getByRole("button", { name: "Sign in with Microsoft" }));
+  const waiting = await screen.findByRole("button", { name: "Opening Microsoft…" });
+  expect(waiting).toBeDisabled();
+  expect(getMicrosoftCredential).toHaveBeenCalledTimes(1);
+  await act(async () => { release("ms-id-token"); });
+  expect(await screen.findByText("PICKER")).toBeInTheDocument();
+});
+
+test("closing the Microsoft window shows no error and the button is ready again", async () => {
+  vi.mocked(microsoftEnabled).mockReturnValue(true);
+  vi.mocked(getMicrosoftCredential).mockRejectedValueOnce(Object.assign(new Error("User cancelled the flow."), { errorCode: "user_cancelled" }));
+  renderLogin();
+  await userEvent.click(screen.getByRole("button", { name: "Sign in with Microsoft" }));
+  expect(await screen.findByRole("button", { name: "Sign in with Microsoft" })).toBeEnabled();
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
+test("an MSAL failure names its code and the way back", async () => {
+  vi.mocked(microsoftEnabled).mockReturnValue(true);
+  vi.mocked(getMicrosoftCredential).mockRejectedValueOnce(Object.assign(new Error("AADSTS700016"), { errorCode: "popup_window_error" }));
+  renderLogin();
+  await userEvent.click(screen.getByRole("button", { name: "Sign in with Microsoft" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Microsoft sign-in failed (popup_window_error). Try again, or sign in with your password.");
+});
+
+test("SSO-only: an MSAL failure does not point at the password", async () => {
+  vi.mocked(microsoftEnabled).mockReturnValue(true);
+  methods({ password: false, providers: ["microsoft"] });
+  vi.mocked(getMicrosoftCredential).mockRejectedValueOnce(Object.assign(new Error("x"), { errorCode: "popup_window_error" }));
+  renderLogin();
+  // The normal form shows until /auth/methods answers: wait for the SSO-only card before clicking
+  await screen.findByText("Sign-in is through your Microsoft work account.");
+  await userEvent.click(screen.getByRole("button", { name: "Sign in with Microsoft" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Microsoft sign-in failed (popup_window_error). Try again.");
+  expect(screen.getByRole("alert")).not.toHaveTextContent("password");
 });
 
 test("Google button mounts and its credential posts to the API", async () => {

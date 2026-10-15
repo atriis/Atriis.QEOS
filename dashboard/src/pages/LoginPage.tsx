@@ -9,9 +9,11 @@ import {
   microsoftEnabled,
 } from "../auth/ssoProviders";
 import { isSsoOnly, ssoOnlyLine, useAuthMethods } from "../auth/useAuthMethods";
+import { isSsoCancelled, ssoFailure } from "../auth/ssoErrors";
 import { safeNext, withNext } from "../auth/redirect";
 import AuthShell from "../components/AuthShell";
 import ErrorBanner from "../components/ErrorBanner";
+import MicrosoftButton from "../components/MicrosoftButton";
 import TextField from "../components/TextField";
 
 export default function LoginPage() {
@@ -53,13 +55,20 @@ export default function LoginPage() {
     }
   }, [googleSlot]);
 
+  // The Microsoft window is open: the button waits, so a second click cannot start a second window
+  const [ssoBusy, setSsoBusy] = useState(false);
+
   async function onMicrosoft() {
     setError(null);
+    setSsoBusy(true);
     try {
       const credential = await getMicrosoftCredential();
       await finishSso("microsoft", credential);
     } catch (err) {
-      setError(err);
+      // Closing the Microsoft window is not a failure; an MSAL failure names its code and the way back
+      if (!isSsoCancelled(err)) setError(ssoFailure(err, !ssoOnly));
+    } finally {
+      setSsoBusy(false);
     }
   }
 
@@ -140,14 +149,10 @@ export default function LoginPage() {
           {expired && <p role="status" className="muted">Your session expired, sign in again.</p>}
           <p>{ssoOnlyLine(methods!.providers)}</p>
           {error != null && <ErrorBanner error={error} />}
-          {showMicrosoft && (
-            <button className="primary" type="button" onClick={onMicrosoft} style={{ width: "100%" }}>
-              Sign in with Microsoft
-            </button>
-          )}
-          {showGoogle && <div ref={setGoogleSlot} data-testid="google-button" style={{ marginTop: 8 }} />}
+          {showMicrosoft && <MicrosoftButton primary onClick={onMicrosoft} busy={ssoBusy} />}
+          {showGoogle && <div ref={setGoogleSlot} data-testid="google-button" className="sso-google" />}
           {/* Break-glass for superusers (ADR-031): closed by default, not advertised */}
-          <details className="more-filters" style={{ marginTop: 16 }}>
+          <details className="more-filters sso-admin">
             <summary>
               <ChevronRight size={14} aria-hidden="true" className="chevron" />
               Administrator sign-in
@@ -179,15 +184,10 @@ export default function LoginPage() {
         </button>
         {anySso && (
           <>
-            <p className="muted" style={{ textAlign: "center", margin: "16px 0 8px" }}>
-              or
-            </p>
-            {showGoogle && <div ref={setGoogleSlot} data-testid="google-button" />}
-            {showMicrosoft && (
-              <button type="button" onClick={onMicrosoft} style={{ width: "100%", marginTop: 8 }}>
-                Sign in with Microsoft
-              </button>
-            )}
+            {/* A hairline each side of the word, so the two ways in read as alternatives */}
+            <p className="auth-divider muted" aria-hidden="true"><span>or</span></p>
+            {showGoogle && <div ref={setGoogleSlot} data-testid="google-button" className="sso-google" />}
+            {showMicrosoft && <MicrosoftButton onClick={onMicrosoft} busy={ssoBusy} />}
           </>
         )}
         <p className="muted" style={{ marginBottom: 0 }}>
