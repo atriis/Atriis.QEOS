@@ -3,7 +3,7 @@ audit request. One line per object, streamed, so memory stays flat however large
 
     {"type": "export", "format": 1, "project_id": …, "exported_at": …}
     {"type": "run", …run fields, "changed_files": […], "components": […]}
-    {"type": "result", "run_id": …, …result fields}      (the run's results follow its run line)
+    {"type": "result", "run_id": …, …result fields, "log", "log_values": [{"pattern", "value"}]}      (the run's results follow its run line)
 """
 import json
 from datetime import date, datetime, timezone
@@ -11,10 +11,10 @@ from typing import Iterator
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, undefer
 
 from src.ingestion.api.deps import ProjectAccess, get_db, require_project_role
-from src.ingestion.models import Run, RunChangedFile, RunComponent, RunResult
+from src.ingestion.models import LogPattern, LogValue, Run, RunChangedFile, RunComponent, RunResult
 
 router = APIRouter()  # mounted at /projects/{project_id}/export
 
@@ -37,6 +37,21 @@ def _line(record: dict) -> bytes:
     return (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
 
 
+def _log_values_of_run(db: Session, run_id: int) -> dict:
+    """Each result's log values (ADR-032), patterns by name, values in log order."""
+    values: dict = {}
+    rows = (
+        db.query(LogValue.result_id, LogPattern.name, LogValue.value)
+        .join(LogPattern, LogPattern.id == LogValue.pattern_id)
+        .join(RunResult, RunResult.id == LogValue.result_id)
+        .filter(RunResult.run_id == run_id)
+        .order_by(LogValue.result_id, LogPattern.name, LogValue.position)
+    )
+    for result_id, name, value in rows:
+        values.setdefault(result_id, []).append({"pattern": name, "value": value})
+    return values
+
+
 def _export(db: Session, project_id: int) -> Iterator[bytes]:
     yield _line({
         "type": "export", "format": FORMAT_VERSION, "project_id": project_id,
@@ -55,8 +70,11 @@ def _export(db: Session, project_id: int) -> Iterator[bytes]:
             for c in db.query(RunComponent).filter_by(run_id=run_id).order_by(RunComponent.id)
         ]
         yield _line(record)
-        for result in db.query(RunResult).filter_by(run_id=run_id).order_by(RunResult.id).yield_per(1000):
-            yield _line({"type": "result", **_row(result, _RESULT_INTERNAL)})
+        values = _log_values_of_run(db, run_id)
+        results = (db.query(RunResult).options(undefer(RunResult.log)).filter_by(run_id=run_id)
+                   .order_by(RunResult.id).yield_per(1000))
+        for result in results:
+            yield _line({"type": "result", **_row(result, _RESULT_INTERNAL), "log_values": values.get(result.id, [])})
         db.expunge_all()  # keep the session from growing with every exported row
 
 

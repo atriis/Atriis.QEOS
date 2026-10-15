@@ -1517,7 +1517,8 @@ hold records who placed it, when, and why. **Release legal hold** ends it; the n
 pass then deletes anything older than the period.
 
 **Export.** Settings → **Data** → **Download all results** (owners and admins). It downloads
-every run and result as NDJSON (`qeos-project-<id>-<date>.ndjson`), masked as stored. Do this
+every run and result as NDJSON (`qeos-project-<id>-<date>.ndjson`), masked as stored. Each result line carries
+its `log` and `log_values` (`[{"pattern", "value"}]`). Do this
 before you delete a project or answer a data request. The Test results view and the Report also offer
 CSV downloads.
 

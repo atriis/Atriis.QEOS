@@ -273,3 +273,22 @@ def test_a_project_without_a_legal_hold_answer_stops_the_pass(db, session_factor
     answer([policy])
     assert run_job(session_factory) == 1
     assert remaining(db) == [old]
+
+
+def test_log_values_go_with_their_results(db, session_factory, answer, add_run):
+    from src.ingestion.models import LogPattern, LogValue
+
+    old, recent = add_run(1, 40), add_run(1, 5)
+    pattern = LogPattern(project_id=1, name="trip_id", pattern="x")
+    db.add(pattern)
+    db.flush()
+    for run_id in (old, recent):
+        result = db.query(RunResult).filter_by(run_id=run_id).one()
+        db.add(LogValue(result_id=result.id, pattern_id=pattern.id, position=0, value=str(run_id)))
+    db.commit()
+    answer([live(1, 30)])
+
+    assert run_job(session_factory) == 0
+
+    db.expire_all()
+    assert [v.value for v in db.query(LogValue)] == [str(recent)]

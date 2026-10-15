@@ -166,7 +166,7 @@ readable. Test names, suites, classes, files and branches are never changed.
 - Results stored before masking existed (or before a new rule) are re-masked on demand:
   `python -m src.ingestion.jobs.remask [--dry-run] [--project ID] [--batch-size N]`
   (`docker compose exec ingestion-service python -m src.ingestion.jobs.remask --dry-run`). It
-  walks results by id in committed batches (message, details and the failed step's text, definition and pattern; then run CI URLs and commit subjects), prints a JSON summary (`results_scanned`,
+  walks results by id in committed batches (message, details, the failed step's text, definition and pattern, and the log, whose log values are then read again; then run CI URLs and commit subjects), prints a JSON summary (`results_scanned`,
   `results_changed`, `runs_changed`, `kinds`), and is safe to repeat: masked text is skipped.
   Text that masking makes longer than 64 KB is cut back and marked `truncated`.
 
@@ -207,7 +207,8 @@ service runs it with `--loop`):
   percent-encode special characters).
 - Deletes runs uploaded (`created_at`) more than that many days ago. A deleted project's API keys
   are revoked at once; its runs are all deleted once it has been deleted for more than
-  `RETENTION_DELETED_GRACE_DAYS` (default 7) — until then a soft delete can still be undone.
+  `RETENTION_DELETED_GRACE_DAYS` (default 7) — until then a soft delete can still be undone. A run's results go
+  with their logs and log values.
 - A project on **legal hold** (`legal_hold: true` in the answer) loses nothing, whatever its age
   or deletion; its keys are still revoked if it is deleted (that deletes no data). Each pass
   reports `projects_held`. The field is required: an answer without it is untrustworthy.
@@ -276,7 +277,7 @@ labelled so it is never read as a full verdict:
 `GET /api/v1/projects/{id}/export` (owners and admins) streams everything stored for a project
 as NDJSON (`application/x-ndjson`, `attachment`): an `export` header line (`format: 1`), then each
 run (`type: run`, with its `changed_files` and `components`) followed by its results
-(`type: result`, with `failed_step_text`, `failed_step_line`, `failed_step_definition` and `failed_step_pattern`). Text is exported as stored, masked. For a legal request, or before deleting
+(`type: result`, with `failed_step_text`, `failed_step_line`, `failed_step_definition` and `failed_step_pattern`). Each result line carries its `log` and `log_values` (`[{"pattern", "value"}]`). Text is exported as stored, masked. For a legal request, or before deleting
 a project. The dashboard's Settings → Data has a download button.
 - `RETENTION_INTERVAL_HOURS` (default 24) between passes with `--loop`; `RETENTION_BATCH_SIZE`
   (default 500) runs per transaction. One pass at a time (PostgreSQL advisory lock).

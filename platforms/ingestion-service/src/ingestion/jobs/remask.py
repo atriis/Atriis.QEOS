@@ -2,7 +2,8 @@
 
     python -m src.ingestion.jobs.remask [--dry-run] [--project ID] [--batch-size N]
 
-For results stored before masking existed, or before a pattern was added. Masking skips what is
+For results stored before masking existed, or before a pattern was added. Message, details, the failed step and the
+log are re-masked; a log that changes has its log values read again. Masking skips what is
 already masked, so a second pass changes nothing and the command is safe to repeat. Rows are
 walked by id in batches, each committed on its own, so a long pass never holds one huge
 transaction and can be stopped and run again.
@@ -14,24 +15,25 @@ from collections import Counter
 from typing import List, Optional
 
 from sqlalchemy import or_
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, sessionmaker, undefer
 
 from src.ingestion.core.config import settings
 from src.ingestion.models import Run, RunResult
 from src.ingestion.models.run import FAILED_STEP_DEFINITION_LENGTH, FAILED_STEP_PATTERN_LENGTH, FAILED_STEP_TEXT_LENGTH
-from src.ingestion.service import masking_pattern_service
+from src.ingestion.service import log_pattern_service, log_value_service, masking_pattern_service
 from src.ingestion.service.ingest_service import CI_RUN_URL_LENGTH, COMMIT_MESSAGE_LENGTH, mask, truncate_utf8
 
 
 class _ProjectPatterns:
-    """Each project's custom patterns, loaded once per pass."""
+    """Each project's patterns (masking, or log-value with `load=log_pattern_service.compiled_for`), loaded once
+    per pass."""
 
-    def __init__(self, db: Session):
-        self.db, self.cache = db, {}
+    def __init__(self, db: Session, load=masking_pattern_service.compiled_for):
+        self.db, self.load, self.cache = db, load, {}
 
     def __call__(self, project_id: int) -> tuple:
         if project_id not in self.cache:
-            self.cache[project_id] = tuple(masking_pattern_service.compiled_for(self.db, project_id))
+            self.cache[project_id] = tuple(self.load(self.db, project_id))
         return self.cache[project_id]
 
 
@@ -46,7 +48,8 @@ def _remask_text(text: Optional[str], patterns: tuple, kinds: Counter) -> tuple[
 
 
 def _results_pass(
-    db: Session, project_id: Optional[int], batch_size: int, dry_run: bool, kinds: Counter, patterns_for: _ProjectPatterns
+    db: Session, project_id: Optional[int], batch_size: int, dry_run: bool, kinds: Counter,
+    patterns_for: _ProjectPatterns, log_patterns_for: _ProjectPatterns,
 ) -> tuple[int, int]:
     scanned = changed = 0
     last_id = 0
@@ -54,6 +57,7 @@ def _results_pass(
         query = (
             db.query(RunResult, Run.project_id)
             .join(Run, Run.id == RunResult.run_id)
+            .options(undefer(RunResult.log))
             .filter(RunResult.id > last_id)
         )
         if project_id is not None:
@@ -61,6 +65,7 @@ def _results_pass(
         batch = query.order_by(RunResult.id).limit(batch_size).all()
         if not batch:
             return scanned, changed
+        relogged: dict = {}
         for row, row_project in batch:
             scanned += 1
             patterns = patterns_for(row_project)
@@ -70,7 +75,9 @@ def _results_pass(
             step, step_changed, step_cut = _remask_text(row.failed_step_text, patterns, row_kinds)
             definition, definition_changed, definition_cut = _remask_text(row.failed_step_definition, patterns, row_kinds)
             pattern, pattern_changed, pattern_cut = _remask_text(row.failed_step_pattern, patterns, row_kinds)
-            if not (message_changed or details_changed or step_changed or definition_changed or pattern_changed):
+            log, log_changed, _ = _remask_text(row.log, patterns, row_kinds)
+            shown_changed = message_changed or details_changed or step_changed or definition_changed or pattern_changed
+            if not (shown_changed or log_changed):
                 continue
             changed += 1
             # A result counts once per kind, the way ingest's metrics count it
@@ -81,9 +88,16 @@ def _results_pass(
                 row.failed_step_definition = (definition[:FAILED_STEP_DEFINITION_LENGTH]
                                               if definition is not None else None)
                 row.failed_step_pattern = pattern[:FAILED_STEP_PATTERN_LENGTH] if pattern is not None else None
-                row.redacted = True
+                # `redacted` and `truncated` stay about the text the run page shows
+                row.redacted = row.redacted or shown_changed
                 row.truncated = (row.truncated or message_cut or details_cut or step_cut
                                  or definition_cut or pattern_cut)
+                if log_changed:
+                    row.log = log
+                    relogged.setdefault(row_project, []).append((row.id, log))
+        # A log that masking changed has its values read again: a value now hidden is no longer captured (ADR-032)
+        for row_project, items in relogged.items():
+            log_value_service.replace_values(db, items, log_patterns_for(row_project))
         last_id = batch[-1][0].id
         if dry_run:
             db.rollback()
@@ -122,7 +136,8 @@ def _runs_pass(
 def run_pass(db: Session, *, project_id: Optional[int], batch_size: int, dry_run: bool) -> dict:
     kinds: Counter = Counter()
     patterns_for = _ProjectPatterns(db)
-    scanned, results_changed = _results_pass(db, project_id, batch_size, dry_run, kinds, patterns_for)
+    log_patterns_for = _ProjectPatterns(db, log_pattern_service.compiled_for)
+    scanned, results_changed = _results_pass(db, project_id, batch_size, dry_run, kinds, patterns_for, log_patterns_for)
     runs_changed = _runs_pass(db, project_id, dry_run, kinds, patterns_for)
     return {
         "event": "remask",

@@ -159,3 +159,42 @@ def test_masking_that_lengthens_the_definition_is_cut_to_its_column(db, session_
     run_id = add_run(results=[("plain", None)], definitions={0: "x" * 480 + f" {SECRET}"})
     run_job(session_factory)
     assert len(results(db, run_id)[0].failed_step_definition) <= FAILED_STEP_DEFINITION_LENGTH
+
+
+def test_a_re_masked_log_has_its_values_read_again(db, session_factory, add_run):
+    from src.ingestion.models import LogPattern, LogValue
+
+    run_id = add_run(results=[("plain message", None)])
+    row = db.query(RunResult).filter_by(run_id=run_id).one()
+    row.log = f'tripId="42" GITHUB_TOKEN={SECRET}'
+    token = LogPattern(project_id=1, name="token", pattern=r"GITHUB_TOKEN=(\S+)")
+    trip = LogPattern(project_id=1, name="trip_id", pattern=r'tripId="(\d+)"')
+    db.add_all([token, trip])
+    db.flush()
+    db.add(LogValue(result_id=row.id, pattern_id=token.id, position=0, value=SECRET))  # stored before masking
+    db.commit()
+
+    assert run_job(session_factory) == 0
+
+    db.expire_all()
+    stored = db.query(RunResult).filter_by(run_id=run_id).one()
+    assert SECRET not in stored.log and "[REDACTED:" in stored.log
+    assert stored.redacted is False  # only the log changed; the run page's text did not
+    assert [(v.pattern_id, v.value) for v in db.query(LogValue)] == [(trip.id, "42")]
+
+
+def test_a_dry_run_leaves_the_log_and_its_values(db, session_factory, add_run):
+    from src.ingestion.models import LogPattern, LogValue
+
+    run_id = add_run(results=[("m", None)])
+    row = db.query(RunResult).filter_by(run_id=run_id).one()
+    row.log = f"GITHUB_TOKEN={SECRET}"
+    token = LogPattern(project_id=1, name="token", pattern=r"GITHUB_TOKEN=(\S+)")
+    db.add(token)
+    db.flush()
+    db.add(LogValue(result_id=row.id, pattern_id=token.id, position=0, value=SECRET))
+    db.commit()
+    assert run_job(session_factory, "--dry-run") == 0
+    db.expire_all()
+    assert SECRET in db.query(RunResult).filter_by(run_id=run_id).one().log
+    assert db.query(LogValue).count() == 1

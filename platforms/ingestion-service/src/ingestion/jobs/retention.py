@@ -20,13 +20,13 @@ from typing import Callable, Iterator, List, Optional
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Query, Session, sessionmaker
 
 from src.ingestion.core.config import settings
 from src.ingestion.jobs import heartbeat
-from src.ingestion.models import ApiKey, Run, RunResult
+from src.ingestion.models import ApiKey, LogValue, Run, RunResult
 
 RETENTION_PATH = "/internal/v1/projects/retention"
 LOCK_ID = 7_351_001  # any fixed number; only this job takes it
@@ -172,7 +172,10 @@ def _delete_in_batches(db: Session, runs: Query, batch_size: int) -> int:
         batch = [run_id for (run_id,) in runs.order_by(Run.id).limit(batch_size)]
         if not batch:
             return deleted
-        # Results first, explicitly: SQLite (the tests) does not enforce ON DELETE CASCADE by default
+        # Children first, explicitly: SQLite (the tests) does not enforce ON DELETE CASCADE by default. The results'
+        # log values (ADR-032), then the results
+        results = select(RunResult.id).where(RunResult.run_id.in_(batch))
+        db.query(LogValue).filter(LogValue.result_id.in_(results)).delete(synchronize_session=False)
         db.query(RunResult).filter(RunResult.run_id.in_(batch)).delete(synchronize_session=False)
         db.query(Run).filter(Run.id.in_(batch)).delete(synchronize_session=False)
         db.commit()

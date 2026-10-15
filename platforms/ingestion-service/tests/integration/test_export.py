@@ -75,3 +75,25 @@ def test_an_empty_project_exports_just_the_header(client, auth, project_role):
     project_role(role="admin", project_id=1)
     response = client.get(URL, headers=auth())
     assert [line["type"] for line in lines(response)] == ["export"]
+
+
+def test_the_log_and_its_values_are_exported(client, auth, project_role, stored, db):
+    from src.ingestion.models import LogPattern, LogValue
+
+    run_id = stored(1, "mine")
+    bad = db.query(RunResult).filter_by(run_id=run_id, name="mine bad").one()
+    bad.log = 'Trip id captured tripId="3960562" routeKey="wasToBos"'
+    trip = LogPattern(project_id=1, name="trip_id", pattern=r'tripId="(\d+)"')
+    route = LogPattern(project_id=1, name="route_key", pattern=r'routeKey="([^"]+)"')
+    db.add_all([trip, route])
+    db.flush()
+    db.add_all([LogValue(result_id=bad.id, pattern_id=trip.id, position=0, value="3960562"),
+                LogValue(result_id=bad.id, pattern_id=route.id, position=0, value="wasToBos")])
+    db.commit()
+    project_role(role="owner", project_id=1)
+
+    _, _, ok, bad_line = lines(client.get(URL, headers=auth()))
+    assert bad_line["log"] == 'Trip id captured tripId="3960562" routeKey="wasToBos"'
+    assert bad_line["log_values"] == [{"pattern": "route_key", "value": "wasToBos"},
+                                      {"pattern": "trip_id", "value": "3960562"}]
+    assert ok["log"] is None and ok["log_values"] == []
