@@ -34,6 +34,7 @@ function renderPage(role = "member") {
       </MemoryRouter>
     </QueryClientProvider>,
   );
+  return qc;
 }
 
 test("repositories come first, editable for members", async () => {
@@ -387,9 +388,11 @@ test("after deleting the project an owner lands on the project list", async () =
     http.get("/api/v1/projects/42/api-keys", () => HttpResponse.json([])),
     http.delete("/api/v1/projects/42", () => new HttpResponse(null, { status: 204 })),
   );
-  renderPage("owner");
+  const qc = renderPage("owner");
   await userEvent.click(await screen.findByRole("button", { name: "Delete project" }));
   await userEvent.type(screen.getByLabelText(/type the project name/i), "Web");
   await userEvent.click(screen.getByRole("button", { name: "Delete permanently in 7 days" }));
   expect(await screen.findByRole("heading", { name: "Project list" })).toBeInTheDocument();
+  // Back within the cache's minute must not show the live project from cache
+  expect(qc.getQueryData(["project", 42])).toBeUndefined();
 });

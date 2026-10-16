@@ -447,6 +447,8 @@ export default function ProjectSettingsPage() {
           onDeleted={() => {
             // Pending now: the project list shows it greyed (owners and admins) or not at all
             void qc.invalidateQueries({ queryKey: ["projects"] });
+            // Its cached copy is live and fresh for a minute: Back would show the project as if nothing happened
+            qc.removeQueries({ queryKey: ["project", id] });
             navigate("/");
           }}
         />
