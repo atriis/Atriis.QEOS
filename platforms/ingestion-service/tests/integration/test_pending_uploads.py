@@ -66,3 +66,35 @@ def test_the_feed_is_read_once_a_minute(client, make_key, feed):
     for _ in range(3):
         client.post(URL, json=upload_body(), headers=key_headers(key))
     assert route.call_count == 1
+
+
+def test_a_hanging_project_service_blocks_one_request_not_all(monkeypatch):
+    """Only the request that refreshes waits for the feed; the others use the last answer (fail open)."""
+    import threading
+
+    from src.ingestion.jobs import retention
+
+    monkeypatch.setattr(settings, "PROJECT_SERVICE_INTERNAL_URL", INTERNAL)
+    project_state.reset()
+    release = threading.Event()
+    started = threading.Event()
+
+    def hanging(endpoint, **kwargs):
+        started.set()
+        release.wait(5)
+        return []
+
+    monkeypatch.setattr(retention, "fetch_policies", hanging)
+    first = threading.Thread(target=project_state.is_pending, args=(1,))
+    first.start()
+    assert started.wait(2)
+    answered = []
+    second = threading.Thread(target=lambda: answered.append(project_state.is_pending(1)))
+    second.start()
+    second.join(1)
+    blocked = second.is_alive()
+    release.set()
+    first.join(5)
+    second.join(5)
+    project_state.reset()
+    assert not blocked and answered == [False]

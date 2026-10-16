@@ -174,7 +174,7 @@ bash deploy/init-env.sh localhost you@example.com
 | `EMAILS_FROM_NAME` | `QEOS` | Sender name. |
 | `IMPORT_MAX_FILES` | `2000` | Gherkin import: files per request. |
 | `IMPORT_MAX_FILE_BYTES` | `262144` | Gherkin import: size of one file. |
-| `PROJECT_DELETE_GRACE_DAYS` | `7` | Days a deleted project stays restorable before the retention job purges it everywhere ([4.7](#47-retention-legal-hold-and-export)). |
+| `PROJECT_DELETE_GRACE_DAYS` | `7` | Days a deleted project stays restorable before the retention job purges it everywhere ([4.7](#47-retention-legal-hold-and-export)). Compose also sets `TEST_MANAGEMENT_INTERNAL_URL` for that purge from `INTERNAL_API_PASSWORD`. |
 | `IMPORT_MAX_TOTAL_BYTES` | `10485760` | Gherkin import: all content in one request. |
 | `GATEWAY_IMPORT_MAX_BODY` | `25m` | Gateway body cap on the import path. Keep it about 2.5× `IMPORT_MAX_TOTAL_BYTES`. |
 | `VITE_GOOGLE_CLIENT_ID` | empty | Shows the Google button. Baked in at build time. See [3.8](#38-single-sign-on-google-and-microsoft). |

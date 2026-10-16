@@ -121,3 +121,22 @@ def test_a_pending_project_on_legal_hold_is_not_purged(db, session_factory, answ
     routes = services(1)
     assert run_job(session_factory) == 0
     assert routes["tm"].call_count == 0
+
+
+def test_a_database_error_in_one_purge_does_not_stop_the_others(db, session_factory, answer, add_run, services,
+                                                                 monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    from src.ingestion.jobs import purge
+
+    def broken(session, project_id, **kwargs):
+        raise OperationalError("DELETE FROM test_runs", {}, Exception("deadlock detected"))
+
+    monkeypatch.setattr(purge, "purge_ingestion", broken)
+    add_run(1, 1)
+    keep, old = add_run(2, 1), add_run(2, 400)
+    answer([gone(1, days_ago=8), live(2, 30)])
+    services(1)
+    assert run_job(session_factory) == 1  # reported
+    db.expire_all()
+    assert sorted(r.id for r in db.query(Run).filter(Run.project_id == 2)) == [keep]  # the live project's retention ran

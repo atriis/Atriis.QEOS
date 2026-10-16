@@ -271,8 +271,9 @@ services:
         condition: service_completed_successfully
       project-service:
         condition: service_healthy
+      # Started, not healthy: live projects' retention must not wait on it; a purge it cannot reach resumes later
       test-management-service:
-        condition: service_healthy
+        condition: service_started
 
   dashboard:
     build: *dashboard-build

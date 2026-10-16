@@ -78,9 +78,9 @@ def parse_internal_url(value: str, name: str = "PROJECT_SERVICE_INTERNAL_URL") -
     )
 
 
-def fetch_policies(endpoint: Endpoint) -> List[Policy]:
+def fetch_policies(endpoint: Endpoint, timeout: float = TIMEOUT_SECONDS) -> List[Policy]:
     try:
-        response = httpx.get(endpoint.url, auth=(endpoint.username, endpoint.password), timeout=TIMEOUT_SECONDS)
+        response = httpx.get(endpoint.url, auth=(endpoint.username, endpoint.password), timeout=timeout)
     except httpx.HTTPError as exc:
         raise RetentionError(f"cannot reach {endpoint.display}: {type(exc).__name__}: {exc}") from None
     if response.status_code != 200:
@@ -156,9 +156,11 @@ def run_pass(
             else:
                 try:
                     steps = purge(policy)
-                except RetentionError as exc:
+                except Exception as exc:  # a service refusal or a database error: this project only
+                    db.rollback()  # keep the session usable for the other projects
                     purge_failures += 1
-                    _log({"event": "purge_failed", "project_id": policy.project_id, "error": str(exc)}, error=True)
+                    error = str(exc) if isinstance(exc, RetentionError) else f"{type(exc).__name__}: {exc}"
+                    _log({"event": "purge_failed", "project_id": policy.project_id, "error": error}, error=True)
                     continue
                 if steps:
                     projects_purged += 1
