@@ -153,7 +153,7 @@ ORG_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
 check "create a project" 201 POST "$BASE/api/v1/organizations/$ORG_ID/projects" "${AUTH[@]}" \
   -H "Content-Type: application/json" -d "{\"name\":\"Smoke $SUFFIX\"}"
 PROJECT_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
-# Project deletion (ADR-033) on a throwaway project: pending (410), listed for the owner, restored
+# Project deletion (ADR-034) on a throwaway project: pending (410), listed for the owner, restored
 check "create a project to delete" 201 POST "$BASE/api/v1/organizations/$ORG_ID/projects" "${AUTH[@]}" \
   -H "Content-Type: application/json" -d "{\"name\":\"Smoke delete $SUFFIX\"}"
 DOOMED_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"

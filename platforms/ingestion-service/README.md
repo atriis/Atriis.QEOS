@@ -214,7 +214,7 @@ service runs it with `--loop`):
   percent-encode special characters).
 - Deletes runs uploaded (`created_at`) more than that many days ago. A run's results go with their logs and log
   values.
-- A **deleted** project (ADR-033) keeps everything, keys included, for `PROJECT_DELETE_GRACE_DAYS` (default 7):
+- A **deleted** project (ADR-034) keeps everything, keys included, for `PROJECT_DELETE_GRACE_DAYS` (default 7):
   it can still be restored as it was. After that the pass purges it in every service, each step recorded in
   project-service (`POST /internal/v1/projects/{id}/purge-state`) so a failed pass resumes: `started` (refused for
   a live project, and it blocks any later restore), test-management (`DELETE /internal/v1/projects/{id}` with

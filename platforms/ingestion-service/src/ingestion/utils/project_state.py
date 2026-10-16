@@ -1,4 +1,4 @@
-"""Which projects are pending deletion (ADR-033), read from project-service's internal feed and kept 60 s.
+"""Which projects are pending deletion (ADR-034), read from project-service's internal feed and kept 60 s.
 Uploads to them are refused. Fail open: without an answer, the last known one is used (none at first), so a
 project-service outage never stops CI uploads. The feed is read outside the lock by one request at a time; every
 other request meanwhile gets the last answer at once, so a hanging project-service delays one upload, not all."""

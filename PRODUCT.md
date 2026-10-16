@@ -67,7 +67,7 @@ yet.
   show them, copyable and optionally linked to an https page. Logs are stored masked and cut to 64 KB; adding a
   pattern re-scans the runs of the last 90 days. Needs collector 0.9.0 and a test repository that attaches its log
   lines to the scenario.
-- Project deletion (ADR-033): owners and admins delete a project from Settings › Data after typing its name; it
+- Project deletion (ADR-034): owners and admins delete a project from Settings › Data after typing its name; it
   stays restorable for 7 days (greyed in the project list, with Restore) and is then deleted in every service.
 - Access model: organization membership grants project access; roles are
   owner/admin/member/viewer/billing_manager (viewers and billing managers

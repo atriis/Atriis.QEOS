@@ -2,7 +2,7 @@
 
 Status: design agreed in conversation 2026-10-16; pending review of this written spec.
 Blueprint: Platform (project-service), Intelligence (ingestion retention), Execution (test-management), dashboard.
-New ADR-033 (replaces the 7-day grace described in SETUP §4.7).
+New ADR-034 (replaces the 7-day grace described in SETUP §4.7).
 
 ## 1. Goal and scope
 
@@ -106,7 +106,7 @@ heartbeat stays as today.
 
 ## 8. Documentation
 
-ADR-033. SETUP §4.7 (replace the 7-day text: delete, 7 days pending, restore, purge everywhere), SECURITY (data deletion), PRODUCT,
+ADR-034. SETUP §4.7 (replace the 7-day text: delete, 7 days pending, restore, purge everywhere), SECURITY (data deletion), PRODUCT,
 TECHNICAL_SPECIFICATION (endpoints, states, `PROJECT_DELETE_GRACE_DAYS`), DESIGN (dialog, greyed row, notice page),
 the project-service, ingestion and test-management READMEs, `.env.example`.
 

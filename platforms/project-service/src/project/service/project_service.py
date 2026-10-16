@@ -130,7 +130,7 @@ PURGE_STARTED = "The purge has started; this project can no longer be restored"
 
 
 def restore(db: Session, project: Project) -> Project:
-    """One conditional UPDATE against the purge job's "started" step (ADR-033): whichever commits first wins, and
+    """One conditional UPDATE against the purge job's "started" step (ADR-034): whichever commits first wins, and
     the other matches no row. Under READ COMMITTED a blocked UPDATE re-checks its WHERE after the other commits."""
     if project.purge_state:
         raise PurgeStarted(PURGE_STARTED)

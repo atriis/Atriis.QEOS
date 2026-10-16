@@ -143,7 +143,7 @@ def test_other_roles_never_see_pending_projects(client, auth, org_role, make_pro
 
 
 def test_restore_loses_to_a_purge_that_started_after_it_read_the_row(make_project, db):
-    """Restore and the purge's "started" race (ADR-033): the conditional UPDATE decides, not what Python read."""
+    """Restore and the purge's "started" race (ADR-034): the conditional UPDATE decides, not what Python read."""
     from sqlalchemy import text
 
     from src.project.service import project_service

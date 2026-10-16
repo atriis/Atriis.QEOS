@@ -21,7 +21,7 @@
 - API keys are **not** revoked during the 7 days (a restore brings them back); the purge deletes them.
 - Purge order, each step idempotent and recorded in `purge_state`: `started` → `test_management` → `ingestion` → project row. Recording `started` is the atomic check: project-service refuses it (409) for a live project, and refuses a restore once it is recorded, so a restore and a purge can never both win. The row goes last and only after both data steps are recorded.
 - Delete confirmation: the project name typed **exactly** (case-sensitive, trimmed input compared to the name).
-- Docs updated in the same commits as behaviour (ADR-033, SETUP §4.7, SECURITY, PRODUCT, TECHNICAL_SPECIFICATION, DESIGN, the three service READMEs, `.env.example`).
+- Docs updated in the same commits as behaviour (ADR-034, SETUP §4.7, SECURITY, PRODUCT, TECHNICAL_SPECIFICATION, DESIGN, the three service READMEs, `.env.example`).
 - Another session may work in this tree: `git add <paths>` then `git commit -o <paths> -m …`; never `git add -A`. Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Push only a SHA the user clears.
 - Every dashboard UI task starts by invoking the `ui-ux-pro-max` skill (project rule).
 - Never run the smoke script or migrations against the user's running stack (compose project `qeos`).
@@ -51,7 +51,7 @@ ingestion: `src/ingestion/core/config.py`, `src/ingestion/utils/project_client.p
 
 dashboard: `src/api/orgs.ts`, `src/components/DeleteProjectDialog.tsx` (new) + test, `src/components/DataCard.tsx`, `src/pages/PickerPage.tsx` + test, `src/pages/ProjectLayout.tsx`, `src/components/PendingDeletion.tsx` (new) + test, `src/index.css`.
 
-Repo: `docker-compose.yml`, `.env.example`, `scripts/smoke_gateway.sh`, `docs/architecture/adr/ADR-033-project-deletion.md` (new), `docs/architecture/adr/INDEX.md`, `docs/SETUP.md`, `SECURITY.md`, `PRODUCT.md`, `TECHNICAL_SPECIFICATION.md`, `DESIGN.md`, the three service READMEs.
+Repo: `docker-compose.yml`, `.env.example`, `scripts/smoke_gateway.sh`, `docs/architecture/adr/ADR-034-project-deletion.md` (new), `docs/architecture/adr/INDEX.md`, `docs/SETUP.md`, `SECURITY.md`, `PRODUCT.md`, `TECHNICAL_SPECIFICATION.md`, `DESIGN.md`, the three service READMEs.
 
 ---
 
@@ -1538,14 +1538,14 @@ export default function PendingDeletion({ projectId, info, canRestore }: { proje
 
 ---
 
-### Task 9: Docs, ADR-033, smoke, gate
+### Task 9: Docs, ADR-034, smoke, gate
 
-**Files:** `docs/architecture/adr/ADR-033-project-deletion.md` (new), `docs/architecture/adr/INDEX.md`, `docs/SETUP.md` (§4.7), `SECURITY.md`, `PRODUCT.md`, `TECHNICAL_SPECIFICATION.md`, `DESIGN.md`, `platforms/project-service/README.md`, `platforms/ingestion-service/README.md`, `platforms/test-management-service/README.md`, `.env.example`, `scripts/smoke_gateway.sh`.
+**Files:** `docs/architecture/adr/ADR-034-project-deletion.md` (new), `docs/architecture/adr/INDEX.md`, `docs/SETUP.md` (§4.7), `SECURITY.md`, `PRODUCT.md`, `TECHNICAL_SPECIFICATION.md`, `DESIGN.md`, `platforms/project-service/README.md`, `platforms/ingestion-service/README.md`, `platforms/test-management-service/README.md`, `.env.example`, `scripts/smoke_gateway.sh`.
 
-- [ ] **Step 1: ADR-033** — `docs/architecture/adr/ADR-033-project-deletion.md`:
+- [ ] **Step 1: ADR-034** — `docs/architecture/adr/ADR-034-project-deletion.md`:
 
 ```markdown
-# ADR-033: Project deletion — 7 days pending and restorable, then purged in every service
+# ADR-034: Project deletion — 7 days pending and restorable, then purged in every service
 
 Status: Accepted (2026-10-16) · Spec: `docs/superpowers/specs/2026-10-16-project-deletion-design.md`
 
@@ -1587,7 +1587,7 @@ logs, test cases, suites, keys, settings and the project itself). A project on l
 
 - [ ] **Step 5: Gate.** project-service, test-management, ingestion full suites; dashboard lint, typecheck, build, `npx vitest run --no-file-parallelism`; `python scripts/check_architecture_docs.py`; `bash -n scripts/smoke_gateway.sh`; migration 005 on PostgreSQL done in Task 1.
 
-- [ ] **Step 6: Commit** the docs and smoke with `docs: project deletion (ADR-033) — confirm, 7 days to restore, purge everywhere; smoke`.
+- [ ] **Step 6: Commit** the docs and smoke with `docs: project deletion (ADR-034) — confirm, 7 days to restore, purge everywhere; smoke`.
 
 ---
 

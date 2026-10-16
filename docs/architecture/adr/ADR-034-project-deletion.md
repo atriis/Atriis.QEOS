@@ -1,4 +1,4 @@
-# ADR-033: Project deletion — 7 days pending and restorable, then purged in every service
+# ADR-034: Project deletion — 7 days pending and restorable, then purged in every service
 
 Status: Accepted (2026-10-16) · Spec: `docs/superpowers/specs/2026-10-16-project-deletion-design.md`
 

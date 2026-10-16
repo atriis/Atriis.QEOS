@@ -38,7 +38,7 @@ per server IP, shared by every user.
 
 `PUT /api/v1/projects/{id}/legal-hold` `{"reason": "…"}` places a hold, and `DELETE` releases it.
 
-**Deleting a project** (ADR-033). `DELETE /api/v1/projects/{id}` (owners and admins; 409 under a legal hold)
+**Deleting a project** (ADR-034). `DELETE /api/v1/projects/{id}` (owners and admins; 409 under a legal hold)
 records `deleted_at` and `deleted_by`. For `PROJECT_DELETE_GRACE_DAYS` (default 7) the project is pending:
 `GET /api/v1/projects/{id}` answers 410 `{"detail": {"code": "pending_deletion", "organization_id", "deleted_at",
 "deleted_by", "purge_at"}}` to every member (404 to non-members), every other route of it answers 404,
@@ -96,7 +96,7 @@ personal layout per user, each a JSONB `layout` with a `version`.
 {"projects": [{"project_id": 7, "result_retention_days": 90, "deleted": false, "deleted_at": null, "legal_hold": false, "purge_state": null}]}
 ```
 
-The purge of a deleted project (ADR-033) uses two more routes, same credentials:
+The purge of a deleted project (ADR-034) uses two more routes, same credentials:
 
 - `POST /internal/v1/projects/{id}/purge-state` `{"step": "started" | "test_management" | "ingestion"}` records
   a confirmed step in `purge_state` (204). 409 for a live project, so a restored project is never purged; once

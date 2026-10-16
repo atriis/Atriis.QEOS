@@ -229,7 +229,7 @@ details.
   no container, and `CadvisorNoContainers` fires after 10 minutes.
 - **Data.** Per-project retention, legal hold and a full NDJSON export. Deleting a project (owners and admins,
   the name typed to confirm; refused under a legal hold) hides it at once and purges it in every service 7 days
-  later (ADR-033). Meanwhile its uploads answer 410 and owners and admins can restore it; the purge runs in
+  later (ADR-034). Meanwhile its uploads answer 410 and owners and admins can restore it; the purge runs in
   recorded steps over the internal APIs and never touches a restored project.
 - **Production package** (`deploy/`). A Caddy TLS edge with Let's Encrypt and
   HSTS is the only published service. Secrets are generated into a mode-600

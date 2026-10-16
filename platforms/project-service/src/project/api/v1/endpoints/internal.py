@@ -98,7 +98,7 @@ def record_purge_step(project_id: int, payload: PurgeStepIn, _: None = Depends(r
     project = _pending_or_error(db, project_id)
     state = {**(project.purge_state or {}), payload.step: datetime.now(timezone.utc).isoformat()}
     # Conditional on still being deleted: a restore that committed after the read above wins, and this matches no
-    # row (ADR-033). Only the job writes steps, one pass at a time, so the merge cannot lose another step.
+    # row (ADR-034). Only the job writes steps, one pass at a time, so the merge cannot lose another step.
     written = (
         db.query(Project)
         .filter(Project.id == project_id, Project.deleted_at.isnot(None))

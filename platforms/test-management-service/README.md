@@ -74,7 +74,7 @@ After deploying migration 003, run a full import once to fill Feature on existin
 
 `DELETE /internal/v1/projects/{project_id}` deletes every case, label, suite, feature file, run request and the CI
 target of one project (204, also when there is nothing). The ingestion retention job calls it when it purges a
-deleted project (ADR-033). HTTP Basic against `INTERNAL_API_USERNAME` (default `ingestion-service`) and
+deleted project (ADR-034). HTTP Basic against `INTERNAL_API_USERNAME` (default `ingestion-service`) and
 `INTERNAL_API_PASSWORD`: wrong or missing credentials answer 401, an unset password 503. The gateway does not
 route `/internal`, and the route is not in the OpenAPI schema.
 
