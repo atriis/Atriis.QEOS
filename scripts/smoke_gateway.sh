@@ -153,6 +153,17 @@ ORG_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
 check "create a project" 201 POST "$BASE/api/v1/organizations/$ORG_ID/projects" "${AUTH[@]}" \
   -H "Content-Type: application/json" -d "{\"name\":\"Smoke $SUFFIX\"}"
 PROJECT_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
+# Project deletion (ADR-033) on a throwaway project: pending (410), listed for the owner, restored
+check "create a project to delete" 201 POST "$BASE/api/v1/organizations/$ORG_ID/projects" "${AUTH[@]}" \
+  -H "Content-Type: application/json" -d "{\"name\":\"Smoke delete $SUFFIX\"}"
+DOOMED_ID="$(grep -o '"id":[0-9]*' "$TMP/body" | head -1 | cut -d: -f2)"
+check "delete it -> pending" 204 DELETE "$BASE/api/v1/projects/$DOOMED_ID" "${AUTH[@]}"
+check "a pending project answers 410" 410 GET "$BASE/api/v1/projects/$DOOMED_ID" "${AUTH[@]}"
+body_has "... with its purge date" '"pending_deletion"'
+check "owners list pending projects" 200 GET "$BASE/api/v1/organizations/$ORG_ID/projects?include_pending=true" "${AUTH[@]}"
+body_has "... including the deleted one" "Smoke delete $SUFFIX"
+check "restore it" 200 POST "$BASE/api/v1/projects/$DOOMED_ID/restore" "${AUTH[@]}"
+check "the restored project is back" 200 GET "$BASE/api/v1/projects/$DOOMED_ID" "${AUTH[@]}"
 # The smoke user owns the project, so its key may read test suggestions (spec 2026-10-13 §9): /collect/impact below
 check "create an API key -> ingestion-service (overlap route)" 201 POST \
   "$BASE/api/v1/projects/$PROJECT_ID/api-keys" "${AUTH[@]}" -H "Content-Type: application/json" \

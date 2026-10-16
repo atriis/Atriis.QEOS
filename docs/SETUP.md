@@ -151,7 +151,7 @@ bash deploy/init-env.sh localhost you@example.com
 | Variable | What it is | How to set it |
 |---|---|---|
 | `SECRET_KEY` | Signs and verifies every login token (JWT). All services share it. | Long and random (64 hex). Changing it later signs everyone out. API keys keep working. |
-| `INTERNAL_API_PASSWORD` | Shared secret for service-to-service APIs: auth ↔ organization (member checks and Entra app roles) and project ↔ retention job. | Letters and digits only. It goes inside a URL, so `@ : / %` break it. |
+| `INTERNAL_API_PASSWORD` | Shared secret for service-to-service APIs: auth ↔ organization (member checks and Entra app roles), project ↔ ingestion (retention, uploads to deleted projects) and test-management ↔ retention job (the purge of deleted projects). | Letters and digits only. It goes inside a URL, so `@ : / %` break it. |
 
 **Recommended.**
 
@@ -174,6 +174,7 @@ bash deploy/init-env.sh localhost you@example.com
 | `EMAILS_FROM_NAME` | `QEOS` | Sender name. |
 | `IMPORT_MAX_FILES` | `2000` | Gherkin import: files per request. |
 | `IMPORT_MAX_FILE_BYTES` | `262144` | Gherkin import: size of one file. |
+| `PROJECT_DELETE_GRACE_DAYS` | `7` | Days a deleted project stays restorable before the retention job purges it everywhere ([4.7](#47-retention-legal-hold-and-export)). |
 | `IMPORT_MAX_TOTAL_BYTES` | `10485760` | Gherkin import: all content in one request. |
 | `GATEWAY_IMPORT_MAX_BODY` | `25m` | Gateway body cap on the import path. Keep it about 2.5× `IMPORT_MAX_TOTAL_BYTES`. |
 | `VITE_GOOGLE_CLIENT_ID` | empty | Shows the Google button. Baked in at build time. See [3.8](#38-single-sign-on-google-and-microsoft). |
@@ -1578,8 +1579,13 @@ Invoke-RestMethod -Method Patch "https://localhost:8443/api/v1/projects/<project
 without MFA, or complete the challenge with `POST /api/v1/auth/mfa/verify`. PowerShell 5.1 needs
 the local certificate trusted in Windows, [2.7](#27-trust-the-local-https-certificate).)
 
-When a project is deleted, its API keys are revoked on the next retention pass, and its runs
-are deleted 7 days later. Until then, the deletion can still be undone.
+**Deleting a project.** Settings → **Data** → **Delete project** (owners and admins): type the
+project name to confirm. Members lose it at once; its pages show "This project is scheduled for
+deletion" with the date. For **7 days** (`PROJECT_DELETE_GRACE_DAYS`) owners and admins still see it
+in the project list, greyed, with **Restore**, which brings everything back as it was, API keys
+included. Uploads to it answer 410 meanwhile. After the 7 days the retention job deletes it everywhere:
+runs, results, logs, test cases, suites, keys, settings and the project itself. A project on legal hold
+cannot be deleted. If a new project took its name meanwhile, Restore asks you to rename that one first.
 
 **Legal hold.** Settings → **Data** → enter a **Reason** → **Place legal hold** (owners and
 admins). While a project is held, retention deletes **nothing** of it, whatever its age. The
@@ -1635,7 +1641,7 @@ cases ([4.2](#42-test-cases)). The tiles refresh at most once a minute.
 **Revoke or rotate an API key.** Settings → **API keys** → **Revoke**. Uploads that use it fail
 with 401 straight away. To rotate a key: create a new one, update the CI secret, check that
 **Last used** moves to the new key, then revoke the old one. Before you delete a project,
-revoke its keys or export its data.
+export its data: its keys stop working at once (410) and are deleted with it after 7 days.
 
 **Rotate the GitHub token (Run from QEOS).** Create a new fine-grained token
 ([4.3](#43-run-from-qeos-play-and-stop)). Settings → **Run from QEOS** → **Replace token** →

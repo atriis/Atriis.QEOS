@@ -569,6 +569,14 @@ Every signed-in page starts with `PageHeader`: the page name as the one `h1` (22
 ### Project Tile
 A Paper tile with a 10px radius, Hairline border and resting lift, holding a folder icon and the project name at 600. On hover the border turns Signal Cyan, with no lift and no underline.
 
+A project pending deletion (ADR-033; owners and admins only) is a recessed tile instead: Recessed Panel fill, a dashed strong border, no lift and Graphite text, not a link. It is a `role="group"` named "<name>, deletion pending" holding the name, a 12.5px line "Deletion pending · removed on 23 Oct 2026, 14:05 · deleted by <email>" and a default **Restore** button (no confirmation: it only undoes; its accessible name is "Restore <name>"). It is not faded, so its text and button keep full contrast. A refused restore (a live project took the name) shows an Error Banner under the grid.
+
+### Delete Project (Settings → Data)
+The last block of the Data card, owners and admins only, above a hairline: "Delete this project", one Graphite sentence (hidden at once, deleted permanently 7 days later, restorable meanwhile) and a default **Delete project** trigger with the trash icon. Under a legal hold the trigger is disabled and "Release the legal hold before deleting this project." follows it. It is the Destructive Confirmation pattern with one more part: the trigger swaps in place for a group named "Delete <name>?" with what is deleted and when, a pointer to **Download all results** above, a labelled field "Type the project name to confirm" that takes focus, the Danger confirm **Delete permanently in 7 days** (disabled until the name matches exactly, case included; Enter submits only then) and Cancel. Escape or Cancel backs out and returns focus to the trigger. A refusal is an Error Banner inside the group. On success the page goes to the project list.
+
+### Pending Deletion Notice
+A pending project's URLs show one card instead of the view: an h1 "This project is scheduled for deletion" with the trash icon in Graphite, "It will be deleted permanently on <date>, with its runs, results, logs, test cases, suites and settings.", then **Restore project** (primary) for owners and admins, or "Ask an owner or admin if this is a mistake." for everyone else. Restoring reloads the project and its view.
+
 ### Error Banner
 A 6px-radius box with a Danger Text border and text over a 6% failed-red tint, with an optional Retry button. It uses `role="alert"`. An Overview widget that throws while rendering keeps the failure inside its own card: its heading, then this banner saying "This widget failed to load" with Retry, while the other widgets keep working. Loading and empty states are plain Graphite sentences that say what is absent and how data arrives. They never show a zero in place of missing data.
 

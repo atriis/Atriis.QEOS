@@ -212,13 +212,20 @@ service runs it with `--loop`):
   `GET /internal/v1/projects/retention`, with the HTTP Basic credentials in
   `PROJECT_SERVICE_INTERNAL_URL` (`http://ingestion-service:<password>@project-service:8000`;
   percent-encode special characters).
-- Deletes runs uploaded (`created_at`) more than that many days ago. A deleted project's API keys
-  are revoked at once; its runs are all deleted once it has been deleted for more than
-  `RETENTION_DELETED_GRACE_DAYS` (default 7) — until then a soft delete can still be undone. A run's results go
-  with their logs and log values.
+- Deletes runs uploaded (`created_at`) more than that many days ago. A run's results go with their logs and log
+  values.
+- A **deleted** project (ADR-033) keeps everything, keys included, for `PROJECT_DELETE_GRACE_DAYS` (default 7):
+  it can still be restored as it was. After that the pass purges it in every service, each step recorded in
+  project-service (`POST /internal/v1/projects/{id}/purge-state`) so a failed pass resumes: `started` (refused for
+  a live project, and it blocks any later restore), test-management (`DELETE /internal/v1/projects/{id}` with
+  the credentials in `TEST_MANAGEMENT_INTERNAL_URL`), ingestion (runs, results, log values and patterns, masking
+  patterns, API keys, settings, channels, muted tests, rollups, impact data), then the project row
+  (`DELETE /internal/v1/projects/{id}` on project-service). One JSON line per project: `project_purged` with its
+  steps, `purge_skipped` (restored meanwhile, or `TEST_MANAGEMENT_INTERNAL_URL` unset) or `purge_failed`. A
+  failed purge makes the pass fail (exit 1, heartbeat error) after everything else was done. The summary counts
+  `projects_purged` and `purge_failures`.
 - A project on **legal hold** (`legal_hold: true` in the answer) loses nothing, whatever its age
-  or deletion; its keys are still revoked if it is deleted (that deletes no data). Each pass
-  reports `projects_held`. The field is required: an answer without it is untrustworthy.
+  or deletion. Each pass reports `projects_held`. The field is required: an answer without it is untrustworthy.
 - Without a trustworthy answer (unreachable, not 200, unexpected body) it deletes nothing and
   exits 1. Projects missing from the answer are never touched.
 - Each loop job (`retention`, `rollup`, `weekly_summary`, `impact_rollup`) records a heartbeat after every pass it
@@ -536,11 +543,13 @@ scoring missed its budget (p95 249 ms): reading the pairs of a change's units wa
   never: no successful (or no failed) pass has been recorded yet, so a job that has not succeeded yet looks stale.
   If the database read fails, the job series are left out and `job_heartbeat_read_errors_total` increases while
   `/metrics` keeps answering (the read has its own one-connection engine and a 2 s connect, pool and statement budget). Prometheus scrapes ingestion with `honor_labels: true` so `job` keeps the loop job's name.
-- Uploads never call another service; key management and reads need project-service (503 if it is down).
+- Uploads read project-service's internal feed at most once a minute: a key of a project pending deletion
+  answers 410 "Project scheduled for deletion" (`qav_ingest_rejected{reason="pending_deletion"}`). Without an
+  answer the last one is kept, so a project-service outage never stops uploads. Key management and reads need
+  project-service (503 if it is down).
 
 ## Known limitations
 
-- Deleting a project does not revoke its keys; revoke them first.
 - JSON only — parsing JUnit XML and other formats is the collector's job.
 
 ## Running locally

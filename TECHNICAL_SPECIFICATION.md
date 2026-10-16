@@ -113,7 +113,13 @@ Projects under organizations (access follows org roles), settings
 (GitHub, GitLab, Azure DevOps; checked against the provider's public API),
 legal hold (owner/admin, with a required reason; retention deletes nothing of a
 held project), internal retention endpoint (HTTP Basic, INTERNAL_API_PASSWORD)
-consumed by the retention job. Overview layouts (`/projects/{id}/overview-layout`):
+consumed by the retention job. Project deletion (ADR-033): `DELETE` records who and
+when (409 under a legal hold); a pending project answers 410 with `purge_at` on
+`GET /projects/{id}` (404 elsewhere), is listed with `include_pending=true` for
+owners/admins, `POST /projects/{id}/restore` undoes it (409 on a name taken
+meanwhile or once the purge started); internal `POST /internal/v1/projects/{id}/purge-state`
+and `DELETE /internal/v1/projects/{id}` drive the purge after
+`PROJECT_DELETE_GRACE_DAYS` (7). Overview layouts (`/projects/{id}/overview-layout`):
 GET resolves personal → project default → built-in; `PUT`/`DELETE /personal` for
 every role, `/project` for owner/admin; a save names its `version` (0 creates) and
 a stale one is a 409 carrying the stored row; layouts are validated against
@@ -191,7 +197,8 @@ a stale one is a 409 carrying the stored row; layouts are validated against
 - **Export**: `GET /projects/{id}/export` streams everything stored for a
   project as NDJSON.
 - **Jobs**: `ingestion-retention` (per-project retention, skips projects on
-  legal hold, empties deleted projects after a 7-day grace, pg advisory lock
+  legal hold, purges deleted projects in every service after
+  `PROJECT_DELETE_GRACE_DAYS` in recorded steps (ADR-033), pg advisory lock
   7351001); `analytics-rollup` (flaky_daily backfill ≤90 d + yesterday/today
   every 6 h, lock 7351002); `weekly-summary` (Mondays, once per channel per
   week, lock 7351003); `impact-rollup` (test impact statistics: impact_pairs

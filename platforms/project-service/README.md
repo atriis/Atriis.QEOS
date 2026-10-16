@@ -37,6 +37,14 @@ per server IP, shared by every user.
 ## Legal hold
 
 `PUT /api/v1/projects/{id}/legal-hold` `{"reason": "…"}` places a hold, and `DELETE` releases it.
+
+**Deleting a project** (ADR-033). `DELETE /api/v1/projects/{id}` (owners and admins; 409 under a legal hold)
+records `deleted_at` and `deleted_by`. For `PROJECT_DELETE_GRACE_DAYS` (default 7) the project is pending:
+`GET /api/v1/projects/{id}` answers 410 `{"detail": {"code": "pending_deletion", "organization_id", "deleted_at",
+"deleted_by", "purge_at"}}` to every member (404 to non-members), every other route of it answers 404,
+`GET /api/v1/organizations/{org}/projects?include_pending=true` lists it with `deletion` for owners and admins
+only, and `POST /api/v1/projects/{id}/restore` (owners and admins) brings it back: 409 when a live project now
+uses its name or slug, or once the purge has started.
 Both are for owners and admins only, and the reason is required. While held, retention deletes
 nothing of the project. Every `GET /projects/{id}` shows `legal_hold: {since, by, reason}`, or
 `null` when there is no hold. The hold is stored in its own columns, not in `settings`: settings
@@ -85,8 +93,16 @@ personal layout per user, each a JSONB `layout` with a `version`.
 `result_retention_days` and whether it is on legal hold, for ingestion-service's retention job:
 
 ```json
-{"projects": [{"project_id": 7, "result_retention_days": 90, "deleted": false, "deleted_at": null, "legal_hold": false}]}
+{"projects": [{"project_id": 7, "result_retention_days": 90, "deleted": false, "deleted_at": null, "legal_hold": false, "purge_state": null}]}
 ```
+
+The purge of a deleted project (ADR-033) uses two more routes, same credentials:
+
+- `POST /internal/v1/projects/{id}/purge-state` `{"step": "started" | "test_management" | "ingestion"}` records
+  a confirmed step in `purge_state` (204). 409 for a live project, so a restored project is never purged; once
+  `started` is recorded a restore answers 409.
+- `DELETE /internal/v1/projects/{id}` deletes the project row, its overview layouts and repositories (204, also
+  when already gone). 409 for a live project or while a data step is missing.
 
 - HTTP Basic, checked against `INTERNAL_API_USERNAME` (default `ingestion-service`) and
   `INTERNAL_API_PASSWORD`. Wrong or missing credentials: 401. A user's JWT is not accepted here,

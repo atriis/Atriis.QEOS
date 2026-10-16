@@ -116,7 +116,8 @@
 - [~] mTLS between agent and platform — collector side done (`--client-cert`/`--client-key`); server-side enforcement (nginx ssl_verify_client) is a deployment decision
 - [ ] Artifacts (screenshots, videos, traces, logs)
 - [x] Per-test history endpoints — analytics `tests/{test_key}/history`, dashboard History view
-- [x] Revoke a project's API keys when the project is deleted — done by the retention job
+- [x] Revoke a project's API keys when the project is deleted — superseded by project deletion (ADR-033): keys stay during the 7 days (uploads answer 410, a restore brings them back) and are deleted by the purge
+- [x] Project deletion (ADR-033, 2026-10-16) — Settings › Data, name typed to confirm, 7 days pending and restorable by owners and admins (greyed in the project list; members see a notice), then purged in test-management, ingestion and project-service in recorded, resumable steps
 - [x] Re-mask results stored before masking existed — `python -m src.ingestion.jobs.remask [--dry-run] [--project ID]`: id-ordered committed batches, JSON summary, idempotent; text lengthened past 64 KB is cut back and flagged. Pilot data (9,853 results) checked: nothing to change
 - [x] Custom masking patterns per project — project Settings → Masking: up to 20 RE2 patterns (linear time, no ReDoS; ADR-020), refused with a reason when invalid or matching empty text, named markers `[REDACTED:customer_id]`, a preview showing the sample exactly as it would be stored; applied at ingest and by the re-mask command, never across projects
 - [x] Legal hold and data export before deletion. In Settings → Data, owners and admins can place
