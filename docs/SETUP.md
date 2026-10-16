@@ -578,7 +578,7 @@ No optional claim is needed. The `roles` claim comes in the ID token by default.
 - Owners are always granted by hand.
 - When someone has several app roles, the highest mapped role wins.
 - Removing a mapping changes nobody until their next sign-in.
-- If organization-service was down at a sign-in, auth-service tries again at the next token refresh, within the hour.
+- If organization-service was down at a sign-in, auth-service tries again at the person's next token refresh. That is within the hour while they stay signed in, and at their next sign-in otherwise.
 
 auth-service needs two settings: `ORGANIZATION_SERVICE_URL` and `ORGANIZATION_INTERNAL_API_PASSWORD`.
 `docker-compose.yml` sets both. The password is your `INTERNAL_API_PASSWORD`, so `.env` needs no new

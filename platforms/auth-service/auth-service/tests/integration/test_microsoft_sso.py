@@ -533,12 +533,28 @@ def test_a_failed_retry_never_fails_the_refresh(client, db, microsoft_key, org_c
     assert client.post("/api/v1/auth/refresh-token", json={"refresh_token": first["refresh_token"]}).status_code == 200
 
 
+def test_a_database_error_in_the_retry_never_fails_the_refresh(client, db, microsoft_key, org_calls, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+    org_calls.status = 503
+    first = sign_in(client, ms_token(microsoft_key, roles=["QEOS.Admin"])).json()
+
+    def broken(db, link):
+        raise OperationalError("x", {}, None)
+
+    monkeypatch.setattr(org_roles_sync, "_push", broken)
+    refreshed = client.post("/api/v1/auth/refresh-token", json={"refresh_token": first["refresh_token"]})
+    assert refreshed.status_code == 200
+    assert refreshed.json()["access_token"] and refreshed.json()["refresh_token"] != first["refresh_token"]
+
+
 def test_linking_microsoft_pushes_the_roles(client, db, microsoft_key, org_calls, register_and_verify):
     login = register_and_verify("bob@example.com")
     linked = client.post(LINK, json={"credential": ms_token(microsoft_key, roles=["QEOS.Viewer"]),
                                      "current_password": "securepassword123"}, headers=bearer(login))
     assert linked.status_code == 200
     assert org_calls[-1][2] == {"user_id": linked.json()["id"], "roles": ["QEOS.Viewer"]}
+    link = db.query(OAuthAccount).one()
+    assert link.sso_roles == ["QEOS.Viewer"] and link.sso_roles_synced_at is not None
 
 
 def test_without_the_password_nothing_is_pushed(client, db, microsoft_key, org_calls, monkeypatch):

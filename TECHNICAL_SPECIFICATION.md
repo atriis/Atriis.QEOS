@@ -83,6 +83,11 @@ Grafana; its `/monitoring?next=` page does the same when the gateway sends a coo
   and service tokens are rejected). `/internal/v1/users[/{id}]` (HTTP Basic,
   INTERNAL_API_PASSWORD; not routed by the gateway) serves organization-service.
   organization-service has its own internal API (`/internal/v1/sso-roles`, section 2.2).
+- Entra app roles (ADR-033, migration 009): `oauth_accounts` gains `sso_roles` (JSON),
+  `sso_roles_at` and `sso_roles_synced_at`. After each Microsoft sign-in and link, auth-service
+  posts the token's roles to organization-service's `/internal/v1/sso-roles` (HTTP Basic, user
+  `auth-service`, 5 s timeout; settings `ORGANIZATION_SERVICE_URL` and
+  `ORGANIZATION_INTERNAL_API_PASSWORD`). A failed push is logged and retried at the next token refresh.
 
 ### 2.2 organization-service
 Organizations (soft delete), members (owner/admin/member/viewer/

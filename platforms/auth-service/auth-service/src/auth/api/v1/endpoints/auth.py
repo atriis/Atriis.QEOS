@@ -401,14 +401,15 @@ def refresh_access_token(
         )
 
 
-    # A Microsoft sign-in whose app roles never reached organization-service: try again (ADR-033)
-    org_roles_sync.retry_pending(db, user.id)
-
     # Issue new tokens
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     access_token = AuthService.create_access_token_for_user(user, expires_delta=access_token_expires)
     new_refresh_token = AuthService.create_user_session(db, user).token
     set_refresh_cookie(response, new_refresh_token)
+
+    # A Microsoft sign-in whose app roles never reached organization-service: try again (ADR-033).
+    # After the new session exists, so a slow or failing retry cannot cost the person their refresh
+    org_roles_sync.retry_pending(db, user.id)
 
     return {
         "access_token": access_token,

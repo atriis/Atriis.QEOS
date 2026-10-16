@@ -97,6 +97,9 @@ details.
   hand-made members are never touched. Managed members cannot be removed by hand (409). The internal
   endpoint `POST /internal/v1/sso-roles` uses HTTP Basic, answers 503 while its password is empty, and is
   never routed by the gateway. Each change is logged at INFO with organization, user, old and new role.
+  auth-service pushes the roles with HTTP Basic, using `ORGANIZATION_INTERNAL_API_PASSWORD`, over the internal
+  network. With an empty password it stores the roles but never applies them, and start-up logs a WARNING.
+  A failed push logs only the exception class or the HTTP status, never credentials, and never blocks sign-in.
 - **Access control.** Organisation roles (owner, admin, member, viewer,
   billing_manager) checked on every request; project access follows the
   organisation role; non-members get 404.

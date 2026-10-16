@@ -55,14 +55,19 @@ def record_and_push(db: Session, link: Optional[OAuthAccount], roles: list[str])
 
 
 def retry_pending(db: Session, user_id: int) -> None:
-    """At a token refresh: push again when the last roles never reached organization-service."""
-    link = db.query(OAuthAccount).filter(OAuthAccount.user_id == user_id, OAuthAccount.provider == "microsoft").first()
-    if link is None or link.sso_roles_at is None:
-        return
-    synced = link.sso_roles_synced_at
-    if synced is not None and _aware(synced) >= _aware(link.sso_roles_at):
-        return
-    _push(db, link)
+    """At a token refresh: push again when the last roles never reached organization-service. Never raises."""
+    try:
+        link = db.query(OAuthAccount).filter(
+            OAuthAccount.user_id == user_id, OAuthAccount.provider == "microsoft").first()
+        if link is None or link.sso_roles_at is None:
+            return
+        synced = link.sso_roles_synced_at
+        if synced is not None and _aware(synced) >= _aware(link.sso_roles_at):
+            return
+        _push(db, link)
+    except Exception as exc:  # a database error here must not fail the refresh
+        db.rollback()
+        logger.warning("entra role sync deferred: user=%s reason=%s", user_id, type(exc).__name__)
 
 
 def _aware(value: datetime) -> datetime:
