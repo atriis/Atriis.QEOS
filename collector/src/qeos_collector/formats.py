@@ -299,10 +299,16 @@ def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] =
             message = str(result.get("error_message") or "")
             keyword, step_text = f"{stopped_at.get('keyword', '')}", f"{stopped_at.get('name', '')}"
             step_name = f"{keyword}{step_text}".strip()
-            # A failed step's message is its error; a skipped scenario's says why it stopped, Cucumber's text in details
-            headline = _first_line(message) if status == "failed" else _SKIP_REASONS.get(
-                str(result.get("status") or ""), "Skipped")
-            _attach(row, headline, "\n".join(part for part in (step_name, message.strip()) if part))
+            if status == "failed":
+                # A failed step's message is its error's first line; details hold the step and the whole error
+                _attach(row, _first_line(message), "\n".join(part for part in (step_name, message.strip()) if part))
+            else:
+                # A skipped scenario's message says why it stopped: what the test attached to that step as text (a
+                # known-error note, whole, every line), else the step's status; details add Cucumber's own text
+                reason = _SKIP_REASONS.get(str(result.get("status") or ""), "Skipped")
+                note = "\n".join(text.strip() for text in _step_texts(stopped_at) if text.strip())
+                _attach(row, note or reason,
+                        "\n".join(part for part in (step_name, reason, note, message.strip()) if part))
             if step_name:
                 entry = {"text": step_name[:STEP_TEXT_LENGTH]}
                 line = stopped_at.get("line")

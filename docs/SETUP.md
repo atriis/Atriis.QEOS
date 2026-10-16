@@ -1173,9 +1173,11 @@ stack on `https://localhost:8443`, add `--ca-file qeos-ca.crt` ([4.1.3](#413-col
   Outline case is linked to its first example row only, so its pill and failed step come from that
   row. Hand-written cases (not imported from a .feature file) show the last-result pill but no red
   step. A skipped scenario is marked the same way in yellow at the step it stopped at (an undefined,
-  pending or ambiguous step, or its first step when a hook skipped it), with the reason ("Undefined
-  step") where the error would be, and "Skipped in Background" on the feature card; this needs the
-  collector 0.9.1 or later, older uploads show a skipped pill and no marked step.
+  pending or ambiguous step, or its first step when a hook skipped it), with the reason where the
+  error would be: what the test attached to that step as text (for example a note saying a known
+  booking error blocked the booking; collector 0.9.3), else the step's status ("Undefined step"),
+  and "Skipped in Background" on the feature card; this needs the collector 0.9.1 or later, older
+  uploads show a skipped pill and no marked step.
 - **Failed steps across test cases** (run page, the **Failed steps** card under **Failures by cause**, and
   one extra line in the failed-step tooltip): each failed Cucumber step is listed once, the one in the
   most test cases first. A row shows the step, "failed in N test cases" and "failing since run #430,

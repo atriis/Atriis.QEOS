@@ -530,9 +530,11 @@ showing up, but its failures stop counting. With `--gate`, the collector decides
   1000 characters, `line` omitted when the report has none); the other formats send none.
   From 0.9.1 a skipped scenario carries `failed_step` too: the step it stopped at, the first that did not pass
   (undefined, pending, ambiguous, or skipped when a hook skipped the scenario before any step ran), in the same
-  shape (text, line, definition, pattern), with `message` saying why ("Undefined step", "Pending step",
-  "Ambiguous step" or "Skipped") and `details` holding the step and Cucumber's own text when it has one. A skipped
-  scenario with no steps sends neither. Any platform that takes `failed_step` (migration 021) stores it.
+  shape (text, line, definition, pattern), with `message` saying why: from 0.9.3 what the test attached to that
+  step as text (its `text/plain` or `text/x.cucumber.log+plain` attachments, whole, joined by newlines, so a note
+  like "BOOKING_ERROR: a known booking error modal blocked the booking…" is the message), else the step's status
+  ("Undefined step", "Pending step", "Ambiguous step" or "Skipped"); `details` hold the step, the status, that note
+  and Cucumber's own text when it has one. A skipped scenario with no steps sends neither. Any platform that takes `failed_step` (migration 021) stores it.
   collector 0.6.0 sends `failed_step`; it needs a platform with ingestion migration 021, so upgrade the platform first (an older platform answers 422 and the run is not stored; this holds for 0.8.0 too, which still sends `failed_step`).
   From 0.8.0 it also carries `definition`, the step definition that ran the step (Cucumber's `match.location`, cut to 500 characters, left out when the report has none), and `pattern`, the step text with each matched argument replaced by `{…}` (`When I search {…}`, cut to 1000 characters; the text itself when the report lists no arguments, as cucumber-js's does, or they do not fit the text). QEOS uses them to group one step's failures across test cases.
   Collector 0.8.0 also works with a platform that has migration 021 but not 022 (the one that adds these two fields): that platform answers 422 naming `failed_step.definition` or `failed_step.pattern`, and the collector then sends the upload once more without `definition` and `pattern`, under the same Idempotency-Key, and logs one line saying the platform is older than the collector. No other 422 is retried (a platform without migration 021 refuses `failed_step` itself, so there is nothing to strip); uploads saved with `--spool` get the same retry when they are resent.

@@ -164,7 +164,7 @@ def test_a_skipped_scenario_names_the_step_that_stopped_it(tmp_path, status, rea
     assert rows[0]["status"] == "skipped"
     assert rows[0]["failed_step"] == {"text": "When I search Lisbon", "line": 5, "pattern": "When I search Lisbon"}
     assert rows[0]["message"] == reason
-    assert rows[0]["details"] == "When I search Lisbon"
+    assert rows[0]["details"] == "When I search Lisbon\n" + reason
 
 
 def test_a_scenario_skipped_before_any_step_ran_names_its_first_step(tmp_path):
@@ -178,7 +178,47 @@ def test_a_scenario_skipped_before_any_step_ran_names_its_first_step(tmp_path):
 def test_the_stopping_step_keeps_cucumbers_own_message_in_details(tmp_path):
     rows = parse_cucumber(tmp_path, steps=[step("When ", "x", 5, "pending", "TODO: implement me")])
     assert rows[0]["message"] == "Pending step"
-    assert rows[0]["details"] == "When x\nTODO: implement me"
+    assert rows[0]["details"] == "When x\nPending step\nTODO: implement me"
+
+
+BOOKING_NOTE = ("BOOKING_ERROR:[Checkout.bookAndFinalize] A known booking error modal blocked the booking, so the "
+                "booking was never confirmed and the scenario was skipped. Supplier response: The selected rate "
+                "changed from 113.87 USD to 133.52 USD. Please review and change selection")
+
+
+def test_what_the_stopping_step_attached_is_the_reason(tmp_path):
+    """The test wrote why it stopped as a text attachment on the step (a text/plain note): that is the message,
+    whole, so the reader sees why, not only "Pending step"."""
+    stopped = step("And ", "I complete the booking", 22, "pending")
+    stopped["embeddings"] = [{"data": b64(BOOKING_NOTE), "mime_type": "text/plain"}]
+    rows = parse_cucumber(tmp_path, steps=[step("Given ", "a trip", 20, "passed"), stopped,
+                                           step("Then ", "the booking confirms", 23, "skipped")])
+    assert rows[0]["status"] == "skipped"
+    assert rows[0]["message"] == BOOKING_NOTE
+    assert rows[0]["details"] == "And I complete the booking\nPending step\n" + BOOKING_NOTE
+    assert rows[0]["failed_step"]["text"] == "And I complete the booking"
+    assert rows[0]["log"] == BOOKING_NOTE
+
+
+def test_several_notes_on_the_stopping_step_join_and_images_do_not_count(tmp_path):
+    stopped = step("When ", "x", 5, "skipped")
+    stopped["embeddings"] = [{"data": b64("first line "), "mime_type": "text/x.cucumber.log+plain"},
+                             {"data": b64(b"\x89PNG"), "mime_type": "image/png"},
+                             {"data": b64("second"), "mime_type": "text/plain"}]
+    rows = parse_cucumber(tmp_path, steps=[stopped])
+    assert rows[0]["message"] == "first line\nsecond"
+
+
+def test_a_blank_note_on_the_stopping_step_falls_back_to_the_status(tmp_path):
+    stopped = step("When ", "x", 5, "undefined")
+    stopped["embeddings"] = [{"data": b64("   \n"), "mime_type": "text/plain"}]
+    assert parse_cucumber(tmp_path, steps=[stopped])[0]["message"] == "Undefined step"
+
+
+def test_a_failed_step_keeps_its_error_as_the_message_even_with_a_note(tmp_path):
+    failed = step("When ", "x", 5, "failed", "AssertionError: nope")
+    failed["embeddings"] = [{"data": b64("some note"), "mime_type": "text/plain"}]
+    assert parse_cucumber(tmp_path, steps=[failed])[0]["message"] == "AssertionError: nope"
 
 
 def test_a_skipped_scenario_without_steps_has_no_step(tmp_path):
