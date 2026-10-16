@@ -5,15 +5,18 @@ import { apiBlob } from "../api/http";
 import { Project, placeLegalHold, releaseLegalHold } from "../api/orgs";
 import { downloadBlob } from "../lib/csv";
 import ConfirmButton from "./ConfirmButton";
+import DeleteProjectDialog from "./DeleteProjectDialog";
 import ErrorBanner from "./ErrorBanner";
 
 interface Props {
   project: Project;
-  /** Owners and admins: legal hold and export. */
+  /** Owners and admins: legal hold, export and deleting the project. */
   canManage: boolean;
+  /** After the project was deleted (it is pending for 7 days): leave its pages. */
+  onDeleted?: () => void;
 }
 
-export default function DataCard({ project: initial, canManage }: Props) {
+export default function DataCard({ project: initial, canManage, onDeleted }: Props) {
   const qc = useQueryClient();
   const [project, setProject] = useState(initial);
   const [reason, setReason] = useState("");
@@ -115,9 +118,11 @@ export default function DataCard({ project: initial, canManage }: Props) {
             </span>
           </div>
           {exporting.error != null && <ErrorBanner error={exporting.error} />}
+
+          <DeleteProjectDialog project={project} onDeleted={onDeleted ?? (() => {})} />
         </>
       ) : (
-        <p className="muted">Only owners and admins can place a legal hold or export the data.</p>
+        <p className="muted">Only owners and admins can place a legal hold, export the data or delete the project.</p>
       )}
     </div>
   );

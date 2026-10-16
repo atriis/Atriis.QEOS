@@ -14,6 +14,15 @@ export interface Project {
   my_role?: string;
   settings?: { result_retention_days: number };
   legal_hold?: LegalHold | null;
+  /** Set while the project is pending deletion (owners and admins see it with include_pending). */
+  deletion?: Deletion | null;
+}
+
+/** A pending deletion (spec 2026-10-16): restorable by owners and admins until purge_at. */
+export interface Deletion {
+  deleted_at: string;
+  deleted_by: number | null;
+  purge_at: string;
 }
 
 export interface LegalHold {
@@ -138,8 +147,28 @@ export function acceptInvitation(token: string): Promise<Member> {
   return apiFetch(`/api/v1/invitations/${encodeURIComponent(token)}/accept`, { method: "POST" });
 }
 
-export function listProjects(orgId: number): Promise<Project[]> {
-  return apiFetch(`/api/v1/organizations/${orgId}/projects`);
+/** `includePending` also lists projects pending deletion; project-service honours it for owners and admins only. */
+export function listProjects(orgId: number, opts: { includePending?: boolean } = {}): Promise<Project[]> {
+  return apiFetch(`/api/v1/organizations/${orgId}/projects${opts.includePending ? "?include_pending=true" : ""}`);
+}
+
+/** Pending deletion for PROJECT_DELETE_GRACE_DAYS (7), restorable by owners and admins, then purged everywhere. */
+export function deleteProject(projectId: number): Promise<void> {
+  return apiFetch(`/api/v1/projects/${projectId}`, { method: "DELETE" });
+}
+
+export function restoreProject(projectId: number): Promise<Project> {
+  return apiFetch(`/api/v1/projects/${projectId}/restore`, { method: "POST" });
+}
+
+// Fixed names: Intl's en-GB says "Sept" in newer ICU (as in lib/period)
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "23 Oct 2026, 14:05" in the reader's time zone. */
+export function formatPurgeDate(iso: string): string {
+  const d = new Date(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export function getProject(projectId: number): Promise<Project> {

@@ -1,5 +1,5 @@
 import { useId, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiKey, ApiKeyCreated, createKey, listKeys, revokeKey, updateKey } from "../api/keys";
 import { getProject } from "../api/orgs";
@@ -209,6 +209,7 @@ export default function ProjectSettingsPage() {
   const { projectId } = useParams();
   const id = Number(projectId);
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [canReadImpact, setCanReadImpact] = useState(false);
   const impactHint = useId();
@@ -440,7 +441,15 @@ export default function ProjectSettingsPage() {
         <NotificationsCard projectId={id} projectName={project.data.name} canEdit={canEdit} />
       )}
       {project.data != null && (
-        <DataCard project={project.data} canManage={MANAGE_ROLES.includes(project.data.my_role ?? "")} />
+        <DataCard
+          project={project.data}
+          canManage={MANAGE_ROLES.includes(project.data.my_role ?? "")}
+          onDeleted={() => {
+            // Pending now: the project list shows it greyed (owners and admins) or not at all
+            void qc.invalidateQueries({ queryKey: ["projects"] });
+            navigate("/");
+          }}
+        />
       )}
     </section>
   );

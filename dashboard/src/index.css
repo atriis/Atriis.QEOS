@@ -336,6 +336,14 @@ input.mono { font-family: var(--font-mono); }
 .export-row { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; border-top: 1px solid var(--grid); margin-top: var(--space-4); padding-top: var(--space-4); }
 .export-row button { display: inline-flex; align-items: center; gap: var(--space-2); }
 .export-row .muted { flex: 1 1 260px; font-size: 13px; }
+/* Settings -> Data: deleting the project (spec 2026-10-16). Destructive Confirmation in place, with the name typed */
+.danger-zone { border-top: 1px solid var(--grid); margin-top: var(--space-5); padding-top: var(--space-4); }
+.danger-zone > button { display: inline-flex; align-items: center; gap: var(--space-2); }
+.delete-confirm { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); max-width: 560px; }
+.delete-confirm p { margin: 0; }
+.delete-confirm-title { font-weight: 600; }
+.delete-confirm input { width: 100%; max-width: 360px; }
+.delete-confirm .button-row { margin-top: var(--space-1); }
 .preview-result pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: var(--space-1) 0 0; max-width: 560px; }
 .success-note { display: flex; gap: var(--space-2); align-items: flex-start; margin: 0 0 var(--space-3); }
 .success-note svg { color: var(--status-passed); flex-shrink: 0; margin-top: 2px; }

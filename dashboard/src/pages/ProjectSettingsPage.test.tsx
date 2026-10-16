@@ -29,6 +29,7 @@ function renderPage(role = "member") {
       <MemoryRouter initialEntries={["/projects/42/settings"]}>
         <Routes>
           <Route path="/projects/:projectId/settings" element={<ProjectSettingsPage />} />
+          <Route path="/" element={<h1>Project list</h1>} />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -379,4 +380,16 @@ test("the Log values card follows Masking", async () => {
   await screen.findByRole("heading", { level: 2, name: "Log values" });
   const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
   expect(headings.indexOf("Log values")).toBe(headings.indexOf("Masking") + 1);
+});
+
+test("after deleting the project an owner lands on the project list", async () => {
+  server.use(
+    http.get("/api/v1/projects/42/api-keys", () => HttpResponse.json([])),
+    http.delete("/api/v1/projects/42", () => new HttpResponse(null, { status: 204 })),
+  );
+  renderPage("owner");
+  await userEvent.click(await screen.findByRole("button", { name: "Delete project" }));
+  await userEvent.type(screen.getByLabelText(/type the project name/i), "Web");
+  await userEvent.click(screen.getByRole("button", { name: "Delete permanently in 7 days" }));
+  expect(await screen.findByRole("heading", { name: "Project list" })).toBeInTheDocument();
 });
