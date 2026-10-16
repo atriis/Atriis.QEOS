@@ -1,9 +1,11 @@
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from src.project.core.config import settings
 from src.project.models.project import Project
 from src.project.schemas.project import ProjectCreate, ProjectUpdate
 from src.project.schemas.settings import merge_settings
@@ -56,15 +58,11 @@ def create_project(db: Session, org_id: int, user_id: int, data: ProjectCreate) 
     return project
 
 
-def list_projects(db: Session, org_id: int, limit: int, offset: int) -> list[Project]:
-    return (
-        db.query(Project)
-        .filter(Project.organization_id == org_id, Project.deleted_at.is_(None))
-        .order_by(Project.id)
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+def list_projects(db: Session, org_id: int, limit: int, offset: int, include_pending: bool = False) -> list[Project]:
+    query = db.query(Project).filter(Project.organization_id == org_id)
+    if not include_pending:
+        query = query.filter(Project.deleted_at.is_(None))
+    return query.order_by(Project.id).offset(offset).limit(limit).all()
 
 
 def update_project(db: Session, project: Project, data: ProjectUpdate) -> Project:
@@ -99,6 +97,42 @@ def release_legal_hold(db: Session, project: Project) -> Project:
     return project
 
 
-def soft_delete(db: Session, project: Project) -> None:
+class LegalHoldActive(Exception):
+    pass
+
+
+class PurgeStarted(Exception):
+    pass
+
+
+def purge_at(project: Project) -> datetime:
+    deleted_at = project.deleted_at if project.deleted_at.tzinfo else project.deleted_at.replace(tzinfo=timezone.utc)
+    return deleted_at + timedelta(days=settings.PROJECT_DELETE_GRACE_DAYS)
+
+
+def soft_delete(db: Session, project: Project, user_id: int) -> None:
+    """Pending deletion: hidden from everyone but owners and admins, restorable until purge_at, then purged by the
+    ingestion retention job (spec 2026-10-16). Data under a legal hold cannot be deleted."""
+    if project.legal_hold_at is not None:
+        raise LegalHoldActive("Release the legal hold before deleting this project")
     project.deleted_at = datetime.now(timezone.utc)
+    project.deleted_by = user_id
+    project.purge_state = None
     db.commit()
+
+
+def get_pending(db: Session, project_id: int) -> Optional[Project]:
+    return db.query(Project).filter(Project.id == project_id, Project.deleted_at.isnot(None)).first()
+
+
+def restore(db: Session, project: Project) -> Project:
+    if project.purge_state:
+        # The purge job recorded "started": data may already be gone in other services
+        raise PurgeStarted("The purge has started; this project can no longer be restored")
+    project.deleted_at = project.deleted_by = project.purge_state = None
+    try:
+        _commit(db)
+    except DuplicateProject:
+        raise DuplicateProject("A live project already uses this name or slug; rename it first")
+    db.refresh(project)
+    return project

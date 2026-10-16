@@ -40,6 +40,14 @@ class LegalHoldOut(BaseModel):
     reason: Optional[str] = None
 
 
+class DeletionOut(BaseModel):
+    """A pending deletion (spec 2026-10-16): restorable by owners and admins until purge_at."""
+
+    deleted_at: datetime
+    deleted_by: Optional[int] = None
+    purge_at: datetime
+
+
 class ProjectOut(BaseModel):
     id: int
     organization_id: int
@@ -52,3 +60,4 @@ class ProjectOut(BaseModel):
     updated_at: Optional[datetime] = None
     my_role: str
     legal_hold: Optional[LegalHoldOut] = None
+    deletion: Optional[DeletionOut] = None

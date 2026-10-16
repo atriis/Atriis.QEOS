@@ -22,5 +22,8 @@ class Settings(BaseServiceSettings):
     INTERNAL_API_USERNAME: str = "ingestion-service"
     INTERNAL_API_PASSWORD: str = ""
 
+    # A deleted project is purged everywhere this long after the deletion; until then it can be restored
+    PROJECT_DELETE_GRACE_DAYS: int = 7
+
 
 settings = Settings()

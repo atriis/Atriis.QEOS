@@ -191,11 +191,13 @@ def test_settings_body_must_be_an_object(client, auth, org_role, make_project):
     assert response.status_code == 422
 
 
-def test_deleted_project_is_gone_for_everyone(client, auth, org_role, make_project):
+def test_a_deleted_project_is_pending_for_its_members(client, auth, org_role, make_project):
     project = make_project()
     org_role("owner")
     client.delete(f"/api/v1/projects/{project.id}", headers=auth())
-    assert client.get(f"/api/v1/projects/{project.id}", headers=auth()).status_code == 404
+    # 410 with the purge date (spec 2026-10-16); every other route of it is 404
+    assert client.get(f"/api/v1/projects/{project.id}", headers=auth()).status_code == 410
+    assert client.patch(f"/api/v1/projects/{project.id}/settings", json={}, headers=auth()).status_code == 404
 
 
 def test_org_service_down_is_503(client, auth, org_role, make_project):

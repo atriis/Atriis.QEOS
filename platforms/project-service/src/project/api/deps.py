@@ -53,7 +53,7 @@ def get_caller(token: str = Depends(oauth2_scheme)) -> Caller:
         raise _unauthorized()
 
 
-def _role_in(org_id: int, caller: Caller, not_found_detail: str) -> str:
+def role_in(org_id: int, caller: Caller, not_found_detail: str) -> str:
     try:
         return org_client.get_my_role(org_id, caller.token)
     except org_client.NotAMember:
@@ -71,7 +71,7 @@ def _forbidden() -> HTTPException:
 
 def require_org_role(*roles: str):
     def dependency(org_id: int, caller: Caller = Depends(get_caller)) -> OrgAccess:
-        role = _role_in(org_id, caller, "Organization not found")
+        role = role_in(org_id, caller, "Organization not found")
         if role not in roles:
             raise _forbidden()
         return OrgAccess(org_id=org_id, user_id=caller.user_id, role=role)
@@ -96,7 +96,7 @@ def require_project_role(*roles: str):
         # organization-service must not hold this connection out of the pool.
         # The project reloads on next access, on a fresh connection.
         db.rollback()
-        role = _role_in(org_id, caller, "Project not found")
+        role = role_in(org_id, caller, "Project not found")
         if role not in roles:
             raise _forbidden()
         return ProjectAccess(project=project, user_id=caller.user_id, role=role)
@@ -105,6 +105,6 @@ def require_project_role(*roles: str):
 
 
 __all__ = [
-    "get_db", "get_caller", "require_org_role", "require_project_role",
+    "get_db", "get_caller", "role_in", "Caller", "require_org_role", "require_project_role",
     "OrgAccess", "ProjectAccess", "MANAGE_ROLES", "EDIT_ROLES", "READ_ROLES",
 ]
