@@ -29,6 +29,7 @@ export default function MicrosoftRolesCard({ orgId }: { orgId: number }) {
   function onSubmit(event: FormEvent) {
     event.preventDefault();
     setFieldError("");
+    remove.reset();
     add.mutate();
   }
 
@@ -61,7 +62,7 @@ export default function MicrosoftRolesCard({ orgId }: { orgId: number }) {
                     ariaLabel={`Remove mapping ${m.app_role}`}
                     question="Remove this mapping? Members keep their role until their next Microsoft sign-in."
                     confirmLabel="Remove"
-                    onConfirm={() => remove.mutate(m.id)}
+                    onConfirm={() => { add.reset(); remove.mutate(m.id); }}
                     disabled={remove.isPending}
                   />
                 </td>
@@ -84,7 +85,7 @@ export default function MicrosoftRolesCard({ orgId }: { orgId: number }) {
         </label>
         <button type="submit" disabled={add.isPending}>Add</button>
       </form>
-      {fieldError && <p id="sso-role-error" className="field-error">{fieldError}</p>}
+      {fieldError && <p id="sso-role-error" className="field-error" role="alert">{fieldError}</p>}
     </div>
   );
 }

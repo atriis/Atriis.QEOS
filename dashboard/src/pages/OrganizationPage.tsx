@@ -91,16 +91,22 @@ export default function OrganizationPage() {
                   <td>{member.email ?? `user ${member.user_id}`}</td>
                   <td>
                     {member.role}
-                    {member.managed_by === "entra" && <> <span className="badge badge-muted" title="Managed by Entra" aria-label="Managed by Entra">Entra</span></>}
+                    {member.managed_by === "entra" && <> <span className="badge badge-muted" title="Managed by Entra">Entra<span className="sr-only">, managed by Entra</span></span></>}
                   </td>
                   <td>{member.status}</td>
                   <td>{new Date(member.created_at).toLocaleDateString()}</td>
                   {canManage && (
                     <td>
                       {member.managed_by === "entra" ? (
-                        <button type="button" disabled title="Managed by Entra: remove the app role instead.">
-                          Remove<span className="sr-only">Managed by Entra: remove the app role instead.</span>
-                        </button>
+                        <>
+                          <button type="button" aria-disabled="true" onClick={(e) => e.preventDefault()}
+                            aria-label={`Remove ${member.email ?? `user ${member.user_id}`}`}
+                            aria-describedby={`entra-managed-${member.id}`}
+                            title="Managed by Entra: remove the app role instead.">
+                            Remove
+                          </button>
+                          <span id={`entra-managed-${member.id}`} className="sr-only">Managed by Entra: remove the app role instead.</span>
+                        </>
                       ) : (
                         <ConfirmButton
                           label="Remove"

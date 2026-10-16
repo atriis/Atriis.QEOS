@@ -45,13 +45,19 @@ def _push(db: Session, link: OAuthAccount) -> bool:
 
 
 def record_and_push(db: Session, link: Optional[OAuthAccount], roles: list[str]) -> bool:
-    """Store the roles a Microsoft sign-in (or link) carried, then push them."""
+    """Store the roles a Microsoft sign-in (or link) carried, then push them. Never raises."""
     if link is None:
         return False
-    link.sso_roles = list(roles)
-    link.sso_roles_at = datetime.now(timezone.utc)
-    db.commit()
-    return _push(db, link)
+    user_id = link.user_id
+    try:
+        link.sso_roles = list(roles)
+        link.sso_roles_at = datetime.now(timezone.utc)
+        db.commit()
+        return _push(db, link)
+    except Exception as exc:  # a database error here must not fail the sign-in or the link
+        db.rollback()
+        logger.warning("entra role sync deferred: user=%s reason=%s", user_id, type(exc).__name__)
+        return False
 
 
 def retry_pending(db: Session, user_id: int) -> None:

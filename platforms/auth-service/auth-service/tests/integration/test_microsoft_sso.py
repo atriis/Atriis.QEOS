@@ -547,6 +547,20 @@ def test_a_database_error_in_the_retry_never_fails_the_refresh(client, db, micro
     assert refreshed.json()["access_token"] and refreshed.json()["refresh_token"] != first["refresh_token"]
 
 
+def test_a_database_error_in_the_push_never_fails_the_sign_in(client, db, microsoft_key, org_calls, monkeypatch, caplog):
+    from sqlalchemy.exc import OperationalError
+
+    def broken(db, link):
+        raise OperationalError("x", {}, None)
+
+    monkeypatch.setattr(org_roles_sync, "_push", broken)
+    with caplog.at_level(logging.WARNING):
+        response = sign_in(client, ms_token(microsoft_key, roles=["QEOS.Admin"]))
+    assert response.status_code == 200
+    assert response.json()["access_token"]
+    assert "entra role sync deferred" in caplog.text
+
+
 def test_linking_microsoft_pushes_the_roles(client, db, microsoft_key, org_calls, register_and_verify):
     login = register_and_verify("bob@example.com")
     linked = client.post(LINK, json={"credential": ms_token(microsoft_key, roles=["QEOS.Viewer"]),

@@ -28,15 +28,15 @@ claim, and QEOS ignores it today.
 - A deployment that configures nothing behaves exactly as today.
 
 ## Stakeholders
-IT administrators of the Entra tenant, organization owners, every QEOS user, security reviewers.
+IT administrators of the Entra tenants, organization owners, every QEOS user, security reviewers.
 
 ## Constraints
 PostgreSQL only; auth-service owns sign-in and organization-service owns memberships, so the two talk over
 the internal API (HTTP Basic, never routed by the gateway).
 
 ## Assumptions
-The QEOS app registration lists app roles and IT assigns people or groups to them. The tenant is already on
-the `AZURE_ALLOWED_TENANTS` allowlist.
+The QEOS app registration lists app roles and IT assigns people or groups to them. The tenants that sign in
+are already on the `AZURE_ALLOWED_TENANTS` allowlist, and every one of them is trusted to assign these roles.
 
 ## Architecture Principles
 One owner per concern, least privilege, fail safe (a missed sync never blocks a sign-in).
@@ -69,7 +69,7 @@ user links Microsoft, QEOS keeps the memberships in step.
 
 ## Success Metrics / Evaluation Criteria
 A person assigned to an app role gets the mapped role at their next Microsoft sign-in without an
-invitation. A person who loses the app role loses the managed membership within 60 minutes. No change to
+invitation. A person who loses the app role loses the managed membership at their next Microsoft sign-in. No change to
 a hand-made member or to an organization without mappings.
 
 ## Scope
@@ -150,7 +150,9 @@ auth-service already verifies the token; one owner per concern.
 - Entra can grant at most admin. An organization keeps at least one hand-made owner.
 - Managed members cannot be removed by hand; the app role is removed in Entra instead.
 - Sync is best effort. A missed sync heals on the next refresh, within 60 minutes.
-- A removed app role takes effect at the person's next sign-in or refresh, not at once.
+- A removed app role takes effect at the person's next Microsoft sign-in, not at once. A refresh never asks Entra again: it only re-sends roles already stored while a push is pending.
+- A session the person already holds lasts until its refresh token expires (30 days); see the known limitation in SETUP section 3.8.
+- A linked user who signs in with a password (outside SSO-only mode) is not reconciled at that sign-in.
 
 ---
 
@@ -185,7 +187,8 @@ existing row).
 |------|------------|
 | An Entra editor reaches the mapping editor | Mappings never grant `owner`; only owners edit them |
 | A mapping change removes people by mistake | Nothing changes until each person's next sign-in; every change is logged |
-| The sync call fails | Sign-in succeeds; retried on refresh within 60 minutes |
+| The sync call fails | Sign-in succeeds; retried at the next token refresh while the push is pending |
+| An administrator of one allowed tenant grants roles in every organization | `AZURE_ALLOWED_TENANTS` may list several tenants and a mapping carries no tenant, so an administrator of any allowed tenant can grant every mapped role in every organization that maps that value. List only tenants you trust that much; mappings scoped to a tenant are on the TODO list |
 
 ---
 

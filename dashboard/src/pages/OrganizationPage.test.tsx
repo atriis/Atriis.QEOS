@@ -151,10 +151,20 @@ test("an Entra-managed member shows the badge and cannot be removed", async () =
   server.use(http.get("/api/v1/organizations/7/members", () => HttpResponse.json([...MEMBERS, MANAGED])));
   renderPage();
   const row = (await screen.findByText("eve@example.com")).closest("tr")!;
-  expect(within(row).getByText("Entra")).toHaveAttribute("title", "Managed by Entra");
-  const remove = await within(row).findByRole("button", { name: /Remove/ });
-  expect(remove).toBeDisabled();
+  const badge = within(row).getByText("Entra", { exact: false, selector: "span.badge" });
+  expect(badge).toHaveAttribute("title", "Managed by Entra");
+  expect(badge).toHaveTextContent("Entra, managed by Entra");
+  const remove = await within(row).findByRole("button", { name: "Remove eve@example.com" });
+  expect(remove).not.toBeDisabled();
+  expect(remove).toHaveAttribute("aria-disabled", "true");
   expect(remove).toHaveAttribute("title", "Managed by Entra: remove the app role instead.");
+  expect(remove).toHaveAccessibleDescription("Managed by Entra: remove the app role instead.");
+  remove.focus();
+  expect(remove).toHaveFocus();
+  let deleted = false;
+  server.use(http.delete("/api/v1/organizations/7/members/3", () => { deleted = true; return new HttpResponse(null, { status: 204 }); }));
+  await userEvent.click(remove);
+  expect(deleted).toBe(false);
   // A hand-made member keeps the normal Remove
   const handMade = screen.getByText("user 11").closest("tr")!;
   expect(within(handMade).getByRole("button", { name: /Remove user 11/ })).toBeEnabled();

@@ -100,6 +100,9 @@ details.
   auth-service pushes the roles with HTTP Basic, using `ORGANIZATION_INTERNAL_API_PASSWORD`, over the internal
   network. With an empty password it stores the roles but never applies them, and start-up logs a WARNING.
   A failed push logs only the exception class or the HTTP status, never credentials, and never blocks sign-in.
+  Trust across tenants: `AZURE_ALLOWED_TENANTS` may list several tenants and a mapping carries no tenant, so an
+  administrator of any allowed tenant can grant every mapped role in every organization that maps that value.
+  List only tenants you trust that much.
 - **Access control.** Organisation roles (owner, admin, member, viewer,
   billing_manager) checked on every request; project access follows the
   organisation role; non-members get 404.

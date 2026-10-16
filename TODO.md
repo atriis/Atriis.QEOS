@@ -193,6 +193,8 @@ Reliability and operations
 - [ ] Personal Microsoft accounts (outlook.com)
 - [x] Map Entra groups / app roles to organization roles (app roles, ADR-033, spec 2026-10-16; groups not planned)
 - [ ] SCIM provisioning and deprovisioning (ends the sessions of people removed from Entra; today they last until the refresh token expires, ADR-031)
+- [ ] Owner override for Entra-managed members (take over or remove at once; today removal waits for the person's next Microsoft sign-in)
+- [ ] Entra app-role mappings scoped to a tenant id (today every allowed tenant can grant every mapped role)
 - [ ] GitHub SSO
 - [ ] Single sign-out
 - [x] MFA for password accounts: TOTP enrollment (QR + otpauth URI), verification on login, recovery codes; SSO sign-ins defer MFA to the identity provider

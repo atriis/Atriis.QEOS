@@ -195,8 +195,7 @@ bash deploy/init-env.sh localhost you@example.com
 
 **Not forwarded by `docker-compose.yml`.** Some service settings exist in the code, but the
 stock compose file does not pass them through, so putting them in `.env` has no effect.
-Examples: auth-service's `GOOGLE_CLIENT_ID`, `AZURE_CLIENT_ID` and `AZURE_ALLOWED_TENANTS`
-(see [3.8](#38-single-sign-on-google-and-microsoft) for how to pass them), ingestion's
+Examples: auth-service's `GOOGLE_CLIENT_ID` (see [3.8](#38-single-sign-on-google-and-microsoft) for how to pass it), ingestion's
 `WEEKLY_SUMMARY_HOUR_UTC` (fixed at 7), `RETENTION_INTERVAL_HOURS` (fixed at 24) and
 `NOTIFY_TIMEOUT_SECONDS` (fixed at 5).
 
@@ -566,9 +565,11 @@ Optional. An Entra app role can set a person's organization role at each Microso
 1. Open the app registration, then **App roles**, then **Create app role**.
 2. Set the display name to "QEOS Admin", allowed member types to Users/Groups, and the value to `QEOS.Admin`.
 3. Do the same for `QEOS.Member` and `QEOS.Viewer`.
-4. Open **Enterprise applications**, then the app, then **Users and groups**, then **Add user/group**. Pick the user or group and the role.
+4. Open **Enterprise applications**, then the app, then **Users and groups**, then **Add user/group**. Pick the user or group and the role. Assigning groups to an enterprise application needs Microsoft Entra ID P1 or P2. Individual users work on every tier.
 
 No optional claim is needed. The `roles` claim comes in the ID token by default.
+
+**Trust:** `AZURE_ALLOWED_TENANTS` may list several tenants, and a mapping carries no tenant. An administrator of any allowed tenant can therefore grant every mapped role in every organization that maps that value. List only tenants you trust that much.
 
 **In QEOS:** an owner opens the Organization page, then **Microsoft roles**, and maps each value to admin, member or viewer.
 
@@ -579,6 +580,8 @@ No optional claim is needed. The `roles` claim comes in the ID token by default.
 - Owners are always granted by hand.
 - When someone has several app roles, the highest mapped role wins.
 - Removing a mapping changes nobody until their next sign-in.
+- A change in Entra, including a removed app role, takes effect at the person's next Microsoft sign-in. A session they already hold lasts until its refresh token expires (30 days); see the known limitation below.
+- A linked user who signs in with a password (outside SSO-only mode) is not reconciled at that sign-in.
 - If organization-service was down at a sign-in, auth-service tries again at the person's next token refresh. That is within the hour while they stay signed in, and at their next sign-in otherwise.
 
 auth-service needs two settings: `ORGANIZATION_SERVICE_URL` and `ORGANIZATION_INTERNAL_API_PASSWORD`.

@@ -166,8 +166,8 @@ input:hover, select:hover, textarea:hover { border-color: var(--text-secondary);
 input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; border-color: var(--accent); }
 input::placeholder, textarea::placeholder { color: var(--placeholder); opacity: 1; }
 button { cursor: pointer; font-weight: 500; display: inline-flex; align-items: center; gap: 6px; transition: background-color 120ms ease-out, border-color 120ms ease-out; }
-button:hover:not(:disabled) { background: var(--hover-strong); }
-button:disabled { opacity: 0.55; cursor: default; }
+button:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--hover-strong); }
+button:disabled, button[aria-disabled="true"] { opacity: 0.55; cursor: default; }
 button.primary { background: var(--accent-fill); color: #fff; border-color: transparent; }
 button.primary:hover:not(:disabled) { background: var(--accent-fill-hover); }
 /* White on --status-failed is 4.8:1 in both themes; red text on the dark surface would not reach AA. */

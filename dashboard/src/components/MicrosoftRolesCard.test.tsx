@@ -68,6 +68,23 @@ test("a duplicate shows at the field", async () => {
   expect(await screen.findByText("This app role is already mapped.")).toBeInTheDocument();
 });
 
+test("a failed add's banner does not survive a later successful remove", async () => {
+  let rows = [row(1, "QEOS.Admin", "admin")];
+  server.use(
+    http.get(URL, () => HttpResponse.json(rows)),
+    http.post(URL, () => HttpResponse.json({ detail: "boom" }, { status: 500 })),
+    http.delete(`${URL}/1`, () => { rows = []; return new HttpResponse(null, { status: 204 }); }),
+  );
+  renderCard();
+  await userEvent.type(await screen.findByLabelText("App role"), "QEOS.New");
+  await userEvent.click(screen.getByRole("button", { name: "Add" }));
+  expect(await screen.findByRole("alert")).toBeInTheDocument();
+  await userEvent.click(screen.getByRole("button", { name: "Remove mapping QEOS.Admin" }));
+  await userEvent.click(screen.getByRole("button", { name: "Remove" }));
+  await waitFor(() => expect(screen.getByText("No app roles mapped yet.")).toBeInTheDocument());
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+});
+
 test("removes a mapping after confirmation", async () => {
   let rows = [row(1, "QEOS.Admin", "admin")];
   server.use(
