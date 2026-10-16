@@ -140,3 +140,53 @@ def test_other_roles_never_see_pending_projects(client, auth, org_role, make_pro
     org_role(role)
     listed = client.get("/api/v1/organizations/1/projects?include_pending=true", headers=auth()).json()
     assert [p["name"] for p in listed] == ["Live"]
+
+
+def test_restore_loses_to_a_purge_that_started_after_it_read_the_row(make_project, db):
+    """Restore and the purge's "started" race (ADR-033): the conditional UPDATE decides, not what Python read."""
+    from sqlalchemy import text
+
+    from src.project.service import project_service
+
+    project = make_project()
+    project.deleted_at = datetime.now(timezone.utc) - timedelta(days=8)
+    db.commit()
+    stale = project_service.get_pending(db, project.id)  # restore has read the row: no purge yet
+    # The purge job records "started" from another session before restore writes; restore's copy stays stale
+    from sqlalchemy.orm import Session
+    with Session(bind=db.get_bind()) as other:
+        other.execute(text("UPDATE projects SET purge_state = :s WHERE id = :id"),
+                      {"s": '{"started": "2026-10-23T03:00:00+00:00"}', "id": project.id})
+        other.commit()
+    assert stale.purge_state is None
+    with pytest.raises(project_service.PurgeStarted):
+        project_service.restore(db, stale)
+    db.expire_all()
+    assert db.get(Project, project.id).deleted_at is not None
+
+
+def test_a_purge_step_loses_to_a_restore_that_came_first(client, make_project, db, monkeypatch):
+    from sqlalchemy import text
+
+    from src.project.api.v1.endpoints import internal
+    from src.project.core.config import settings
+
+    monkeypatch.setattr(settings, "INTERNAL_API_PASSWORD", "pw")
+    project = make_project()
+    project.deleted_at = datetime.now(timezone.utc) - timedelta(days=8)
+    db.commit()
+    real = internal._pending_or_error
+
+    def restored_right_after_the_read(session, project_id):
+        row = real(session, project_id)
+        # A restore commits between the job's read and its write
+        session.execute(text("UPDATE projects SET deleted_at = NULL WHERE id = :id"), {"id": project_id})
+        return row
+
+    monkeypatch.setattr(internal, "_pending_or_error", restored_right_after_the_read)
+    import base64
+    auth = {"Authorization": "Basic " + base64.b64encode(b"ingestion-service:pw").decode()}
+    response = client.post(f"/internal/v1/projects/{project.id}/purge-state", json={"step": "started"}, headers=auth)
+    assert response.status_code == 409
+    db.expire_all()
+    assert db.get(Project, project.id).purge_state is None

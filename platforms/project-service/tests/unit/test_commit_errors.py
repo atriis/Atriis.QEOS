@@ -34,3 +34,19 @@ def test_the_session_stays_usable_after_either_failure(db):
         project_service._commit(db)
     db.add(_project(slug="other", name="Other"))
     project_service._commit(db)  # no PendingRollbackError
+
+
+class _Psycopg3UniqueViolation(Exception):
+    """psycopg 3's errors carry `sqlstate`, not psycopg 2's `pgcode`, and PostgreSQL's own message."""
+    sqlstate = "23505"
+
+    def __str__(self):
+        return 'duplicate key value violates unique constraint "uq_project_org_name"'
+
+
+def test_a_psycopg3_unique_violation_is_a_duplicate():
+    from sqlalchemy.exc import IntegrityError
+
+    from src.project.service.project_service import _is_unique_violation
+
+    assert _is_unique_violation(IntegrityError("UPDATE projects …", {}, _Psycopg3UniqueViolation()))

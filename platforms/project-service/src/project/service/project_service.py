@@ -24,7 +24,8 @@ UNIQUE_VIOLATION = "23505"  # PostgreSQL SQLSTATE
 
 
 def _is_unique_violation(exc: IntegrityError) -> bool:
-    if getattr(exc.orig, "pgcode", None) == UNIQUE_VIOLATION:
+    # psycopg 3 (what this service runs) names it sqlstate; psycopg 2 named it pgcode
+    if (getattr(exc.orig, "sqlstate", None) or getattr(exc.orig, "pgcode", None)) == UNIQUE_VIOLATION:
         return True
     return "UNIQUE constraint failed" in str(exc.orig)  # SQLite, used by the test suite
 
@@ -117,7 +118,7 @@ def soft_delete(db: Session, project: Project, user_id: int) -> None:
         raise LegalHoldActive("Release the legal hold before deleting this project")
     project.deleted_at = datetime.now(timezone.utc)
     project.deleted_by = user_id
-    project.purge_state = None
+    project.purge_state = None  # SQL NULL (none_as_null): restore's conditional UPDATE tests it
     db.commit()
 
 
@@ -125,11 +126,30 @@ def get_pending(db: Session, project_id: int) -> Optional[Project]:
     return db.query(Project).filter(Project.id == project_id, Project.deleted_at.isnot(None)).first()
 
 
+PURGE_STARTED = "The purge has started; this project can no longer be restored"
+
+
 def restore(db: Session, project: Project) -> Project:
+    """One conditional UPDATE against the purge job's "started" step (ADR-033): whichever commits first wins, and
+    the other matches no row. Under READ COMMITTED a blocked UPDATE re-checks its WHERE after the other commits."""
     if project.purge_state:
-        # The purge job recorded "started": data may already be gone in other services
-        raise PurgeStarted("The purge has started; this project can no longer be restored")
-    project.deleted_at = project.deleted_by = project.purge_state = None
+        raise PurgeStarted(PURGE_STARTED)
+    try:
+        restored = (
+            db.query(Project)
+            .filter(Project.id == project.id, Project.deleted_at.isnot(None), Project.purge_state.is_(None))
+            .update({Project.deleted_at: None, Project.deleted_by: None}, synchronize_session=False)
+        )
+    except IntegrityError as exc:
+        # The UPDATE itself hits the live-rows unique index when the name or slug was reused meanwhile
+        db.rollback()
+        if _is_unique_violation(exc):
+            raise DuplicateProject("A live project already uses this name or slug; rename it first")
+        raise
+    if restored == 0:
+        # The purge started after this request read the row (or it was restored meanwhile)
+        db.rollback()
+        raise PurgeStarted(PURGE_STARTED)
     try:
         _commit(db)
     except DuplicateProject:

@@ -96,8 +96,17 @@ def record_purge_step(project_id: int, payload: PurgeStepIn, _: None = Depends(r
                       db: Session = Depends(get_db)):
     """The purge job confirms one step for a deleted project (spec 2026-10-16 §5). 409 for a live project."""
     project = _pending_or_error(db, project_id)
-    # A new dict, so SQLAlchemy sees the change
-    project.purge_state = {**(project.purge_state or {}), payload.step: datetime.now(timezone.utc).isoformat()}
+    state = {**(project.purge_state or {}), payload.step: datetime.now(timezone.utc).isoformat()}
+    # Conditional on still being deleted: a restore that committed after the read above wins, and this matches no
+    # row (ADR-033). Only the job writes steps, one pass at a time, so the merge cannot lose another step.
+    written = (
+        db.query(Project)
+        .filter(Project.id == project_id, Project.deleted_at.isnot(None))
+        .update({Project.purge_state: state}, synchronize_session=False)
+    )
+    if written == 0:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Project is not pending deletion")
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
