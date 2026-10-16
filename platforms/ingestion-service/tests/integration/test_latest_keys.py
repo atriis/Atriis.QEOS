@@ -56,3 +56,35 @@ def test_branch_limits_the_runs(history, auth):
 
 def test_a_bad_status_is_422(history, auth):
     assert history.get(f"{URL}?status=broken", headers=auth()).status_code == 422
+
+
+# --- a period (spec: Test cases "Period" filter, 2026-10-16): only results started in [since, until] count --------
+
+
+def hours_ago(h):
+    return (datetime.now(timezone.utc) - timedelta(hours=h)).isoformat().replace("+00:00", "Z")
+
+
+def test_a_period_keeps_only_the_tests_that_ran_in_it(history, auth):
+    # The last 2.5 hours hold the -2h run (A passed, C skipped, E errored) and the -1h run (D failed)
+    assert keys(history, auth, f"status=any&since={hours_ago(2.5)}") == k("A", "C", "D", "E")
+    # Before that: only the -3h run
+    assert keys(history, auth, f"status=any&until={hours_ago(2.5)}") == k("A", "B", "D")
+
+
+def test_the_latest_result_is_the_latest_within_the_period(history, auth):
+    # In the last 2.5 hours A's latest is passed, D's is failed, E's errored
+    assert keys(history, auth, f"status=failed&since={hours_ago(2.5)}") == k("D", "E")
+    assert keys(history, auth, f"status=passed&since={hours_ago(2.5)}") == k("A")
+    # Before -2.5h, A and B were failed and D passed
+    assert keys(history, auth, f"status=failed&until={hours_ago(2.5)}") == k("A", "B")
+    assert keys(history, auth, f"status=passed&since={hours_ago(3.5)}&until={hours_ago(2.5)}") == k("D")
+
+
+def test_a_period_combines_with_the_branch(history, auth):
+    assert keys(history, auth, f"status=any&since={hours_ago(2.5)}&branch=main") == k("A", "C", "E")
+
+
+def test_an_empty_or_reversed_period_is_422(history, auth):
+    assert history.get(f"{URL}?status=any&since={hours_ago(1)}&until={hours_ago(2)}", headers=auth()).status_code == 422
+    assert history.get(f"{URL}?status=any&since=yesterday", headers=auth()).status_code == 422

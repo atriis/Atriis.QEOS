@@ -150,11 +150,18 @@ def unmute_flaky(
 def latest_keys(
     status: Literal["passed", "failed", "skipped", "any"] = Query(...),
     branch: Optional[str] = Query(None, max_length=255, pattern=NO_NUL),
+    # A period (the Test cases "Period" filter): only results of runs started in [since, until) count
+    since: Optional[datetime] = Query(None),
+    until: Optional[datetime] = Query(None),
     db: Session = Depends(get_db),
     access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
 ):
-    """Keys of the tests whose latest result has `status`; the dashboard passes them to test-management."""
-    return {"keys": analytics_service.latest_keys(db, access.project_id, status, branch)}
+    """Keys of the tests whose latest result has `status`, within the period when one is given; the dashboard
+    passes them to test-management."""
+    if since is not None and until is not None and since >= until:
+        # 422 as a number: the `status` parameter shadows fastapi.status in this function
+        raise HTTPException(status_code=422, detail="since must be before until")
+    return {"keys": analytics_service.latest_keys(db, access.project_id, status, branch, since, until)}
 
 
 class RunStripIn(BaseModel):

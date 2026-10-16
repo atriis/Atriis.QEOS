@@ -368,12 +368,19 @@ def latest_results(db: Session, project_id: int, keys: List[str], run_id: Option
     return out
 
 
-def latest_keys(db: Session, project_id: int, status: str, branch: Optional[str] = None) -> List[str]:
+def latest_keys(db: Session, project_id: int, status: str, branch: Optional[str] = None,
+                since: Optional[datetime] = None, until: Optional[datetime] = None) -> List[str]:
     """Test keys whose most recent result (by run start) has `status`; failed includes errored.
-    `any`: every test with at least one result. Used by the dashboard's latest-result case filter."""
+    `any`: every test with at least one result. With a period (`since` inclusive, `until` exclusive, on the run's
+    start) only the results in it count, and "latest" is the latest within it. Used by the dashboard's
+    latest-result and period case filters."""
     filters = [Run.project_id == project_id]
     if branch:
         filters.append(Run.branch == branch)
+    if since is not None:
+        filters.append(Run.started_at >= since)
+    if until is not None:
+        filters.append(Run.started_at < until)
     if status == "any":
         rows = db.execute(select(RunResult.test_key).distinct().join(Run, Run.id == RunResult.run_id).where(*filters))
         return sorted(k for (k,) in rows)
