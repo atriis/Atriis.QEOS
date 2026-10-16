@@ -29,7 +29,7 @@ Manages organizations (tenants) and their memberships for QEOS.
     characters after trimming. The same value twice (case-insensitive) answers 409 `duplicate_app_role`.
     An unknown role, `owner`, `billing_manager` or a blank value answers 422.
   - `DELETE .../{mapping_id}` answers 204, or 404 when the mapping is not this organization's.
-  - Only owners may call these routes; everyone else gets 404.
+  - Only owners may call these routes; a member with another role gets 403, and someone who is not a member gets 404.
   Deleting a mapping changes no member; the next Microsoft sign-in of each person does.
 - Managed members: a member created by a mapping has `managed_by: "entra"` (`null` for hand-made members).
   `DELETE .../members/{member_id}` on a managed member answers 409 `managed_by_entra`.
