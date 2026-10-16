@@ -82,6 +82,7 @@ Grafana; its `/monitoring?next=` page does the same when the gateway sends a coo
 - Every service accepts only access tokens as sessions (MFA challenge, refresh
   and service tokens are rejected). `/internal/v1/users[/{id}]` (HTTP Basic,
   INTERNAL_API_PASSWORD; not routed by the gateway) serves organization-service.
+  organization-service has its own internal API (`/internal/v1/sso-roles`, section 2.2).
 
 ### 2.2 organization-service
 Organizations (soft delete), members (owner/admin/member/viewer/
@@ -92,6 +93,14 @@ billing_manager; only an owner grants or removes owner/admin), invitations
 `GET /organizations/{id}/members/me` answers the caller's role for the other
 services. Member lists carry emails from auth-service's internal API. Role
 checks via JWT `sub` + membership.
+Entra app roles (ADR-033, migration 004): `organization_sso_role_mappings` maps an
+app role value to admin, member or viewer per organization (owners only:
+`/organizations/{id}/sso-role-mappings`; 409 `duplicate_app_role`, 422 for owner or
+billing_manager). Members carry `managed_by` (`entra` or null); a managed member
+cannot be removed by hand (409 `managed_by_entra`). The internal API
+`POST /internal/v1/sso-roles` (HTTP Basic, `INTERNAL_CALLER_USERNAME` and
+INTERNAL_API_PASSWORD; not routed by the gateway) reconciles one user's managed
+memberships from the token's app roles and logs each change at INFO.
 
 ### 2.3 project-service
 Projects under organizations (access follows org roles), settings

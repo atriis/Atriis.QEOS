@@ -22,7 +22,32 @@ Manages organizations (tenants) and their memberships for QEOS.
   (`/internal/v1/users/{id}`, HTTP Basic with `INTERNAL_API_USERNAME`/`INTERNAL_API_PASSWORD`)
   before adding them: `404` means no such user; any other answer is a `502`, never a silent yes
   or no.
+- Entra app roles (ADR-033). Owners map an app role value to `admin`, `member` or `viewer` (never
+  `owner` or `billing_manager`):
+  - `GET /api/v1/organizations/{org_id}/sso-role-mappings` lists `[{id, app_role, role, created_at}]`.
+  - `POST` takes `{"app_role": "QEOS.Member", "role": "member"}` and answers 201. The value is 1 to 100
+    characters after trimming. The same value twice (case-insensitive) answers 409 `duplicate_app_role`.
+    An unknown role, `owner`, `billing_manager` or a blank value answers 422.
+  - `DELETE .../{mapping_id}` answers 204, or 404 when the mapping is not this organization's.
+  - Only owners may call these routes; everyone else gets 404.
+  Deleting a mapping changes no member; the next Microsoft sign-in of each person does.
+- Managed members: a member created by a mapping has `managed_by: "entra"` (`null` for hand-made members).
+  `DELETE .../members/{member_id}` on a managed member answers 409 `managed_by_entra`.
+- Internal API, `POST /internal/v1/sso-roles`, called by auth-service after a Microsoft sign-in. HTTP Basic
+  with `INTERNAL_CALLER_USERNAME` (default `auth-service`) and `INTERNAL_API_PASSWORD`. An empty password
+  answers 503, wrong credentials 401. The body is `{"user_id": 7, "roles": ["QEOS.Member"]}`, at most 50
+  roles (more answers 422). The answer is `{"changes": [{"organization_id", "action", "from", "to"}]}`,
+  empty when nothing changed. Only organizations with a mapping are touched, and only members marked
+  `managed_by = entra`. Each change is logged at INFO. The gateway does not route `/internal/`.
 - Prometheus metrics at `/metrics` (not routed by the gateway).
+
+## Tables
+
+- `organizations`, `organization_members`, `organization_invitations`.
+- `organization_members.managed_by` (migration 004): `NULL` for hand-made members, `entra` for members kept in
+  step by the app-role mapping.
+- `organization_sso_role_mappings` (migration 004): `organization_id`, `app_role` (up to 100 characters),
+  `role` (`admin`, `member` or `viewer`). The pair (organization, lower-cased `app_role`) is unique.
 
 ## Auth model
 

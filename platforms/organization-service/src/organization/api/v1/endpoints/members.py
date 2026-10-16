@@ -62,6 +62,9 @@ def remove_member(
 ):
     try:
         removed = member_service.remove_member(db, org_id, member_id, granter_role)
+    except member_service.ManagedByEntra:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
+                            detail={"code": "managed_by_entra", "message": "Managed by Entra: remove the app role instead."})
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
     except ValueError as exc:

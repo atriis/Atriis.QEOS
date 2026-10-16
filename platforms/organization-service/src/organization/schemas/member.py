@@ -16,6 +16,7 @@ class MemberOut(BaseModel):
     email: Optional[str] = None  # enriched from auth-service, best effort
     role: str
     status: str
+    managed_by: Optional[str] = None  # "entra": kept in step by the app-role mapping (ADR-033)
     created_at: datetime
     updated_at: Optional[datetime] = None
 

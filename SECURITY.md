@@ -92,6 +92,11 @@ details.
   non-superuser once (access tokens expire within 60 minutes). A superuser can allow one account to
   link Microsoft at its next Microsoft sign-in (7 days, logged at WARNING, used once); it is never
   matched on the email alone.
+- **Entra app roles (ADR-033).** A mapping grants at most `admin`; owners are granted only by hand. Only
+  owners edit their organization's mapping. Only members marked `managed_by = entra` follow the token;
+  hand-made members are never touched. Managed members cannot be removed by hand (409). The internal
+  endpoint `POST /internal/v1/sso-roles` uses HTTP Basic, answers 503 while its password is empty, and is
+  never routed by the gateway. Each change is logged at INFO with organization, user, old and new role.
 - **Access control.** Organisation roles (owner, admin, member, viewer,
   billing_manager) checked on every request; project access follows the
   organisation role; non-members get 404.

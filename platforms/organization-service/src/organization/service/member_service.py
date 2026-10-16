@@ -4,6 +4,11 @@ from src.organization.models.member import OrganizationMember
 from src.organization.utils.auth_client import user_exists
 
 
+class ManagedByEntra(Exception):
+    """The member is created and kept in step by the Entra app-role mapping; removing it by hand would be undone at
+    their next Microsoft sign-in (ADR-033)."""
+
+
 def get_role(db: Session, org_id: int, user_id: int) -> Optional[str]:
     member = (
         db.query(OrganizationMember)
@@ -78,6 +83,9 @@ def remove_member(db: Session, org_id: int, member_id: int, granter_role: str) -
     )
     if member is None:
         return False
+
+    if member.managed_by == "entra":
+        raise ManagedByEntra()
 
     _assert_can_grant_role(granter_role, member.role)
 
