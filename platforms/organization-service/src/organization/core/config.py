@@ -16,6 +16,9 @@ class Settings(BaseServiceSettings):
     AUTH_SERVICE_URL: str = "http://localhost:8000"
     INTERNAL_API_USERNAME: str = "organization-service"
     INTERNAL_API_PASSWORD: str = ""
+    # Who may call THIS service's internal API (POST /internal/v1/sso-roles): auth-service, with the same
+    # shared INTERNAL_API_PASSWORD. INTERNAL_API_USERNAME above is what this service sends to auth-service
+    INTERNAL_CALLER_USERNAME: str = "auth-service"
 
 
 settings = Settings()
