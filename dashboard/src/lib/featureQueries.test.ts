@@ -17,11 +17,15 @@ test("fileLabel drops the path and a trailing .feature, in any case", () => {
 const at = (run_id: number, status: StripStatus, hour = run_id): StripEntry =>
   ({ run_id, started_at: `2026-10-06T${String(hour).padStart(2, "0")}:00:00Z`, branch: "main", status });
 
-test("mergeStrips takes the worst status per run: failed > rerun > passed > skipped", () => {
+test("mergeStrips takes the worst status per run: failed > rerun > skipped > passed", () => {
+  // Run 1: a failure beats everything; run 2: one skipped scenario among passed ones makes the feature skipped
   expect(mergeStrips([[at(1, "passed"), at(2, "skipped")], [at(1, "failed"), at(2, "passed")]]).map((e) => e.status))
-    .toEqual(["failed", "passed"]);
+    .toEqual(["failed", "skipped"]);
+  // Run 1: skipped beats passed; run 2: a re-run beats passed
   expect(mergeStrips([[at(1, "skipped"), at(2, "rerun")], [at(1, "passed"), at(2, "passed")]]).map((e) => e.status))
-    .toEqual(["passed", "rerun"]);
+    .toEqual(["skipped", "rerun"]);
+  // A re-run still beats a skipped scenario: something flaky happened in that run
+  expect(mergeStrips([[at(1, "rerun")], [at(1, "skipped")]]).map((e) => e.status)).toEqual(["rerun"]);
   expect(mergeStrips([])).toEqual([]);
 });
 

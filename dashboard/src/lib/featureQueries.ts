@@ -15,11 +15,12 @@ export const STATUS_ORDER: CaseStatus[] = ["ready", "draft", "archived"];
 /** A feature file's name for display: its file name without a trailing ".feature" (any case). */
 export const fileLabel = (path: string) => path.slice(path.lastIndexOf("/") + 1).replace(/\.feature$/i, "");
 
-/** Worst first: what a feature's run shows when its scenarios disagree. */
-const WORST: StripStatus[] = ["failed", "rerun", "passed", "skipped"];
+/** Worst first: what a feature's run shows when its scenarios disagree. A failure or a flaky re-run dominates; one
+ *  skipped scenario among green ones makes the feature skipped (something did not run), so passed is last. */
+const WORST: StripStatus[] = ["failed", "rerun", "skipped", "passed"];
 
 /** A feature's strip from its scenarios' strips: the newest `limit` runs any scenario was in, oldest to newest, each
- *  with the worst status present (failed > rerun > passed > skipped), and their log values merged per pattern. Exact when every strip holds that test's last
+ *  with the worst status present (failed > rerun > skipped > passed), and their log values merged per pattern. Exact when every strip holds that test's last
  *  `limit` results: a run among the newest `limit` with any scenario is among each of its scenarios' newest `limit`. */
 export function mergeStrips(perTest: StripEntry[][], limit = 10): StripEntry[] {
   const byRun = new Map<number, StripEntry>();
