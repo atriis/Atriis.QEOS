@@ -75,3 +75,9 @@ def test_trailing_slash_in_the_configured_url(http, monkeypatch):
     )
     assert project_client.get_project(7, "t").role == "viewer"
     assert route.called
+
+
+def test_410_a_project_pending_deletion_is_project_not_found(project_role):
+    project_role(project_id=7, status_code=410, body={"detail": {"code": "pending_deletion"}})
+    with pytest.raises(project_client.ProjectNotFound):
+        project_client.get_project(7, "t")

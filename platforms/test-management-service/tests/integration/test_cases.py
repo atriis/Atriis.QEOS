@@ -149,3 +149,8 @@ def test_non_access_tokens_are_401_on_user_routes(client, http, claims):
     headers = {"Authorization": f"Bearer {make_token(1, **claims)}"}
     assert client.get(URL, headers=headers).status_code == 401
     assert not http.calls
+
+
+def test_a_project_pending_deletion_is_404(client, auth, project_role):
+    project_role(status_code=410, body={"detail": {"code": "pending_deletion"}})
+    assert client.get("/api/v1/projects/1/cases", headers=auth()).status_code == 404

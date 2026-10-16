@@ -41,7 +41,8 @@ def get_project(project_id: int, token: str) -> ProjectInfo:
     except httpx.HTTPError as exc:
         raise ProjectServiceUnavailable(f"could not reach project-service: {exc}") from exc
 
-    if response.status_code == 404:
+    # 410: the project is pending deletion (spec 2026-10-16); for every other service it no longer exists
+    if response.status_code in (404, 410):
         raise ProjectNotFound()
     if response.status_code == 401:
         raise InvalidCredentials()
