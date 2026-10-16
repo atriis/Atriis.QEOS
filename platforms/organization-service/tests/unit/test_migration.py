@@ -10,7 +10,7 @@ from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import IntegrityError
 from src.organization.db.base import Base
-from src.organization.models import Organization, OrganizationMember, OrganizationInvitation  # noqa: F401  registers tables
+from src.organization.models import Organization, OrganizationMember, OrganizationInvitation, OrganizationSsoRoleMapping  # noqa: F401  registers tables
 
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 
@@ -82,3 +82,56 @@ def test_migration_enforces_invitation_role_check(migrated_engine):
                     " VALUES (1, 'x@y.test', 'sysadmin', 1, 'tok', '2026-01-01T00:00:00+00:00')"
                 )
             )
+
+
+def _org(conn, slug="acme"):
+    conn.execute(text(f"INSERT INTO organizations (name, slug, plan_tier) VALUES ('{slug}', '{slug}', 'free')"))
+    return conn.execute(text(f"SELECT id FROM organizations WHERE slug = '{slug}'")).scalar_one()
+
+
+def test_migration_004_mapping_role_check(migrated_engine):
+    with migrated_engine.begin() as conn:
+        org = _org(conn)
+        conn.execute(text(f"INSERT INTO organization_sso_role_mappings (organization_id, app_role, role) VALUES ({org}, 'QEOS.Member', 'member')"))
+    with pytest.raises(IntegrityError):
+        with migrated_engine.begin() as conn:
+            conn.execute(text(f"INSERT INTO organization_sso_role_mappings (organization_id, app_role, role) VALUES ({org}, 'QEOS.Owner', 'owner')"))
+
+
+def test_migration_004_app_role_unique_per_org_ignoring_case(migrated_engine):
+    with migrated_engine.begin() as conn:
+        org = _org(conn)
+        other = _org(conn, "beta")
+        conn.execute(text(f"INSERT INTO organization_sso_role_mappings (organization_id, app_role, role) VALUES ({org}, 'QEOS.Member', 'member')"))
+        # Another organization may map the same value
+        conn.execute(text(f"INSERT INTO organization_sso_role_mappings (organization_id, app_role, role) VALUES ({other}, 'QEOS.Member', 'viewer')"))
+    with pytest.raises(IntegrityError):
+        with migrated_engine.begin() as conn:
+            conn.execute(text(f"INSERT INTO organization_sso_role_mappings (organization_id, app_role, role) VALUES ({org}, 'qeos.member', 'admin')"))
+
+
+def test_migration_004_managed_by_is_null_or_entra(migrated_engine):
+    with migrated_engine.begin() as conn:
+        org = _org(conn)
+        conn.execute(text(f"INSERT INTO organization_members (organization_id, user_id, role, status) VALUES ({org}, 1, 'owner', 'active')"))
+        conn.execute(text(f"INSERT INTO organization_members (organization_id, user_id, role, status, managed_by) VALUES ({org}, 2, 'member', 'active', 'entra')"))
+        assert conn.execute(text("SELECT managed_by FROM organization_members WHERE user_id = 1")).scalar_one() is None
+    with pytest.raises(IntegrityError):
+        with migrated_engine.begin() as conn:
+            conn.execute(text(f"INSERT INTO organization_members (organization_id, user_id, role, status, managed_by) VALUES ({org}, 3, 'member', 'active', 'scim')"))
+
+
+def test_migration_004_downgrade_and_upgrade_again(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'roundtrip.db').as_posix()}"
+    cfg = Config(str(SERVICE_ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(SERVICE_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+    command.downgrade(cfg, "003")
+    engine = create_engine(url)
+    try:
+        assert "organization_sso_role_mappings" not in inspect(engine).get_table_names()
+        assert "managed_by" not in {c["name"] for c in inspect(engine).get_columns("organization_members")}
+    finally:
+        engine.dispose()
+    command.upgrade(cfg, "head")
