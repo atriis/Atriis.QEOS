@@ -24,7 +24,7 @@
 // checkout or an internal mirror).
 def call(Map config = [:]) {
     String patterns = config.patterns ?: 'reports/**/*.xml'
-    String ref = config.ref ?: 'collector-v0.9.2'
+    String ref = config.ref ?: 'collector-v0.9.3'
     String impact = (config.impact ?: 'off').toString()
     if (!(impact in ['off', 'first', 'only'])) {
         error("qeosCollectorUpload: impact must be 'off', 'first' or 'only'")
