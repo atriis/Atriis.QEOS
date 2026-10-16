@@ -12,6 +12,11 @@ class Settings(BaseServiceSettings):
     PROJECT_SERVICE_URL: str = "http://localhost:8002"
     PROJECT_SERVICE_TIMEOUT_SECONDS: float = 3.0
 
+    # Internal API (DELETE /internal/v1/projects/{id}), called by ingestion's purge job with HTTP Basic
+    # (spec 2026-10-16). An empty password turns it off (503); it is never open by default.
+    INTERNAL_API_USERNAME: str = "ingestion-service"
+    INTERNAL_API_PASSWORD: str = ""
+
     # Gherkin import (ADR-023): one request is one transaction; these keep it bounded.
     # Raise them in .env; the gateway's GATEWAY_IMPORT_MAX_BODY must stay above the total
     IMPORT_MAX_FILES: int = 2000

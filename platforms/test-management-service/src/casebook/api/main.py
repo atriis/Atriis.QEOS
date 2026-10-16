@@ -5,6 +5,7 @@ from fastapi.responses import JSONResponse
 from qeos_shared.metrics import install_metrics
 from starlette.middleware.cors import CORSMiddleware
 
+from src.casebook.api import internal
 from src.casebook.api.v1.api import api_router
 from src.casebook.core.config import settings
 from src.casebook.utils import metrics
@@ -33,6 +34,8 @@ def validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
 
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
+# Service-to-service only: not routed by the gateway, not in the public OpenAPI
+app.include_router(internal.router, prefix="/internal/v1", include_in_schema=False)
 install_metrics(app, service="test-management", registry=metrics.REGISTRY)
 
 
