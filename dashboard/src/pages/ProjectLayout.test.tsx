@@ -47,3 +47,39 @@ test("requested runs are titled as such, not as a run number", async () => {
   renderAt("/projects/42/runs/requested");
   await waitFor(() => expect(document.title).toBe("Requested runs · Shop E2E · QEOS"));
 });
+
+const PENDING_BODY = { detail: { code: "pending_deletion", message: "This project is scheduled for deletion", organization_id: 1,
+  deleted_at: "2026-10-16T13:05:00Z", deleted_by: 9, purge_at: "2026-10-23T13:05:00Z" } };
+
+function renderPending(role: string) {
+  setAccessToken("acc");
+  server.use(
+    http.get("/api/v1/projects/42", () => HttpResponse.json(PENDING_BODY, { status: 410 })),
+    http.get("/api/v1/organizations/1/members/me", () => HttpResponse.json({ role })),
+  );
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={["/projects/42/runs"]}>
+        <Routes>
+          <Route path="/projects/:projectId" element={<ProjectLayout />}>
+            <Route path="runs" element={<h1>Runs</h1>} />
+          </Route>
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+test("a member who opens a pending project sees the deletion notice, not the view", async () => {
+  renderPending("member");
+  expect(await screen.findByRole("heading", { name: "This project is scheduled for deletion" })).toBeInTheDocument();
+  expect(screen.queryByRole("heading", { name: "Runs" })).not.toBeInTheDocument();
+  expect(screen.getByText(/ask an owner or admin/i)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Restore project" })).not.toBeInTheDocument();
+});
+
+test("an owner who opens a pending project can restore it there", async () => {
+  renderPending("owner");
+  expect(await screen.findByRole("button", { name: "Restore project" })).toBeInTheDocument();
+});

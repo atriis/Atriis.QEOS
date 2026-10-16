@@ -888,6 +888,14 @@ input[readonly] { background: var(--surface-2); }
 .project-tile { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-1); color: var(--text-primary); font-weight: 600; box-shadow: var(--shadow-1); transition: border-color 120ms ease-out; }
 .project-tile:hover { border-color: var(--accent); text-decoration: none; }
 .project-tile svg { color: var(--text-secondary); }
+/* Pending deletion (spec 2026-10-16): recessed and dashed, not faded, so its text and Restore keep full contrast */
+.project-tile.is-pending { flex-direction: column; align-items: flex-start; gap: var(--space-2); background: var(--surface-2); border-style: dashed; border-color: var(--border-strong); box-shadow: none; color: var(--text-secondary); }
+.project-tile.is-pending:hover { border-color: var(--border-strong); }
+.project-tile-name { display: inline-flex; align-items: center; gap: var(--space-3); }
+.pending-line { font-size: 12.5px; font-weight: 500; overflow-wrap: anywhere; }
+.pending-deletion { max-width: 640px; }
+.pending-deletion h1 { display: flex; align-items: center; gap: var(--space-2); }
+.pending-deletion h1 svg { color: var(--text-secondary); flex-shrink: 0; }
 
 /* ---- Accessibility plumbing ---- */
 /* Hidden until focused: the first Tab on any page offers a jump past the navigation. */

@@ -4,7 +4,8 @@ import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FolderKanban, Plus } from "lucide-react";
 import {
-  MyOrganization, createOrganization, createProject, listMyOrganizations, listProjects, slugify,
+  MyOrganization, Project, createOrganization, createProject, formatPurgeDate, listMembers, listMyOrganizations,
+  listProjects, restoreProject, slugify,
 } from "../api/orgs";
 import ErrorBanner from "../components/ErrorBanner";
 import PageHeader from "../components/PageHeader";
@@ -17,7 +18,23 @@ function OrgProjects({ org }: { org: MyOrganization }) {
   const [formOpen, setFormOpen] = useState(false);
   const newProjectRef = useFocusReturn<HTMLButtonElement>(formOpen);
   const [name, setName] = useState("");
-  const projects = useQuery({ queryKey: ["projects", org.id], queryFn: () => listProjects(org.id) });
+  const canCreate = MANAGER_ROLES.includes(org.role);
+  // Owners and admins also see projects pending deletion, greyed, to restore them (spec 2026-10-16)
+  const projects = useQuery({
+    queryKey: ["projects", org.id, canCreate],
+    queryFn: () => listProjects(org.id, { includePending: canCreate }),
+  });
+  const anyPending = (projects.data ?? []).some((p) => p.deletion);
+  const members = useQuery({
+    queryKey: ["members", org.id],
+    queryFn: () => listMembers(org.id),
+    enabled: canCreate && anyPending,
+  });
+  const restore = useMutation({
+    mutationFn: (projectId: number) => restoreProject(projectId),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["projects", org.id] }),
+  });
+  const deleter = (p: Project) => members.data?.find((m) => m.user_id === p.deletion?.deleted_by)?.email ?? null;
   const create = useMutation({
     mutationFn: () => createProject(org.id, name.trim()),
     onSuccess: () => {
@@ -26,7 +43,6 @@ function OrgProjects({ org }: { org: MyOrganization }) {
       qc.invalidateQueries({ queryKey: ["projects", org.id] });
     },
   });
-  const canCreate = MANAGER_ROLES.includes(org.role);
 
   return (
     <section className="org-block" aria-labelledby={`org-${org.id}`}>
@@ -69,13 +85,29 @@ function OrgProjects({ org }: { org: MyOrganization }) {
       )}
       {projects.data != null && projects.data.length > 0 && (
         <div className="project-grid">
-          {projects.data.map((project) => (
+          {projects.data.map((project) => project.deletion ? (
+            <div key={project.id} className="project-tile is-pending" role="group"
+              aria-label={`${project.name}, deletion pending`}>
+              <span className="project-tile-name">
+                <FolderKanban size={18} aria-hidden="true" /> {project.name}
+              </span>
+              <span className="pending-line">
+                Deletion pending · removed on {formatPurgeDate(project.deletion.purge_at)}
+                {deleter(project) && ` · deleted by ${deleter(project)}`}
+              </span>
+              <button type="button" onClick={() => restore.mutate(project.id)}
+                disabled={restore.isPending} aria-label={`Restore ${project.name}`}>
+                Restore
+              </button>
+            </div>
+          ) : (
             <Link key={project.id} className="project-tile" to={`/projects/${project.id}/overview`}>
               <FolderKanban size={18} aria-hidden="true" /> {project.name}
             </Link>
           ))}
         </div>
       )}
+      {restore.error != null && <ErrorBanner error={restore.error} />}
     </section>
   );
 }
