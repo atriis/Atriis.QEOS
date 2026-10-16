@@ -1,4 +1,4 @@
-# Project deletion: confirm, 48 hours pending, restore, then purge everywhere — design
+# Project deletion: confirm, 7 days pending, restore, then purge everywhere — design
 
 Status: design agreed in conversation 2026-10-16; pending review of this written spec.
 Blueprint: Platform (project-service), Intelligence (ingestion retention), Execution (test-management), dashboard.
@@ -7,7 +7,7 @@ New ADR-033 (replaces the 7-day grace described in SETUP §4.7).
 ## 1. Goal and scope
 
 Owners and admins can delete a project from the dashboard. Deleting asks for confirmation, then the project waits
-48 hours, greyed out and restorable by any owner or admin of its organization. After 48 hours everything that
+7 days, greyed out and restorable by any owner or admin of its organization. After 7 days everything that
 belongs to the project is deleted, in every service, for good.
 
 What exists today: `DELETE /api/v1/projects/{id}` (owners and admins) sets `deleted_at`; the project disappears from
@@ -15,18 +15,18 @@ lists and answers 404; ingestion retention revokes its keys on the next pass and
 is no dashboard button, no confirmation, no restore, and test-management data and the project row are never removed.
 
 Not in scope: deleting an organization (it has its own soft delete), deleting a single run, scheduling a deletion
-for a later date, changing the 48 hours from the dashboard.
+for a later date, changing the 7 days from the dashboard.
 
 ## 2. States
 
 | State | `deleted_at` | Who sees it | What works |
 |---|---|---|---|
 | Live | null | every member | everything |
-| Pending deletion | set, less than 48 h ago | owners and admins: in the project list, greyed; others: a notice page on its URLs | Restore; nothing else |
+| Pending deletion | set, less than 7 days ago | owners and admins: in the project list, greyed; others: a notice page on its URLs | Restore; nothing else |
 | Purged | row gone | nobody | nothing |
 
-`PROJECT_DELETE_GRACE_HOURS` (default 48) sets the window, in project-service and in the purge job; it replaces
-ingestion's `RETENTION_DELETED_GRACE_DAYS`.
+`PROJECT_DELETE_GRACE_DAYS` (default 7, decided 2026-10-16) sets the window, in project-service and in the purge
+job; it replaces ingestion's `RETENTION_DELETED_GRACE_DAYS` (same default, so nothing changes for existing setups).
 
 ## 3. project-service
 
@@ -46,7 +46,7 @@ ingestion's `RETENTION_DELETED_GRACE_DAYS`.
 - The membership check other services call (`check_project_role`) keeps answering "no access" for a pending
   project: test-management and ingestion refuse its requests without knowing about deletion.
 
-## 4. Uploads and keys during the 48 hours
+## 4. Uploads and keys during the 7 days
 
 Ingestion asks project-service whether the key's project is pending (the internal retention feed already carries
 `deleted` and `deleted_at`; a cached lookup per upload, 60 s). A pending project's upload answers 410 `"Project
@@ -55,7 +55,7 @@ as they were. The collector already treats a refused upload as a warning, never 
 
 ## 5. The purge
 
-After `PROJECT_DELETE_GRACE_HOURS`, the ingestion retention job (it already runs on a loop under an advisory lock and
+After `PROJECT_DELETE_GRACE_DAYS`, the ingestion retention job (it already runs on a loop under an advisory lock and
 reads the internal project feed) purges the project, in this order, each step idempotent:
 
 1. **test-management:** new internal endpoint `DELETE /internal/v1/projects/{id}` (HTTP Basic, the internal
@@ -77,15 +77,15 @@ heartbeat stays as today.
 
 - **Settings → Data → Delete project** (owners and admins; a danger zone at the end of the Data card). A dialog:
   what is deleted ("its runs, results, logs, test cases, suites, API keys and settings"), when ("permanently on
-  18 Oct 2026, 14:05; until then any owner or admin can restore it"), a link to **Download all results** first, and a
+  23 Oct 2026, 14:05; until then any owner or admin can restore it"), a link to **Download all results** first, and a
   field "Type the project name to confirm". **Delete project** (danger button) is enabled only when the name matches
   exactly. Under a legal hold the button is disabled with the reason.
 - After deleting: back to the organization's project list.
 - **Project list (owners and admins):** pending projects stay in the list, greyed (muted text, no link), with a
-  badge "Deletion pending · removed on 18 Oct, 14:05 · deleted by Pedro Carneiro" and a **Restore** button. Restore
+  badge "Deletion pending · removed on 23 Oct, 14:05 · deleted by Pedro Carneiro" and a **Restore** button. Restore
   asks no confirmation (it only undoes) and returns the project to normal at once.
 - **A pending project's URL:** owners and admins see the same badge with Restore; other members see "This project is
-  scheduled for deletion on 18 Oct 2026, 14:05. Ask an owner or admin if this is a mistake."
+  scheduled for deletion on 23 Oct 2026, 14:05. Ask an owner or admin if this is a mistake."
 - The project picker and the switcher leave pending projects out.
 
 ## 7. Testing
@@ -106,8 +106,8 @@ heartbeat stays as today.
 
 ## 8. Documentation
 
-ADR-033. SETUP §4.7 (replace the 7-day text: delete, 48 hours, restore, purge), SECURITY (data deletion), PRODUCT,
-TECHNICAL_SPECIFICATION (endpoints, states, `PROJECT_DELETE_GRACE_HOURS`), DESIGN (dialog, greyed row, notice page),
+ADR-033. SETUP §4.7 (replace the 7-day text: delete, 7 days pending, restore, purge everywhere), SECURITY (data deletion), PRODUCT,
+TECHNICAL_SPECIFICATION (endpoints, states, `PROJECT_DELETE_GRACE_DAYS`), DESIGN (dialog, greyed row, notice page),
 the project-service, ingestion and test-management READMEs, `.env.example`.
 
 ## 9. Delivery
