@@ -89,6 +89,7 @@ pipeline already produces, and it starts runs only through workflows you own.
   - TOTP two-factor authentication with recovery codes;
   - Google and Microsoft (Entra ID) single sign-on, with a tenant allowlist.
 - **Organisations** with owner, admin, member and viewer roles, and invitations.
+- **Organisation role from Entra:** owners map Entra app roles to admin, member or viewer for their organisation. The role is kept in step at each Microsoft sign-in. Owners are always granted by hand.
 - **Projects** with repositories and per-project settings.
 
 ### Operations

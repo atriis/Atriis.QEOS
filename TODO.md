@@ -191,7 +191,7 @@ Reliability and operations
 - [x] Signing-key fetch hardened for Google and Microsoft (timeout, throttled refresh); outages answer 503
 - [x] SSO-only mode (`AUTH_SSO_ONLY`, ADR-031): Microsoft sign-in only, active superusers keep a logged password break-glass, non-superuser sessions revoked once per switch, readiness and a one-time 7-day link allowance
 - [ ] Personal Microsoft accounts (outlook.com)
-- [ ] Map Entra groups / app roles to organization roles
+- [x] Map Entra groups / app roles to organization roles (app roles, ADR-033, spec 2026-10-16; groups not planned)
 - [ ] SCIM provisioning and deprovisioning (ends the sessions of people removed from Entra; today they last until the refresh token expires, ADR-031)
 - [ ] GitHub SSO
 - [ ] Single sign-out

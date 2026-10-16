@@ -1,16 +1,23 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { http, HttpResponse } from "msw";
 import { server } from "../test/server";
 import { setAccessToken } from "../auth/tokens";
+import { microsoftEnabled } from "../auth/ssoProviders";
 import OrganizationPage from "./OrganizationPage";
 
+vi.mock("../auth/ssoProviders", () => ({ microsoftEnabled: vi.fn(() => false) }));
+beforeEach(() => vi.mocked(microsoftEnabled).mockReturnValue(false));
+
 const MEMBERS = [
-  { id: 1, organization_id: 7, user_id: 10, email: "owner@example.com", role: "owner", status: "active", created_at: "2026-10-01T10:00:00Z", updated_at: null },
-  { id: 2, organization_id: 7, user_id: 11, email: null, role: "member", status: "active", created_at: "2026-10-02T10:00:00Z", updated_at: null },
+  { id: 1, organization_id: 7, user_id: 10, email: "owner@example.com", role: "owner", status: "active", created_at: "2026-10-01T10:00:00Z", updated_at: null, managed_by: null },
+  { id: 2, organization_id: 7, user_id: 11, email: null, role: "member", status: "active", created_at: "2026-10-02T10:00:00Z", updated_at: null, managed_by: null },
 ];
+
+const MANAGED = { id: 3, organization_id: 7, user_id: 12, email: "eve@example.com", role: "member", status: "active",
+  created_at: "2026-10-04T10:00:00Z", updated_at: null, managed_by: "entra" };
 
 const INVITATIONS = [
   { id: 5, organization_id: 7, email: "carol@example.com", role: "member", invited_by_user_id: 10,
@@ -137,4 +144,43 @@ test("the status region exists before there is anything to say", async () => {
   renderPage();
   await screen.findByText("Acme QA");
   expect(screen.getByRole("status")).toHaveTextContent("");
+});
+
+test("an Entra-managed member shows the badge and cannot be removed", async () => {
+  mockOrg();
+  server.use(http.get("/api/v1/organizations/7/members", () => HttpResponse.json([...MEMBERS, MANAGED])));
+  renderPage();
+  const row = (await screen.findByText("eve@example.com")).closest("tr")!;
+  expect(within(row).getByText("Entra")).toHaveAttribute("title", "Managed by Entra");
+  const remove = await within(row).findByRole("button", { name: /Remove/ });
+  expect(remove).toBeDisabled();
+  expect(remove).toHaveAttribute("title", "Managed by Entra: remove the app role instead.");
+  // A hand-made member keeps the normal Remove
+  const handMade = screen.getByText("user 11").closest("tr")!;
+  expect(within(handMade).getByRole("button", { name: /Remove user 11/ })).toBeEnabled();
+});
+
+test("the Microsoft roles card shows for owners when the build has Microsoft sign-in", async () => {
+  vi.mocked(microsoftEnabled).mockReturnValue(true);
+  mockOrg("owner");
+  server.use(http.get("/api/v1/organizations/7/sso-role-mappings", () => HttpResponse.json([])));
+  renderPage();
+  expect(await screen.findByRole("heading", { name: "Microsoft roles" })).toBeInTheDocument();
+});
+
+test("the card is hidden for admins", async () => {
+  vi.mocked(microsoftEnabled).mockReturnValue(true);
+  mockOrg("admin");
+  renderPage();
+  await screen.findByText("owner@example.com");
+  await screen.findByRole("button", { name: /Remove user 11/ });
+  expect(screen.queryByRole("heading", { name: "Microsoft roles" })).not.toBeInTheDocument();
+});
+
+test("the card is hidden when the build has no Microsoft sign-in", async () => {
+  mockOrg("owner");
+  renderPage();
+  await screen.findByText("owner@example.com");
+  await screen.findByRole("button", { name: /Remove user 11/ });
+  expect(screen.queryByRole("heading", { name: "Microsoft roles" })).not.toBeInTheDocument();
 });

@@ -52,6 +52,34 @@ export interface Member {
   status: string;
   created_at: string;
   updated_at: string | null;
+  /** "entra" when a Microsoft app role sets this role (ADR-033); the member cannot be removed by hand. */
+  managed_by: "entra" | null;
+}
+
+/** An Entra app role value and the organization role it grants (ADR-033). Never owner. */
+export interface SsoRoleMapping {
+  id: number;
+  app_role: string;
+  role: string;
+  created_at: string | null;
+}
+
+export const MAPPED_ROLES = ["admin", "member", "viewer"] as const;
+
+export function listSsoRoleMappings(orgId: number): Promise<SsoRoleMapping[]> {
+  return apiFetch(`/api/v1/organizations/${orgId}/sso-role-mappings`);
+}
+
+export function createSsoRoleMapping(orgId: number, appRole: string, role: string): Promise<SsoRoleMapping> {
+  return apiFetch(`/api/v1/organizations/${orgId}/sso-role-mappings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ app_role: appRole, role }),
+  });
+}
+
+export function deleteSsoRoleMapping(orgId: number, mappingId: number): Promise<void> {
+  return apiFetch(`/api/v1/organizations/${orgId}/sso-role-mappings/${mappingId}`, { method: "DELETE" });
 }
 
 export interface InvitationPreview {

@@ -5,8 +5,10 @@ import {
   InvitationCreated, ROLES, createInvitation, listInvitations, listMembers,
   listMyOrganizations, myRole, removeMember, revokeInvitation,
 } from "../api/orgs";
+import { microsoftEnabled } from "../auth/ssoProviders";
 import ConfirmButton from "../components/ConfirmButton";
 import ErrorBanner from "../components/ErrorBanner";
+import MicrosoftRolesCard from "../components/MicrosoftRolesCard";
 import SecretBlock from "../components/SecretBlock";
 import PageHeader from "../components/PageHeader";
 
@@ -33,6 +35,7 @@ export default function OrganizationPage() {
   const invitations = useQuery({ queryKey: ["org", id, "invitations"], queryFn: () => listInvitations(id) });
 
   const canManage = me.data != null && MANAGER_ROLES.includes(me.data.role);
+  const isOwner = me.data?.role === "owner";
   const org = orgs.data?.find((o) => o.id === id);
 
   const invite = useMutation({
@@ -86,19 +89,28 @@ export default function OrganizationPage() {
               {members.data.map((member) => (
                 <tr key={member.id}>
                   <td>{member.email ?? `user ${member.user_id}`}</td>
-                  <td>{member.role}</td>
+                  <td>
+                    {member.role}
+                    {member.managed_by === "entra" && <> <span className="badge badge-muted" title="Managed by Entra" aria-label="Managed by Entra">Entra</span></>}
+                  </td>
                   <td>{member.status}</td>
                   <td>{new Date(member.created_at).toLocaleDateString()}</td>
                   {canManage && (
                     <td>
-                      <ConfirmButton
-                        label="Remove"
-                        ariaLabel={`Remove ${member.email ?? `user ${member.user_id}`}`}
-                        question={`Remove ${member.email ?? `user ${member.user_id}`}? They lose access to every project in this organization.`}
-                        confirmLabel="Remove"
-                        onConfirm={() => remove.mutate(member.id)}
-                        disabled={remove.isPending}
-                      />
+                      {member.managed_by === "entra" ? (
+                        <button type="button" disabled title="Managed by Entra: remove the app role instead.">
+                          Remove<span className="sr-only">Managed by Entra: remove the app role instead.</span>
+                        </button>
+                      ) : (
+                        <ConfirmButton
+                          label="Remove"
+                          ariaLabel={`Remove ${member.email ?? `user ${member.user_id}`}`}
+                          question={`Remove ${member.email ?? `user ${member.user_id}`}? They lose access to every project in this organization.`}
+                          confirmLabel="Remove"
+                          onConfirm={() => remove.mutate(member.id)}
+                          disabled={remove.isPending}
+                        />
+                      )}
                     </td>
                   )}
                 </tr>
@@ -172,6 +184,8 @@ export default function OrganizationPage() {
           </table>
         )}
       </div>
+
+      {isOwner && microsoftEnabled() && <MicrosoftRolesCard orgId={id} />}
     </div>
   );
 }

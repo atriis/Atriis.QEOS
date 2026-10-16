@@ -46,7 +46,8 @@ yet.
   a failure notification (Slack, Teams, email) or when a flaky ticket lands;
   managers open it in weekly reviews or read the weekly summary.
 - Microservices behind one NGINX gateway: auth-service (JWT, MFA, Google and
-  Microsoft SSO, an optional Microsoft-only sign-in mode with a superuser break-glass), organization-service (orgs, members, roles, invitations),
+  Microsoft SSO, an optional Microsoft-only sign-in mode with a superuser break-glass), organization-service (orgs, members, roles, invitations;
+  owners can map Entra app roles to admin, member or viewer, applied at each Microsoft sign-in, and the owner role is always granted by hand),
   project-service (projects, repositories, settings), ingestion-service (runs,
   results, analytics, report, notifications), test-management-service (cases,
   suites, Gherkin sync, runs from QEOS), `dashboard/` (React SPA).
