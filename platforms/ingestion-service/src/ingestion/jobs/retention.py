@@ -45,6 +45,8 @@ class Policy:
     deleted: bool
     deleted_at: Optional[datetime] = None
     legal_hold: bool = False
+    # Purge steps project-service already recorded for a deleted project (spec 2026-10-16), so a purge resumes
+    purge_state: Optional[dict] = None
 
 
 @dataclass(frozen=True)
@@ -53,10 +55,11 @@ class Endpoint:
     username: str
     password: str
     display: str    # for logs: the password replaced with ***
+    base: str = ""  # without credentials nor the feed path: other internal routes hang off it
 
 
-def parse_internal_url(value: str) -> Endpoint:
-    problem = RetentionError("PROJECT_SERVICE_INTERNAL_URL must look like http://user:password@host:port")
+def parse_internal_url(value: str, name: str = "PROJECT_SERVICE_INTERNAL_URL") -> Endpoint:
+    problem = RetentionError(f"{name} must look like http://user:password@host:port")
     try:
         parts = urlsplit(value.strip())
         username, password, hostname = parts.username, parts.password, parts.hostname
@@ -71,6 +74,7 @@ def parse_internal_url(value: str) -> Endpoint:
         username=unquote(username),
         password=unquote(password),
         display=urlunsplit((parts.scheme, f"{username}:***@{host}", path, "", "")),
+        base=urlunsplit((parts.scheme, host, path, "", "")),
     )
 
 
@@ -115,6 +119,7 @@ def _policy(item: object, endpoint: Endpoint) -> Policy:
     return Policy(
         project_id=item["project_id"], days=item["result_retention_days"], deleted=item["deleted"],
         deleted_at=deleted_at, legal_hold=item["legal_hold"],
+        purge_state=item.get("purge_state") if isinstance(item.get("purge_state"), dict) else None,
     )
 
 
@@ -130,27 +135,40 @@ def _aware_time(value: object) -> Optional[datetime]:
 
 
 def run_pass(
-    db: Session, policies: List[Policy], now: datetime, *, batch_size: int, dry_run: bool, grace_days: int = 7
+    db: Session, policies: List[Policy], now: datetime, *, batch_size: int, dry_run: bool, grace_days: int = 7,
+    purge: Optional[Callable[[Policy], List[str]]] = None,
 ) -> dict:
-    runs_deleted = keys_revoked = projects_held = 0
+    """Live projects lose runs past their retention period. A deleted project (spec 2026-10-16) keeps everything
+    while it can be restored, then `purge` removes it from every service; without `purge` it is left alone."""
+    runs_deleted = projects_purged = purge_failures = projects_held = 0
     for policy in policies:
         if policy.legal_hold:
             projects_held += 1
-        runs = db.query(Run.id).filter(Run.project_id == policy.project_id)
-        # A soft delete can be undone: a deleted project is emptied only once the grace period is
-        # over; until then the usual retention applies (its keys are revoked at once, below)
-        empty_it = policy.deleted and policy.deleted_at <= now - timedelta(days=grace_days)
-        if not empty_it:
-            runs = runs.filter(Run.created_at < now - timedelta(days=policy.days))
-        if not policy.legal_hold:  # on hold: nothing of it is deleted, whatever its age
-            runs_deleted += runs.count() if dry_run else _delete_in_batches(db, runs, batch_size)
-        if policy.deleted:  # revoking keys deletes no data, so a hold does not stop it
-            keys = db.query(ApiKey).filter(ApiKey.project_id == policy.project_id, ApiKey.revoked_at.is_(None))
+            continue  # on hold: nothing of it is deleted, whatever its age or deletion
+        if policy.deleted:
+            if policy.deleted_at > now - timedelta(days=grace_days):
+                continue  # pending: restorable as it was, so not even the usual retention
             if dry_run:
-                keys_revoked += keys.count()
+                projects_purged += 1
+            elif purge is None:
+                _log({"event": "purge_skipped", "project_id": policy.project_id,
+                      "reason": "TEST_MANAGEMENT_INTERNAL_URL is not set"})
             else:
-                keys_revoked += keys.update({ApiKey.revoked_at: now}, synchronize_session=False)
-                db.commit()
+                try:
+                    steps = purge(policy)
+                except RetentionError as exc:
+                    purge_failures += 1
+                    _log({"event": "purge_failed", "project_id": policy.project_id, "error": str(exc)}, error=True)
+                    continue
+                if steps:
+                    projects_purged += 1
+                    _log({"event": "project_purged", "project_id": policy.project_id, "steps": steps})
+                else:
+                    _log({"event": "purge_skipped", "project_id": policy.project_id, "reason": "restored"})
+            continue
+        runs = db.query(Run.id).filter(
+            Run.project_id == policy.project_id, Run.created_at < now - timedelta(days=policy.days))
+        runs_deleted += runs.count() if dry_run else _delete_in_batches(db, runs, batch_size)
     listed = {policy.project_id for policy in policies}
     known = {pid for (pid,) in db.query(Run.project_id).distinct()} | {
         pid for (pid,) in db.query(ApiKey.project_id).distinct()
@@ -159,7 +177,8 @@ def run_pass(
         "event": "retention",
         "projects": len(policies),
         "runs_deleted": runs_deleted,
-        "keys_revoked": keys_revoked,
+        "projects_purged": projects_purged,
+        "purge_failures": purge_failures,
         "projects_skipped": len(known - listed),
         "projects_held": projects_held,
         "dry_run": dry_run,
@@ -211,10 +230,18 @@ def run_once(*, dry_run: bool, now: Callable[[], datetime], session_factory: ses
                 _log({"event": "retention_skipped", "reason": "another pass is already running"})
                 return True  # the copy holding the lock writes the heartbeat
             policies = fetch_policies(endpoint)
+            tm = (parse_internal_url(settings.TEST_MANAGEMENT_INTERNAL_URL, name="TEST_MANAGEMENT_INTERNAL_URL")
+                  if settings.TEST_MANAGEMENT_INTERNAL_URL else None)
             with session_factory() as db:
+                purge = None
+                if tm is not None:
+                    from src.ingestion.jobs.purge import purge_project
+
+                    def purge(policy: Policy) -> List[str]:
+                        return purge_project(db, policy, endpoint, tm)
                 summary = run_pass(
                     db, policies, now(), batch_size=settings.RETENTION_BATCH_SIZE, dry_run=dry_run,
-                    grace_days=settings.RETENTION_DELETED_GRACE_DAYS,
+                    grace_days=settings.PROJECT_DELETE_GRACE_DAYS, purge=purge,
                 )
     except RetentionError as exc:
         _log({"event": "retention_failed", "error": str(exc)}, error=True)
@@ -226,6 +253,10 @@ def run_once(*, dry_run: bool, now: Callable[[], datetime], session_factory: ses
         heartbeat.record_error(session_factory, JOB, message, now())
         return False
     _log(summary)
+    if summary["purge_failures"]:
+        # Everything else was done; the failed purges resume from their recorded steps on the next pass
+        heartbeat.record_error(session_factory, JOB, f"{summary['purge_failures']} project purge(s) failed", now())
+        return False
     heartbeat.record_success(session_factory, JOB, now())
     return True
 

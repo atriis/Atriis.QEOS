@@ -23,7 +23,11 @@ class Settings(BaseServiceSettings):
     RETENTION_INTERVAL_HOURS: float = 24.0
     RETENTION_BATCH_SIZE: int = 500
     # A deleted project's runs are kept this long after the deletion (it can still be undone)
-    RETENTION_DELETED_GRACE_DAYS: int = 7
+    # A deleted project waits this long, restorable, before the retention job purges it everywhere (spec 2026-10-16)
+    PROJECT_DELETE_GRACE_DAYS: int = 7
+    # test-management's internal API for that purge, with HTTP Basic credentials: http://user:password@host:port.
+    # Unset: deleted projects are never purged (the purge needs every service), and each pass says so
+    TEST_MANAGEMENT_INTERNAL_URL: str = ""
     # The log-value re-scan (ADR-032): results per committed batch, and whether a scan queued when the service
     # stopped runs again when it starts (off in the tests)
     LOG_SCAN_BATCH_SIZE: int = 500

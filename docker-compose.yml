@@ -66,6 +66,8 @@ x-project-env: &project-env
   ORGANIZATION_SERVICE_URL: http://organization-service:8000
   # Internal API (GET /internal/v1/projects/retention), used by ingestion-retention
   INTERNAL_API_PASSWORD: ${INTERNAL_API_PASSWORD:?set INTERNAL_API_PASSWORD (project-service's internal API; URL-safe characters)}
+  # Days a deleted project stays restorable before it is purged; ingestion-retention reads the same value
+  PROJECT_DELETE_GRACE_DAYS: ${PROJECT_DELETE_GRACE_DAYS:-7}
 
 x-ingestion-env: &ingestion-env
   <<: [*smtp-env, *build-env]
@@ -260,11 +262,16 @@ services:
     pull_policy: never
     environment:
       <<: *ingestion-env
+      # test-management's internal API, for the purge of deleted projects after PROJECT_DELETE_GRACE_DAYS (spec 2026-10-16)
+      TEST_MANAGEMENT_INTERNAL_URL: http://ingestion-service:${INTERNAL_API_PASSWORD:?set INTERNAL_API_PASSWORD (service-to-service internal APIs; URL-safe characters)}@test-management-service:8000
+      PROJECT_DELETE_GRACE_DAYS: ${PROJECT_DELETE_GRACE_DAYS:-7}
     command: ["python", "-m", "src.ingestion.jobs.retention", "--loop"]
     depends_on:
       ingestion-migrate:
         condition: service_completed_successfully
       project-service:
+        condition: service_healthy
+      test-management-service:
         condition: service_healthy
 
   dashboard:
