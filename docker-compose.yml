@@ -72,6 +72,9 @@ x-ingestion-env: &ingestion-env
   DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/ingestion_db
   SECRET_KEY: ${SECRET_KEY:?set SECRET_KEY (shared by every service)}
   PROJECT_SERVICE_URL: http://project-service:8000
+  # project-service's internal feed, with HTTP Basic credentials as a connection string (the password must be
+  # URL-safe here): retention reads it, and uploads to a project pending deletion are refused (spec 2026-10-16)
+  PROJECT_SERVICE_INTERNAL_URL: http://ingestion-service:${INTERNAL_API_PASSWORD:?set INTERNAL_API_PASSWORD (project-service's internal API; URL-safe characters)}@project-service:8000
   # Run links in failure notifications (Slack/Teams/webhook) point at the gateway
   DASHBOARD_URL: https://localhost:${GATEWAY_HTTPS_PORT:-8443}
 
@@ -257,8 +260,6 @@ services:
     pull_policy: never
     environment:
       <<: *ingestion-env
-      # HTTP Basic credentials as a connection string; the password must be URL-safe here
-      PROJECT_SERVICE_INTERNAL_URL: http://ingestion-service:${INTERNAL_API_PASSWORD:?set INTERNAL_API_PASSWORD (project-service's internal API; URL-safe characters)}@project-service:8000
     command: ["python", "-m", "src.ingestion.jobs.retention", "--loop"]
     depends_on:
       ingestion-migrate:

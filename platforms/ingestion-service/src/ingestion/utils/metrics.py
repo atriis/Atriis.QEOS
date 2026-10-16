@@ -27,7 +27,7 @@ HEARTBEAT_READ_ERRORS = Counter(
 )
 
 # Pre-create each label's series so it is visible (at 0) before the first event
-for _reason in ("auth", "validation", "conflict"):
+for _reason in ("auth", "validation", "conflict", "pending_deletion"):
     REJECTED.labels(reason=_reason)
 for _status in ("passed", "failed", "errored", "skipped"):
     EXECUTIONS.labels(status=_status)
