@@ -71,7 +71,6 @@ def test_a_valid_token_signs_in_and_creates_a_passwordless_user(client, db, micr
     assert (link.provider, link.provider_user_id) == ("microsoft", f"{TENANT}:{OID}")
 
 
-@pytest.mark.xfail(strict=True, reason="Task 6 stores the roles")
 def test_the_tokens_app_roles_are_stored_on_the_link(client, db, microsoft_key):
     assert sign_in(client, ms_token(microsoft_key, roles=["QEOS.Member", "QEOS.Viewer"])).status_code == 200
     link = db.query(OAuthAccount).one()
@@ -466,3 +465,91 @@ def test_an_allowance_consumed_after_it_was_read_does_not_link(client, db, micro
     response = sign_in(client, ms_token(microsoft_key))
     assert response.status_code == 409
     assert db.query(OAuthAccount).count() == 0
+
+
+# --- Entra app roles pushed to organization-service (ADR-033) ---------------------------------------------
+
+from src.auth.service import org_roles_sync  # noqa: E402
+
+
+@pytest.fixture
+def org_calls(monkeypatch):
+    """Records each push; answers what the test sets in .status (200 by default; an Exception to raise)."""
+    class Calls(list):
+        status = 200
+    calls = Calls()
+
+    def fake_post(url, auth, body):
+        calls.append((url, auth, body))
+        if isinstance(calls.status, Exception):
+            raise calls.status
+        return calls.status
+
+    monkeypatch.setattr(settings, "ORGANIZATION_SERVICE_URL", "http://org.test")
+    monkeypatch.setattr(settings, "ORGANIZATION_INTERNAL_API_PASSWORD", "s3cret")
+    monkeypatch.setattr(org_roles_sync, "_post", fake_post)
+    return calls
+
+
+def test_sign_in_pushes_the_roles(client, db, microsoft_key, org_calls):
+    assert sign_in(client, ms_token(microsoft_key, roles=["QEOS.Member"])).status_code == 200
+    user_id = db.query(User).one().id
+    assert org_calls == [("http://org.test/internal/v1/sso-roles", ("auth-service", "s3cret"),
+                          {"user_id": user_id, "roles": ["QEOS.Member"]})]
+    assert db.query(OAuthAccount).one().sso_roles_synced_at is not None
+
+
+def test_a_token_without_roles_pushes_an_empty_list(client, db, microsoft_key, org_calls):
+    sign_in(client, ms_token(microsoft_key))
+    assert org_calls[0][2]["roles"] == []
+
+
+@pytest.mark.parametrize("answer", [503, 401, ConnectionError("down")])
+def test_a_failed_push_still_signs_in_and_is_left_pending(client, db, microsoft_key, org_calls, caplog, answer):
+    org_calls.status = answer
+    with caplog.at_level(logging.WARNING):
+        response = sign_in(client, ms_token(microsoft_key, roles=["QEOS.Member"]))
+    assert response.status_code == 200
+    link = db.query(OAuthAccount).one()
+    assert link.sso_roles_synced_at is None
+    assert "entra role sync deferred" in caplog.text
+
+
+def test_refresh_retries_a_pending_push_then_stops(client, db, microsoft_key, org_calls):
+    org_calls.status = 503
+    first = sign_in(client, ms_token(microsoft_key, roles=["QEOS.Admin"])).json()
+    org_calls.status = 200
+    refreshed = client.post("/api/v1/auth/refresh-token", json={"refresh_token": first["refresh_token"]})
+    assert refreshed.status_code == 200
+    assert len(org_calls) == 2 and org_calls[1][2]["roles"] == ["QEOS.Admin"]
+    assert db.query(OAuthAccount).one().sso_roles_synced_at is not None
+    again = client.post("/api/v1/auth/refresh-token", json={"refresh_token": refreshed.json()["refresh_token"]})
+    assert again.status_code == 200 and len(org_calls) == 2
+
+
+def test_a_failed_retry_never_fails_the_refresh(client, db, microsoft_key, org_calls):
+    org_calls.status = 503
+    first = sign_in(client, ms_token(microsoft_key, roles=["QEOS.Admin"])).json()
+    assert client.post("/api/v1/auth/refresh-token", json={"refresh_token": first["refresh_token"]}).status_code == 200
+
+
+def test_linking_microsoft_pushes_the_roles(client, db, microsoft_key, org_calls, register_and_verify):
+    login = register_and_verify("bob@example.com")
+    linked = client.post(LINK, json={"credential": ms_token(microsoft_key, roles=["QEOS.Viewer"]),
+                                     "current_password": "securepassword123"}, headers=bearer(login))
+    assert linked.status_code == 200
+    assert org_calls[-1][2] == {"user_id": linked.json()["id"], "roles": ["QEOS.Viewer"]}
+
+
+def test_without_the_password_nothing_is_pushed(client, db, microsoft_key, org_calls, monkeypatch):
+    monkeypatch.setattr(settings, "ORGANIZATION_INTERNAL_API_PASSWORD", "")
+    assert sign_in(client, ms_token(microsoft_key, roles=["QEOS.Member"])).status_code == 200
+    assert org_calls == []
+    assert db.query(OAuthAccount).one().sso_roles == ["QEOS.Member"]
+
+
+def test_the_start_up_warns_when_the_password_is_missing(monkeypatch, caplog):
+    monkeypatch.setattr(settings, "ORGANIZATION_INTERNAL_API_PASSWORD", "")
+    with caplog.at_level(logging.WARNING):
+        org_roles_sync.warn_if_unconfigured()
+    assert "Entra app roles are not applied: ORGANIZATION_INTERNAL_API_PASSWORD is not set" in caplog.text

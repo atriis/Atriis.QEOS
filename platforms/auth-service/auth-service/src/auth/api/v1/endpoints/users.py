@@ -10,7 +10,7 @@ from src.auth.schemas.auth import LinkGoogleRequest, LinkMicrosoftRequest
 from src.auth.models.user import User as UserModel
 from src.auth.models.oauth import OAuthAccount
 from src.auth.service.auth_service import AuthService
-from src.auth.service import sso_readiness
+from src.auth.service import sso_readiness, org_roles_sync
 from src.auth.config import settings
 from src.auth.service.auth_mode import sso_only_error
 from src.auth.utils.grafana_session import MONITORING_URL
@@ -178,8 +178,19 @@ def link_microsoft_account(
     current_user: UserModel = Depends(deps.get_current_active_user),
 ):
     """Link a Microsoft (Entra ID) identity to the current, authenticated account."""
-    return _link_identity(db, current_user, request.credential, request.current_password,
-                          verify_microsoft_credential, "Microsoft")
+    seen: dict = {}
+
+    def verify(credential: str) -> dict:
+        identity = verify_microsoft_credential(credential)
+        seen.update(identity)
+        return identity
+
+    user = _link_identity(db, current_user, request.credential, request.current_password, verify, "Microsoft")
+    link = db.query(OAuthAccount).filter(
+        OAuthAccount.user_id == current_user.id, OAuthAccount.provider == "microsoft",
+    ).first()
+    org_roles_sync.record_and_push(db, link, seen.get("roles", []))
+    return user
 
 
 @router.get("/sso-readiness", response_model=SsoReadiness)

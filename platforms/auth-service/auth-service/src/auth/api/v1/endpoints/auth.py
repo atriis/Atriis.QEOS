@@ -15,7 +15,7 @@ from src.auth.schemas.auth import (
     AuthMethods, LoginRequest, MfaCodeRequest, MfaVerifyRequest, Token, PasswordResetRequest,
     PasswordResetConfirm, RefreshTokenRequest, ResendVerificationRequest, ChangePasswordRequest,
 )
-from src.auth.service import mfa_service
+from src.auth.service import mfa_service, org_roles_sync
 from src.auth.service.auth_mode import available_providers, client_ip, log_break_glass, sso_only_error
 from src.auth.schemas.user import RegisterRequest
 from src.auth.models.pending_registration import PendingRegistration
@@ -400,6 +400,9 @@ def refresh_access_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+
+    # A Microsoft sign-in whose app roles never reached organization-service: try again (ADR-033)
+    org_roles_sync.retry_pending(db, user.id)
 
     # Issue new tokens
     access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)

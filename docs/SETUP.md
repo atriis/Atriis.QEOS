@@ -151,7 +151,7 @@ bash deploy/init-env.sh localhost you@example.com
 | Variable | What it is | How to set it |
 |---|---|---|
 | `SECRET_KEY` | Signs and verifies every login token (JWT). All services share it. | Long and random (64 hex). Changing it later signs everyone out. API keys keep working. |
-| `INTERNAL_API_PASSWORD` | Shared secret for service-to-service APIs: auth ↔ organization (member checks) and project ↔ retention job. | Letters and digits only. It goes inside a URL, so `@ : / %` break it. |
+| `INTERNAL_API_PASSWORD` | Shared secret for service-to-service APIs: auth ↔ organization (member checks and Entra app roles) and project ↔ retention job. | Letters and digits only. It goes inside a URL, so `@ : / %` break it. |
 
 **Recommended.**
 
@@ -551,8 +551,39 @@ when there is no active superuser.
 Every such sign-in is logged at WARNING as `break-glass sign-in` with user id, email, IP and time:
 `docker compose logs auth-service | grep break-glass`.
 
-**New colleagues:** they sign in once with Microsoft (that creates their account), then an owner or
-admin adds them to the organization or project; members are added by existing account.
+**New colleagues:** they sign in once with Microsoft (that creates their account). If an
+[app role mapping](#app-roles-organization-role-from-entra-adr-033) matches their Entra role, they get
+their organization role at that first sign-in. Otherwise an owner or admin adds them to the
+organization; members are added by existing account.
+
+#### App roles (organization role from Entra, ADR-033)
+
+Optional. An Entra app role can set a person's organization role at each Microsoft sign-in.
+
+**In Entra (IT):**
+
+1. Open the app registration, then **App roles**, then **Create app role**.
+2. Set the display name to "QEOS Admin", allowed member types to Users/Groups, and the value to `QEOS.Admin`.
+3. Do the same for `QEOS.Member` and `QEOS.Viewer`.
+4. Open **Enterprise applications**, then the app, then **Users and groups**, then **Add user/group**. Pick the user or group and the role.
+
+No optional claim is needed. The `roles` claim comes in the ID token by default.
+
+**In QEOS:** an owner opens the Organization page, then **Microsoft roles**, and maps each value to admin, member or viewer.
+
+**The rules:**
+
+- At each Microsoft sign-in, the role follows Entra for members that Entra created.
+- Members invited by hand are never changed.
+- Owners are always granted by hand.
+- When someone has several app roles, the highest mapped role wins.
+- Removing a mapping changes nobody until their next sign-in.
+- If organization-service was down at a sign-in, auth-service tries again at the next token refresh, within the hour.
+
+auth-service needs two settings: `ORGANIZATION_SERVICE_URL` and `ORGANIZATION_INTERNAL_API_PASSWORD`.
+`docker-compose.yml` sets both. The password is your `INTERNAL_API_PASSWORD`, so `.env` needs no new
+line. Without the password, auth-service logs a WARNING at start and no role is applied. On AKS or
+another deployment, pass both settings to auth-service and `INTERNAL_API_PASSWORD` to organization-service.
 
 **Known limitation:** someone removed from Entra ID cannot get a new Microsoft token, but a QEOS session
 they already hold lasts until its refresh token expires (30 days). Deactivate them in QEOS to end it at

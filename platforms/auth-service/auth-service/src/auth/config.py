@@ -49,6 +49,11 @@ class Settings(BaseServiceSettings):
     INTERNAL_API_USERNAME: str = "organization-service"
     INTERNAL_API_PASSWORD: str = ""
 
+    # Entra app roles (ADR-033): where a Microsoft sign-in's roles are pushed, and the password of
+    # organization-service's internal API. Empty password: roles are stored but never applied (one start-up warning)
+    ORGANIZATION_SERVICE_URL: str = "http://organization-service:8000"
+    ORGANIZATION_INTERNAL_API_PASSWORD: str = ""
+
     # Monitoring (spec 2026-10-10, ADR-027): offer Grafana at /grafana/ to superusers. Same .env value
     # the gateway reads; the compose profile `monitoring` must be on too
     MONITORING_ENABLED: bool = False

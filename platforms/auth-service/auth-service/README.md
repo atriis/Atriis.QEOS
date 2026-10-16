@@ -156,6 +156,10 @@ SSO-only mode:
 - `AUTH_SSO_ONLY`: SSO-only mode (default `false`, ADR-031). People sign in only with the providers listed in `AUTH_SSO_PROVIDERS`; active superusers keep password sign-in (break-glass, MFA still applies).
 - `AUTH_SSO_PROVIDERS`: comma-separated providers allowed in the mode (default `microsoft`; valid: `microsoft`, `google`). With the mode on, start-up stops when a listed provider is unknown or not configured, and logs the missing setting's name. With the mode on and no active superuser, start-up logs a WARNING.
 
+Entra app roles (ADR-033):
+- `ORGANIZATION_SERVICE_URL`: where a Microsoft sign-in's roles are pushed (default `http://organization-service:8000`).
+- `ORGANIZATION_INTERNAL_API_PASSWORD`: the password of organization-service's internal API, the same value as its `INTERNAL_API_PASSWORD` (docker-compose passes it from `INTERNAL_API_PASSWORD`). When empty, the roles are stored but never applied, and start-up logs a WARNING: `Entra app roles are not applied: ORGANIZATION_INTERNAL_API_PASSWORD is not set`.
+
 #### Setting up Microsoft sign-in
 
 1. In Entra ID, register an application as a **single-page application** with your frontend's
@@ -202,6 +206,11 @@ set it to any address). The address must be one the user model accepts; otherwis
 - `POST /api/v1/sso/github` - **501, not implemented**
 - `POST /api/v1/sso/microsoft` - Authenticate with a Microsoft (Entra ID) ID token from an allowed tenant. An account that holds the token's address but no Microsoft link is linked only when a superuser allowed it (`allow-microsoft-link`, valid 7 days, cleared when used); otherwise 409.
 - `POST /api/v1/users/me/link/microsoft` - Link a Microsoft identity to the signed-in account (requires `current_password` when the account has one)
+
+### Entra app roles (ADR-033)
+The `roles` claim of a Microsoft ID token is stored on the link (`oauth_accounts.sso_roles`, `sso_roles_at`, `sso_roles_synced_at`; migration 009). After each Microsoft sign-in and after each Microsoft link, auth-service posts `{"user_id", "roles"}` to organization-service's `POST /internal/v1/sso-roles` (HTTP Basic, user `auth-service`, 5 s timeout). Google sign-in carries no roles and never pushes.
+
+The push is best effort: a failure never fails the sign-in, the link or the refresh. It is logged at WARNING as `entra role sync deferred: user=… reason=…` and `sso_roles_synced_at` stays empty. At the next `POST /api/v1/auth/refresh-token`, auth-service pushes again while the last roles are not synced, and then stops.
 
 ### SSO-only mode (ADR-031)
 With `AUTH_SSO_ONLY=true`, every refusal answers `403 {"detail": {"code": "sso_only", "message": "Sign-in is through Microsoft only."}}` (the names come from `AUTH_SSO_PROVIDERS`):

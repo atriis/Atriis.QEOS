@@ -6,6 +6,7 @@ from src.auth.api.v1.endpoints import internal
 from src.auth.config import settings
 from src.auth.db.session import SessionLocal
 from src.auth.service.auth_mode import apply_auth_mode, check_sso_only_settings, warn_if_no_break_glass
+from src.auth.service import org_roles_sync
 from src.auth.service.bootstrap import bootstrap_first_superuser
 
 app = FastAPI(
@@ -28,6 +29,7 @@ def _apply_auth_mode() -> None:
     # ADR-031. Registered after the bootstrap, so the superuser it creates counts for the warning.
     # A listed provider that cannot work stops start-up here, before any database access.
     check_sso_only_settings()
+    org_roles_sync.warn_if_unconfigured()
     db = SessionLocal()
     try:
         apply_auth_mode(db)

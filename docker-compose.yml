@@ -47,6 +47,9 @@ x-auth-env: &auth-env
   AZURE_ALLOWED_TENANTS: ${AZURE_ALLOWED_TENANTS:-}
   AUTH_SSO_ONLY: ${AUTH_SSO_ONLY:-false}
   AUTH_SSO_PROVIDERS: ${AUTH_SSO_PROVIDERS:-microsoft}
+  # Entra app roles (ADR-033): a Microsoft sign-in's roles go to organization-service's internal API
+  ORGANIZATION_SERVICE_URL: http://organization-service:8000
+  ORGANIZATION_INTERNAL_API_PASSWORD: ${INTERNAL_API_PASSWORD:?set INTERNAL_API_PASSWORD (service-to-service internal APIs; URL-safe characters)}
 
 x-organization-env: &organization-env
   <<: *build-env

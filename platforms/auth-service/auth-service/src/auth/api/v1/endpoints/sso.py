@@ -11,6 +11,7 @@ from src.auth.service.sso_service import SSOService, SSOConfigurationError, SSOI
 from src.auth.service.auth_service import AuthService
 from src.auth.service.user_service import UserService
 from src.auth.service.sso_readiness import valid_allowance
+from src.auth.service import org_roles_sync
 from src.auth.schemas.auth import GoogleLoginRequest, MicrosoftLoginRequest, Token
 from src.auth.schemas.user import UserCreate  # used when SSO creates a first-time user
 from src.auth.models.oauth import OAuthAccount
@@ -273,6 +274,10 @@ def microsoft_login(
         MICROSOFT_EXISTING_ACCOUNT_SSO_ONLY if settings.AUTH_SSO_ONLY else MICROSOFT_EXISTING_ACCOUNT
     )
     tokens = sso_sign_in(db, identity, "Microsoft", existing_account_detail=existing_account_detail)
+    link = db.query(OAuthAccount).filter(
+        OAuthAccount.provider == "microsoft", OAuthAccount.provider_user_id == identity["provider_user_id"],
+    ).first()
+    org_roles_sync.record_and_push(db, link, identity.get("roles", []))
     set_refresh_cookie(response, tokens["refresh_token"])
     return tokens
 

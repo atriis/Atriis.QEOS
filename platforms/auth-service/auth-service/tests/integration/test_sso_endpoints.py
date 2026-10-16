@@ -373,3 +373,12 @@ def test_google_key_outage_is_503(client, monkeypatch):
     response = client.post("/api/v1/sso/google", json={"credential": "anything"})
     assert response.status_code == 503
     assert response.json() == {"detail": "Google sign-in is temporarily unavailable"}
+
+
+def test_google_sign_in_never_pushes_roles(client, db, google_key, monkeypatch):
+    from src.auth.service import org_roles_sync
+    calls = []
+    monkeypatch.setattr(settings, "ORGANIZATION_INTERNAL_API_PASSWORD", "s3cret")
+    monkeypatch.setattr(org_roles_sync, "_post", lambda url, auth, body: calls.append(body) or 200)
+    assert client.post("/api/v1/sso/google", json={"credential": _id_token(google_key)}).status_code == 200
+    assert calls == []
