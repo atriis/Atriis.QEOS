@@ -1,4 +1,4 @@
-import { getLatestKeys } from "../api/analytics";
+import { type KeysWindow, getLatestKeys } from "../api/analytics";
 import { searchCases, type CaseSearchBody } from "../api/cases";
 
 /** A page of the Cases list. */
@@ -7,9 +7,9 @@ export const CASES_PAGE = 50;
 const JOIN_STALE_MS = 60_000;
 
 /** Test keys whose latest result has `status`, under one key for every reader (list filter, Failing tile). */
-export const latestKeysQuery = (projectId: number, status: "passed" | "failed" | "skipped" | "any") => ({
-  queryKey: ["latest-keys", projectId, status] as const,
-  queryFn: () => getLatestKeys(projectId, status),
+export const latestKeysQuery = (projectId: number, status: "passed" | "failed" | "skipped" | "any", window?: KeysWindow) => ({
+  queryKey: ["latest-keys", projectId, status, window?.since ?? "", window?.until ?? ""] as const,
+  queryFn: () => getLatestKeys(projectId, status, window),
   staleTime: JOIN_STALE_MS,
 });
 

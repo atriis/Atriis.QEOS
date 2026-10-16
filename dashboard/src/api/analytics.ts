@@ -100,11 +100,17 @@ export function getTrends(
 }
 
 /** Test keys whose most recent result has the status ("any": at least one result). */
+/** A period for latest-keys: ISO instants, `until` exclusive, on the run's start. */
+export interface KeysWindow { since: string; until: string }
+
+/** Keys of the tests whose latest result has `status`; with a window, only the results of runs started in it count,
+ *  so "latest" is the latest within it and `any` lists every test that ran in it. */
 export function getLatestKeys(
   projectId: number,
   status: "passed" | "failed" | "skipped" | "any",
+  window?: KeysWindow,
 ): Promise<{ keys: string[] }> {
-  return apiFetch(`/api/v1/projects/${projectId}/analytics/latest-keys${buildQuery({ status })}`);
+  return apiFetch(`/api/v1/projects/${projectId}/analytics/latest-keys${buildQuery({ status, ...window })}`);
 }
 
 export type StripStatus = "passed" | "failed" | "rerun" | "skipped";

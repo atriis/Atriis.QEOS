@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { CI_LABELS } from "../../lib/ciProviders";
+import {
+  MAX_AGE_DAYS, MAX_SPAN_DAYS, PRESETS, type Preset, addDays, isDay, spanDays, todayIn,
+} from "../../lib/period";
 import { type AreaFilter, parseArea } from "../../lib/reportScope";
 
-/** The report's filters live in the URL (spec: Filters): reload, share and Back restore them. */
+/** The report's filters live in the URL (spec: Filters): reload, share and Back restore them. The period helpers
+ *  are shared with the Test cases list (lib/period) and re-exported here for the report's own modules. */
+export { MAX_AGE_DAYS, MAX_SPAN_DAYS, PRESETS, type Preset, addDays, spanDays, todayIn };
 
-export const PRESETS = ["7", "30", "90"] as const;
-export type Preset = (typeof PRESETS)[number];
 export const DEFAULT_PRESET: Preset = "30";
-export const MAX_SPAN_DAYS = 90;
-export const MAX_AGE_DAYS = 400;
 /** `branch=*`: every branch. No `branch`: the project's default branch (plan Ruling 1). `*` is not a legal git branch name. */
 export const ALL_BRANCHES = "*";
 
@@ -30,28 +31,6 @@ export interface ReportFilters {
   origin: "any" | "ci" | "qeos";
   area: AreaFilter | null;
   suite: number | null;
-}
-
-const DAY_MS = 86_400_000;
-
-/** The calendar day it is now in `tz`, as YYYY-MM-DD. */
-export function todayIn(tz: string, now: Date = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
-}
-
-export function addDays(day: string, n: number): string {
-  return new Date(Date.parse(`${day}T00:00:00Z`) + n * DAY_MS).toISOString().slice(0, 10);
-}
-
-/** Days from `from` to `to`, both included. */
-export function spanDays(from: string, to: string): number {
-  return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / DAY_MS) + 1;
-}
-
-function isDay(s: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
-  const time = Date.parse(`${s}T00:00:00Z`);
-  return !Number.isNaN(time) && new Date(time).toISOString().slice(0, 10) === s;
 }
 
 const noNul = (s: string) => !s.includes("\u0000");

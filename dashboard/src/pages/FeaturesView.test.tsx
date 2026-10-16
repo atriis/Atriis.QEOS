@@ -270,11 +270,11 @@ test("a filter the feature list cannot apply groups the matching cases in the pa
       kase(9, { title: "Written by hand" }),
     ] });
   }));
-  renderCases("/projects/42/cases?origin=imported");
+  renderCases("/projects/42/cases?status=archived");
   expect(await screen.findByRole("link", { name: "Login" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Pay" })).toBeInTheDocument();
   expect(seenFeatures).toHaveLength(0);
-  expect(seenCases[seenCases.length - 1].get("origin")).toBe("imported");
+  expect(seenCases[seenCases.length - 1].get("status")).toBe("archived");
   await userEvent.click(within(featureRow("Pay")).getByRole("button", { name: "Show scenarios of Pay" }));
   expect(await screen.findByRole("link", { name: "Case 4" })).toBeInTheDocument();
 });
@@ -329,7 +329,7 @@ test("the client-side grouping computes the same aggregates from the cases", asy
     kase(2, { source_path: LOGIN.path, feature_name: "Login", priority: "critical", status: "draft" }),
     kase(3, { source_path: "features/pay.feature", feature_name: "Pay", status: "ready", automated_test_key: KEY }),
   ] })));
-  renderCases("/projects/42/cases?origin=imported");
+  renderCases("/projects/42/cases?status=archived");
   await screen.findByRole("link", { name: "Login" });
   const login = featureRow("Login");
   expect(within(login).getByLabelText("Highest priority: critical")).toBeInTheDocument();

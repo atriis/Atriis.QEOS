@@ -3,10 +3,11 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Crosshair, Plus, Upload } from "lucide-react";
 import {
-  CaseStatus, MAX_SEARCH_KEYS, PRIORITIES, Priority, SEARCH_IN, type SearchIn, listCases, listFeatureGroups, listFeatures,
-  listFolders, listLabels,
+  CaseStatus, MAX_SEARCH_KEYS, PRIORITIES, Priority, SEARCH_IN, type SearchIn, listCases, listFeatureGroups, listFolders, listLabels,
 } from "../api/cases";
+import type { KeysWindow } from "../api/analytics";
 import { CASES_PAGE, caseSearchQuery, latestKeysQuery } from "../lib/caseQueries";
+import { PRESETS, type Preset, dayStartIso, formatPeriod, isDay, presetRange, todayIn } from "../lib/period";
 import { FEATURES_PAGE, GROUP_CASES_MAX, groupByFeature } from "../lib/featureQueries";
 import { MAX_RUN_CASES } from "../api/runRequests";
 import CaseTable, { type CaseRowData } from "../components/CaseTable";
@@ -17,6 +18,7 @@ import FilterChips, { revealFilters, type AppliedFilter, type QuickChip } from "
 import FiltersDisclosure from "../components/FiltersDisclosure";
 import FilterSelect from "../components/FilterSelect";
 import FolderSelect from "../components/FolderSelect";
+import PeriodRange from "../components/PeriodRange";
 import FeatureList from "../components/FeatureList";
 import LikelyAffectedPanel from "../components/LikelyAffectedPanel";
 import RunControl from "../components/RunControl";
@@ -31,18 +33,20 @@ import { tableCardClass, useIsWide } from "../lib/useIsWide";
 
 const RESULTS = ["passed", "failed", "skipped", "never"];
 const LEGEND = [["passed", "Passed"], ["failed", "Failed"], ["rerun", "Re-run"], ["skipped", "Skipped"]] as const;
-const KEYS = ["q", "label", "status", "priority", "origin", "folder", "linked", "result", "feature", "ado"] as const;
+// `period` (a preset) or `from`/`to` (a custom range): only cases with a result in that period (2026-10-16)
+const KEYS = ["q", "label", "status", "priority", "folder", "linked", "result", "period", "from", "to"] as const;
 // The form also holds where the search looks; it is part of the search, not a filter of its own (no chip)
 const FORM_KEYS = [...KEYS, "search_in"] as const;
 type Values = Record<(typeof FORM_KEYS)[number], string>;
 // Filters GET /features cannot apply: with one of these the Feature view groups the matching cases itself
-const CASE_ONLY = ["result", "origin", "feature", "ado"] as const;
+const CASE_ONLY = ["result", "period", "from", "to"] as const;
 type Group = "feature" | "scenario";
 const LIKELY_AFFECTED_ID = "likely-affected";
 const SEARCH_IN_NAMES: Record<SearchIn, string> = { feature: "Feature", scenario: "Scenario", both: "Both" };
 const SEARCH_HINT: Record<SearchIn, string> = { feature: "feature name or path", scenario: "title, steps or TC key", both: "feature or scenario" };
 
-// One press each; chips that share a key are one choice
+// One press each; chips that share a key are one choice. The period chips are built per render (the Custom chip
+// reads its range); `quickChips` adds them to these
 const QUICK: QuickChip[] = [
   { key: "result", value: "failed", label: "Failing" },
   { key: "result", value: "never", label: "Never ran" },
@@ -53,22 +57,40 @@ const QUICK: QuickChip[] = [
 ];
 // How an applied filter reads in its chip
 const FILTER_NAMES: Record<(typeof KEYS)[number], string> = {
-  q: "Search", label: "Label", status: "Status", priority: "Priority", origin: "Origin", folder: "Folder",
-  linked: "Link", result: "Latest result", feature: "Feature", ado: "Azure DevOps",
+  q: "Search", label: "Label", status: "Status", priority: "Priority", folder: "Folder",
+  linked: "Link", result: "Latest result", period: "Period", from: "Period", to: "Period",
 };
 const VALUE_NAMES: Partial<Record<(typeof KEYS)[number], Record<string, string>>> = {
   status: { draft: "Draft", ready: "Ready", archived: "Archived" },
-  origin: { manual: "Manual", imported: "Imported" },
   linked: { true: "Linked", false: "Not linked" },
   result: { passed: "Passed", failed: "Failed", skipped: "Skipped", never: "Never ran" },
 };
+const isPreset = (s: string): s is Preset => (PRESETS as readonly string[]).includes(s);
+/** The custom range in the URL, when both days are valid and in order. */
+const customRange = (v: Values) => (isDay(v.from) && isDay(v.to) && v.from <= v.to ? { from: v.from, to: v.to } : null);
+/** The period chips: the presets and "Custom…", which reads its range once one is applied. */
+function quickChips(v: Values): QuickChip[] {
+  const range = customRange(v);
+  return [
+    ...QUICK,
+    ...PRESETS.map((p) => ({ key: "period", value: p, label: `${p} days` })),
+    { key: "period", value: "custom", label: range ? `Custom: ${formatPeriod(range.from, range.to)}` : "Custom…" },
+  ];
+}
 function appliedFilters(v: Values): AppliedFilter[] {
-  // A search chip reads where it looks, when the reader chose
-  return KEYS.filter((k) => v[k] !== "").map((k) => ({
+  // A search chip reads where it looks, when the reader chose. The period is one filter: a preset, or the custom
+  // range under the "period" key (its quick chip shows it, so no second chip)
+  const range = customRange(v);
+  return KEYS.filter((k) => v[k] !== "" && k !== "from" && k !== "to").map((k) => ({
     key: k,
     name: k === "q" && SEARCH_IN.includes(v.search_in as SearchIn) ? `Search (${SEARCH_IN_NAMES[v.search_in as SearchIn].toLowerCase()})` : FILTER_NAMES[k],
-    value: k === "folder" ? v[k].split("/").join(" / ") : k === "ado" ? `#${v[k]}` : VALUE_NAMES[k]?.[v[k]] ?? v[k],
-  }));
+    value: k === "folder" ? v[k].split("/").join(" / ") : k === "period" && isPreset(v[k]) ? `${v[k]} days` : VALUE_NAMES[k]?.[v[k]] ?? v[k],
+  })).concat(range && !v.period ? [{ key: "period", name: "Period", value: formatPeriod(range.from, range.to) }] : []);
+}
+/** The instants a period covers, for latest-keys: a preset ends today; a custom range's To is inclusive. */
+function periodWindow(v: Values, today: string): KeysWindow | null {
+  const range = isPreset(v.period) ? presetRange(v.period, today) : customRange(v);
+  return range ? { since: dayStartIso(range.from), until: dayStartIso(range.to, 1) } : null;
 }
 
 const read = (p: URLSearchParams): Values =>
@@ -86,6 +108,10 @@ export default function CasesPage() {
   const [params, setParams] = useSearchParams();
   const applied = read(params);
   const [form, setForm] = useState<Values>(applied);
+  // "Custom…" pressed: the range row shows until a range is applied or Cancel
+  const [customOpen, setCustomOpen] = useState(false);
+  const today = todayIn(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const periodWin = periodWindow(applied, today);
   const group: Group = params.get("group") === "scenario" ? "scenario" : "feature";
   // Where the search looks: the reader's choice, else the view's own field (feature names, or scenarios)
   const searchIn: SearchIn = SEARCH_IN.includes(applied.search_in as SearchIn) ? (applied.search_in as SearchIn) : group;
@@ -154,18 +180,18 @@ export default function CasesPage() {
     queryFn: async () => {
       const base = {
         search: applied.q || undefined, search_in: applied.q ? searchIn : undefined, status, priority,
-        origin: (applied.origin === "manual" || applied.origin === "imported" ? applied.origin : undefined) as "manual" | "imported" | undefined,
-        folder: applied.folder || undefined, feature: applied.feature || undefined, ado: applied.ado || undefined,
+        folder: applied.folder || undefined,
         limit: caseLimit, offset: caseOffset,
       };
       const plain = { ...base, label: applied.label || undefined, linked: linked as "true" | "false" | undefined };
       const result = RESULTS.includes(applied.result) ? applied.result : "";
-      if (!result) return { page: await listCases(id, plain), notice: null };
+      // A period alone keeps the cases that ran in it; with a result, the latest result within the period
+      if (!result && !periodWin) return { page: await listCases(id, plain), notice: null };
       let keys: string[];
       try {
         // Shared with the Failing tile (one request, re-asked at most once a minute)
         keys = (await queryClient.fetchQuery(
-          latestKeysQuery(id, result === "never" ? "any" : (result as "passed" | "failed" | "skipped")),
+          latestKeysQuery(id, result === "never" || !result ? "any" : (result as "passed" | "failed" | "skipped"), periodWin ?? undefined),
         )).keys;
       } catch {
         return { page: await listCases(id, plain), notice: "unavailable" as const };
@@ -197,23 +223,11 @@ export default function CasesPage() {
     placeholderData: keepPreviousData,
   });
   const labels = useQuery({ queryKey: ["case-labels", id], queryFn: () => listLabels(id) });
-  const featureNames = useQuery({ queryKey: ["case-features", id], queryFn: () => listFeatures(id) });
   const folders = useQuery({ queryKey: ["case-folders", id], queryFn: () => listFolders(id) });
   const casesTotal = useQuery({ queryKey: ["cases-total", id], queryFn: async () => (await listCases(id, { limit: 1, offset: 0 })).total });
   const labelOptions = useMemo(
     () => (labels.data ?? []).filter((l) => !/^ado-\d+$/.test(l.label)).map((l) => ({ value: l.label, label: `${l.label} (${l.count})` })),
     [labels.data],
-  );
-  const adoOptions = useMemo(
-    () => (labels.data ?? []).flatMap((l) => {
-      const m = /^ado-(\d+)$/.exec(l.label);
-      return m ? [{ value: m[1], label: `#${m[1]} (${l.count})` }] : [];
-    }),
-    [labels.data],
-  );
-  const featureOptions = useMemo(
-    () => (featureNames.data ?? []).map((f) => ({ value: f.feature, label: `${f.feature} (${f.count})` })),
-    [featureNames.data],
   );
 
   // Picking a folder applies it together with whatever else is typed in the form; the grouping stays
@@ -226,17 +240,28 @@ export default function CasesPage() {
 
   const pickFolder = (path: string) => submit({ ...form, folder: path });
 
-  // Chips patch the applied URL (not the form draft) and go back to page 1
+  // Chips patch the applied URL (not the form draft) and go back to page 1. The period is one filter: a preset
+  // replaces a custom range and the other way round; "Custom…" only opens the range row
   function patchFilters(patch: Record<string, string>) {
+    if (patch.period === "custom") {
+      setCustomOpen(true);
+      return;
+    }
     setParams((prev) => {
       const next = new URLSearchParams(prev);
       for (const [k, v] of Object.entries(patch)) {
         if (v) next.set(k, v);
         else next.delete(k);
       }
+      if ("period" in patch) {
+        next.delete("from");
+        next.delete("to");
+      }
+      if (patch.from || patch.to) next.delete("period");
       next.delete("offset");
       return next;
     });
+    setCustomOpen(false);
   }
   // A view switch keeps the filters and goes back to page 1
   function setGroup(to: Group) {
@@ -334,18 +359,19 @@ export default function CasesPage() {
               options={[{ value: "draft", label: "Draft" }, { value: "ready", label: "Ready" }, { value: "archived", label: "Archived" }]} />
             <FilterSelect label="Priority" value={form.priority} onChange={(v) => setForm({ ...form, priority: v })}
               options={PRIORITIES.map((p) => ({ value: p, label: p }))} />
-            <FilterSelect label="Origin" value={form.origin} emptyLabel="All" onChange={(v) => setForm({ ...form, origin: v })}
-              options={[{ value: "manual", label: "Manual" }, { value: "imported", label: "Imported" }]} />
             <FilterSelect label="Link" value={form.linked} onChange={(v) => setForm({ ...form, linked: v })}
               options={[{ value: "true", label: "Linked" }, { value: "false", label: "Not linked" }]} />
             <FilterSelect label="Latest result" value={form.result} onChange={(v) => setForm({ ...form, result: v })}
               options={[{ value: "passed", label: "Passed" }, { value: "failed", label: "Failed" }, { value: "skipped", label: "Skipped" }, { value: "never", label: "Never ran" }]} />
-            <FilterSelect label="Feature" value={form.feature} options={featureOptions} onChange={(v) => setForm({ ...form, feature: v })} />
-            <FilterSelect label="Azure DevOps" value={form.ado} options={adoOptions} onChange={(v) => setForm({ ...form, ado: v })} />
         </FiltersDisclosure>
       </form>
-      <FilterChips quick={QUICK} values={applied} applied={appliedFilters(applied)} onChange={patchFilters}
+      <FilterChips quick={quickChips(applied)} values={{ ...applied, period: customRange(applied) && !applied.period ? "custom" : applied.period }}
+        applied={appliedFilters(applied)} onChange={patchFilters}
         onClearAll={clearAll} onAddFilter={() => revealFilters(disclosureRef.current)} />
+      {(customOpen || (customRange(applied) && !applied.period)) && (
+        <PeriodRange from={customRange(applied)?.from ?? ""} to={customRange(applied)?.to ?? ""} today={today} autoFocus={customOpen}
+          onApply={(from, to) => patchFilters({ from, to })} onCancel={customRange(applied) ? undefined : () => setCustomOpen(false)} />
+      )}
 
       {listed && query.data?.notice === "unavailable" && (
         <p className="error-banner" role="status">Latest result filter unavailable right now; showing the other filters.</p>

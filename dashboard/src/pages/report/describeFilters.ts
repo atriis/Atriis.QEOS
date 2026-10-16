@@ -23,13 +23,5 @@ export function describeFilters(f: ReportFilters, defaultBranch: string | null, 
   return out;
 }
 
-// Fixed names: Intl's en-GB says "Sept" in newer ICU, and the period must read the same everywhere
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-/** "9 Sep – 8 Oct 2026"; the year is repeated only when the range crosses one. These are calendar days (YYYY-MM-DD). */
-export function formatPeriod(from: string, to: string): string {
-  const [fy, fm, fd] = from.split("-").map(Number);
-  const [ty, tm, td] = to.split("-").map(Number);
-  const left = `${fd} ${MONTHS[fm - 1]}${fy === ty ? "" : ` ${fy}`}`;
-  return `${left} – ${td} ${MONTHS[tm - 1]} ${ty}`;
-}
+/** "9 Sep – 8 Oct 2026": shared with the Test cases list's period filter. */
+export { formatPeriod } from "../../lib/period";

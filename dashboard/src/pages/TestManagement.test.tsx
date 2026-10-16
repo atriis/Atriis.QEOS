@@ -252,24 +252,20 @@ test("saving an imported case sends only the fields QEOS owns", async () => {
   expect(Object.keys(sent ?? {}).sort()).toEqual(["description", "priority", "status"]);
 });
 
-test("the origin filter reaches the API", async () => {
+test("the filter form offers neither Origin, Feature nor Azure DevOps (removed 2026-10-16)", async () => {
   asRole("member");
-  const seen: string[] = [];
-  server.use(
-    http.get(`${P}/cases`, ({ request }) => { const sp = listParams(request); if (sp) seen.push(sp.get("origin") ?? ""); return HttpResponse.json({ total: 0, items: [] }); }),
-    http.get(`${P}/case-labels`, () => HttpResponse.json([])),
-  );
   renderAt("/projects/42/cases?group=scenario");
-  await userEvent.setup().selectOptions(await screen.findByLabelText(/origin/i), "imported");
-  await userEvent.setup().click(screen.getByRole("button", { name: /apply/i }));
-  await vi.waitFor(() => expect(seen).toContain("imported"));
+  await screen.findByLabelText("Search");
+  expect(screen.queryByLabelText(/^origin/i)).toBeNull();
+  expect(screen.queryByLabelText(/^feature$/i)).toBeNull();
+  expect(screen.queryByLabelText(/azure devops/i)).toBeNull();
+  expect(screen.getByLabelText("Latest result")).toBeInTheDocument();
 });
 
 // --- case filters --------------------------------------------------------------------------
 
 /** Lets the facet queries land, so no state update arrives after the test ends. */
 async function settled() {
-  await screen.findByRole("option", { name: "Hotels (2)" });
   await screen.findByRole("option", { name: "smoke (1)" });
 }
 
@@ -286,7 +282,7 @@ test("a folder in the URL reaches the API", async () => {
   server.use(http.get(`${P}/cases`, ({ request }) => { const sp = listParams(request); if (sp) seen.push(sp); return HttpResponse.json({ total: 0, items: [] }); }));
   renderAt("/projects/42/cases?group=scenario&folder=tests%2Ffeatures");
   await waitFor(() => expect(seen.at(-1)?.get("folder")).toBe("tests/features"));
-  await screen.findByRole("option", { name: "Hotels (2)" });
+  await screen.findByRole("option", { name: "smoke (1)" });
 });
 
 test("picking a folder from the dropdown puts it in the URL and the API call, keeping other filters", async () => {
@@ -339,14 +335,14 @@ test("Clear all appears with a filter and resets the URL; the form has no second
   await waitFor(() => expect(screen.getByTestId("where")).not.toHaveTextContent("priority"));
 });
 
-test("link, feature and ADO filters reach the API", async () => {
+test("the link filter reaches the API; feature and ado keys in an old link are ignored", async () => {
   asRole("member"); facets();
   const seen: URLSearchParams[] = [];
   server.use(http.get(`${P}/cases`, ({ request }) => { const sp = listParams(request); if (sp) seen.push(sp); return HttpResponse.json({ total: 0, items: [] }); }));
   renderAt("/projects/42/cases?group=scenario&linked=false&feature=Hotels&ado=81284");
-  await waitFor(() => expect(seen.at(-1)?.get("feature")).toBe("Hotels"));
-  expect(seen.at(-1)?.get("linked")).toBe("false");
-  expect(seen.at(-1)?.get("ado")).toBe("81284");
+  await waitFor(() => expect(seen.at(-1)?.get("linked")).toBe("false"));
+  expect(seen.at(-1)?.get("feature")).toBeNull();
+  expect(seen.at(-1)?.get("ado")).toBeNull();
   await settled();
 });
 
@@ -558,4 +554,70 @@ test("on phones the last runs come back as a count under the title", async () =>
     return el;
   });
   expect(meta.querySelector("a")).toBeNull(); // a count, not a second strip of links
+});
+
+// --- period (2026-10-16): only cases that ran in the period ----------------------------------------------------
+
+function periodServer() {
+  const asked: URLSearchParams[] = [];
+  let body: Record<string, unknown> | null = null;
+  server.use(
+    http.get(`${P}/analytics/latest-keys`, ({ request }) => {
+      const sp = new URL(request.url).searchParams;
+      if (sp.get("status") !== "failed" || sp.get("since")) asked.push(sp); // the Failing tile's own request has no period
+      return HttpResponse.json({ keys: ["a".repeat(64)] });
+    }),
+    http.post(`${P}/cases/search`, async ({ request }) => { body = (await request.json()) as Record<string, unknown>; return HttpResponse.json({ total: 1, items: [kase(1)] }); }),
+  );
+  return { asked, body: () => body };
+}
+
+test("a period chip asks ingestion for the tests that ran in it, then searches with their keys", async () => {
+  asRole("member"); facets();
+  const s = periodServer();
+  renderAt("/projects/42/cases?group=scenario&period=7");
+  await waitFor(() => expect(s.body()).not.toBeNull());
+  const sp = s.asked.at(-1)!;
+  expect(sp.get("status")).toBe("any");
+  expect(sp.get("since")).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  expect(sp.get("until")).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  expect(Date.parse(sp.get("until")!) - Date.parse(sp.get("since")!)).toBe(7 * 86_400_000);
+  expect(s.body()).toMatchObject({ test_keys: ["a".repeat(64)], keys_mode: "include" });
+  expect(screen.getByRole("button", { name: "7 days" })).toHaveAttribute("aria-pressed", "true");
+  await settled();
+});
+
+test("a latest-result filter with a period means the latest within the period", async () => {
+  asRole("member"); facets();
+  const s = periodServer();
+  renderAt("/projects/42/cases?group=scenario&result=failed&period=30");
+  await waitFor(() => expect(s.body()).not.toBeNull());
+  const sp = s.asked.at(-1)!;
+  expect(sp.get("status")).toBe("failed");
+  expect(sp.get("since")).not.toBeNull();
+  await settled();
+});
+
+test("Custom… shows the range row; an applied range is one Custom chip whose removal clears both dates", async () => {
+  asRole("member"); facets();
+  const s = periodServer();
+  const user = userEvent.setup();
+  renderAt("/projects/42/cases?group=scenario");
+  await screen.findByLabelText("Search");
+  await user.click(screen.getByRole("button", { name: "Custom…" }));
+  const row = screen.getByRole("form", { name: "Custom period" });
+  expect(within(row).getByLabelText("From")).toHaveFocus();
+  await user.type(within(row).getByLabelText("From"), "2026-10-01");
+  await user.type(within(row).getByLabelText("To"), "2026-10-08");
+  await user.click(within(row).getByRole("button", { name: "Apply" }));
+  await waitFor(() => expect(screen.getByTestId("where")).toHaveTextContent("from=2026-10-01&to=2026-10-08"));
+  const chip = screen.getByRole("button", { name: "Custom: 1 Oct – 8 Oct 2026" });
+  expect(chip).toHaveAttribute("aria-pressed", "true");
+  await waitFor(() => expect(s.body()).not.toBeNull());
+  expect(s.asked.at(-1)!.get("since")).toBe(new Date(2026, 9, 1).toISOString());
+  expect(s.asked.at(-1)!.get("until")).toBe(new Date(2026, 9, 9).toISOString());
+  await user.click(chip);
+  await waitFor(() => expect(screen.getByTestId("where")).not.toHaveTextContent("from="));
+  expect(screen.getByTestId("where")).not.toHaveTextContent("to=");
+  await settled();
 });

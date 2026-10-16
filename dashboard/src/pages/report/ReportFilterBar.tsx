@@ -5,12 +5,11 @@ import ErrorBanner from "../../components/ErrorBanner";
 import FilterChips, { type QuickChip, revealFilters } from "../../components/FilterChips";
 import FilterSelect from "../../components/FilterSelect";
 import FolderSelect from "../../components/FolderSelect";
+import PeriodRange from "../../components/PeriodRange";
 import { CI_LABELS } from "../../lib/ciProviders";
 import { AREA_KINDS, AREA_NAMES, type AreaKind, folderCounts, formatArea } from "../../lib/reportScope";
 import { LINKED_ONLY, describeFilters, formatPeriod } from "./describeFilters";
-import {
-  ALL_BRANCHES, type FilterKey, MAX_AGE_DAYS, MAX_SPAN_DAYS, PRESETS, type ReportFilters, addDays, spanDays,
-} from "./useReportFilters";
+import { ALL_BRANCHES, type FilterKey, PRESETS, type ReportFilters } from "./useReportFilters";
 import { caseAreasMessage } from "./useReportRequest";
 
 type Patch = Partial<Record<FilterKey, string>>;
@@ -30,27 +29,28 @@ interface Props {
 }
 
 /** One row above the sections (spec: Filter bar): period chips, a chip per filter in force, "+ Filter" and
- *  "Clear all"; the form sits in a disclosure that "+ Filter" opens. */
+ *  "Clear all"; "Custom…" opens a compact From–To row right under the chips, and the other filters sit in a
+ *  disclosure that "+ Filter" opens. */
 export default function ReportFilterBar({ filters, update, clearAll, today, defaultBranch, caseAreas, runUrls, facets }: Props) {
   const uid = useId();
   const detailsRef = useRef<HTMLDetailsElement>(null);
-  const fromRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
-  const [draft, setDraft] = useState({ from: "", to: "", branch: "", allBranches: false, environment: "" });
-  const [rangeError, setRangeError] = useState<{ message: string; fields: ("from" | "to")[] } | null>(null);
-  const errorId = `${uid}-range-error`;
+  // "Custom…" pressed while a preset is on: the range row shows until a range is applied or Cancel
+  const [customOpen, setCustomOpen] = useState(false);
+  const [draft, setDraft] = useState({ branch: "", allBranches: false, environment: "" });
   const [areaKind, setAreaKind] = useState<AreaKind | "">(filters.area?.kind ?? "");
   const areas = caseAreas.data;
 
   // The drafts follow the URL (Back, a chip removed, a pasted link)
   useEffect(() => {
     setDraft({
-      from: filters.preset === null ? filters.from : "", to: filters.preset === null ? filters.to : "",
       branch: filters.branch === ALL_BRANCHES ? "" : filters.branch, allBranches: filters.branch === ALL_BRANCHES,
       environment: filters.environment,
     });
-    setRangeError(null);
-  }, [filters.preset, filters.from, filters.to, filters.branch, filters.environment]);
+  }, [filters.branch, filters.environment]);
+  useEffect(() => {
+    setCustomOpen(false);
+  }, [filters.preset, filters.from, filters.to]);
   // A filter in the URL picks its kind; clearing the value keeps the chosen kind, so the second step stays open
   useEffect(() => {
     if (filters.area) setAreaKind(filters.area.kind);
@@ -64,14 +64,13 @@ export default function ReportFilterBar({ filters, update, clearAll, today, defa
   const applied = describeFilters(filters, defaultBranch, areas);
   const active = applied.filter((a) => !(a.key === "branch" && filters.branch === "")).length;
 
-  function openForm(focusFrom: boolean) {
+  function openForm() {
     revealFilters(detailsRef.current);
-    if (focusFrom) fromRef.current?.focus();
   }
 
   function onChipChange(patch: Record<string, string>) {
     if ("period" in patch) {
-      if (patch.period === "custom") openForm(true);
+      if (patch.period === "custom") setCustomOpen(true);
       else if (patch.period) update({ period: patch.period });
       // "" (the pressed preset pressed again): a period is always set, so nothing changes
       return;
@@ -86,28 +85,7 @@ export default function ReportFilterBar({ filters, update, clearAll, today, defa
 
   function apply(e: FormEvent) {
     e.preventDefault();
-    const patch: Patch = {
-      branch: draft.allBranches ? ALL_BRANCHES : draft.branch.trim(),
-      env: draft.environment.trim(),
-    };
-    if (draft.from || draft.to) {
-      const both: ("from" | "to")[] = ["from", "to"];
-      const problem: { message: string; fields: ("from" | "to")[] } | null =
-        !draft.from || !draft.to ? { message: "Give both From and To", fields: [draft.from ? "to" : "from"] }
-        : draft.from > draft.to ? { message: "From must be on or before To", fields: both }
-        : spanDays(draft.from, draft.to) > MAX_SPAN_DAYS ? { message: `The period can be at most ${MAX_SPAN_DAYS} days`, fields: both }
-        : draft.to > today ? { message: "To cannot be after today", fields: ["to"] }
-        : draft.from < addDays(today, -MAX_AGE_DAYS) ? { message: `From can be at most ${MAX_AGE_DAYS} days ago`, fields: ["from"] }
-        : null;
-      if (problem) {
-        setRangeError(problem);
-        return;
-      }
-      patch.from = draft.from;
-      patch.to = draft.to;
-    }
-    setRangeError(null);
-    update(patch);
+    update({ branch: draft.allBranches ? ALL_BRANCHES : draft.branch.trim(), env: draft.environment.trim() });
   }
 
   const areaValue = (kind: AreaKind) => (filters.area?.kind === kind ? filters.area.value : "");
@@ -121,8 +99,12 @@ export default function ReportFilterBar({ filters, update, clearAll, today, defa
         applied={applied}
         onChange={onChipChange}
         onClearAll={clearAll}
-        onAddFilter={() => openForm(false)}
+        onAddFilter={openForm}
       />
+      {(custom || customOpen) && (
+        <PeriodRange from={custom ? filters.from : ""} to={custom ? filters.to : ""} today={today} autoFocus={customOpen}
+          onApply={(from, to) => update({ from, to })} onCancel={custom ? undefined : () => setCustomOpen(false)} />
+      )}
       <details
         ref={detailsRef}
         className="more-filters"
@@ -133,16 +115,6 @@ export default function ReportFilterBar({ filters, update, clearAll, today, defa
       >
         <summary><ChevronRight size={14} aria-hidden="true" className="chevron" /> Filters{active > 0 && ` (${active} active)`}</summary>
         <form className="filters report-filter-form" onSubmit={apply} noValidate>
-          <label>From
-            <input ref={fromRef} type="date" value={draft.from} min={addDays(today, -MAX_AGE_DAYS)} max={today}
-              aria-invalid={rangeError?.fields.includes("from") || undefined} aria-describedby={rangeError?.fields.includes("from") ? errorId : undefined}
-              onChange={(e) => { setRangeError(null); setDraft((d) => ({ ...d, from: e.target.value })); }} />
-          </label>
-          <label>To
-            <input type="date" value={draft.to} min={addDays(today, -MAX_AGE_DAYS)} max={today}
-              aria-invalid={rangeError?.fields.includes("to") || undefined} aria-describedby={rangeError?.fields.includes("to") ? errorId : undefined}
-              onChange={(e) => { setRangeError(null); setDraft((d) => ({ ...d, to: e.target.value })); }} />
-          </label>
           <label>Branch
             <input list={`${uid}-branches`} value={draft.branch} maxLength={255} disabled={draft.allBranches}
               placeholder={defaultBranch ? `${defaultBranch} (default)` : ""}
@@ -159,7 +131,6 @@ export default function ReportFilterBar({ filters, update, clearAll, today, defa
           </label>
           <datalist id={`${uid}-envs`}>{facets?.environments.map((v) => <option key={v} value={v} />)}</datalist>
           <button type="submit" className="primary">Apply</button>
-          {rangeError && <p id={errorId} className="field-error" role="alert">{rangeError.message}</p>}
 
           <FilterSelect label="CI provider" value={filters.ci} onChange={(v) => update({ ci: v })}
             options={Object.entries(CI_LABELS).map(([value, label]) => ({ value, label }))} />

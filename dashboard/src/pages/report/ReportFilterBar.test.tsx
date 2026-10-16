@@ -41,7 +41,7 @@ function renderAt(search = "", props: Parameters<typeof Harness>[0] = {}) {
 }
 const search = () => screen.getByTestId("search").textContent;
 
-test("period chips; Custom opens the form at From", async () => {
+test("period chips; Custom shows the range row with From focused, and Cancel hides it", async () => {
   renderAt();
   const chips = screen.getByRole("group", { name: "Quick filters" });
   expect(within(chips).getByRole("button", { name: "30 days" })).toHaveAttribute("aria-pressed", "true");
@@ -50,7 +50,22 @@ test("period chips; Custom opens the form at From", async () => {
   await userEvent.click(within(chips).getByRole("button", { name: "7 days" }));  // pressing the pressed preset keeps it
   expect(search()).toBe("?period=7");
   await userEvent.click(within(chips).getByRole("button", { name: "Custom…" }));
-  expect(screen.getByLabelText("From")).toHaveFocus();
+  const row = screen.getByRole("form", { name: "Custom period" });
+  expect(within(row).getByLabelText("From")).toHaveFocus();
+  // The dates live in the row, not in the Filters form
+  expect(screen.getByText(/^Filters/, { selector: "summary" }).closest("details")).not.toContainElement(row);
+  await userEvent.click(within(row).getByRole("button", { name: "Cancel" }));
+  expect(screen.queryByRole("form", { name: "Custom period" })).toBeNull();
+  expect(search()).toBe("?period=7");
+});
+
+test("an applied custom range shows the row with its dates and no Cancel", () => {
+  renderAt("?from=2026-09-01&to=2026-09-10");
+  const row = screen.getByRole("form", { name: "Custom period" });
+  expect(within(row).getByLabelText("From")).toHaveValue("2026-09-01");
+  expect(within(row).getByLabelText("To")).toHaveValue("2026-09-10");
+  expect(within(row).queryByRole("button", { name: "Cancel" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Custom: 1 Sep – 10 Sep 2026" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("the default branch is a chip; removing it means every branch, and removing that returns to the default", async () => {
@@ -91,11 +106,11 @@ test("the area is chosen in two steps, by keyboard", async () => {
 
 test("a custom range is checked before it is applied", async () => {
   renderAt();
-  await userEvent.click(screen.getByRole("button", { name: "+ Filter" }));
+  await userEvent.click(screen.getByRole("button", { name: "Custom…" }));
   const today = todayIn("UTC");
   await userEvent.type(screen.getByLabelText("From"), today);
   await userEvent.type(screen.getByLabelText("To"), "2020-01-01");
-  await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+  await userEvent.click(within(screen.getByRole("form", { name: "Custom period" })).getByRole("button", { name: "Apply" }));
   expect(screen.getByRole("alert")).toHaveTextContent("From must be on or before To");
   expect(search()).toBe("");
 });
@@ -118,10 +133,10 @@ test("describeFilters and formatPeriod", () => {
 });
 
 async function applyRange(from: string, to: string) {
-  await userEvent.click(screen.getByRole("button", { name: "+ Filter" }));
+  await userEvent.click(screen.getByRole("button", { name: "Custom…" }));
   if (from) await userEvent.type(screen.getByLabelText("From"), from);
   if (to) await userEvent.type(screen.getByLabelText("To"), to);
-  await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+  await userEvent.click(within(screen.getByRole("form", { name: "Custom period" })).getByRole("button", { name: "Apply" }));
 }
 
 test.each([
