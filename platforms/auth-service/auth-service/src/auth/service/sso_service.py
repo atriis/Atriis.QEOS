@@ -22,6 +22,31 @@ from src.auth.config import settings
 
 logger = logging.getLogger(__name__)
 
+APP_ROLES_MAX = 50
+APP_ROLE_LENGTH = 100
+
+
+def _app_roles(claims: dict) -> list[str]:
+    """The ID token's Entra app roles (ADR-033): strings only, stripped, cut to 100 characters, deduplicated without
+    regard to case (first one kept), at most 50."""
+    raw = claims.get("roles")
+    if not isinstance(raw, list):
+        return []
+    seen: set[str] = set()
+    values: list[str] = []
+    for item in raw:
+        if not isinstance(item, str) or not item.strip():
+            continue
+        value = item.strip()[:APP_ROLE_LENGTH]
+        if value.lower() in seen:
+            continue
+        seen.add(value.lower())
+        values.append(value)
+    if len(values) > APP_ROLES_MAX:
+        logger.warning("Microsoft token carries %s app roles; only the first %s are used", len(values), APP_ROLES_MAX)
+        values = values[:APP_ROLES_MAX]
+    return values
+
 KEY_FETCH_TIMEOUT_SECONDS = 5
 KEY_REFRESH_INTERVAL_SECONDS = 300
 
@@ -195,4 +220,5 @@ class SSOService:
             "provider": "microsoft",
             # oid is unique only within a tenant
             "provider_user_id": f"{tid}:{claims['oid']}",
+            "roles": _app_roles(claims),
         }

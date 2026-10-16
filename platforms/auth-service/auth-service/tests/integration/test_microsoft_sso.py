@@ -71,6 +71,14 @@ def test_a_valid_token_signs_in_and_creates_a_passwordless_user(client, db, micr
     assert (link.provider, link.provider_user_id) == ("microsoft", f"{TENANT}:{OID}")
 
 
+@pytest.mark.xfail(strict=True, reason="Task 6 stores the roles")
+def test_the_tokens_app_roles_are_stored_on_the_link(client, db, microsoft_key):
+    assert sign_in(client, ms_token(microsoft_key, roles=["QEOS.Member", "QEOS.Viewer"])).status_code == 200
+    link = db.query(OAuthAccount).one()
+    assert link.sso_roles == ["QEOS.Member", "QEOS.Viewer"]
+    assert link.sso_roles_at is not None
+
+
 def test_a_returning_user_is_found_by_identity_even_if_the_email_changed(client, db, microsoft_key):
     assert sign_in(client, ms_token(microsoft_key)).status_code == 200
     again = sign_in(client, ms_token(microsoft_key, email="ann.renamed@example.com"))
