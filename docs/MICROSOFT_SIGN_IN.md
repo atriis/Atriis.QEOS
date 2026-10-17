@@ -178,6 +178,19 @@ Open the **Organization** page → **Microsoft roles**, and map each value:
 Mappings belong to one organization. Two organizations may map the same value differently. Values
 match whatever their letter case.
 
+### In QEOS (superuser approval)
+
+The mappings apply only after a QEOS **superuser** approves the organization. Until then, the owner's
+Microsoft roles card says **Not applied yet**, and sign-ins add or change nobody.
+
+Open **Security** → **Microsoft roles approval**, find the organization, and select **Approve**.
+
+Why: any user may create an organization and own it. Without approval, anyone could map `QEOS.Member`
+in their own organization, and Entra would add every colleague holding that role to it.
+
+**Revoke** stops the sync for that organization. Members Entra already added stay, and no sign-in
+changes them after that.
+
 ### The rules
 
 - A mapping grants **admin**, **member** or **viewer**. It never grants **owner**: owners are
@@ -268,7 +281,7 @@ to end it at once. Automatic deprovisioning (SCIM) is not built.
 | Sign-in refused, log says `tenant … is not in AZURE_ALLOWED_TENANTS` | The account belongs to another tenant (or is a guest's home tenant). The log line names the tenant id. Add it only if you trust that tenant. |
 | 409 at sign-in | An account with that address already exists. Link Microsoft from **Security**, or ask a superuser for **Allow link at next sign-in**. |
 | "Microsoft account has no email address" | The account has no user principal name on a verified domain. Ask IT. |
-| Role from Entra not applied | Check the mapping on **Organization → Microsoft roles**, that the person is assigned that app role, and that they signed in again after the change. Members invited by hand are never changed. |
+| Role from Entra not applied | Check that a superuser approved the organization (the Microsoft roles card says **Not applied yet** otherwise), the mapping on **Organization → Microsoft roles**, that the person is assigned that app role, and that they signed in again after the change. Members invited by hand are never changed. |
 | auth-service exits with "AUTH_SSO_ONLY=true but …" | A provider in `AUTH_SSO_PROVIDERS` is not configured. The log names the missing setting. |
 
 More: the common problems table at the end of [SETUP section 3.8](SETUP.md#38-single-sign-on-google-and-microsoft).

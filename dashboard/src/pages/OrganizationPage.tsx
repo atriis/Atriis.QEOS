@@ -191,7 +191,9 @@ export default function OrganizationPage() {
         )}
       </div>
 
-      {isOwner && microsoftEnabled() && <MicrosoftRolesCard orgId={id} />}
+      {isOwner && microsoftEnabled() && (
+        <MicrosoftRolesCard orgId={id} approved={orgs.data?.find((o) => o.id === id)?.entra_sync_approved} />
+      )}
     </div>
   );
 }

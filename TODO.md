@@ -192,6 +192,7 @@ Reliability and operations
 - [x] SSO-only mode (`AUTH_SSO_ONLY`, ADR-031): Microsoft sign-in only, active superusers keep a logged password break-glass, non-superuser sessions revoked once per switch, readiness and a one-time 7-day link allowance
 - [ ] Personal Microsoft accounts (outlook.com)
 - [x] Map Entra groups / app roles to organization roles (app roles, ADR-033, spec 2026-10-16; groups not planned)
+- [x] A superuser approves each organization before its app-role mappings apply (ADR-033 amendment 2026-10-17: any user could otherwise pull Entra-assigned people into an organization they own)
 - [ ] SCIM provisioning and deprovisioning (ends the sessions of people removed from Entra; today they last until the refresh token expires, ADR-031)
 - [ ] Owner override for Entra-managed members (take over or remove at once; today removal waits for the person's next Microsoft sign-in)
 - [ ] Entra app-role mappings scoped to a tenant id (today every allowed tenant can grant every mapped role)

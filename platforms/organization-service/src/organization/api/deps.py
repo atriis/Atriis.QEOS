@@ -47,4 +47,18 @@ def require_org_role(*roles: str):
     return dependency
 
 
-__all__ = ["get_db", "get_current_user_id", "require_org_role"]
+def require_active_superuser(user_id: int = Depends(get_current_user_id)) -> int:
+    """The caller is an active superuser, as auth-service knows them now: the access token carries only `sub`, and
+    a superuser flag in it would outlive a revocation by up to an hour."""
+    from src.organization.utils.auth_client import AuthServiceUnavailable, is_active_superuser
+
+    try:
+        allowed = is_active_superuser(user_id)
+    except AuthServiceUnavailable as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Superusers only")
+    return user_id
+
+
+__all__ = ["get_db", "get_current_user_id", "require_org_role", "require_active_superuser"]

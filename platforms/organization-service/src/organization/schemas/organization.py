@@ -25,6 +25,7 @@ class OrganizationOut(BaseModel):
     plan_tier: str
     created_at: datetime
     updated_at: Optional[datetime] = None
+    entra_sync_approved: bool = False
 
     class Config:
         from_attributes = True
@@ -32,3 +33,17 @@ class OrganizationOut(BaseModel):
 
 class MyOrganizationOut(OrganizationOut):
     role: str
+
+
+class EntraSyncUpdate(BaseModel):
+    approved: bool
+
+
+class EntraSyncEntry(BaseModel):
+    """An organization a superuser may approve for Entra role sync (ADR-033)."""
+    id: int
+    name: str
+    slug: str
+    mappings: int
+    entra_sync_approved: bool
+    entra_sync_approved_at: Optional[datetime] = None

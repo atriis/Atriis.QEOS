@@ -63,6 +63,8 @@ user links Microsoft, QEOS keeps the memberships in step.
 - An organization without any mapping is never touched. Deleting a mapping touches no member; the next
   sign-in of each person reconciles them.
 - A managed member cannot be removed by hand: `DELETE` answers 409 `managed_by_entra`.
+- An organization is reconciled only after an active superuser approved it (amendment of 2026-10-17, below).
+  Until then its mappings change nobody, and revoking the approval stops the sync and keeps the members it made.
 - auth-service sends the roles to `POST /internal/v1/sso-roles` of organization-service. A failed call is
   logged, never fails the sign-in, and is repeated on refresh.
 - Every change is logged at INFO by organization-service.
@@ -159,9 +161,12 @@ auth-service already verifies the token; one owner per concern.
 # Implementation
 
 ## Affected Components/Services
-organization-service: migration 004, `OrganizationSsoRoleMapping`, `OrganizationMember.managed_by`,
-`sso_role_service`, mapping routes, `POST /internal/v1/sso-roles`, members `DELETE`. auth-service: token
-`roles`, sync call, refresh retry (migration 009). Dashboard: the "Microsoft roles" card and the "Entra" badge.
+organization-service: migrations 004 and 005, `OrganizationSsoRoleMapping`, `OrganizationMember.managed_by`,
+`Organization.entra_sync_approved_at`, `sso_role_service`, mapping and approval routes, `POST /internal/v1/sso-roles`,
+members `DELETE`. auth-service: token
+`roles`, sync call, refresh retry (migration 009), `is_superuser` in the internal user lookup. Dashboard: the
+"Microsoft roles" card with its approval status, the "Entra" badge, and the superusers' "Microsoft roles approval"
+card on the Security page.
 
 ## Affected Domains
 Identity, Collaboration.
@@ -177,7 +182,8 @@ and the auth-service WARNING `entra role sync deferred`.
 
 ## Migration Considerations
 Migration 004 adds `organization_sso_role_mappings` and `organization_members.managed_by` (NULL for every
-existing row).
+existing row). Migration 005 adds the approval columns. Deploy auth-service (`is_superuser` in its internal user
+lookup) before organization-service, or approvals answer 403.
 
 ---
 
@@ -186,9 +192,36 @@ existing row).
 | Risk | Mitigation |
 |------|------------|
 | An Entra editor reaches the mapping editor | Mappings never grant `owner`; only owners edit them |
+| Any user creates an organization, maps a common app role, and Entra pulls everyone holding it into that organization (a membership the person cannot leave, and their email addresses in the member list) | Found in a review on 2026-10-17. A superuser approves each organization before reconcile touches it (amendment below) |
 | A mapping change removes people by mistake | Nothing changes until each person's next sign-in; every change is logged |
 | The sync call fails | Sign-in succeeds; retried at the next token refresh while the push is pending |
 | An administrator of one allowed tenant grants roles in every organization | `AZURE_ALLOWED_TENANTS` may list several tenants and a mapping carries no tenant, so an administrator of any allowed tenant can grant every mapped role in every organization that maps that value. List only tenants you trust that much; mappings scoped to a tenant are on the TODO list |
+
+---
+
+# Amendment 2026-10-17: a superuser approves each organization
+
+**Problem.** Any active user may create an organization and own it. An owner's mapping alone let that user make
+Entra add every person holding a mapped app role (the values are documented) to their organization, as a managed
+member nobody can remove by hand, and read those people's email addresses in its member list. No data of the
+people's own organizations was reachable.
+
+**Decision.** reconcile touches an organization only when `organizations.entra_sync_approved_at` is set. An active
+superuser sets or clears it with `PUT /api/v1/organizations/{id}/entra-sync` `{"approved": true|false}`, and lists
+the organizations that have a mapping or an approval with `GET /api/v1/organizations/entra-sync`. organization-service
+asks auth-service's internal API whether the caller is an active superuser at each call (the access token carries
+only `sub`); auth-service unreachable answers 502 and changes nothing. Owners still edit their own mappings and see
+whether their organization is approved (`entra_sync_approved` on the organization).
+
+- Revoking stops the sync. Members Entra created stay, still managed, and no sign-in changes them.
+- Migration 005 adds `entra_sync_approved_at` and `entra_sync_approved_by`, NULL for every organization: mappings
+  made before it stay paused until a superuser approves.
+- Each approval and revocation is logged at WARNING with the organization and the superuser.
+
+**Alternatives.** Superusers alone edit mappings: superusers are rarely members of every organization, and owners
+know their own roles. App role values named after the organization (`QEOS.<slug>.Member`): IT's assignment would be
+the approval, but IT would create roles per organization. A deployment allowlist in `.env`: a restart per
+organization.
 
 ---
 
@@ -202,6 +235,7 @@ existing row).
 | Date | Version | Description |
 |------|---------|-------------|
 | 2026-10-16 | 1.0 | Initial version |
+| 2026-10-17 | 1.1 | Amendment: Entra role sync per organization needs a superuser's approval |
 
 ---
 

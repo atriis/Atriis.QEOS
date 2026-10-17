@@ -1,12 +1,14 @@
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CircleCheck, CircleSlash } from "lucide-react";
 import { ApiError } from "../api/http";
 import { MAPPED_ROLES, createSsoRoleMapping, deleteSsoRoleMapping, listSsoRoleMappings } from "../api/orgs";
 import ConfirmButton from "./ConfirmButton";
 import ErrorBanner from "./ErrorBanner";
 
-/** Owners map Entra app roles to admin, member or viewer (ADR-033). Owners are never granted by a mapping. */
-export default function MicrosoftRolesCard({ orgId }: { orgId: number }) {
+/** Owners map Entra app roles to admin, member or viewer (ADR-033). Owners are never granted by a mapping, and the
+ *  mappings apply only once a superuser approved the organization (`approved`; undefined while it is not known). */
+export default function MicrosoftRolesCard({ orgId, approved }: { orgId: number; approved: boolean | undefined }) {
   const qc = useQueryClient();
   const key = ["org", orgId, "sso-role-mappings"];
   const mappings = useQuery({ queryKey: key, queryFn: () => listSsoRoleMappings(orgId) });
@@ -42,6 +44,14 @@ export default function MicrosoftRolesCard({ orgId }: { orgId: number }) {
       <p className="muted">
         People assigned to these app roles in Entra get the role below at each Microsoft sign-in. Owners are always granted by hand.
       </p>
+      {approved !== undefined && (
+        <p className="mfa-status" role="status">
+          {approved
+            ? <><CircleCheck size={16} aria-hidden="true" /> <strong>Applied at each Microsoft sign-in</strong></>
+            : <><CircleSlash size={16} aria-hidden="true" /> <span><strong>Not applied yet.</strong> A QEOS superuser must approve
+              Microsoft roles for this organization (Security page) before they add or change anyone.</span></>}
+        </p>
+      )}
       {mappings.error != null && <ErrorBanner error={mappings.error} onRetry={() => mappings.refetch()} />}
       {actionError != null && <ErrorBanner error={actionError} />}
       {mappings.isPending && <p className="muted">Loading app roles…</p>}

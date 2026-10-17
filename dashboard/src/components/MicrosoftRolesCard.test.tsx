@@ -9,10 +9,11 @@ import MicrosoftRolesCard from "./MicrosoftRolesCard";
 const URL = "/api/v1/organizations/5/sso-role-mappings";
 const row = (id: number, app_role: string, role: string) => ({ id, app_role, role, created_at: "2026-10-16T09:00:00Z" });
 
-function renderCard() {
+function renderCard(approved?: boolean) {
   setAccessToken("acc");
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={qc}><MicrosoftRolesCard orgId={5} /></QueryClientProvider>);
+  render(<QueryClientProvider client={qc}><MicrosoftRolesCard orgId={5} approved={approved} /></QueryClientProvider>);
+  // renderCard() is the approval still loading
 }
 
 test("lists the mappings with the lead line", async () => {
@@ -103,4 +104,25 @@ test("a failed load shows the error with Retry inside the card", async () => {
   renderCard();
   expect(await screen.findByRole("alert")).toHaveTextContent("boom");
   expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+});
+
+
+test("until a superuser approves, the card says the mappings are not applied", async () => {
+  server.use(http.get(URL, () => HttpResponse.json([row(1, "QEOS.Member", "member")])));
+  renderCard(false);
+  const status = screen.getByRole("status");
+  expect(status).toHaveTextContent("Not applied yet");
+  expect(status).toHaveTextContent(/superuser must approve/);
+});
+
+test("once approved, the card says the mappings apply at each sign-in", async () => {
+  server.use(http.get(URL, () => HttpResponse.json([])));
+  renderCard(true);
+  expect(screen.getByRole("status")).toHaveTextContent("Applied at each Microsoft sign-in");
+});
+
+test("while the approval is unknown, no status is shown", async () => {
+  server.use(http.get(URL, () => HttpResponse.json([])));
+  renderCard(undefined);
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
 });

@@ -30,6 +30,8 @@ class InternalUser(BaseModel):
     id: int
     email: str
     is_active: bool
+    # organization-service lets only an active superuser approve Entra role sync for an organization (ADR-033)
+    is_superuser: bool = False
 
 
 def _same(given: str, expected: str) -> bool:

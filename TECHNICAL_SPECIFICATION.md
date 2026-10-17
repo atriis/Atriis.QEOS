@@ -105,7 +105,10 @@ billing_manager). Members carry `managed_by` (`entra` or null); a managed member
 cannot be removed by hand (409 `managed_by_entra`). The internal API
 `POST /internal/v1/sso-roles` (HTTP Basic, `INTERNAL_CALLER_USERNAME` and
 INTERNAL_API_PASSWORD; not routed by the gateway) reconciles one user's managed
-memberships from the token's app roles and logs each change at INFO.
+memberships from the token's app roles and logs each change at INFO. Only organizations
+an active superuser approved are reconciled (migration 005, `entra_sync_approved_at`;
+`PUT /organizations/{id}/entra-sync` and `GET /organizations/entra-sync`, superusers
+checked through auth-service's internal user lookup, which now returns `is_superuser`).
 
 ### 2.3 project-service
 Projects under organizations (access follows org roles), settings

@@ -93,7 +93,10 @@ details.
   link Microsoft at its next Microsoft sign-in (7 days, logged at WARNING, used once); it is never
   matched on the email alone.
 - **Entra app roles (ADR-033).** A mapping grants at most `admin`; owners are granted only by hand. Only
-  owners edit their organization's mapping. Only members marked `managed_by = entra` follow the token;
+  owners edit their organization's mapping, and a mapping applies only after an active superuser approved the
+  organization (`PUT /api/v1/organizations/{id}/entra-sync`; organization-service asks auth-service at each call).
+  Without that, any user could create an organization and have Entra add everyone holding a mapped app role to it,
+  then read their addresses in its member list. Only members marked `managed_by = entra` follow the token;
   hand-made members are never touched. Managed members cannot be removed by hand (409). The internal
   endpoint `POST /internal/v1/sso-roles` uses HTTP Basic, answers 503 while its password is empty, and is
   never routed by the gateway. Each change is logged at INFO with organization, user, old and new role.

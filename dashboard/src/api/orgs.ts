@@ -5,6 +5,8 @@ export interface MyOrganization {
   name: string;
   slug: string;
   role: string;
+  /** A superuser approved Entra role sync for it (ADR-033); until then its Microsoft role mappings are not applied. */
+  entra_sync_approved?: boolean;
 }
 
 export interface Project {
@@ -80,6 +82,25 @@ export function createSsoRoleMapping(orgId: number, appRole: string, role: strin
 
 export function deleteSsoRoleMapping(orgId: number, mappingId: number): Promise<void> {
   return apiFetch(`/api/v1/organizations/${orgId}/sso-role-mappings/${mappingId}`, { method: "DELETE" });
+}
+
+/** An organization with Microsoft role mappings or an approval, as a superuser sees it (ADR-033). */
+export interface EntraSyncOrganization {
+  id: number;
+  name: string;
+  slug: string;
+  mappings: number;
+  entra_sync_approved: boolean;
+  entra_sync_approved_at: string | null;
+}
+
+export function listEntraSync(): Promise<EntraSyncOrganization[]> {
+  return apiFetch("/api/v1/organizations/entra-sync");
+}
+
+/** Superusers only: approve or revoke Entra role sync for one organization. */
+export function setEntraSync(orgId: number, approved: boolean): Promise<{ id: number; entra_sync_approved: boolean }> {
+  return apiFetch(`/api/v1/organizations/${orgId}/entra-sync`, { method: "PUT", body: JSON.stringify({ approved }) });
 }
 
 export interface InvitationPreview {

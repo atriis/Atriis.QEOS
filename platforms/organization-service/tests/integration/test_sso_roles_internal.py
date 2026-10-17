@@ -19,9 +19,12 @@ def basic():
     return ("auth-service", "s3cret")
 
 
-def org(db, slug, mappings=(), deleted=False):
+def org(db, slug, mappings=(), deleted=False, approved=True):
     from datetime import datetime, timezone
-    o = Organization(name=slug, slug=slug, plan_tier="free", deleted_at=datetime.now(timezone.utc) if deleted else None)
+    now = datetime.now(timezone.utc)
+    # approved by a superuser unless a test says otherwise: test_entra_sync_approval covers the approval itself
+    o = Organization(name=slug, slug=slug, plan_tier="free", deleted_at=now if deleted else None,
+                     entra_sync_approved_at=now if approved else None, entra_sync_approved_by=7 if approved else None)
     db.add(o)
     db.commit()
     for app_role, role in mappings:

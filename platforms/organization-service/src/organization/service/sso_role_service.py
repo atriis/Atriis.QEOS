@@ -1,5 +1,6 @@
 """Entra app roles to organization roles (spec 2026-10-16, ADR-033)."""
 import logging
+from datetime import datetime, timezone
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -101,7 +102,8 @@ def reconcile(db: Session, user_id: int, roles: list[str]) -> list[SsoRoleChange
     wanted = {normalize_app_role(r) for r in roles if r.strip()}
     org_ids = [row[0] for row in (db.query(OrganizationSsoRoleMapping.organization_id)
                                   .join(Organization, Organization.id == OrganizationSsoRoleMapping.organization_id)
-                                  .filter(Organization.deleted_at.is_(None))
+                                  .filter(Organization.deleted_at.is_(None),
+                                          Organization.entra_sync_approved_at.isnot(None))
                                   .distinct().order_by(OrganizationSsoRoleMapping.organization_id).all())]
     changes: list[SsoRoleChange] = []
     for org_id in org_ids:
@@ -116,3 +118,36 @@ def reconcile(db: Session, user_id: int, roles: list[str]) -> list[SsoRoleChange
         if change is not None:
             changes.append(change)
     return changes
+
+
+def set_sync_approval(db: Session, org_id: int, approved: bool, superuser_id: int) -> Organization | None:
+    """Approve or revoke Entra role sync for a live organization. Revoking keeps the members Entra created: they stay
+    managed, and the sync no longer changes them."""
+    org = db.query(Organization).filter(Organization.id == org_id, Organization.deleted_at.is_(None)).one_or_none()
+    if org is None:
+        return None
+    if approved and org.entra_sync_approved_at is None:
+        org.entra_sync_approved_at = datetime.now(timezone.utc)
+        org.entra_sync_approved_by = superuser_id
+    elif not approved:
+        org.entra_sync_approved_at = None
+        org.entra_sync_approved_by = None
+    db.commit()
+    db.refresh(org)
+    logger.warning("entra role sync %s: org=%s by superuser=%s", "approved" if approved else "revoked", org_id,
+                   superuser_id)
+    return org
+
+
+def list_sync_organizations(db: Session) -> list[dict]:
+    """Live organizations with at least one mapping or an approval, by name, with their mapping count."""
+    counts = dict(db.query(OrganizationSsoRoleMapping.organization_id, func.count(OrganizationSsoRoleMapping.id))
+                  .group_by(OrganizationSsoRoleMapping.organization_id).all())
+    orgs = (db.query(Organization)
+            .filter(Organization.deleted_at.is_(None))
+            .filter(Organization.id.in_(list(counts)) | Organization.entra_sync_approved_at.isnot(None))
+            .order_by(func.lower(Organization.name))
+            .all())
+    return [{"id": o.id, "name": o.name, "slug": o.slug, "mappings": counts.get(o.id, 0),
+             "entra_sync_approved": o.entra_sync_approved, "entra_sync_approved_at": o.entra_sync_approved_at}
+            for o in orgs]

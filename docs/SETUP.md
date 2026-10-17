@@ -573,7 +573,13 @@ No optional claim is needed. The `roles` claim comes in the ID token by default.
 
 **Trust:** `AZURE_ALLOWED_TENANTS` may list several tenants, and a mapping carries no tenant. An administrator of any allowed tenant can therefore grant every mapped role in every organization that maps that value. List only tenants you trust that much.
 
-**In QEOS:** an owner opens the Organization page, then **Microsoft roles**, and maps each value to admin, member or viewer.
+**In QEOS:**
+
+1. An owner opens the Organization page, then **Microsoft roles**, and maps each value to admin, member or viewer.
+2. A superuser opens **Security**, then **Microsoft roles approval**, and approves that organization. Until then the
+   mappings change nobody, and the owner's card says "Not applied yet". Any user may create an organization, so
+   without this step anyone could make Entra add people to theirs. Revoking stops the sync and keeps the members it
+   already added.
 
 **The rules:**
 

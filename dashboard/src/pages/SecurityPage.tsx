@@ -8,7 +8,9 @@ import {
 } from "../api/auth";
 import { getMicrosoftCredential, microsoftEnabled } from "../auth/ssoProviders";
 import { downloadCsv } from "../lib/csv";
+import ConfirmButton from "../components/ConfirmButton";
 import ErrorBanner from "../components/ErrorBanner";
+import { listEntraSync, setEntraSync, type EntraSyncOrganization } from "../api/orgs";
 import NewPasswordFields from "../components/NewPasswordFields";
 import SecretBlock from "../components/SecretBlock";
 import TextField from "../components/TextField";
@@ -249,6 +251,87 @@ function SsoOnlyAdminCard({ ssoOnly }: { ssoOnly: boolean }) {
   );
 }
 
+/** Superusers only (ADR-033): an organization's Microsoft role mappings apply only after a superuser approves it, since
+ *  any user may create and own an organization. Revoking stops the sync and keeps the members it made. */
+function EntraSyncAdminCard() {
+  const [orgs, setOrgs] = useState<EntraSyncOrganization[] | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [saving, setSaving] = useState<number | null>(null);
+
+  useEffect(() => {
+    listEntraSync().then(setOrgs).catch((err) => setError(err));
+  }, []);
+
+  async function onSet(orgId: number, approved: boolean) {
+    setError(null);
+    setSaving(orgId);
+    try {
+      const saved = await setEntraSync(orgId, approved);
+      setOrgs((current) => current && current.map((o) => (
+        o.id === orgId ? { ...o, entra_sync_approved: saved.entra_sync_approved } : o)));
+    } catch (err) {
+      setError(err);
+    } finally {
+      setSaving(null);
+    }
+  }
+
+  return (
+    <section className="card" aria-labelledby="entra-sync-heading">
+      <h3 id="entra-sync-heading">Microsoft roles approval</h3>
+      <p className="muted">
+        Owners map Entra app roles on their Organization page. Entra adds or changes members of an organization only
+        after you approve it here. Revoking stops that and keeps the members it already added.
+      </p>
+      {error != null && <ErrorBanner error={error} />}
+      {orgs && orgs.length === 0 && <p className="muted">No organization has mapped Microsoft roles yet.</p>}
+      {orgs && orgs.length > 0 && (
+        <table className="data">
+          <caption className="sr-only">Organizations with Microsoft role mappings</caption>
+          <thead>
+            <tr>
+              <th scope="col">Organization</th>
+              <th scope="col">Mappings</th>
+              <th scope="col">Status</th>
+              <th scope="col"><span className="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {orgs.map((org) => (
+              <tr key={org.id}>
+                <td>{org.name}<br /><span className="muted">{org.slug}</span></td>
+                <td>{org.mappings}</td>
+                <td>
+                  {org.entra_sync_approved
+                    ? <span className="badge badge-passed"><CircleCheck size={14} aria-hidden="true" />Approved</span>
+                    : <span className="badge badge-muted"><CircleSlash size={14} aria-hidden="true" />Waiting for approval</span>}
+                </td>
+                <td>
+                  {org.entra_sync_approved ? (
+                    <ConfirmButton
+                      label="Revoke"
+                      ariaLabel={`Revoke Microsoft roles for ${org.name}`}
+                      question={`Stop Microsoft roles for ${org.name}? Members Entra added stay, and no sign-in changes them.`}
+                      confirmLabel="Revoke"
+                      onConfirm={() => void onSet(org.id, false)}
+                      disabled={saving !== null}
+                    />
+                  ) : (
+                    <button type="button" onClick={() => void onSet(org.id, true)} disabled={saving !== null}
+                      aria-label={`Approve Microsoft roles for ${org.name}`}>
+                      Approve
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
+
 export default function SecurityPage() {
   const [step, setStep] = useState<Step>("idle");
   const [secret, setSecret] = useState("");
@@ -466,6 +549,7 @@ export default function SecurityPage() {
         )}
       </div>
       {me?.is_superuser === true && <SsoOnlyAdminCard ssoOnly={me.sso_only === true} />}
+      {me?.is_superuser === true && <EntraSyncAdminCard />}
     </div>
   );
 }

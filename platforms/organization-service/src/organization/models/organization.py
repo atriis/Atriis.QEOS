@@ -15,9 +15,17 @@ class Organization(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     deleted_at = Column(DateTime(timezone=True), nullable=True)
+    # Entra role sync (ADR-033) touches this organization only once an active superuser approved it: any user may
+    # create and own an organization, so an owner's mapping alone must not let Entra add people to it.
+    entra_sync_approved_at = Column(DateTime(timezone=True), nullable=True)
+    entra_sync_approved_by = Column(Integer, nullable=True)
 
     __table_args__ = (
         CheckConstraint(
             "plan_tier IN ('free','pro','enterprise','enterprise_plus')", name="chk_plan_tier"
         ),
     )
+
+    @property
+    def entra_sync_approved(self) -> bool:
+        return self.entra_sync_approved_at is not None

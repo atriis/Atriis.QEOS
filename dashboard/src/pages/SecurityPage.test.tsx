@@ -389,3 +389,71 @@ test("the Password card is shown when the account cannot be loaded", async () =>
   expect(await screen.findByRole("heading", { name: "Password" })).toBeInTheDocument();
   expect(screen.getByText(/checking two-factor status/i)).toBeInTheDocument();
 });
+
+
+const ENTRA_SYNC = [
+  { id: 3, name: "Acme", slug: "acme", mappings: 2, entra_sync_approved: false, entra_sync_approved_at: null },
+  { id: 4, name: "Beta", slug: "beta", mappings: 1, entra_sync_approved: true, entra_sync_approved_at: "2026-10-17T09:00:00+00:00" },
+];
+
+function entraCard() {
+  return screen.getByRole("heading", { name: "Microsoft roles approval" }).closest("section")!;
+}
+
+test("a superuser approves Microsoft roles for an organization", async () => {
+  meIs({ is_superuser: true, sso_only: false, has_password: true, linked_providers: [] });
+  let body: unknown = null;
+  server.use(
+    http.get("/api/v1/users/sso-readiness", () => HttpResponse.json(READINESS)),
+    http.get("/api/v1/organizations/entra-sync", () => HttpResponse.json(ENTRA_SYNC)),
+    http.put("/api/v1/organizations/3/entra-sync", async ({ request }) => {
+      body = await request.json();
+      return HttpResponse.json({ id: 3, entra_sync_approved: true });
+    }),
+  );
+  renderSecurity();
+  await screen.findByRole("heading", { name: "Microsoft roles approval" });
+  const acme = (await within(entraCard()).findByText("Acme")).closest("tr")!;
+  expect(within(acme).getByText("Waiting for approval")).toBeInTheDocument();
+  expect(within(acme).getByText("2")).toBeInTheDocument();
+  await userEvent.click(within(acme).getByRole("button", { name: "Approve Microsoft roles for Acme" }));
+  expect(body).toEqual({ approved: true });
+  expect(await within(acme).findByText("Approved")).toBeInTheDocument();
+});
+
+test("revoking asks for confirmation first", async () => {
+  meIs({ is_superuser: true, sso_only: false, has_password: true, linked_providers: [] });
+  let calls = 0;
+  server.use(
+    http.get("/api/v1/users/sso-readiness", () => HttpResponse.json(READINESS)),
+    http.get("/api/v1/organizations/entra-sync", () => HttpResponse.json(ENTRA_SYNC)),
+    http.put("/api/v1/organizations/4/entra-sync", async ({ request }) => {
+      calls += 1;
+      expect(await request.json()).toEqual({ approved: false });
+      return HttpResponse.json({ id: 4, entra_sync_approved: false });
+    }),
+  );
+  renderSecurity();
+  await screen.findByRole("heading", { name: "Microsoft roles approval" });
+  const beta = (await within(entraCard()).findByText("Beta")).closest("tr")!;
+  await userEvent.click(within(beta).getByRole("button", { name: "Revoke Microsoft roles for Beta" }));
+  expect(calls).toBe(0);
+  await userEvent.click(within(beta).getByRole("button", { name: "Revoke" }));
+  expect(await within(beta).findByText("Waiting for approval")).toBeInTheDocument();
+  expect(calls).toBe(1);
+});
+
+test("with nothing to approve the card says so", async () => {
+  meIs({ is_superuser: true, sso_only: false, has_password: true, linked_providers: [] });
+  server.use(http.get("/api/v1/users/sso-readiness", () => HttpResponse.json(READINESS)));
+  renderSecurity();
+  await screen.findByRole("heading", { name: "Microsoft roles approval" });
+  expect(await within(entraCard()).findByText("No organization has mapped Microsoft roles yet.")).toBeInTheDocument();
+});
+
+test("a non-superuser does not see the approval card", async () => {
+  meIs({ is_superuser: false, sso_only: false, has_password: true, linked_providers: [] });
+  renderSecurity();
+  await screen.findByRole("heading", { name: "Password" });
+  expect(screen.queryByRole("heading", { name: "Microsoft roles approval" })).not.toBeInTheDocument();
+});

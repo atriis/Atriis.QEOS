@@ -31,13 +31,20 @@ Manages organizations (tenants) and their memberships for QEOS.
   - `DELETE .../{mapping_id}` answers 204, or 404 when the mapping is not this organization's.
   - Only owners may call these routes; a member with another role gets 403, and someone who is not a member gets 404.
   Deleting a mapping changes no member; the next Microsoft sign-in of each person does.
+  - A mapping applies only after an active superuser approved the organization, because any user may create and own
+    one. `PUT /api/v1/organizations/{org_id}/entra-sync` with `{"approved": true|false}` sets or clears the approval
+    and answers the organization; `GET /api/v1/organizations/entra-sync` lists `[{id, name, slug, mappings,
+    entra_sync_approved, entra_sync_approved_at}]` for organizations with a mapping or an approval. Both ask
+    auth-service's internal API whether the caller is an active superuser: no answers 403, auth-service unreachable
+    502. Superusers need not be members. Organizations carry `entra_sync_approved` so owners see the state.
+    Revoking keeps the members Entra created and stops changing them.
 - Managed members: a member created by a mapping has `managed_by: "entra"` (`null` for hand-made members).
   `DELETE .../members/{member_id}` on a managed member answers 409 `managed_by_entra`.
 - Internal API, `POST /internal/v1/sso-roles`, called by auth-service after a Microsoft sign-in. HTTP Basic
   with `INTERNAL_CALLER_USERNAME` (default `auth-service`) and `INTERNAL_API_PASSWORD`. An empty password
   answers 503, wrong credentials 401. The body is `{"user_id": 7, "roles": ["QEOS.Member"]}`, at most 50
   roles (more answers 422). The answer is `{"changes": [{"organization_id", "action", "from", "to"}]}`,
-  empty when nothing changed. Only organizations with a mapping are touched, and only members marked
+  empty when nothing changed. Only approved organizations with a mapping are touched, and only members marked
   `managed_by = entra`. Each change is logged at INFO. The gateway does not route `/internal/`.
 - Prometheus metrics at `/metrics` (not routed by the gateway).
 
