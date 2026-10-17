@@ -470,6 +470,8 @@ docker compose exec postgres psql -U postgres -d auth_db -c "DELETE FROM mfa_rec
 
 ### 3.8 Single sign-on (Google and Microsoft)
 
+Step-by-step Microsoft guide, with an IT request template and troubleshooting: [MICROSOFT_SIGN_IN.md](MICROSOFT_SIGN_IN.md).
+
 Optional. Without it, sign-in is email and password. GitHub SSO and SAML are **not
 implemented**.
 
