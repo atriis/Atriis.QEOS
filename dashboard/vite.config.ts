@@ -15,6 +15,9 @@ export default defineConfig({
     setupFiles: "./src/test/setup.ts",
     // Typing-heavy UI tests run in parallel workers; 5 s was too tight on a loaded machine
     testTimeout: 15000,
+    // At most 4 test files at once. The default (one per core) starved the heavy page tests on a 20-core laptop
+    // until they timed out; 4 matches a CI runner and runs the suite green locally
+    maxWorkers: 4,
     globals: true,
   },
 });

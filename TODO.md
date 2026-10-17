@@ -212,6 +212,7 @@ Reliability and operations
 - [ ] Report regressions at size B is at p95 8.4 s against the 8 s target (README Report timing; accepted 2026-10-10, size A is the expected volume). When a real project's 90-day results near size B: first a per-request `SET LOCAL work_mem`, then the per-test daily rollup. The covering index the spec lists first did not pay at size B (experimental one dropped, README Report timing, task-20-perf-report.md "Why no covering index"); try it only if production shows a small window over a large mixed table.
 
 ### Dashboard follow-ups
+- [ ] Speed up the slowest dashboard tests. `maxWorkers: 4` (vite.config.ts) cut timeouts on a loaded laptop from 9 to about 2, but some tests are close to the 15 s limit on their own: "at most 200 cases can be selected" (RunFromQeos.test.tsx, about 11 s alone, renders 260 cases over 4 pages) and the Report page's "announced only when every section asked has loaded"
 - [x] SSO sign-in buttons (Google, Microsoft) in the login page — rendered only when `VITE_*` client ids are baked at build time; manual verification against a real tenant still pending
 - [x] SSO-only mode in the dashboard (ADR-031): sign-in page from `/auth/methods` with an administrator disclosure, recovery pages point to sign-in, Security page Microsoft link card, superuser readiness card with the one-time link allowance
 - [x] Refresh token in an httpOnly cookie — `qeos_refresh`, Secure, SameSite=Strict, Path=/api/v1/auth (ADR-013)
