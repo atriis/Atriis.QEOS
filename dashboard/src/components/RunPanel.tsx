@@ -55,7 +55,10 @@ export default function RunPanel({ projectId, caseNumber }: Props) {
   });
   const stop = useMutation({
     mutationFn: () => stopRunRequest(projectId, rid as number),
-    onSuccess: (updated) => qc.setQueryData(["run-requests", projectId, "latest"], updated),
+    onSuccess: (updated) => {
+      qc.setQueryData(["run-requests", projectId, "latest"], updated);
+      void qc.invalidateQueries({ queryKey: ["run-requests", projectId, "active"] });
+    },
     onError: (error) => {
       // 409: the run finished first. Show its final state, not an error
       if (error instanceof ApiError && error.status === 409) {

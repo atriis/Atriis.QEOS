@@ -257,7 +257,9 @@ test("a repository suite page is read-only and shows where it comes from", async
   expect(screen.queryByRole("button", { name: /move|remove/i })).not.toBeInTheDocument();
   expect(screen.queryByLabelText(/find cases to add/i)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /delete the suite/i })).not.toBeInTheDocument();
+  // Run on a repository suite dispatches its own workflow (RunRepositorySuites.test.tsx), not the hand-made "Run suite"
   expect(screen.queryByRole("button", { name: /run suite/i })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Run Amadeus non-booking" })).toBeInTheDocument();
 });
 
 test("a manual suite page keeps its edit controls and Run suite", async () => {

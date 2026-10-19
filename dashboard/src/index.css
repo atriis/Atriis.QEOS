@@ -997,6 +997,10 @@ input[readonly] { background: var(--surface-2); }
 .run-reason { color: var(--text-secondary); font-size: 13px; }
 .run-confirm { flex-basis: 100%; max-width: 560px; margin: 0; }
 .run-confirm h3 { margin-top: 0; }
+.run-cell { text-align: right; }
+.run-cell .run-control { margin: 0; justify-content: flex-end; }
+.run-cell .run-confirm { min-width: min(320px, 70vw); text-align: left; }
+.suite-group > .run-control { margin-top: 0; }
 .run-confirm-cases { margin: 0 0 var(--space-2); padding-left: var(--space-5); overflow-wrap: anywhere; }
 .run-selection { position: sticky; bottom: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); margin: var(--space-3) 0 0; background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-2); /* the confirmation card opens inside it: scroll rather than run off-screen */ max-height: min(70vh, 520px); max-height: min(70dvh, 520px); overflow-y: auto; overscroll-behavior: contain; }
 .run-selection .run-control { margin: 0; }

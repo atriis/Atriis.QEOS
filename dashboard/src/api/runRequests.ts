@@ -37,6 +37,8 @@ export interface RunRequest {
   selection: SelectedCase[];
   case_count: number;
   suite_id: number | null;
+  /** The workflow file dispatched: a repository suite's, else the CI target's. Older servers omit it. */
+  workflow?: string | null;
   status: RunRequestStatus;
   conclusion: string | null;
   github_run_id: number | null;
@@ -54,7 +56,8 @@ export interface RunRequest {
   refreshing: boolean;
 }
 
-export type RunSelection = { case_numbers: number[] } | { suite_id: number };
+/** A repository suite id, or a whole workflow by its file name ("suite-flights.yml"), dispatches that workflow. */
+export type RunSelection = { case_numbers: number[] } | { suite_id: number } | { workflow_group: string };
 
 export const MAX_RUN_CASES = 200;
 export const EXPIRY_WARNING_DAYS = 14;

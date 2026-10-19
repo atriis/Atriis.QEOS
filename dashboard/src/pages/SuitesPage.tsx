@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Suite, createSuite, listSuites, shardText } from "../api/cases";
 import ErrorBanner from "../components/ErrorBanner";
+import RunControl from "../components/RunControl";
 import { useCanEdit } from "../lib/useCanEdit";
 import PageHeader from "../components/PageHeader";
 import { tableCardClass, useIsWide } from "../lib/useIsWide";
@@ -73,11 +74,15 @@ export default function SuitesPage() {
             <h2>{g.group} <span className="muted">({g.suites.length} {g.suites.length === 1 ? "suite" : "suites"})</span></h2>
             {g.workflow && <span className="muted">{g.workflow}</span>}
           </summary>
+          {canEdit && g.workflow && (
+            <RunControl projectId={id} cases={[]} selection={{ workflow_group: g.workflow }} label="Run all" ariaLabel={`Run all ${g.group}`} emphasis={false}
+              repo={{ workflow: g.workflow, sourceRepo: g.suites.find((x) => x.source_repo)?.source_repo ?? null, subject: "all its suites", all: true, title: `Run all ${g.group}?` }} />
+          )}
           <div ref={g === first ? card.ref : undefined} className={tableCardClass(card.wide)} tabIndex={0} role="region" aria-label={`${g.group} suites`}>
             <table className="data">
               <caption className="sr-only">{g.group} suites</caption>
               <thead>
-                <tr><th>Suite</th><th className="num">Cases</th><th className="hide-narrow">Changed</th></tr>
+                <tr><th>Suite</th><th className="num">Cases</th><th className="hide-narrow">Changed</th>{canEdit && g.workflow && <th><span className="sr-only">Run</span></th>}</tr>
               </thead>
               <tbody>
                 {g.suites.map((s) => (
@@ -90,6 +95,14 @@ export default function SuitesPage() {
                     </td>
                     <td className="num">{s.case_count}</td>
                     <td className="hide-narrow">{new Date(s.updated_at ?? s.created_at).toLocaleDateString()}</td>
+                    {canEdit && g.workflow && (
+                      <td className="run-cell">
+                        {s.origin === "repository" && s.workflow && (
+                          <RunControl projectId={id} cases={[]} selection={{ suite_id: s.id }} label="Run" ariaLabel={`Run ${s.name}`} emphasis={false}
+                            repo={{ workflow: s.workflow, sourceRepo: s.source_repo ?? null, subject: s.external_id ?? s.name, title: `Run ${s.name}?`, noCases: s.case_count === 0 }} />
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>

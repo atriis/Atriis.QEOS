@@ -108,8 +108,12 @@ export default function SuiteDetailPage() {
       </p>
       <PageHeader title={suite.data.name} subtitle={suite.data.description || undefined}
         meta={estimate.data?.estimate_ms != null ? `Estimated duration ${estimateText(estimate.data)}` : undefined} />
-      {/* A repository suite runs through its own workflow: no Run until that exists (Task 10) */}
-      {!fromRepo && (
+      {fromRepo && suite.data.workflow ? (
+        // A repository suite runs through its own workflow, whatever cases QEOS holds for it
+        <RunControl projectId={id} cases={[]} selection={{ suite_id: sid }} label="Run" ariaLabel={`Run ${suite.data.name}`}
+          repo={{ workflow: suite.data.workflow, sourceRepo: suite.data.source_repo ?? null, subject: suite.data.external_id ?? suite.data.name,
+            title: `Run ${suite.data.name}?`, noCases: suite.data.cases.length === 0 }} />
+      ) : !fromRepo && (
         <RunControl projectId={id} cases={suite.data.cases.map((c) => ({ number: c.number, title: c.title, manual: c.source_path === null, testKey: c.automated_test_key }))}
           selection={{ suite_id: sid }} label="Run suite" emphasis={!dirty && !detailsDirty}
           emptyReason={suite.data.cases.length === 0 ? "This suite has no cases" : "This suite has no automated cases"} />
