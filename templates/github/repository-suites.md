@@ -14,23 +14,33 @@ nightly, scheduler, rerun or manual run behaves as before.
 
 ## 1. Sync the workflows
 
-In `qeos-sync-cases.yml`, sync the suite workflows along with the `.feature` files, and run the sync
-when either one changes:
+In `qeos-sync-cases.yml`, sync the caller workflows along with the `.feature` files, and run the sync
+when either one changes. List each caller workflow by name:
 
 ```yaml
 on:
   push:
-    paths: ["tests/features/**", ".github/workflows/suite-*.yml"]
+    paths:
+      - "tests/features/**"
+      - ".github/workflows/suite-flights.yml"
+      - ".github/workflows/suite-hotels.yml"
 ```
 
 ```yaml
-      - run: qeos-collector import-features "tests/features/**/*.feature" --suites ".github/workflows/suite-*.yml"
+      - run: >-
+          qeos-collector import-features "tests/features/**/*.feature"
+          --suites .github/workflows/suite-flights.yml
+          --suites .github/workflows/suite-hotels.yml
 ```
 
 `--suites` needs collector 0.10.0 or later. The QEOS server must also be new enough to accept it:
-an older one answers 422 and the whole sync fails. If the pattern also matches files that are not
-callers (the runner, a scheduler), the sync warns about each one and skips it. List the caller files
-with several `--suites` options to avoid the warnings.
+an older one answers 422 and the whole sync fails.
+
+You can use a glob such as `--suites ".github/workflows/suite-*.yml"`, but only if it matches
+nothing except callers. A runner, a scheduler or a workflow whose matrix is not plain JSON (for
+example one with `${{ inputs.parallel }}` in it) gives a warning at every sync and makes `--strict`
+fail. In OBT, `suite-*.yml` also matches `suite-runner.yml`, `suite-scheduler.yml` and
+`suite-custom-run.yml`, so OBT lists its five callers by name.
 
 ## 2. The inputs and the run-name (each caller workflow)
 
@@ -71,7 +81,10 @@ If the workflow already has a `run-name`, put the QEOS rule first and keep yours
 A workflow without a `run-name` is titled with its `name`, so use that as the fallback.
 
 QEOS treats a workflow as busy while any of its runs is queued, in progress, waiting, pending or
-requested, so a `concurrency` group that queues runs works well with it.
+requested, and does not start a run then. A QEOS run still holds the workflow's `concurrency` group
+while it runs. A scheduled run that starts meanwhile (a nightly, for example) waits behind it.
+GitHub keeps only one pending run per group, so a second run that arrives while one is already
+waiting replaces the waiting one. Leave a quiet window before scheduled runs, or keep QEOS runs short.
 
 ## 3. The runner: inputs and the select job
 
@@ -154,7 +167,7 @@ A QEOS run usually runs one leg, so it should not become anyone's "latest run":
 
   ```bash
   gh run list --workflow "$SUITE_WORKFLOW" --branch main --limit 30 --json databaseId,status,conclusion,displayTitle \
-    --jq '[.[] | select(.status == "completed" and (.displayTitle | startswith("QEOS #") | not))][0].databaseId'
+    --jq '[.[] | select(.status == "completed" and (.conclusion == "success" or .conclusion == "failure") and (.displayTitle | startswith("QEOS #") | not))][0].databaseId'
   ```
 
   A lookup that takes the newest run with a given artifact already skips QEOS runs, as long as those
@@ -164,5 +177,5 @@ A QEOS run usually runs one leg, so it should not become anyone's "latest run":
 
 Suites built by hand in QEOS (a list of scenarios, not a workflow leg) run through `qeos-run.yml`
 and `qeos-run.mjs` in this folder. Adapt `qeos-run.yml` to run like your suite legs: the same
-cucumber profile and retry, the same secrets, and the same results upload. OBT's copy uses
+cucumber profile and retry, the same secrets, the same post-run steps, and the same results upload. OBT's copy uses
 `--profile ci` and `--retry 1`.
