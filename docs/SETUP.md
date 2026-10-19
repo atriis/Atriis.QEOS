@@ -1391,8 +1391,8 @@ does at night, and the run is titled `QEOS #<id>`.
 
 - The repository in **Settings → Run from QEOS** must be the one the suites came from. If not, Run is
   refused: "Set up Run from QEOS in Project Settings for <repository>".
-- One run per workflow at a time. QEOS asks GitHub first. If that workflow is already running, also
-  when the nightly started it, Run is refused: "<Group> is already running on GitHub (started HH:MM).
+- One run per workflow at a time. QEOS asks GitHub first. If that workflow is already running on any
+  branch, also when the nightly started it, Run is refused: "<Group> is already running on GitHub (started HH:MM).
   Try again when it finishes." with a link to GitHub. If GitHub cannot be asked, nothing starts and
   the dialog offers **Retry**.
 - Different workflows can run at the same time. A case selection or a hand-made suite uses

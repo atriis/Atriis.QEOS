@@ -240,7 +240,7 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   `suite_id` or `workflow_group`. A repository suite or group dispatches its own workflow with inputs
   `suites` and `request_id` on the CI target's repository and ref, and the run is found by the title
   `QEOS #<id>`. Before dispatching, GitHub is asked about queued, in progress, waiting, pending or requested
-  runs of that workflow on the ref (newest 100): 409 `workflow_busy`, or 503 `github_unavailable` with nothing
+  runs of that workflow on any branch, since its `concurrency` group is not branch-scoped (newest 100): 409 `workflow_busy`, or 503 `github_unavailable` with nothing
   started. A `source_repo` that differs from the CI target is 409 `repository_mismatch`. The 200-case cap and
   the manual, archived and unnamed checks do not apply. Only workflow names from synced suite rows or the CI
   target are dispatched.

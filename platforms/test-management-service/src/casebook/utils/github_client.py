@@ -187,13 +187,14 @@ def find_run(token: str, repo: str, workflow: str, title: "str | tuple[str, ...]
 BUSY_STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
 
 
-def busy_run(token: str, repo: str, workflow: str, ref: str) -> Optional[dict]:
-    """The newest run of the workflow on `ref` that has not finished, or None. GitHub filters by one status
-    per call, so the newest 100 runs on the branch are read and filtered here: an unfinished run older than
-    the last 100 cannot exist while the workflow's concurrency group holds."""
+def busy_run(token: str, repo: str, workflow: str) -> Optional[dict]:
+    """The newest run of the workflow, on any branch, that has not finished, or None. Suite workflows'
+    concurrency groups are not branch-scoped, so a run on any branch holds the group. GitHub filters by one
+    status per call, so the newest 100 runs are read and filtered here: an unfinished run older than the
+    last 100 cannot exist while the workflow's concurrency group holds."""
     _check_names(repo, workflow)
     response = _send(token, "GET", f"/repos/{repo}/actions/workflows/{workflow}/runs",
-                     params={"branch": ref, "per_page": 100})
+                     params={"per_page": 100})
     runs = [run for run in _json(response).get("workflow_runs") or []
             if isinstance(run, dict) and run.get("status") in BUSY_STATUSES]
     return max(runs, key=lambda r: (_created(r) or datetime.min.replace(tzinfo=timezone.utc), r.get("id", 0))) \

@@ -363,7 +363,7 @@ def _check_repository(target: CiTarget, run: RepositoryRun) -> None:
 def _check_not_busy(target: CiTarget, token: str, run: RepositoryRun) -> None:
     """A dispatch while the workflow runs or waits would let its concurrency group cancel one of the two."""
     try:
-        busy = github_client.busy_run(token, target.repo, run.workflow, target.ref)
+        busy = github_client.busy_run(token, target.repo, run.workflow)
     except github_client.RateLimited as exc:
         raise GitHubUnavailable(run.group_name, exc.retry_after) from None
     except github_client.GitHubError:

@@ -56,7 +56,8 @@ follow it the same way.
 - **One active run per workflow** (test-management migration 010; ADR-025 said one per project). Each request
   records its workflow, and the unique index is on project and workflow. Two different workflows can run at once.
 - **Busy check before the dispatch.** QEOS asks GitHub whether that workflow has a queued, in progress, waiting,
-  pending or requested run on the branch. If so: 409 `workflow_busy` ("<Group> is already running on GitHub
+  pending or requested run on any branch (suite workflows' `concurrency` groups are not branch-scoped, so a
+  run on any branch holds the group). If so: 409 `workflow_busy` ("<Group> is already running on GitHub
   (started HH:MM). Try again when it finishes."). This also covers a run that did not start from QEOS, such as the
   nightly. If GitHub cannot be asked: 503 `github_unavailable`, and nothing is started.
 - **Same repository.** A repository suite whose recorded `source_repo` differs from the CI target's repository

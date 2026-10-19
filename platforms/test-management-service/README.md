@@ -206,8 +206,8 @@ not the CI target's. It uses the CI target's repository, branch and token.
 - The suite's `source_repo` must equal the CI target's `repo` (case-insensitive), else 409
   `repository_mismatch` ("Set up Run from QEOS in Project Settings for <source_repo>"). A suite synced
   without a repository (`source_repo` null) runs against the CI target as it is.
-- Before the request is made, GitHub is asked for the workflow's newest run on the branch that is
-  queued, in progress, waiting, pending or requested. If there is one: 409 `workflow_busy` ("Flights is
+- Before the request is made, GitHub is asked for the workflow's newest run, on any branch (the
+  workflow's `concurrency` group is not branch-scoped), that is queued, in progress, waiting, pending or requested. If there is one: 409 `workflow_busy` ("Flights is
   already running on GitHub (started 21:00). Try again when it finishes.", time in UTC) with `run_url`.
   If GitHub cannot be asked (timeout, error, rate limit): 503 `github_unavailable` ("GitHub could not be
   asked whether Flights is running; try again.", `Retry-After` on a rate limit). Nothing is dispatched
