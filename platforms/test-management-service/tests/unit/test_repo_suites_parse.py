@@ -63,6 +63,21 @@ def test_whitespace_and_folder_without_slash():
     assert wf.legs[0].files == ("b.feature",)
 
 
+def test_glob_entry_is_a_pattern():
+    wf, issues = parse_workflow(WF + "suite-x.yml", _workflow({"include": [_leg(test_path="a/b/*.feature c/")]}))
+    assert issues == []
+    assert wf.legs[0].globs == ("a/b/*.feature",)
+    assert wf.legs[0].folders == ("c",)
+    assert wf.legs[0].files == ()
+
+
+def test_question_mark_and_bracket_are_globs():
+    wf, _ = parse_workflow(WF + "suite-x.yml", _workflow({"include": [_leg(test_path="a/?.feature b/[xy]*/ c.feature")]}))
+    assert wf.legs[0].globs == ("a/?.feature", "b/[xy]*/")
+    assert wf.legs[0].folders == ()
+    assert wf.legs[0].files == ("c.feature",)
+
+
 def test_leg_without_suite_id():
     matrix = {"include": [{"suite_name": "N", "test_path": "t/"}, _leg()]}
     wf, issues = parse_workflow(WF + "suite-x.yml", _workflow(matrix))

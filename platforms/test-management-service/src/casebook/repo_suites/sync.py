@@ -1,7 +1,7 @@
 """Repository suites from the test repository's suite workflows: plan with the import, apply in its transaction.
 
 Spec docs/superpowers/specs/2026-10-19-repository-suites-design.md, 5.2 and 5.3. A suite is keyed by
-(workflow file, suite_id); its cases are the live imported cases under its folders or equal to its files."""
+(workflow file, suite_id); its cases are the live imported cases under its folders or equal to its files or matching its globs."""
 import posixpath
 import re
 from dataclasses import dataclass, field
@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from src.casebook.models import Case, Suite, SuiteCase
-from src.casebook.repo_suites.parse import WORKFLOWS_DIR, ParsedLeg, parse_workflow
+from src.casebook.repo_suites.parse import GLOB_CHARS, WORKFLOWS_DIR, ParsedLeg, parse_workflow
 from src.casebook.schemas.suite import MAX_SUITE_CASES
 
 # The names github_client and ci_targets accept: QEOS can only dispatch a workflow named like this
@@ -50,10 +50,14 @@ def _warn(plan: SuitePlan, workflow: str, external_id: Optional[str], message: s
 
 
 def _entries(leg: ParsedLeg) -> List[str]:
-    return [folder + "/" for folder in leg.folders] + list(leg.files)
+    return [folder + "/" for folder in leg.folders] + list(leg.files) + list(leg.globs)
 
 
 def _matches(entry: str, path: str) -> bool:
+    if any(c in entry for c in GLOB_CHARS):
+        # fnmatch's * also crosses "/", unlike cucumber's: fine, a feature folder has no deeper .feature files.
+        # A glob ending in "/" names folders, so it matches everything under them.
+        return fnmatchcase(path, entry + "*" if entry.endswith("/") else entry)
     return path.startswith(entry) if entry.endswith("/") else path == entry
 
 

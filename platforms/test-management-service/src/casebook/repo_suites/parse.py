@@ -17,6 +17,7 @@ class ParsedLeg:
     folders: tuple[str, ...]
     files: tuple[str, ...]
     shard: str | None
+    globs: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -33,17 +34,23 @@ class ParseIssue:
     message: str
 
 
-def _split_paths(test_path: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """`.feature` entries are files, everything else is a folder (trailing slashes stripped)."""
-    folders, files = [], []
+GLOB_CHARS = ("*", "?", "[")
+
+
+def _split_paths(test_path: str) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    """Entries with `*`, `?` or `[` are globs (kept as written); other `.feature` entries are files, everything
+    else is a folder (trailing slashes stripped)."""
+    folders, files, globs = [], [], []
     for entry in test_path.split():
-        if entry.endswith(".feature"):
+        if any(c in entry for c in GLOB_CHARS):
+            globs.append(entry)
+        elif entry.endswith(".feature"):
             files.append(entry)
         else:
             folder = entry.rstrip("/")
             if folder:
                 folders.append(folder)
-    return tuple(folders), tuple(files)
+    return tuple(folders), tuple(files), tuple(globs)
 
 
 def _matrix_include(with_block: dict) -> list | None:
@@ -100,8 +107,8 @@ def parse_workflow(path: str, content: str) -> tuple[ParsedWorkflow | None, list
             issues.append(ParseIssue(workflow, external_id, f"suite_id {external_id} appears more than once; the later leg was skipped"))
             continue
         seen.add(external_id)
-        folders, files = _split_paths(str(row.get("test_path") or ""))
-        if not folders and not files:
+        folders, files, globs = _split_paths(str(row.get("test_path") or ""))
+        if not folders and not files and not globs:
             issues.append(ParseIssue(workflow, external_id, f"Leg {external_id} has no test_path and was skipped"))
             continue
         shard = str(row["shard"]).strip() if row.get("shard") else None
@@ -110,6 +117,7 @@ def parse_workflow(path: str, content: str) -> tuple[ParsedWorkflow | None, list
             name=str(row.get("suite_name") or external_id).strip(),
             folders=folders,
             files=files,
+            globs=globs,
             shard=shard or None,
         ))
     return ParsedWorkflow(workflow, group_name, tuple(legs)), issues

@@ -180,6 +180,30 @@ def test_entry_matching_nothing_warns(client, auth, member):
     assert "preprod-hotels" in suites(client, auth)  # still synced, with what matched (nothing)
 
 
+SUNNY = "tests/features/transportation/cars/sunny_cars/"
+GLOB_FEATURES = [
+    (SUNNY + "x.feature", feature("X", "x1")),
+    (SUNNY + "y.feature", feature("Y", "y1")),
+    ("tests/features/transportation/cars/other/z.feature", feature("Z", "z1")),
+]
+
+
+def test_glob_leg_members(client, auth, member):
+    wf = workflow([("cars", "Cars", SUNNY + "*.feature")])
+    post(client, auth, features=GLOB_FEATURES, workflows=(("suite-cars.yml", wf),))
+    # fnmatch's * also crosses "/"; cucumber's would not, but a feature folder has no deeper .feature files.
+    assert sorted(path for path, _ in members(client, auth, suites(client, auth)["cars"]["id"])) == [
+        SUNNY + "x.feature", SUNNY + "y.feature"]
+
+
+def test_glob_matching_nothing_warns(client, auth, member):
+    entry = "tests/features/none/*.feature"
+    wf = workflow([("cars", "Cars", entry)])
+    result = post(client, auth, features=GLOB_FEATURES, workflows=(("suite-cars.yml", wf),))
+    assert {"workflow": "suite-cars.yml", "external_id": "cars",
+            "message": f"{entry} matches no imported case"} in result["suite_warnings"]
+
+
 def test_dry_run_reports_suite_changes_and_hash_changes(client, auth, member):
     first = post(client, auth, dry_run=True)
     assert changes(first) == [("created", leg) for leg in LEG]

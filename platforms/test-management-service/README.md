@@ -183,7 +183,7 @@ transaction as the cases.
 
 - A new leg is created, a changed one updated, a removed one deleted. A synced workflow that a pattern
   covers but that was not sent is deleted with all its suites; one outside every pattern is kept.
-- A suite's cases are the live imported cases under its folders or equal to its files, ordered by path
+- A suite's cases are the live imported cases under its folders, equal to its files or matching its glob patterns (`*`, `?`, `[`), ordered by path
   and scenario line, recomputed at every sync (at most 1000).
 - A workflow that does not parse, or has no usable leg, keeps its suites. A file name QEOS could not
   dispatch is skipped.
