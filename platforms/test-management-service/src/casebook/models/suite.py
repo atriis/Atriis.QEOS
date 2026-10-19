@@ -25,7 +25,7 @@ class Suite(Base):
     updated_at = Column(DateTime(timezone=True), nullable=True)
     # Repository suites come from the test repository's CI workflows (sync); all null for a manual suite
     origin = Column(String(20), nullable=False, default="manual", server_default="manual")
-    workflow = Column(String(200), nullable=True)  # the workflow file the leg belongs to
+    workflow = Column(String(100), nullable=True)  # the workflow file the leg belongs to
     group_name = Column(String(100), nullable=True)
     external_id = Column(String(200), nullable=True)  # the leg's id inside the workflow
     shard = Column(String(100), nullable=True)

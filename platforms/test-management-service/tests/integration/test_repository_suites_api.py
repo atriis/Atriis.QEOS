@@ -34,6 +34,7 @@ def test_repository_suite_is_read_only(client, auth, db, member):
     for response in responses:
         assert response.status_code == 409, response.text
         assert response.json()["detail"]["code"] == "repository_suite"
+        assert response.json()["detail"]["message"] == "Managed by the repository: change the workflow instead."
     shown = client.get(url, headers=auth()).json()
     assert shown["origin"] == "repository" and shown["workflow"] == "suite-flights.yml"
     assert shown["group_name"] == "Flights"

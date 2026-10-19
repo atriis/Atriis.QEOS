@@ -10,7 +10,7 @@ from src.casebook.service import suite_service
 router = APIRouter()  # mounted at /projects/{project_id}/suites
 
 DUPLICATE = "A suite with this name already exists in the project"
-READ_ONLY = {"code": "repository_suite", "message": "This suite mirrors the test repository and cannot be changed here"}
+READ_ONLY = {"code": "repository_suite", "message": "Managed by the repository: change the workflow instead."}
 
 
 def _suite_or_404(db: Session, access: ProjectAccess, suite_id: int):

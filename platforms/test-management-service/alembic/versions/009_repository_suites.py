@@ -18,7 +18,7 @@ LEG_WHERE = "origin = 'repository'"
 def upgrade() -> None:
     with op.batch_alter_table("suites") as batch:
         batch.add_column(sa.Column("origin", sa.String(20), nullable=False, server_default="manual"))
-        batch.add_column(sa.Column("workflow", sa.String(200), nullable=True))
+        batch.add_column(sa.Column("workflow", sa.String(100), nullable=True))
         batch.add_column(sa.Column("group_name", sa.String(100), nullable=True))
         batch.add_column(sa.Column("external_id", sa.String(200), nullable=True))
         batch.add_column(sa.Column("shard", sa.String(100), nullable=True))
