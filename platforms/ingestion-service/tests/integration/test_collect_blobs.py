@@ -85,6 +85,20 @@ def test_put_over_5mb_413(client, store, headers):
     assert store.objects == {}
 
 
+def test_put_over_5mb_without_content_length_413(client, store, headers):
+    """A chunked body declares no length: the cap is applied while reading."""
+    chunk = b"0" * (1024 * 1024)
+
+    def body():
+        yield PNG
+        for _ in range(6):
+            yield chunk
+
+    response = client.put(url(PNG), content=body(), headers={**headers, "Content-Type": "image/png"})
+    assert response.status_code == 413
+    assert store.objects == {}
+
+
 def test_put_exactly_5mb_is_stored(client, store, headers):
     data = PNG + b"0" * (5 * 1024 * 1024 - len(PNG))
     assert put(client, headers, data).status_code == 201
@@ -120,3 +134,17 @@ def test_blobs_need_a_key(client, store):
     assert client.head(url(PNG)).status_code == 401
     assert client.put(url(PNG), content=PNG, headers={"Content-Type": "image/png"}).status_code == 401
 
+
+
+def test_another_project_stores_its_own_copy(client, store, headers, make_key, db):
+    _, other = make_key(project_id=8)
+    other_headers = {"Authorization": f"Bearer {other}"}
+    db.add(CollectionSettings(project_id=8, collect_manual=True, keep_screenshots=True, discarded_count=0))
+    db.commit()
+    assert put(client, headers).status_code == 201
+    assert client.head(url(PNG), headers=other_headers).status_code == 404
+    assert put(client, other_headers).status_code == 201
+    assert {(b.project_id, b.sha256) for b in db.query(Blob)} == {(7, sha(PNG)), (8, sha(PNG))}
+    assert set(store.objects) == {screenshot_key(7, sha(PNG)), screenshot_key(8, sha(PNG))}
+    assert client.head(url(PNG), headers=headers).status_code == 200
+    assert client.head(url(PNG), headers=other_headers).status_code == 200
