@@ -245,7 +245,13 @@ qeos-collector import-features "features/**/*.feature" --dry-run
 - **Mass-archive guard.** The platform refuses a full import that would archive more than half of
   the imported cases (409). If that is intended, pass `--allow-mass-archive`.
 - **Patterns.** Arguments, else `features:` in `.qeos.yml`, else `**/*.feature`. Paths with a `node_modules` segment are always skipped, and so are dot-directories; patterns cannot reach outside the working directory.
-- `--dry-run` prints the plan and changes nothing; `--strict` exits 1 when a file fails to parse.
+- **Repository suites (from 0.10.0).** `--suites PATTERN` (repeatable) also sends the CI workflow files matching
+  PATTERN, for example `--suites ".github/workflows/suite-*.yml"`. The platform turns them into suites
+  and deletes the suites of files that no longer exist. Patterns are sent as repository-root paths (no leading `./`).
+  The collector does not read the YAML. It sends `GITHUB_REPOSITORY` as the source repository, and prints
+  `Suites: N created, N updated, N deleted` and each suite warning. A pattern that matches no file is reported as
+  `--suites pattern matched no file: <pattern>` but still sent.
+- `--dry-run` prints the plan and changes nothing; `--strict` exits 1 when a file fails to parse or a suite has a warning.
 
 ```yaml
 features:

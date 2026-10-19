@@ -51,6 +51,14 @@ def collect_files(patterns: List[str], cwd: str) -> List[Dict[str, str]]:
     return files
 
 
+def normalise_pattern(pattern: str) -> str:
+    """A repository-root relative POSIX path: forward slashes, no leading ./ (the form the platform matches)."""
+    pattern = pattern.replace("\\", "/")
+    while pattern.startswith("./"):
+        pattern = pattern[2:]
+    return pattern
+
+
 def _detail(raw: bytes) -> str:
     try:
         detail = json.loads(raw or b"{}").get("detail")
@@ -101,8 +109,14 @@ def trade_key(base: str, api_key: str, context) -> dict:
 
 
 def run_import(base: str, grant: dict, files: list, *, full: bool, allow_mass_archive: bool,
-               dry_run: bool, context) -> dict:
+               dry_run: bool, context, suite_files: Optional[list] = None,
+               suite_patterns: Optional[list] = None, source_repo: Optional[str] = None) -> dict:
     payload = {"files": files, "full": full}
+    if suite_patterns:  # --suites: the files (possibly none) always travel with their patterns
+        payload["suite_files"] = suite_files or []
+        payload["suite_patterns"] = suite_patterns
+        if source_repo:
+            payload["source_repo"] = source_repo
     if allow_mass_archive:
         payload["allow_mass_archive"] = True
     url = f"{base}/api/v1/projects/{grant['project_id']}/cases/import?dry_run={'true' if dry_run else 'false'}"
@@ -130,6 +144,12 @@ def report(result: dict, say: Callable[[str], None], dry_run: bool) -> None:
         say(f"  ... and {len(result['errors']) - SHOWN_ERRORS} more errors")
     if result["warnings"]:
         say(f"  {len(result['warnings'])} warnings (skipped scenarios or tags)")
+    changes = result.get("suite_changes") or []
+    if changes:
+        counts = {a: sum(1 for c in changes if c["action"] == a) for a in ("created", "updated", "deleted")}
+        say(f"Suites: {counts['created']} created, {counts['updated']} updated, {counts['deleted']} deleted")
+    for warning in result.get("suite_warnings") or []:
+        say(f"warning: {warning['workflow']} {warning['external_id']}: {warning['message']}")
 
 
 def default_branch(env: Mapping[str, str], cwd: str, run: Callable = subprocess.run) -> str:
@@ -172,12 +192,21 @@ def run(args, env: Mapping[str, str], api_key: str, say: Callable[[str], None], 
     files = collect_files(list(patterns), cwd)
     if not files:
         raise ConfigError(f"no .feature files match {', '.join(patterns)}")
+    suite_patterns = list(dict.fromkeys(normalise_pattern(p) for p in args.suites or []))
+    suite_files: list = []
+    for pattern in suite_patterns:
+        found = collect_files([pattern], cwd)
+        if not found:
+            say(f"--suites pattern matched no file: {pattern}")
+        suite_files.extend(f for f in found if f not in suite_files)
     context = make_context(args.ca_file or env.get("QEOS_CA_FILE") or config.get("ca-file"))
     base = base_url(url)
     try:
         grant = trade_key(base, api_key, context)
         result = run_import(base, grant, files, full=not args.no_full,
-                            allow_mass_archive=args.allow_mass_archive, dry_run=args.dry_run, context=context)
+                            allow_mass_archive=args.allow_mass_archive, dry_run=args.dry_run, context=context,
+                            suite_files=suite_files, suite_patterns=suite_patterns,
+                            source_repo=env.get("GITHUB_REPOSITORY") or None)
         report(result, say, args.dry_run)
     except ImportFailed as exc:
         say(str(exc))
@@ -185,4 +214,5 @@ def run(args, env: Mapping[str, str], api_key: str, say: Callable[[str], None], 
     except (KeyError, TypeError, ValueError, AttributeError):
         say("the platform sent an unexpected response (the import result has the wrong shape)")
         return 1
-    return 1 if result["errors"] and args.strict else 0
+    problems = result["errors"] or result.get("suite_warnings")
+    return 1 if problems and args.strict else 0

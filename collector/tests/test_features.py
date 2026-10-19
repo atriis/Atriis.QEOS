@@ -228,3 +228,70 @@ def test_node_modules_are_not_imported(platform, repo):
 def test_patterns_outside_the_working_directory_are_refused(platform, repo):
     (repo.parent / "outside.feature").write_text("Feature: O\n", encoding="utf-8")
     assert main(["import-features", "../*.feature"], env(platform)) == 2
+
+
+SUITE_FILE = ".github/workflows/suite-flights.yml"
+
+
+@pytest.fixture
+def suites(repo):
+    (repo / ".github" / "workflows").mkdir(parents=True)
+    (repo / ".github" / "workflows" / "suite-flights.yml").write_text("name: flights\n", encoding="utf-8")
+    (repo / ".github" / "workflows" / "ci.yml").write_text("name: ci\n", encoding="utf-8")
+    return repo
+
+
+def test_suites_files_sent_with_patterns_and_repo(platform, suites):
+    platform.reply(200, GRANT)
+    platform.reply(200, RESULT)
+    argv = ["import-features", "--suites", "./.github/workflows/suite-*.yml"]
+    assert main(argv, env(platform, GITHUB_REPOSITORY="atriis/obt")) == 0
+    body = sent(platform, 1)
+    assert body["suite_files"] == [{"path": SUITE_FILE, "content": "name: flights\n"}]
+    assert body["suite_patterns"] == [".github/workflows/suite-*.yml"]
+    assert body["source_repo"] == "atriis/obt"
+    assert [f["path"] for f in body["files"]] == ["features/a.feature", "features/sub/b.feature"]
+
+
+def test_no_suites_option_sends_old_payload(platform, suites):
+    platform.reply(200, GRANT)
+    platform.reply(200, RESULT)
+    assert main(["import-features"], env(platform, GITHUB_REPOSITORY="atriis/obt")) == 0
+    body = sent(platform, 1)
+    assert set(body) == {"files", "full"}
+
+
+def test_suite_warnings_printed(platform, suites, capsys):
+    result = {**RESULT, "suite_changes": [
+        {"action": "created", "workflow": SUITE_FILE, "external_id": "a", "name": "A"},
+        {"action": "created", "workflow": SUITE_FILE, "external_id": "b", "name": "B"},
+        {"action": "updated", "workflow": SUITE_FILE, "external_id": "c", "name": "C"},
+        {"action": "deleted", "workflow": SUITE_FILE, "external_id": "d", "name": "D"}],
+        "suite_warnings": [{"workflow": SUITE_FILE, "external_id": "x", "message": "no such tag"}]}
+    platform.reply(200, GRANT)
+    platform.reply(200, result)
+    assert main(["import-features", "--suites", ".github/workflows/suite-*.yml"], env(platform)) == 0
+    out = capsys.readouterr()
+    text = out.out + out.err
+    assert "Suites: 2 created, 1 updated, 1 deleted" in text
+    assert f"warning: {SUITE_FILE} x: no such tag" in text
+
+
+def test_strict_fails_on_suite_warning(platform, suites):
+    result = {**RESULT, "suite_changes": [],
+              "suite_warnings": [{"workflow": SUITE_FILE, "external_id": "x", "message": "m"}]}
+    for argv, code in ((["import-features", "--suites", SUITE_FILE], 0),
+                       (["import-features", "--suites", SUITE_FILE, "--strict"], 1)):
+        platform.reply(200, GRANT)
+        platform.reply(200, result)
+        assert main(argv, env(platform)) == code
+
+
+def test_pattern_matching_no_file_is_reported(platform, repo, capsys):
+    platform.reply(200, GRANT)
+    platform.reply(200, RESULT)
+    assert main(["import-features", "--suites", ".github/workflows/suite-*.yml"], env(platform)) == 0
+    out = capsys.readouterr()
+    assert "--suites pattern matched no file: .github/workflows/suite-*.yml" in out.out + out.err
+    body = sent(platform, 1)
+    assert body["suite_files"] == [] and body["suite_patterns"] == [".github/workflows/suite-*.yml"]

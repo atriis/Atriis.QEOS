@@ -39,11 +39,16 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith("/api/v1/projects/1/cases/import"):
             with open(UPLOADS, "a", encoding="utf-8") as handle:
                 handle.write(body.decode("utf-8") + "\n")
-            files = json.loads(body)["files"]
+            request = json.loads(body)
+            files = request["files"]
             answer = {"summary": {"created": len(files), "updated": 0, "moved": 0, "reactivated": 0,
                                   "archived": 0, "unchanged": 0, "skipped": 0},
                       "items": [{"action": "created", "path": f["path"], "scenario": None} for f in files],
                       "errors": [], "warnings": []}
+            if "suite_patterns" in request:  # --suites: every suite file is a created suite
+                answer["suite_changes"] = [{"action": "created", "workflow": f["path"], "external_id": f["path"],
+                                            "name": f["path"]} for f in request["suite_files"]]
+                answer["suite_warnings"] = []
             status = 200
         else:
             answer, status = {"detail": "Not Found"}, 404

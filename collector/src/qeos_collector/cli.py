@@ -149,7 +149,11 @@ def build_parser() -> argparse.ArgumentParser:
                                  help="compare only the given files; never archive cases of other files")
     import_features.add_argument("--allow-mass-archive", action="store_true",
                                  help="let a full import archive more than half of the imported cases")
-    import_features.add_argument("--strict", action="store_true", help="exit 1 when a .feature file fails to parse")
+    import_features.add_argument("--suites", action="append", metavar="PATTERN",
+                                 help="also import the CI workflow files matching PATTERN (repeatable, e.g. "
+                                 ".github/workflows/suite-*.yml) as repository suites")
+    import_features.add_argument("--strict", action="store_true",
+                                 help="exit 1 when a .feature file fails to parse or a suite has a warning")
     import_features.add_argument("--dry-run", action="store_true", help="print the plan; change nothing")
     import_features.add_argument("--url", help="platform URL (default: $QEOS_URL)")
     import_features.add_argument("--ca-file", help="trust exactly this CA certificate (default: $QEOS_CA_FILE)")
