@@ -341,6 +341,10 @@ requested ones. Each group needs its own design spec before implementation.
 - [x] Create/add labels on TCs; filter and search by label
 - [x] Create suites — static (hand-picked TCs), ordered, edited in place
 - [x] Link a TC to the automated test that implements it; the case shows that test's latest result
+- [ ] Repository suites: sync the CI suite workflows' matrix legs into Suites (read-only), run them from QEOS through the repository's own workflows, Add to suite from the Test Cases selection, "Not in any suite" filter, sync warnings for broken suite paths, `qeos-run.yml` in OBT (spec `docs/superpowers/specs/2026-10-19-repository-suites-design.md`, ADR-035 to write)
+- [ ] Last result per suite on the Suites list (passed, failed, not run, from its cases' latest results) *(follow-up of repository suites)*
+- [ ] Copy a repository suite into an editable QEOS suite *(follow-up of repository suites)*
+- [ ] Quiet window before the nightly: refuse or warn when a QEOS run of a repository suite could still be running at the scheduler's time *(follow-up of repository suites)*
 - [ ] Dynamic suites defined by a label query, e.g. `smoke AND checkout` *(suggested)*
 - [ ] TC versioning: who changed what, and when *(suggested)*
 - [x] Import existing TCs from the repo (Gherkin `.feature` files, JUnit XML) *(suggested)* (Gherkin done 2026-10-06, ADR-023; JUnit still open)
