@@ -346,6 +346,17 @@ requested ones. Each group needs its own design spec before implementation.
 - [ ] Copy a repository suite into an editable QEOS suite *(follow-up of repository suites)*
 - [ ] Per-workflow busy check reads only the newest 100 runs of the workflow, and the dashboard gate reads only the newest 50 requests; page further if a busier history shows a miss *(follow-up of repository suites)*
 - [ ] Quiet window before the nightly: refuse or warn when a QEOS run of a repository suite could still be running at the scheduler's time *(follow-up of repository suites)*
+- [ ] Repository suites, smaller follow-ups (final review 2026-10-19 judged none blocking):
+  - Run requests: the dashboard polls full `selection` lists while a run is active; a repository "Run all" can make each poll large. Add a summary-only list or a smaller page
+  - Busy check: a GitHub 401/403/404 shows as "GitHub could not be asked … try again"; name the token problem instead. Commit the read transaction before asking GitHub. Remove the unused `active_request(workflow=None)` fallback
+  - PUT /ci-target: refuse a workflow change while a run of the CI target's workflow is active
+  - OBT reruns: a blank `run_id` can still pick a partial manual run (suites set, no request_id) as "the latest run"; GitHub's run list does not show inputs
+  - Sync: suites cut at 1000 cases show the rest under "Not in any suite"; name claims on clashes depend on processing order; a concurrent delete can answer 500 instead of `import_conflict`; NULL `scenario_line` sorts differently on SQLite and PostgreSQL; a literal `[` in a path is read as a glob
+  - Collector: check the 20-pattern / 200-character limits locally; print "Suites: no changes" when nothing changed
+  - Dashboard: the `repository_mismatch` notice stays until the page remounts; the long mismatch reason repeats on every row; the Add to suite status should use a persistent live region; group order is alphabetical
+  - Tests to add: repository-workflow index race, rollback when the suite apply fails, another project's case number on append, a CI-target run blocking a manual suite, glob `*` across `/`, invalid matrix JSON and a missing `include`
+  - Code tidy: shared case-number checks in `suite_service`, `MAX_SUITE_CASES` placement, duplicate-id check order in the parser
+  - Docs: ADR-035 in the full ADR template; split this item's long done line; SETUP "own slot" qualifier when the Settings workflow is also a suite workflow
 - [ ] Dynamic suites defined by a label query, e.g. `smoke AND checkout` *(suggested)*
 - [ ] TC versioning: who changed what, and when *(suggested)*
 - [x] Import existing TCs from the repo (Gherkin `.feature` files, JUnit XML) *(suggested)* (Gherkin done 2026-10-06, ADR-023; JUnit still open)
