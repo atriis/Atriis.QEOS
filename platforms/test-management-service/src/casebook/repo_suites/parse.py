@@ -66,7 +66,7 @@ def parse_workflow(path: str, content: str) -> tuple[ParsedWorkflow | None, list
         return unusable(f"{path} is not directly inside {WORKFLOWS_DIR}")
     try:
         doc = yaml.safe_load(content)
-    except yaml.YAMLError as exc:
+    except (yaml.YAMLError, ValueError, RecursionError) as exc:  # never raise on repository input
         return unusable(f"The workflow is not valid YAML: {exc}")
     jobs = doc.get("jobs") if isinstance(doc, dict) else None
     caller = next(

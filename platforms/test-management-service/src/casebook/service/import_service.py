@@ -2,7 +2,7 @@
 import hashlib
 import re
 from datetime import datetime, timezone
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from src.casebook.gherkin_import.parse import parse_feature
 from src.casebook.gherkin_import.plan import Existing, Plan, build_plan, link_is_import_owned
 from src.casebook.models import Case, CaseLabel, FeatureFile
+from src.casebook.repo_suites import sync as suite_sync
 
 PATH_LENGTH = 500
 DRIVE = re.compile(r"^[A-Za-z]:")
@@ -92,7 +93,8 @@ def _content(row: Case, scenario) -> None:
         row.priority = scenario.priority
 
 
-def apply_plan(db: Session, project_id: int, user_id: int, plan: Plan) -> Plan:
+def apply_plan(db: Session, project_id: int, user_id: int, plan: Plan,
+               suite_plan: Optional[suite_sync.SuitePlan] = None) -> Plan:
     now = datetime.now(timezone.utc)
     ids = [i.case_id for i in plan.items if i.case_id is not None]
     rows = {r.id: r for r in db.query(Case).filter(Case.id.in_(ids)).all()} if ids else {}
@@ -122,6 +124,9 @@ def apply_plan(db: Session, project_id: int, user_id: int, plan: Plan) -> Plan:
         row.updated_by, row.updated_at = user_id, now
     store_sources(db, project_id, plan, now)
     try:
+        if suite_plan is not None:  # repository suites follow the cases in the same transaction
+            db.flush()
+            suite_sync.apply_suites(db, project_id, user_id, suite_plan)
         db.commit()
     except IntegrityError as exc:
         db.rollback()

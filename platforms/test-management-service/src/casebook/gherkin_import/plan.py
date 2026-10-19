@@ -82,11 +82,13 @@ def _differs(case: Existing, scenario: ParsedScenario) -> bool:
     )
 
 
-def plan_hash(items: List[Item]) -> str:
+def plan_hash(items: List[Item], suites: Optional[list] = None) -> str:
     """Over the sorted actions (action, path, scenario, case number), so the order files arrived in never
-    changes it. It does not cover content: the confirm re-sends the same files."""
+    changes it. It does not cover content: the confirm re-sends the same files. `suites` is a repository
+    suite plan's hash_input(), when the import syncs suites."""
     rows = sorted([i.action, i.path, i.scenario or "", i.case_number or 0] for i in items)
-    return hashlib.sha256(json.dumps(rows, separators=(",", ":")).encode("utf-8")).hexdigest()
+    hashed = rows if suites is None else {"cases": rows, "suites": suites}
+    return hashlib.sha256(json.dumps(hashed, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
 def is_mass_archive(summary: dict, full: bool) -> bool:

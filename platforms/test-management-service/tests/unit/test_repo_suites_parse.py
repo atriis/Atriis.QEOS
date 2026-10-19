@@ -113,3 +113,10 @@ def test_group_name_fallback():
     assert named.group_name == "Nightly things"
     unnamed, _ = parse_workflow(WF + "suite-x.yml", _workflow({"include": [_leg()]}, name=None))
     assert unnamed.group_name == "suite-x"
+
+
+def test_yaml_the_loader_rejects_is_an_issue_not_an_exception():
+    # safe_load raises ValueError (not YAMLError) for an impossible date
+    wf, issues = parse_workflow(WF + "suite-x.yml", "on: 2021-02-31\njobs: {}\n")
+    assert wf is None
+    assert len(issues) == 1 and "not valid YAML" in issues[0].message

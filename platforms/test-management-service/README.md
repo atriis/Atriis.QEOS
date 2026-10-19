@@ -38,7 +38,7 @@ Every project role reads. Owner, admin and member edit. A project the caller can
 | `GET` | `/cases?search=&label=&label=&status=&priority=&origin=&folder=&linked=&feature=&ado=&include_archived=&limit=&offset=` | `{total, items}`; archived hidden unless asked; `origin=manual` or `imported`; search also matches the Gherkin text. `search_in` (`scenario`, the default; `feature`; `both`) chooses what the search term is matched against: `scenario` is the title, Gherkin and TC key, `feature` the case's Feature name or file path, `both` either (also on `POST /cases/search`). A search of the form `TC-12`, `tc12` or `12` (1-9 digits, optional `TC`/`TC-`) also matches the case with that number, which sorts first (this applies to `POST /cases/search` too); `total` counts every match, the numbered case plus any whose title or Gherkin contains the digits. Filters are ANDed: `folder` (an imported case's `source_path` under that folder, subfolders included), `linked` (true: has an automated test), `feature` (the Gherkin Feature name), `ado` (digits only, else 422; matches the label `ado-<n>`) |
 | `POST` | `/cases/search` | the same filters as a JSON body (`labels` is a list and `linked` a boolean; `folder` and `feature` up to 500 characters, `ado` 1-12 digits), plus `test_keys` (up to 20 000 64-hex keys, more is 422) and `keys_mode` (`include` default, or `exclude`, which also keeps cases with no automated test); same response as `GET /cases`; every project role may call it. It exists because a list of keys does not fit in a URL |
 | `POST` | `/cases` | `title`, `description`, `steps[{action, expected}]`, `labels`, `priority`, `status`, `automated_test_key`, `automated_name` |
-| `POST` | `/cases/import?dry_run=` | `{files:[{path, content}], full, allow_mass_archive, expected_plan_hash}` (`full` and `allow_mass_archive` default to `false`); returns `{plan_hash, summary, items, errors, warnings}`; a dry run writes nothing; accepts an editor's JWT or the CI service token (ADR-024), whose changes are recorded as user 0; a `full` import that would archive over half the live imported cases is 409 `mass_archive` unless `allow_mass_archive` is true |
+| `POST` | `/cases/import?dry_run=` | `{files:[{path, content}], full, allow_mass_archive, expected_plan_hash, suite_files?, suite_patterns?, source_repo?}` (`full` and `allow_mass_archive` default to `false`; `suite_files` needs `suite_patterns`, see Repository suites); returns `{plan_hash, summary, items, errors, warnings, suite_changes, suite_warnings}`; a dry run writes nothing; accepts an editor's JWT or the CI service token (ADR-024), whose changes are recorded as user 0; a `full` import that would archive over half the live imported cases is 409 `mass_archive` unless `allow_mass_archive` is true |
 | `GET` / `PATCH` | `/cases/{number}` | the single read also lists the case's suites; `automated_test_key: null` unlinks |
 | `GET` | `/case-labels` | labels in use (archived cases left out), with counts |
 | `GET` | `/case-folders` | `[{path, count}]` folders of imported cases; a count includes subfolders and leaves out archived cases |
@@ -168,6 +168,25 @@ curl -k -X POST "https://localhost:8443/api/v1/projects/1/cases/import?dry_run=t
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"files":[{"path":"tests/features/a.feature","content":"Feature: A\n  Scenario: s\n    Given x\n"}]}'
 ```
+
+### Repository suites
+
+An import may also carry the test repository's suite workflows (`suite_files`: each
+`.github/workflows/suite-*.yml` with its raw text), the patterns that found them (`suite_patterns`,
+up to 20) and the repository (`source_repo`, `owner/name`). Each leg of a workflow's suite-runner
+matrix becomes a read-only repository suite, keyed by workflow file and `suite_id`, in the same
+transaction as the cases.
+
+- A new leg is created, a changed one updated, a removed one deleted. A synced workflow that a pattern
+  covers but that was not sent is deleted with all its suites; one outside every pattern is kept.
+- A suite's cases are the live imported cases under its folders or equal to its files, ordered by path
+  and scenario line, recomputed at every sync (at most 1000).
+- A workflow that does not parse, or has no usable leg, keeps its suites. A file name QEOS could not
+  dispatch is skipped.
+- `suite_warnings` lists these, and an entry that matches no case, a name already used by a suite made
+  in QEOS (the suite takes its `suite_id` as name) and a suite cut at 1000.
+- `suite_changes` is part of `plan_hash`. An import without `suite_patterns` leaves repository suites
+  as they are.
 
 Limits (over any of them is 413, and the message names the setting):
 
