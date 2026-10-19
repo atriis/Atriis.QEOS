@@ -67,6 +67,7 @@ http {
     limit_req_zone $binary_remote_addr zone=api:10m rate=20r/s;
     limit_req_zone $binary_remote_addr zone=auth:10m rate=5r/s;
     limit_req_zone $binary_remote_addr zone=collect:10m rate=10r/s;
+    limit_req_zone $binary_remote_addr zone=collect_blobs:10m rate=50r/s;
     limit_req_status 429;
 
     # Docker's embedded DNS; with `proxy_pass $upstream` a recreated container (new IP) is found
@@ -220,6 +221,14 @@ http {
         }
         location /api/v1/runs {
             limit_req zone=api burst=40 nodelay;
+            set $upstream http://ingestion-service:8000;
+            proxy_pass $upstream;
+        }
+        # Step screenshots (ADR-036): a run can bring hundreds of images, each its own HEAD and PUT, so they get their
+        # own zone and a body limit just over the 5 MB the service allows. Before /collect, the shorter prefix
+        location /api/v1/collect/blobs {
+            client_max_body_size 6m;
+            limit_req zone=collect_blobs burst=100 nodelay;
             set $upstream http://ingestion-service:8000;
             proxy_pass $upstream;
         }

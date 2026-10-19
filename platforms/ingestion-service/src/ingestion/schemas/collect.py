@@ -192,6 +192,7 @@ class KeyCheck(BaseModel):
     project_id: int
     name: str
     can_read_impact: bool = False
+    screenshots: bool = False  # step images may be uploaded: storage configured and the setting on
 
 
 class RunReceipt(BaseModel):

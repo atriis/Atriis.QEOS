@@ -14,8 +14,9 @@ from src.ingestion.core.config import settings
 from src.ingestion.models import ApiKey
 from src.ingestion.schemas.collect import KeyCheck, RunReceipt, RunUpload
 from src.ingestion.schemas.impact import SuggestionOut
-from src.ingestion.service import impact_service, ingest_service, notification_service, run_service
+from src.ingestion.service import blob_service, impact_service, ingest_service, notification_service, run_service
 from src.ingestion.utils import metrics
+from src.ingestion.utils.artifact_store import ArtifactStore, get_artifact_store
 
 logger = logging.getLogger(__name__)
 router = APIRouter()  # mounted at /collect
@@ -36,9 +37,16 @@ def _touch(db: Session, key: ApiKey, now: Optional[datetime] = None) -> None:
 
 
 @router.get("/key", response_model=KeyCheck)
-def check_key(key: ApiKey = Depends(get_api_key)):
-    """Proof the key works, for `qeos-collector check` — uploads nothing."""
-    return key
+def check_key(
+    key: ApiKey = Depends(get_api_key), db: Session = Depends(get_db),
+    store: Optional[ArtifactStore] = Depends(get_artifact_store),
+):
+    """Proof the key works, for `qeos-collector check` — uploads nothing. Also the collector's one signal whether to
+    send step screenshots: a HEAD on a blob has no body to say it."""
+    return KeyCheck(
+        project_id=key.project_id, name=key.name, can_read_impact=key.can_read_impact,
+        screenshots=blob_service.screenshots_enabled(db, key.project_id, store),
+    )
 
 
 @router.post("/token")
