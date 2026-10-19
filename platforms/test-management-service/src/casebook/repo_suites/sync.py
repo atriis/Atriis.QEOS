@@ -12,7 +12,7 @@ from typing import Dict, List, Optional, Tuple
 from sqlalchemy.orm import Session
 
 from src.casebook.models import Case, Suite, SuiteCase
-from src.casebook.repo_suites.parse import GLOB_CHARS, WORKFLOWS_DIR, ParsedLeg, parse_workflow
+from src.casebook.repo_suites.parse import WORKFLOWS_DIR, ParsedLeg, is_glob, parse_workflow
 from src.casebook.schemas.suite import MAX_SUITE_CASES
 
 # The names github_client and ci_targets accept: QEOS can only dispatch a workflow named like this
@@ -42,7 +42,16 @@ class SuitePlan:
     source_repo: Optional[str] = None
 
     def hash_input(self) -> list:
-        return sorted([c["action"], c["workflow"], c["external_id"], c["name"]] for c in self.changes)
+        # What makes a suite "updated" (paths, group, shard) is hashed too: a changed glob must change the hash.
+        legs = {(leg.workflow, leg.external_id): leg for leg in self.legs}
+        rows = []
+        for c in self.changes:
+            row = [c["action"], c["workflow"], c["external_id"], c["name"]]
+            leg = legs.get((c["workflow"], c["external_id"]))
+            if leg is not None and c["action"] != "deleted":
+                row += [leg.test_paths, leg.group_name, leg.shard]
+            rows.append(row)
+        return sorted(rows)
 
 
 def _warn(plan: SuitePlan, workflow: str, external_id: Optional[str], message: str) -> None:
@@ -54,7 +63,7 @@ def _entries(leg: ParsedLeg) -> List[str]:
 
 
 def _matches(entry: str, path: str) -> bool:
-    if any(c in entry for c in GLOB_CHARS):
+    if is_glob(entry):
         # fnmatch's * also crosses "/", unlike cucumber's: fine, a feature folder has no deeper .feature files.
         # A glob ending in "/" names folders, so it matches everything under them.
         return fnmatchcase(path, entry + "*" if entry.endswith("/") else entry)

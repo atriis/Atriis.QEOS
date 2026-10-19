@@ -204,6 +204,19 @@ def test_glob_matching_nothing_warns(client, auth, member):
             "message": f"{entry} matches no imported case"} in result["suite_warnings"]
 
 
+def test_glob_only_change_changes_plan_hash(client, auth, member):
+    def cars(glob):
+        return (("suite-cars.yml", workflow([("cars", "Cars", glob)])),)
+    one = post(client, auth, features=GLOB_FEATURES, workflows=cars(SUNNY + "x*.feature"), dry_run=True)
+    two = post(client, auth, features=GLOB_FEATURES, workflows=cars(SUNNY + "y*.feature"), dry_run=True)
+    assert one["plan_hash"] != two["plan_hash"]
+    r = client.post(URL, json={
+        "files": [{"path": p, "content": c} for p, c in GLOB_FEATURES], "full": True,
+        "suite_files": [{"path": WF + "suite-cars.yml", "content": cars(SUNNY + "y*.feature")[0][1]}],
+        "suite_patterns": [PATTERN], "expected_plan_hash": one["plan_hash"]}, headers=auth())
+    assert r.status_code == 409 and r.json()["detail"]["code"] == "plan_changed"
+
+
 def test_dry_run_reports_suite_changes_and_hash_changes(client, auth, member):
     first = post(client, auth, dry_run=True)
     assert changes(first) == [("created", leg) for leg in LEG]

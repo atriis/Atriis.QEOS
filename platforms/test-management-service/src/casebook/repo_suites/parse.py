@@ -37,12 +37,16 @@ class ParseIssue:
 GLOB_CHARS = ("*", "?", "[")
 
 
+def is_glob(entry: str) -> bool:
+    return any(c in entry for c in GLOB_CHARS)
+
+
 def _split_paths(test_path: str) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     """Entries with `*`, `?` or `[` are globs (kept as written); other `.feature` entries are files, everything
     else is a folder (trailing slashes stripped)."""
     folders, files, globs = [], [], []
     for entry in test_path.split():
-        if any(c in entry for c in GLOB_CHARS):
+        if is_glob(entry):
             globs.append(entry)
         elif entry.endswith(".feature"):
             files.append(entry)
