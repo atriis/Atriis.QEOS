@@ -12,6 +12,7 @@ cryptography==50.0.2
 respx==0.23.1
 prometheus-client==0.26.0
 gherkin-official==42.0.1
+PyYAML==6.0.2
 pytest==9.1.1
 # Relative path, resolved from this file's directory. The Dockerfile mirrors the repo
 # layout so this same path resolves inside the image.

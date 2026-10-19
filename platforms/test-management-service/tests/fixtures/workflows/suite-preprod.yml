@@ -1,0 +1,37 @@
+name: Suite - Pre-Prod
+
+on:
+  workflow_dispatch:
+
+jobs:
+  suite:
+    uses: ./.github/workflows/suite-runner.yml
+    secrets: inherit
+    with:
+      domain: Pre-Prod
+      history-workflow: suite-preprod.yml
+      expected-suites: >-
+        preprod-flights preprod-hotels preprod-shell
+      matrix: |
+        {
+          "include": [
+            {
+              "suite_id": "preprod-flights",
+              "suite_name": "Pre-Prod Flights",
+              "test_path": "tests/features/flights/flights_travelfusion/flights_travelfusion_booking/26800_fusion_booking_2_adults_fop_airplus_fare_rules.feature tests/features/flights/flights_sabre/flights_sabre_booking/29426_sabre_flight_booking_fare_rules_contact_info.feature tests/features/flights/flights_lh_ndc/flights_lh_ndc_booking/29439_lufthansa_ndc_after_booking_extras_are_displayed_and_quote_is_not_duplicated.feature",
+              "parallel": 2, "retry": 1, "job_timeout_minutes": 200, "step_timeout_minutes": 190
+            },
+            {
+              "suite_id": "preprod-hotels",
+              "suite_name": "Pre-Prod Hotels",
+              "test_path": "tests/features/hotels/hotels_booking/19201_sabre_share_hotel_price_offer_and_delete_quote.feature tests/features/hotels/hotels_booking/23109_ehotel_book_hotel_verify_provider_label.feature",
+              "parallel": 2, "retry": 1, "job_timeout_minutes": 200, "step_timeout_minutes": 190
+            },
+            {
+              "suite_id": "preprod-shell",
+              "suite_name": "Pre-Prod Shell",
+              "test_path": "tests/features/shell/shell_travel_policy/22084_merged_reference_dynamic_fields_travel_policy.feature tests/features/shell/shell_manual_quote/33007_manual_quotes_perdiem_with_upload_file_to_quote.feature",
+              "parallel": 2, "retry": 1, "job_timeout_minutes": 200, "step_timeout_minutes": 190
+            }
+          ]
+        }

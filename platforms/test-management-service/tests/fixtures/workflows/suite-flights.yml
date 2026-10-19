@@ -1,0 +1,22 @@
+name: Suite - Flights
+
+on:
+  workflow_dispatch:
+
+jobs:
+  suite:
+    uses: ./.github/workflows/suite-runner.yml
+    secrets: inherit
+    with:
+      domain: Flights
+      history-workflow: suite-flights.yml
+      expected-suites: >-
+        flights-amadeus-non-booking flights-general-non-booking-1 flights-general-non-booking-2
+      matrix: |
+        {
+          "include": [
+            { "suite_id": "flights-amadeus-non-booking",     "suite_name": "Flights Amadeus Non Booking",     "test_path": "tests/features/flights/flights_amadeus/flights_amadeus_non_booking/",         "parallel": 2, "retry": 1, "job_timeout_minutes": 100, "step_timeout_minutes": 95 },
+            { "suite_id": "flights-general-non-booking-1",   "suite_name": "Flights General Non Booking 1of2", "test_path": "tests/features/flights/flights_general/flights_general_non_booking/",         "shard": "1/2", "parallel": 2, "retry": 1, "job_timeout_minutes": 100, "step_timeout_minutes": 95 },
+            { "suite_id": "flights-general-non-booking-2",   "suite_name": "Flights General Non Booking 2of2", "test_path": "tests/features/flights/flights_general/flights_general_non_booking/",         "shard": "2/2", "parallel": 2, "retry": 1, "job_timeout_minutes": 100, "step_timeout_minutes": 95 }
+          ]
+        }
