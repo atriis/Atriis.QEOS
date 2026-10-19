@@ -197,7 +197,7 @@
 - [ ] **Step 2:** Write the docs and ADR-035 (context, decision, alternatives from the spec: tags, generic `qeos-run.yml`; consequences).
 - [ ] **Step 3:** Run every CI-equivalent check (Global Constraints) — all green.
 - [ ] **Step 4:** Commit `docs: repository suites stage 1 (ADR-035)` and push to `master`; tag the collector release as recorded in Task 4 and move `collector-v0`; wait for CI green.
-- [ ] **Step 5:** In OBT, create branch `qeos/repository-suites`, commit the sync change, push the branch, open a PR titled "QEOS: sync suite workflows into QEOS suites" (body: what changes, that nightly behaviour is unchanged). After merge, run "QEOS sync test cases" by hand once and check the Suites tab shows the five groups.
+- [ ] **Step 5:** In OBT, create branch `qeos/repository-suites`, commit the sync change, push the branch, open a PR titled "QEOS: sync suite workflows into QEOS suites" (body: what changes, that nightly behaviour is unchanged, and **merge only after the QEOS at the repository's `QEOS_URL` runs this test-management version**: an older server answers 422 to the new fields and every case sync would fail). After merge, run "QEOS sync test cases" by hand once and check the Suites tab shows the five groups.
 
 ## Stage 2 — run from QEOS
 
