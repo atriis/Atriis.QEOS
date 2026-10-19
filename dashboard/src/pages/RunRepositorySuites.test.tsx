@@ -101,6 +101,22 @@ test("Run all sends the workflow group", async () => {
   await waitFor(() => expect(sent).toEqual([{ workflow_group: "suite-flights.yml" }]));
 });
 
+test("two workflows with the same name stay two groups, and Run all sends each one's file", async () => {
+  server.use(http.get(`${P}/suites`, () => HttpResponse.json([
+    repoSuite(2, "Amadeus non-booking"),
+    repoSuite(3, "Flights smoke", { workflow: "suite-flights-smoke.yml", external_id: "flights-smoke" }),
+  ])));
+  const sent = postCapture();
+  renderAt("/projects/42/suites");
+  await ready("Run all Flights (suite-flights-smoke.yml)");
+  expect(screen.getAllByRole("heading", { level: 2, name: /^Flights/ })).toHaveLength(2);
+  expect(screen.getByRole("region", { name: "Flights (suite-flights.yml) suites" })).toHaveTextContent("Amadeus non-booking");
+  expect(screen.getByRole("region", { name: "Flights (suite-flights-smoke.yml) suites" })).toHaveTextContent("Flights smoke");
+  await userEvent.click(screen.getByRole("button", { name: "Run all Flights (suite-flights-smoke.yml)" }));
+  await userEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Run" }));
+  await waitFor(() => expect(sent).toEqual([{ workflow_group: "suite-flights-smoke.yml" }]));
+});
+
 test("a suite with no imported cases still runs, and says the workflow decides", async () => {
   server.use(http.get(`${P}/suites`, () => HttpResponse.json([repoSuite(2, "Amadeus non-booking", { case_count: 0 })])));
   renderAt("/projects/42/suites");

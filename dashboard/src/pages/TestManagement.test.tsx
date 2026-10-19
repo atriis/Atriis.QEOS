@@ -243,6 +243,15 @@ test("groupSuites orders repository groups by name, then Made in QEOS", () => {
   expect(groups[2].workflow).toBeNull();
 });
 
+test("groupSuites keeps two workflows with the same group name apart", () => {
+  const groups = groupSuites([
+    repoSuite(2, "a"), repoSuite(3, "b", { workflow: "suite-flights-smoke.yml" }),
+  ] as Suite[]);
+  expect(groups.map((g) => [g.group, g.workflow, g.suites.map((s) => s.id)])).toEqual([
+    ["Flights", "suite-flights-smoke.yml", [3]], ["Flights", "suite-flights.yml", [2]]]);
+  expect(new Set(groups.map((g) => g.key)).size).toBe(2);
+});
+
 test("a repository suite page is read-only and shows where it comes from", async () => {
   asRole("member");
   const sc = (n: number) => ({ number: n, key: `TC-${n}`, title: `Case ${n}`, status: "draft", priority: "medium", labels: [], automated_test_key: null });
