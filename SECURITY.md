@@ -244,7 +244,9 @@ details.
   that can write to either socket can start, stop or exec into containers): treat cAdvisor as trusted.
   It is opt-in and publishes no port. The containerd socket is required: without it cAdvisor discovers
   no container, and `CadvisorNoContainers` fires after 10 minutes.
-- **Data.** Per-project retention, legal hold and a full NDJSON export. Deleting a project (owners and admins,
+- **Data.** Per-project retention, legal hold and a full NDJSON export (screenshot images are not exported, only their
+  references). Step screenshots are deleted with their results, unreferenced ones after 7 days, and all of a project's
+  with the project. Deleting a project (owners and admins,
   the name typed to confirm; refused under a legal hold) hides it at once and purges it in every service 7 days
   later (ADR-034). Meanwhile its uploads answer 410 and owners and admins can restore it; the purge runs in
   recorded steps over the internal APIs and never touches a restored project.

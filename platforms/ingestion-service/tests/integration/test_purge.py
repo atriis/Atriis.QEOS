@@ -140,3 +140,44 @@ def test_a_database_error_in_one_purge_does_not_stop_the_others(db, session_fact
     assert run_job(session_factory) == 1  # reported
     db.expire_all()
     assert sorted(r.id for r in db.query(Run).filter(Run.project_id == 2)) == [keep]  # the live project's retention ran
+
+
+def test_purge_deletes_project_objects_and_rows(db, session_factory, answer, add_run, services, monkeypatch):
+    from src.ingestion.jobs import purge
+    from src.ingestion.models import Blob, ResultScreenshot, RunResult
+    from src.ingestion.utils.artifact_store import MemoryArtifactStore, screenshot_key
+
+    store = MemoryArtifactStore()
+    monkeypatch.setattr(purge, "get_artifact_store", lambda: store)
+    run_id = add_run(1, 1)
+    add_run(2, 1)
+    for project, sha in ((1, "a" * 64), (1, "b" * 64), (2, "c" * 64), (10, "d" * 64)):
+        db.add(Blob(project_id=project, sha256=sha, media_type="image/png", bytes=1))
+        store.put(screenshot_key(project, sha), b"png", "image/png")
+    db.flush()
+    first = db.query(Blob).filter_by(project_id=1, sha256="a" * 64).one()
+    result = db.query(RunResult).filter_by(run_id=run_id).one()
+    db.add(ResultScreenshot(result_id=result.id, position=0, blob_id=first.id, step_text="When x"))
+    db.commit()
+    answer([gone(1, days_ago=8)])
+    services(1)
+    assert run_job(session_factory) == 0
+    db.expire_all()
+    # Project 10's prefix starts with "1" too: the trailing slash keeps it
+    assert set(store.objects) == {screenshot_key(2, "c" * 64), screenshot_key(10, "d" * 64)}
+    assert [b.project_id for b in db.query(Blob).order_by(Blob.project_id)] == [2, 10]
+    assert db.query(ResultScreenshot).count() == 0
+
+
+def test_purge_without_a_store_deletes_only_the_rows(db, session_factory, answer, services, monkeypatch):
+    from src.ingestion.jobs import purge
+    from src.ingestion.models import Blob
+
+    monkeypatch.setattr(purge, "get_artifact_store", lambda: None)
+    db.add(Blob(project_id=1, sha256="a" * 64, media_type="image/png", bytes=1))
+    db.commit()
+    answer([gone(1, days_ago=8)])
+    services(1)
+    assert run_job(session_factory) == 0
+    db.expire_all()
+    assert db.query(Blob).count() == 0

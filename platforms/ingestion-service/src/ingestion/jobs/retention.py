@@ -20,18 +20,20 @@ from typing import Callable, Iterator, List, Optional
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
-from sqlalchemy import select, text
+from sqlalchemy import exists, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Query, Session, sessionmaker
 
 from src.ingestion.core.config import settings
 from src.ingestion.jobs import heartbeat
-from src.ingestion.models import ApiKey, LogValue, Run, RunResult
+from src.ingestion.models import ApiKey, Blob, LogValue, ResultScreenshot, Run, RunResult
+from src.ingestion.utils.artifact_store import ArtifactStore, get_artifact_store, screenshot_key
 
 RETENTION_PATH = "/internal/v1/projects/retention"
 LOCK_ID = 7_351_001  # any fixed number; only this job takes it
 TIMEOUT_SECONDS = 10.0
 JOB = "retention"
+BLOB_GRACE_DAYS = 7  # covers a blob uploaded before its run, or a spooled part resent days later
 
 
 class RetentionError(Exception):
@@ -136,7 +138,7 @@ def _aware_time(value: object) -> Optional[datetime]:
 
 def run_pass(
     db: Session, policies: List[Policy], now: datetime, *, batch_size: int, dry_run: bool, grace_days: int = 7,
-    purge: Optional[Callable[[Policy], List[str]]] = None,
+    purge: Optional[Callable[[Policy], List[str]]] = None, store: Optional[ArtifactStore] = None,
 ) -> dict:
     """Live projects lose runs past their retention period. A deleted project (spec 2026-10-16) keeps everything
     while it can be restored, then `purge` removes it from every service; without `purge` it is left alone."""
@@ -171,6 +173,9 @@ def run_pass(
         runs = db.query(Run.id).filter(
             Run.project_id == policy.project_id, Run.created_at < now - timedelta(days=policy.days))
         runs_deleted += runs.count() if dry_run else _delete_in_batches(db, runs, batch_size)
+    held = {policy.project_id for policy in policies if policy.legal_hold}
+    blobs_deleted = (_unreferenced_blobs(db, now, held).count() if dry_run
+                     else collect_unreferenced_blobs(db, store, now, batch_size, exclude_projects=held))
     listed = {policy.project_id for policy in policies}
     known = {pid for (pid,) in db.query(Run.project_id).distinct()} | {
         pid for (pid,) in db.query(ApiKey.project_id).distinct()
@@ -179,6 +184,7 @@ def run_pass(
         "event": "retention",
         "projects": len(policies),
         "runs_deleted": runs_deleted,
+        "blobs_deleted": blobs_deleted,
         "projects_purged": projects_purged,
         "purge_failures": purge_failures,
         "projects_skipped": len(known - listed),
@@ -194,13 +200,56 @@ def _delete_in_batches(db: Session, runs: Query, batch_size: int) -> int:
         if not batch:
             return deleted
         # Children first, explicitly: SQLite (the tests) does not enforce ON DELETE CASCADE by default. The results'
-        # log values (ADR-032), then the results
+        # log values (ADR-032) and screenshot references (ADR-036), then the results
         results = select(RunResult.id).where(RunResult.run_id.in_(batch))
         db.query(LogValue).filter(LogValue.result_id.in_(results)).delete(synchronize_session=False)
+        db.query(ResultScreenshot).filter(ResultScreenshot.result_id.in_(results)).delete(
+            synchronize_session=False)
         db.query(RunResult).filter(RunResult.run_id.in_(batch)).delete(synchronize_session=False)
         db.query(Run).filter(Run.id.in_(batch)).delete(synchronize_session=False)
         db.commit()
         deleted += len(batch)
+
+
+def _no_reference():
+    return ~exists().where(ResultScreenshot.blob_id == Blob.id)
+
+
+def _unreferenced_blobs(db: Session, now: datetime, exclude_projects=frozenset()) -> Query:
+    query = db.query(Blob.id).filter(_no_reference(), Blob.created_at < now - timedelta(days=BLOB_GRACE_DAYS))
+    return query.filter(Blob.project_id.notin_(exclude_projects)) if exclude_projects else query
+
+
+def collect_unreferenced_blobs(
+    db: Session, store: Optional[ArtifactStore], now: datetime, batch: int = 500, exclude_projects=frozenset(),
+) -> int:
+    """Deletes the images (ADR-036) that no result shows and that are older than BLOB_GRACE_DAYS, in batches.
+    "Unreferenced" is checked again inside the DELETE, so an ingest that links a blob meanwhile saves it. Rows go
+    first and are committed, then the objects of exactly the rows deleted: a crash in between leaves an orphan
+    object, which is harmless, where the other order could leave a row pointing at a missing image. Without a
+    store only the rows go. Returns the rows deleted."""
+    cutoff = now - timedelta(days=BLOB_GRACE_DAYS)
+    deleted = 0
+    while True:
+        ids = [blob_id for (blob_id,) in
+               _unreferenced_blobs(db, now, exclude_projects).order_by(Blob.id).limit(batch)]
+        if not ids:
+            return deleted
+        rows = db.execute(
+            Blob.__table__.delete()
+            .where(Blob.id.in_(ids), _no_reference(), Blob.created_at < cutoff)
+            .returning(Blob.id, Blob.project_id, Blob.sha256)
+        ).all()
+        db.commit()
+        deleted += len(rows)
+        if store is not None and rows:
+            try:
+                store.delete([screenshot_key(project_id, sha) for _, project_id, sha in rows])
+            except Exception as exc:  # the rows are gone: orphan objects waste space but break nothing
+                _log({"event": "gc_objects_not_deleted", "blobs": len(rows),
+                      "error": f"{type(exc).__name__}: {exc}"}, error=True)
+        if not rows:
+            return deleted  # every candidate got a reference meanwhile; a new pass finds the rest
 
 
 @contextmanager
@@ -244,6 +293,7 @@ def run_once(*, dry_run: bool, now: Callable[[], datetime], session_factory: ses
                 summary = run_pass(
                     db, policies, now(), batch_size=settings.RETENTION_BATCH_SIZE, dry_run=dry_run,
                     grace_days=settings.PROJECT_DELETE_GRACE_DAYS, purge=purge,
+                    store=get_artifact_store(),
                 )
     except RetentionError as exc:
         _log({"event": "retention_failed", "error": str(exc)}, error=True)

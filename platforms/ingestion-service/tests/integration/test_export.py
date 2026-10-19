@@ -97,3 +97,31 @@ def test_the_log_and_its_values_are_exported(client, auth, project_role, stored,
     assert bad_line["log_values"] == [{"pattern": "route_key", "value": "wasToBos"},
                                       {"pattern": "trip_id", "value": "3960562"}]
     assert ok["log"] is None and ok["log_values"] == []
+
+
+def test_export_includes_screenshot_references_without_bytes(client, auth, project_role, stored, db):
+    from src.ingestion.models import Blob, ResultScreenshot
+
+    run_id = stored(1, "mine")
+    project_role(role="owner", project_id=1)
+    blob = Blob(project_id=1, sha256="f" * 64, media_type="image/png", bytes=1234)
+    db.add(blob)
+    db.flush()
+    bad = db.query(RunResult).filter_by(run_id=run_id, status="failed").one()
+    db.add_all([
+        ResultScreenshot(result_id=bad.id, position=1, blob_id=blob.id, step_text="Then I see it",
+                         step_line=9, hook=None),
+        ResultScreenshot(result_id=bad.id, position=0, blob_id=blob.id, step_text="When I log in",
+                         step_line=7, hook="after"),
+    ])
+    db.commit()
+
+    _, _, ok, failed = lines(client.get(URL, headers=auth()))
+
+    assert "screenshots" not in ok  # omitted when empty
+    assert failed["screenshots"] == [
+        {"step_text": "When I log in", "step_line": 7, "hook": "after", "media_type": "image/png",
+         "bytes": 1234, "sha256": "f" * 64},
+        {"step_text": "Then I see it", "step_line": 9, "hook": None, "media_type": "image/png",
+         "bytes": 1234, "sha256": "f" * 64},
+    ]

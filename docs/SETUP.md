@@ -1100,7 +1100,7 @@ repository's suite workflows: change it to match yours. Only files directly unde
 - Each workflow becomes a **group** on Test Cases → **Suites**. Each leg of the job that calls
   `suite-runner.yml` becomes a **repository suite**. The leg's `suite_id`, `suite_name`, `test_path`
   and `shard` are read; nothing else is stored. A sharded leg shows as "Half 1 of 2".
-- The cases of a suite are the live imported cases under the leg's folders and files, ordered by
+- The cases of a suite are the live imported cases under the leg's folders, files and glob patterns (`dir/*.feature`), ordered by
   path, then line. A suite holds at most 1000 cases; more are cut, with a warning.
 - Repository suites are **read-only**. Changing one answers 409 `repository_suite`: change the
   workflow instead. Running them from QEOS comes in stage 2 and is not available yet.
@@ -1599,7 +1599,7 @@ It is safe to repeat.
 ### 4.7 Retention, legal hold and export
 
 **Retention.** The `ingestion-retention` job (started by compose) deletes runs older than the
-project's retention period once a day. The default is **90 days**, and the range is 1 to 365.
+project's retention period once a day, with their step screenshots (an image no result shows is deleted after 7 days). The default is **90 days**, and the range is 1 to 365.
 Settings → **Data** shows the current value. **It can only be changed through the API** (owners,
 admins and members):
 
@@ -1635,7 +1635,9 @@ pass then deletes anything older than the period.
 
 **Export.** Settings → **Data** → **Download all results** (owners and admins). It downloads
 every run and result as NDJSON (`qeos-project-<id>-<date>.ndjson`), masked as stored. Each result line carries
-its `log` and `log_values` (`[{"pattern", "value"}]`). Do this
+its `log` and `log_values` (`[{"pattern", "value"}]`), and, when it has step screenshots, a `screenshots` list of
+their references (step text and line, type, size, SHA-256). **The screenshot images themselves are not exported**,
+and they are deleted with the project, so keep a copy of what you need. Do this
 before you delete a project or answer a data request. The Test results view and the Report also offer
 CSV downloads.
 

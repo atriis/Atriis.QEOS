@@ -96,7 +96,8 @@ def test_runs_older_than_the_retention_period_are_deleted(db, session_factory, a
 
     assert remaining(db) == [recent]
     assert db.query(RunResult).count() == 1
-    assert summary(capsys) == {"event": "retention", "projects": 1, "runs_deleted": 3, "projects_purged": 0,
+    assert summary(capsys) == {"event": "retention", "projects": 1, "runs_deleted": 3, "blobs_deleted": 0,
+                               "projects_purged": 0,
                                "purge_failures": 0, "projects_skipped": 0, "projects_held": 0, "dry_run": False}
 
 
@@ -291,3 +292,141 @@ def test_log_values_go_with_their_results(db, session_factory, answer, add_run):
 
     db.expire_all()
     assert [v.value for v in db.query(LogValue)] == [str(recent)]
+
+
+# Step screenshots (ADR-036): the images go with their results, and never pile up unreferenced
+
+@pytest.fixture
+def store(monkeypatch):
+    from src.ingestion.utils.artifact_store import MemoryArtifactStore
+
+    memory = MemoryArtifactStore()
+    monkeypatch.setattr(retention, "get_artifact_store", lambda: memory)
+    return memory
+
+
+@pytest.fixture
+def add_blob(db, store):
+    from src.ingestion.models import Blob
+    from src.ingestion.utils.artifact_store import screenshot_key
+
+    def _add(days_old, project_id=1, sha="a"):
+        sha = (sha * 64)[:64]
+        blob = Blob(project_id=project_id, sha256=sha, media_type="image/png", bytes=3,
+                    created_at=NOW - timedelta(days=days_old))
+        db.add(blob)
+        db.commit()
+        store.put(screenshot_key(project_id, sha), b"png", "image/png")
+        return blob.id
+
+    return _add
+
+
+def blob_ids(db):
+    from src.ingestion.models import Blob
+
+    db.expire_all()
+    return sorted(b.id for b in db.query(Blob))
+
+
+def test_gc_deletes_unreferenced_blob_older_than_7_days(db, session_factory, answer, add_blob, store):
+    add_blob(8)
+    answer([])
+    assert run_job(session_factory) == 0
+    assert blob_ids(db) == []
+    assert store.objects == {}
+
+
+def test_gc_keeps_unreferenced_blob_6_days_old(db, session_factory, answer, add_blob, store):
+    keep = add_blob(6)
+    answer([])
+    assert run_job(session_factory) == 0
+    assert blob_ids(db) == [keep]
+    assert len(store.objects) == 1
+
+
+def test_gc_keeps_blob_still_referenced_by_other_result(db, session_factory, answer, add_run, add_blob, store):
+    from src.ingestion.models import ResultScreenshot
+
+    blob = add_blob(30)
+    old, recent = add_run(1, 40), add_run(1, 1)
+    for run_id in (old, recent):
+        result = db.query(RunResult).filter_by(run_id=run_id).one()
+        db.add(ResultScreenshot(result_id=result.id, position=0, blob_id=blob, step_text="When x"))
+    db.commit()
+    answer([live(1, 30)])
+    assert run_job(session_factory) == 0
+    assert blob_ids(db) == [blob]  # the recent result still shows it
+    assert len(store.objects) == 1
+    assert db.query(ResultScreenshot).count() == 1
+
+
+def test_retention_deletes_screenshot_rows_with_results(db, session_factory, answer, add_run, add_blob):
+    from src.ingestion.models import ResultScreenshot
+
+    blob = add_blob(1)
+    run_id = add_run(1, 40)
+    result = db.query(RunResult).filter_by(run_id=run_id).one()
+    db.add(ResultScreenshot(result_id=result.id, position=0, blob_id=blob, step_text="When x"))
+    db.commit()
+    answer([live(1, 30)])
+    assert run_job(session_factory) == 0
+    db.expire_all()
+    assert db.query(ResultScreenshot).count() == 0
+    assert blob_ids(db) == [blob]  # too young for the garbage pass
+
+
+def test_gc_deletes_rows_and_skips_objects_without_a_store(db, session_factory, answer, add_blob, monkeypatch):
+    add_blob(8)
+    monkeypatch.setattr(retention, "get_artifact_store", lambda: None)
+    answer([])
+    assert run_job(session_factory) == 0
+    assert blob_ids(db) == []
+
+
+def test_gc_deletes_only_what_the_delete_itself_finds_unreferenced(db, store, add_blob, add_run):
+    """The check runs inside the DELETE: a blob referenced in the meantime is neither deleted nor loses its object."""
+    from src.ingestion.models import ResultScreenshot
+
+    kept, doomed = add_blob(30, sha="a"), add_blob(30, sha="b")
+    result = db.query(RunResult).filter_by(run_id=add_run(1, 1)).one()
+    db.add(ResultScreenshot(result_id=result.id, position=0, blob_id=kept, step_text="When x"))
+    db.commit()
+    assert retention.collect_unreferenced_blobs(db, store, NOW) == 1
+    assert blob_ids(db) == [kept]
+    assert len(store.objects) == 1
+
+
+def test_gc_survives_a_store_that_refuses_to_delete(db, store, add_blob, capsys):
+    from src.ingestion.utils.artifact_store import ArtifactDeleteError
+
+    add_blob(8)
+
+    def refuse(keys):
+        raise ArtifactDeleteError("1 of 1 objects not deleted")
+
+    store.delete = refuse
+    assert retention.collect_unreferenced_blobs(db, store, NOW) == 1
+    assert blob_ids(db) == []
+    assert "gc_objects_not_deleted" in capsys.readouterr().err
+
+
+def test_gc_works_in_batches(db, store, add_blob):
+    for letter in "abcde":
+        add_blob(9, sha=letter)
+    assert retention.collect_unreferenced_blobs(db, store, NOW, batch=2) == 5
+    assert blob_ids(db) == [] and store.objects == {}
+
+
+def test_dry_run_gc_deletes_nothing(db, session_factory, answer, add_blob, store):
+    keep = add_blob(9)
+    answer([])
+    assert run_job(session_factory, "--dry-run") == 0
+    assert blob_ids(db) == [keep] and len(store.objects) == 1
+
+
+def test_gc_leaves_blobs_of_a_project_on_legal_hold(db, session_factory, answer, add_blob):
+    keep = add_blob(9)
+    answer([{**live(1, 30), "legal_hold": True}])
+    assert run_job(session_factory) == 0
+    assert blob_ids(db) == [keep]

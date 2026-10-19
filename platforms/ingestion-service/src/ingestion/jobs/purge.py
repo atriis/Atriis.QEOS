@@ -8,20 +8,27 @@ from sqlalchemy.orm import Session
 
 from src.ingestion.jobs.retention import TIMEOUT_SECONDS, Endpoint, Policy, RetentionError, _delete_in_batches
 from src.ingestion.models import (
-    ApiKey, CollectionSettings, FlakyDaily, FlakyRollupDay, ImpactPair, ImpactTestBase, LogPattern, LogValue,
+    ApiKey, Blob, CollectionSettings, FlakyDaily, FlakyRollupDay, ImpactPair, ImpactTestBase, LogPattern, LogValue,
     MaskingPattern, MutedTest, NotificationChannel, Run,
 )
+from src.ingestion.utils.artifact_store import get_artifact_store
 
 PER_PROJECT = (ApiKey, CollectionSettings, FlakyDaily, FlakyRollupDay, ImpactPair, ImpactTestBase, MaskingPattern,
                MutedTest, NotificationChannel)
 
 
 def purge_ingestion(db: Session, project_id: int, batch_size: int = 500) -> int:
-    """Every run (results, log values, children) and every per-project row of ingestion. Returns runs deleted."""
+    """Every run (results, log values, screenshot references, children), the project's screenshot objects and every
+    per-project row of ingestion. Returns runs deleted."""
     runs = _delete_in_batches(db, db.query(Run.id).filter(Run.project_id == project_id), batch_size)
+    store = get_artifact_store()
+    if store is not None:
+        # The trailing slash: "screenshots/1" would also match project 10. A failure fails the step; the next pass retries
+        store.delete_prefix(f"screenshots/{project_id}/")
     patterns = select(LogPattern.id).where(LogPattern.project_id == project_id)
     db.query(LogValue).filter(LogValue.pattern_id.in_(patterns)).delete(synchronize_session=False)
     db.query(LogPattern).filter(LogPattern.project_id == project_id).delete(synchronize_session=False)
+    db.query(Blob).filter(Blob.project_id == project_id).delete(synchronize_session=False)
     for model in PER_PROJECT:
         db.query(model).filter(model.project_id == project_id).delete(synchronize_session=False)
     db.commit()

@@ -220,13 +220,21 @@ service runs it with `--loop`):
   `GET /internal/v1/projects/retention`, with the HTTP Basic credentials in
   `PROJECT_SERVICE_INTERNAL_URL` (`http://ingestion-service:<password>@project-service:8000`;
   percent-encode special characters).
-- Deletes runs uploaded (`created_at`) more than that many days ago. A run's results go with their logs and log
-  values.
+- Deletes runs uploaded (`created_at`) more than that many days ago. A run's results go with their logs, log
+  values and screenshot references (`result_screenshots`).
+- Then a **garbage pass** deletes the screenshot images (ADR-036) that no result shows any more and that are
+  older than 7 days (the 7 days cover an image uploaded before its run, or a part resent days later): the `blobs`
+  rows first, committed, then their objects in storage. "Unreferenced" is checked again inside the `DELETE`, so a
+  result linked meanwhile keeps its image. A store that refuses to delete is logged (`gc_objects_not_deleted`) and
+  leaves an orphan object, never a row pointing at a missing image. Without artifact storage only the rows go.
+  Blobs of a project on legal hold stay. The summary counts `blobs_deleted`; `--dry-run` counts them without
+  deleting.
 - A **deleted** project (ADR-034) keeps everything, keys included, for `PROJECT_DELETE_GRACE_DAYS` (default 7):
   it can still be restored as it was. After that the pass purges it in every service, each step recorded in
   project-service (`POST /internal/v1/projects/{id}/purge-state`) so a failed pass resumes: `started` (refused for
   a live project, and it blocks any later restore), test-management (`DELETE /internal/v1/projects/{id}` with
-  the credentials in `TEST_MANAGEMENT_INTERNAL_URL`), ingestion (runs, results, log values and patterns, masking
+  the credentials in `TEST_MANAGEMENT_INTERNAL_URL`), ingestion (runs, results, log values and patterns, every
+  screenshot object under `screenshots/{project_id}/` and the project's `blobs` rows, masking
   patterns, API keys, settings, channels, muted tests, rollups, impact data), then the project row
   (`DELETE /internal/v1/projects/{id}` on project-service). One JSON line per project: `project_purged` with its
   steps, `purge_skipped` (restored meanwhile, or `TEST_MANAGEMENT_INTERNAL_URL` unset) or `purge_failed`. A
@@ -300,7 +308,7 @@ labelled so it is never read as a full verdict:
 `GET /api/v1/projects/{id}/export` (owners and admins) streams everything stored for a project
 as NDJSON (`application/x-ndjson`, `attachment`): an `export` header line (`format: 1`), then each
 run (`type: run`, with its `changed_files` and `components`) followed by its results
-(`type: result`, with `failed_step_text`, `failed_step_line`, `failed_step_definition` and `failed_step_pattern`). Each result line carries its `log` and `log_values` (`[{"pattern", "value"}]`). Text is exported as stored, masked. For a legal request, or before deleting
+(`type: result`, with `failed_step_text`, `failed_step_line`, `failed_step_definition` and `failed_step_pattern`). Each result line carries its `log` and `log_values` (`[{"pattern", "value"}]`). A result with screenshots also carries `screenshots` (`[{"step_text", "step_line", "hook", "media_type", "bytes", "sha256"}]`, in position order; omitted when it has none). **The screenshot images are not exported, only these references**, and they are deleted with the project. The format stays `1`: the field is additive and the export has no version rule beyond that number. Text is exported as stored, masked. For a legal request, or before deleting
 a project. The dashboard's Settings → Data has a download button.
 - `RETENTION_INTERVAL_HOURS` (default 24) between passes with `--loop`; `RETENTION_BATCH_SIZE`
   (default 500) runs per transaction. One pass at a time (PostgreSQL advisory lock).

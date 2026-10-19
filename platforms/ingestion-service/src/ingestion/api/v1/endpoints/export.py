@@ -4,6 +4,8 @@ audit request. One line per object, streamed, so memory stays flat however large
     {"type": "export", "format": 1, "project_id": …, "exported_at": …}
     {"type": "run", …run fields, "changed_files": […], "components": […]}
     {"type": "result", "run_id": …, …result fields, "log", "log_values": [{"pattern", "value"}]}      (the run's results follow its run line)
+    A result with screenshots also has "screenshots": [{"step_text", "step_line", "hook", "media_type", "bytes",
+    "sha256"}] in position order. The image files themselves are not exported.
 """
 import json
 from datetime import date, datetime, timezone
@@ -14,7 +16,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, undefer
 
 from src.ingestion.api.deps import ProjectAccess, get_db, require_project_role
-from src.ingestion.models import LogPattern, LogValue, Run, RunChangedFile, RunComponent, RunResult
+from src.ingestion.models import Blob, LogPattern, LogValue, ResultScreenshot, Run, RunChangedFile, RunComponent, RunResult
 
 router = APIRouter()  # mounted at /projects/{project_id}/export
 
@@ -52,6 +54,24 @@ def _log_values_of_run(db: Session, run_id: int) -> dict:
     return values
 
 
+def _screenshots_of_run(db: Session, run_id: int) -> dict:
+    """Each result's screenshot references (ADR-036), in position order: what and where, never the image."""
+    found: dict = {}
+    rows = (
+        db.query(ResultScreenshot, Blob)
+        .join(Blob, Blob.id == ResultScreenshot.blob_id)
+        .join(RunResult, RunResult.id == ResultScreenshot.result_id)
+        .filter(RunResult.run_id == run_id)
+        .order_by(ResultScreenshot.result_id, ResultScreenshot.position)
+    )
+    for shot, blob in rows:
+        found.setdefault(shot.result_id, []).append({
+            "step_text": shot.step_text, "step_line": shot.step_line, "hook": shot.hook,
+            "media_type": blob.media_type, "bytes": blob.bytes, "sha256": blob.sha256,
+        })
+    return found
+
+
 def _export(db: Session, project_id: int) -> Iterator[bytes]:
     yield _line({
         "type": "export", "format": FORMAT_VERSION, "project_id": project_id,
@@ -71,10 +91,14 @@ def _export(db: Session, project_id: int) -> Iterator[bytes]:
         ]
         yield _line(record)
         values = _log_values_of_run(db, run_id)
+        screenshots = _screenshots_of_run(db, run_id)
         results = (db.query(RunResult).options(undefer(RunResult.log)).filter_by(run_id=run_id)
                    .order_by(RunResult.id).yield_per(1000))
         for result in results:
-            yield _line({"type": "result", **_row(result, _RESULT_INTERNAL), "log_values": values.get(result.id, [])})
+            record = {"type": "result", **_row(result, _RESULT_INTERNAL), "log_values": values.get(result.id, [])}
+            if result.id in screenshots:
+                record["screenshots"] = screenshots[result.id]
+            yield _line(record)
         db.expunge_all()  # keep the session from growing with every exported row
 
 

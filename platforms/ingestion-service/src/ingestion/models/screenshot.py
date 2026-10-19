@@ -19,12 +19,12 @@ class Blob(Base):
     sha256 = Column(String(64), nullable=False)
     media_type = Column(String(32), nullable=False)
     bytes = Column(Integer, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class ResultScreenshot(Base):
-    """One image of one result, `position` its order. The rows go with their result (ON DELETE CASCADE; the code also
-    deletes them explicitly, because SQLite, the tests, does not enforce it)."""
+    """One image of one result, `position` its order. The rows go with their result by ON DELETE CASCADE in
+    PostgreSQL. SQLite (the tests) does not enforce it, so retention also deletes them explicitly, as log values."""
 
     __tablename__ = "result_screenshots"
     __table_args__ = (
