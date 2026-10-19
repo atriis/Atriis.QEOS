@@ -118,3 +118,19 @@ test("Escape and Cancel close the dialog and give focus back to Add to suite", a
   await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   expect(trigger).toHaveFocus();
 });
+
+test("pressing Add with nothing chosen shows the choice error on the select and sends nothing", async () => {
+  let posted = 0;
+  server.use(http.post(`${P}/suites/1/cases/append`, () => { posted += 1; return HttpResponse.json({}); }));
+  renderIt();
+  const dialog = await open();
+  await within(dialog).findByRole("option", { name: "Smoke" });
+  await userEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+  const select = within(dialog).getByRole("combobox", { name: "Suite" });
+  const alert = within(dialog).getByRole("alert");
+  expect(alert).toHaveTextContent("Choose a suite or make a new one.");
+  expect(select).toHaveAttribute("aria-invalid", "true");
+  expect(select.getAttribute("aria-describedby")).toBe(alert.id);
+  expect(select).toHaveFocus();
+  expect(posted).toBe(0);
+});
