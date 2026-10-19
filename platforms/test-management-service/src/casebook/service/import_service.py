@@ -124,9 +124,11 @@ def apply_plan(db: Session, project_id: int, user_id: int, plan: Plan,
         row.updated_by, row.updated_at = user_id, now
     store_sources(db, project_id, plan, now)
     try:
+        db.flush()
         if suite_plan is not None:  # repository suites follow the cases in the same transaction
-            db.flush()
             suite_sync.apply_suites(db, project_id, user_id, suite_plan)
+        else:  # no suite fields: the suites stay, their cases still follow
+            suite_sync.recompute_members(db, project_id)
         db.commit()
     except IntegrityError as exc:
         db.rollback()

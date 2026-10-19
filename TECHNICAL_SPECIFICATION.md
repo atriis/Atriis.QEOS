@@ -235,7 +235,7 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   `suite_patterns` and `source_repo` and answers `suite_changes` and `suite_warnings`. Each matrix leg of a
   suite workflow becomes a read-only suite (`origin = repository`, with `workflow`, `group_name`,
   `external_id`, `shard`, `test_paths`, `source_repo`), synced in the import's transaction and part of
-  `plan_hash`. Changing one is 409 `repository_suite`. `GET /cases?suite=none` lists imported cases in no
+  `plan_hash`. An import without suite fields changes no suite but still recomputes their cases. Changing one is 409 `repository_suite`. `GET /cases?suite=none` lists imported cases in no
   repository suite. Run and Run all (ADR-035 stage 2): `POST /run-requests` takes exactly one of `case_numbers`,
   `suite_id` or `workflow_group`. A repository suite or group dispatches its own workflow with inputs
   `suites` and `request_id` on the CI target's repository and ref, and the run is found by the title

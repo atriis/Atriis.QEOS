@@ -207,6 +207,12 @@ def apply_suites(db: Session, project_id: int, user_id: int, plan: SuitePlan) ->
     _recompute_members(db, project_id, now)
 
 
+def recompute_members(db: Session, project_id: int) -> None:
+    """Recompute repository suites' cases without touching the suites: an import with no suite fields (the
+    dashboard, an older collector) still takes archived and moved cases out of the suites at once."""
+    _recompute_members(db, project_id, datetime.now(timezone.utc))
+
+
 def _recompute_members(db: Session, project_id: int, now: datetime) -> None:
     cases = [(case_id, path) for case_id, path, _ in db.query(Case.id, Case.source_path, Case.scenario_line).filter(
         Case.project_id == project_id, Case.source_key.isnot(None), Case.source_path.isnot(None),

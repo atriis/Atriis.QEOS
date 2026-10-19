@@ -1101,7 +1101,9 @@ repository's suite workflows: change it to match yours. Only files directly unde
   `suite-runner.yml` becomes a **repository suite**. The leg's `suite_id`, `suite_name`, `test_path`
   and `shard` are read; nothing else is stored. A sharded leg shows as "Half 1 of 2".
 - The cases of a suite are the live imported cases under the leg's folders, files and glob patterns (`dir/*.feature`), ordered by
-  path, then line. A suite holds at most 1000 cases; more are cut, with a warning.
+  path, then line. A suite holds at most 1000 cases; more are cut, with a warning. Every import
+  recomputes them, also one without `--suites` or from the dashboard, so archived and moved cases
+  leave or join at once.
 - Repository suites are **read-only**. Changing one answers 409 `repository_suite`: change the
   workflow instead. They can be run from QEOS: see "Repository suites" in
   [4.3](#43-run-from-qeos-play-and-stop).

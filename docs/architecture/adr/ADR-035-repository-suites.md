@@ -33,7 +33,8 @@ follow it the same way.
   bare file name identifies the workflow without ambiguity.
 - **Membership is computed from the cases.** The live imported cases under the leg's folders and files, ordered by
   path then line, cut at 1000 (`MAX_SUITE_CASES`) with a warning. It is recomputed at each sync, so new, moved and
-  archived cases follow.
+  archived cases follow. An import without suite fields (the dashboard, an older collector) changes no suite but
+  recomputes their cases too.
 - **Read-only.** Changing a repository suite answers 409 `repository_suite`: "Managed by the repository: change the
   workflow instead."
 - **Warnings, not silence.** `suite_warnings` reports a `test_path` that matches no case, a leg without `suite_id` or

@@ -237,6 +237,21 @@ def test_without_suite_files_nothing_changes(client, auth, member):
     assert suites(client, auth) == before
 
 
+def test_an_import_without_suite_fields_still_moves_cases_out(client, auth, member):
+    post(client, auth)
+    before = suites(client, auth)
+    amadeus = before["flights-amadeus-non-booking"]["id"]
+    without_b2 = [(AMADEUS + "b.feature", feature("B", "b1"))] + FEATURES[1:]
+    body = {"files": [{"path": p, "content": c} for p, c in without_b2], "full": True}
+    preview = client.post(URL + "?dry_run=true", json=body, headers=auth()).json()
+    r = client.post(URL, json={**body, "expected_plan_hash": preview["plan_hash"]}, headers=auth())
+    assert r.status_code == 200 and r.json()["summary"]["archived"] == 1 and r.json()["suite_changes"] == []
+    assert members(client, auth, amadeus) == [(AMADEUS + "a.feature", "a1"), (AMADEUS + "b.feature", "b1")]
+    after = suites(client, auth)
+    assert sorted(after) == sorted(before)  # no suite created or deleted
+    assert {k: (s["name"], s["test_paths"]) for k, s in after.items()} ==         {k: (s["name"], s["test_paths"]) for k, s in before.items()}
+
+
 def test_source_repo_stored(client, auth, member):
     post(client, auth, source_repo="atriis/Atriis.Test.Automation.OBT")
     assert {s["source_repo"] for s in suites(client, auth).values()} == {"atriis/Atriis.Test.Automation.OBT"}

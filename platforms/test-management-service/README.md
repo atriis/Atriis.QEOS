@@ -189,8 +189,9 @@ transaction as the cases.
   dispatch is skipped.
 - `suite_warnings` lists these, and an entry that matches no case, a name already used by a suite made
   in QEOS (the suite takes its `suite_id` as name) and a suite cut at 1000.
-- `suite_changes` is part of `plan_hash`. An import without `suite_patterns` leaves repository suites
-  as they are.
+- `suite_changes` is part of `plan_hash`. An import without `suite_patterns` (the dashboard, an older
+  collector) creates, changes and deletes no repository suite, but their cases are still recomputed, so
+  archived and moved cases leave or join them at once.
 
 ### Repository runs
 
