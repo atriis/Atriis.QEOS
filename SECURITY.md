@@ -162,6 +162,8 @@ details.
   `/metrics` and `/internal` are never routed.
 - **Internal APIs.** HTTP Basic with `INTERNAL_API_PASSWORD`. When it is unset
   they answer 503, never open.
+- **Dispatch targets.** Run from QEOS dispatches only workflow names taken from the project's synced repository
+  suite rows or from its CI target, never a name from the browser. The token scope is unchanged (ADR-035).
 - **Stored secrets.** The GitHub token used by Run from QEOS is encrypted at rest
   (Fernet, `TM_SECRETS_KEY`) and never returned. Notification webhook URLs are
   never returned, and are checked against SSRF (vendor hosts, public addresses

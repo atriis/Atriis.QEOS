@@ -225,7 +225,8 @@ a stale one is a 409 carrying the stored row; layouts are validated against
 - **Run from QEOS** (ADR-025): `ci-target` holds the GitHub repository, workflow and branch, and
   a token encrypted at rest with Fernet (`TM_SECRETS_KEY`); `run-requests` dispatches the
   workflow (`workflow_dispatch`) for a case, a selection or a suite, tracks its status, stops it,
-  stores the duration estimate, and lists run URLs for the report.
+  stores the duration estimate, and lists run URLs for the report. One active run per project and
+  workflow (migration 010, ADR-035 amends ADR-025); each request records its `workflow`.
 - **Suites**: unique name per project, ordered cases replaced as a whole by
   `PUT /suites/{id}/cases` (≤1000, unknown or repeated numbers are a 422); deleting a suite keeps
   its cases. `GET /suites?created_by=me` lists the caller's own suites. `POST /suites/{id}/cases/append`
@@ -235,7 +236,14 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   suite workflow becomes a read-only suite (`origin = repository`, with `workflow`, `group_name`,
   `external_id`, `shard`, `test_paths`, `source_repo`), synced in the import's transaction and part of
   `plan_hash`. Changing one is 409 `repository_suite`. `GET /cases?suite=none` lists imported cases in no
-  repository suite. Running them from QEOS is stage 2.
+  repository suite. Run and Run all (ADR-035 stage 2): `POST /run-requests` takes exactly one of `case_numbers`,
+  `suite_id` or `workflow_group`. A repository suite or group dispatches its own workflow with inputs
+  `suites` and `request_id` on the CI target's repository and ref, and the run is found by the title
+  `QEOS #<id>`. Before dispatching, GitHub is asked about queued, in progress, waiting, pending or requested
+  runs of that workflow on the ref (newest 100): 409 `workflow_busy`, or 503 `github_unavailable` with nothing
+  started. A `source_repo` that differs from the CI target is 409 `repository_mismatch`. The 200-case cap and
+  the manual, archived and unnamed checks do not apply. Only workflow names from synced suite rows or the CI
+  target are dispatched.
 - Access: user JWT + project role via project-service (every role reads; owner/admin/member
   edit), the same contract as ingestion. The client is a copy of ingestion's (ADR-022).
 

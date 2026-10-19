@@ -1103,7 +1103,8 @@ repository's suite workflows: change it to match yours. Only files directly unde
 - The cases of a suite are the live imported cases under the leg's folders, files and glob patterns (`dir/*.feature`), ordered by
   path, then line. A suite holds at most 1000 cases; more are cut, with a warning.
 - Repository suites are **read-only**. Changing one answers 409 `repository_suite`: change the
-  workflow instead. Running them from QEOS comes in stage 2 and is not available yet.
+  workflow instead. They can be run from QEOS: see "Repository suites" in
+  [4.3](#43-run-from-qeos-play-and-stop).
 - A new leg is created, a changed leg is updated, and a leg that is gone is deleted, in the same
   transaction as the cases. The patterns are authoritative for the workflows they cover: a covered
   workflow that was synced before and is now missing loses its whole group. A workflow no pattern
@@ -1383,12 +1384,32 @@ be read ("Run #N has no readable change data"). Viewers do not get the button.
 - When the workflow's upload step finishes, the run appears under **Runs** like any other.
   If it never arrives, the panel says "Results not received: check the QEOS upload step".
 
+**Repository suites (4.3).** A repository suite has **Run** on its row and on its page, and each group
+has **Run all**. QEOS starts the suite's own workflow (for example `suite-flights.yml`) on the repository
+and branch saved in Settings, with the inputs `suites` and `request_id`. The workflow runs the leg as it
+does at night, and the run is titled `QEOS #<id>`.
+
+- The repository in **Settings → Run from QEOS** must be the one the suites came from. If not, Run is
+  refused: "Set up Run from QEOS in Project Settings for <repository>".
+- One run per workflow at a time. QEOS asks GitHub first. If that workflow is already running, also
+  when the nightly started it, Run is refused: "<Group> is already running on GitHub (started HH:MM).
+  Try again when it finishes." with a link to GitHub. If GitHub cannot be asked, nothing starts and
+  the dialog offers **Retry**.
+- Different workflows can run at the same time. A case selection or a hand-made suite uses
+  `qeos-run.yml` and has its own slot.
+- No 200-case limit, and manual or archived cases are not checked: the workflow decides what runs.
+- QEOS only starts workflows named by synced suites or by the Settings target.
+- The repository's workflows need the `suites` and `request_id` inputs, a select job that filters the
+  matrix, and the run name `QEOS #<id>`. Atriis.Test.Automation.OBT has them. For another repository,
+  follow `templates/github/repository-suites.md`. Without these changes the run starts but ignores the
+  choice and runs every leg.
+
 **Verify (4.3):** the GitHub **Actions** tab shows a run named `QEOS #<id>`. It runs only the
 selected scenarios, then a new run appears in QEOS.
 
 **Limits (4.3)**
 
-- 200 cases per run, and one active run per project. Workers 1, retries 0.
+- 200 cases per run (not for repository suites), and one active run per workflow. Workers 1, retries 0.
 - GitHub is polled at most every 5 s, and only while someone is looking.
 - A dispatch whose run is not seen within 2 minutes ends as `failed_to_start`. A Stop issued
   before the run is found is applied on GitHub only within that window.
@@ -2007,7 +2028,9 @@ The gateway always joins a Docker network fixed at `172.30.1.0/24`, with monitor
 | Every failing test shows as "confirmed flaky" | The matrix legs share one environment. Set `QEOS_ENVIRONMENT` per leg. |
 | `import-features` always "skipped" | The sync branch is the default branch, or `master` where the CI does not expose it. Set `QEOS_IMPORT_BRANCH`. |
 | Imported cases never link to results | Import paths differ from report paths (fix **Path prefix**), or the upload is JUnit instead of Cucumber JSON. |
-| Play disabled | No `TM_SECRETS_KEY` on the server, no Run from QEOS target in Settings, an expired token, or a run is already active. The reason is shown next to the button. |
+| Play disabled | No `TM_SECRETS_KEY` on the server, no Run from QEOS target in Settings, an expired token, or a run is already active on that workflow. The reason is shown next to the button. |
+| Run on a repository suite: "already running on GitHub" | That workflow has a run in progress on the branch, maybe the nightly. Wait for it, or open it with **View on GitHub**. |
+| Run on a repository suite: "Set up Run from QEOS in Project Settings for …" | The Settings repository differs from the one the suites were synced from. Change it in Settings, or sync from the right repository. |
 | Play: `failed_to_start` | The workflow's `if:` branch guard does not match, or the workflow is missing on the default branch or the configured branch. |
 | Email channel: "SMTP is not configured" | Set `SMTP_*` and `docker compose up -d --wait gateway`. |
 | Webhook channel refused | It must be public `https` on port 443 with no credentials in the URL. LAN, Docker and loopback addresses are blocked on purpose. |

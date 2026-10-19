@@ -341,9 +341,10 @@ requested ones. Each group needs its own design spec before implementation.
 - [x] Create/add labels on TCs; filter and search by label
 - [x] Create suites — static (hand-picked TCs), ordered, edited in place
 - [x] Link a TC to the automated test that implements it; the case shows that test's latest result
-- [ ] Repository suites. Stage 1 done (2026-10-19, ADR-035): sync of the CI suite workflows' matrix legs into Suites (read-only), Add to suite, "Not in any suite" filter, sync warnings, `--suites` in collector 0.10.0. Stage 2 open: run them from QEOS through the repository's own workflows, `qeos-run.yml` in OBT, the run part of ADR-035 (spec `docs/superpowers/specs/2026-10-19-repository-suites-design.md`)
+- [x] Repository suites (2026-10-19, ADR-035): sync of the CI suite workflows' matrix legs into Suites (read-only), Add to suite, "Not in any suite" filter, sync warnings, `--suites` in collector 0.10.0; stage 2: Run and Run all through the repository's own workflows, one active run per workflow, busy and repository checks (spec `docs/superpowers/specs/2026-10-19-repository-suites-design.md`). Open: the end-to-end run, after the OBT PR (atriis/Atriis.Test.Automation.OBT#563) is merged, which waits for QEOS running this version and collector 0.10.0 tagged
 - [ ] Last result per suite on the Suites list (passed, failed, not run, from its cases' latest results) *(follow-up of repository suites)*
 - [ ] Copy a repository suite into an editable QEOS suite *(follow-up of repository suites)*
+- [ ] Per-workflow busy check reads only the newest 100 runs of the workflow, and the dashboard gate reads only the newest 50 requests; page further if a busier history shows a miss *(follow-up of repository suites)*
 - [ ] Quiet window before the nightly: refuse or warn when a QEOS run of a repository suite could still be running at the scheduler's time *(follow-up of repository suites)*
 - [ ] Dynamic suites defined by a label query, e.g. `smoke AND checkout` *(suggested)*
 - [ ] TC versioning: who changed what, and when *(suggested)*

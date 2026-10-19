@@ -2,6 +2,8 @@
 
 Status: Accepted (2026-10-07) · Spec: `docs/superpowers/specs/2026-10-07-run-from-qa-vision-design.md`
 
+Amended by ADR-035: repository suites run their own workflow, and the limit is one active run per workflow.
+
 ## Context
 Users asked to start tests from the Cases page: one case, a selection, or a whole suite. The tests
 live in the customer's repository, need the customer's environment and secrets, and already run in
@@ -23,7 +25,8 @@ not have.
 - **No worker.** State is refreshed by the GETs the dashboard already polls (at most every 5 s per
   request, at most 3 rows per list call, and no database transaction open during a GitHub call).
   Writes are conditional on the status that was read, so Stop is never overwritten.
-- **One active run per project**, enforced by a partial unique index. A request is matched to its
+- **One active run per project and workflow** (amended by ADR-035: first one per project, now one per workflow,
+  so a repository suite can run beside a case selection), enforced by a partial unique index. A request is matched to its
   GitHub run through the run details of the dispatch, or by the title `QEOS #<id>` when GitHub
   answers 204 (`QA Vision #<id>`, set by workflows copied before the QEOS rename, still matches).
 - **Selection becomes files and names.** `paths` and `names` are JSON arrays sent as workflow inputs.
