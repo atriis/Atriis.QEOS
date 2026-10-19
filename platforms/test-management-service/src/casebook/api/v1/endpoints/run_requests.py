@@ -30,7 +30,7 @@ def create_run_request(
 ):
     try:
         row = runs.create(db, access.project_id, access.user_id, payload.case_numbers, payload.suite_id,
-                          payload.estimate_ms, payload.estimate_upper_ms)
+                          payload.estimate_ms, payload.estimate_upper_ms, payload.workflow_group)
     except runs.NoTarget:
         raise HTTPException(status.HTTP_412_PRECONDITION_FAILED, detail=NO_TARGET)
     except secret_box.SecretsUnavailable as exc:
@@ -41,7 +41,16 @@ def create_run_request(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     except runs.RunActive as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail={
-            "code": "run_active", "message": "A run is in progress", "run_request_id": exc.request_id})
+            "code": "run_active", "message": str(exc), "run_request_id": exc.request_id})
+    except runs.RepositoryNotTarget as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={"code": "repository_mismatch", "message": str(exc)})
+    except runs.WorkflowBusy as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail={
+            "code": "workflow_busy", "message": str(exc), "run_url": exc.run_url})
+    except runs.GitHubUnavailable as exc:
+        headers = {"Retry-After": str(exc.retry_after)} if exc.retry_after else None
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, headers=headers, detail={
+            "code": "github_unavailable", "message": str(exc)})
     except github_client.RateLimited as exc:
         raise github_failure(exc, status.HTTP_502_BAD_GATEWAY)
     return runs.out(row)

@@ -214,3 +214,41 @@ def test_the_403_message_names_the_owner_the_token_must_belong_to():
     assert message.startswith("token has no Actions access to this repository. ")
     assert 'resource owner is "example-org"' in message and "Actions: Read and write" in message
     assert "approve" in message and len(message) <= 500  # run_requests.error is String(500)
+
+
+def _runs(http, workflow, *runs, status=200):
+    return http.get(f"https://api.github.com/repos/acme/obt/actions/workflows/{workflow}/runs").mock(
+        return_value=httpx.Response(status, json={"total_count": len(runs), "workflow_runs": list(runs)}))
+
+
+def test_busy_run_returns_the_newest_unfinished_run_on_the_ref(http):
+    route = _runs(http, "suite-flights.yml",
+                  {"id": 3, "status": "completed", "created_at": "2026-10-19T21:30:00Z"},
+                  {"id": 2, "status": "waiting", "created_at": "2026-10-19T21:00:00Z"},
+                  {"id": 1, "status": "in_progress", "created_at": "2026-10-19T20:00:00Z"})
+    assert gh.busy_run(TOKEN, "acme/obt", "suite-flights.yml", "main")["id"] == 2
+    params = route.calls.last.request.url.params
+    assert params["branch"] == "main" and params["per_page"] == "100"
+
+
+@pytest.mark.parametrize("state", ["queued", "in_progress", "waiting", "pending", "requested"])
+def test_busy_run_counts_every_unfinished_status(http, state):
+    _runs(http, "suite-flights.yml", {"id": 7, "status": state, "created_at": "2026-10-19T21:00:00Z"})
+    assert gh.busy_run(TOKEN, "acme/obt", "suite-flights.yml", "main")["id"] == 7
+
+
+def test_busy_run_is_none_when_every_run_finished(http):
+    _runs(http, "suite-flights.yml", {"id": 3, "status": "completed"}, "not a run")
+    assert gh.busy_run(TOKEN, "acme/obt", "suite-flights.yml", "main") is None
+
+
+def test_busy_run_failures_are_github_errors(http):
+    _runs(http, "suite-flights.yml", status=500)
+    with pytest.raises(gh.GitHubError) as err:
+        gh.busy_run(TOKEN, "acme/obt", "suite-flights.yml", "main")
+    assert err.value.status == 500
+
+
+def test_busy_run_checks_names_first(http):
+    with pytest.raises(ValueError):
+        gh.busy_run(TOKEN, "acme/obt", "../x.yml", "main")

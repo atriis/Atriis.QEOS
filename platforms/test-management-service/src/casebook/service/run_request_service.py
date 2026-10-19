@@ -1,7 +1,7 @@
 """Play: a run request dispatches the project's CI workflow; GETs refresh it from GitHub (no worker)."""
 import json
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -41,9 +41,35 @@ class AlreadyFinished(Exception):
 
 
 class RunActive(Exception):
-    def __init__(self, request_id: Optional[int]):
-        super().__init__("A run is in progress")
+    def __init__(self, request_id: Optional[int], label: Optional[str] = None):
+        super().__init__(f"A run of {label} is in progress" if label else "A run is in progress")
         self.request_id = request_id
+        self.label = label
+
+
+class WorkflowBusy(Exception):
+    """GitHub already runs (or queues) the repository workflow: a dispatch would race its concurrency group."""
+
+    def __init__(self, group_name: str, run_url: Optional[str], started_at: Optional[datetime]):
+        started = f" (started {started_at.astimezone(timezone.utc):%H:%M})" if started_at else ""
+        super().__init__(f"{group_name} is already running on GitHub{started}. Try again when it finishes.")
+        self.group_name, self.run_url, self.started_at = group_name, run_url, started_at
+
+
+class GitHubUnavailable(Exception):
+    """GitHub could not be asked whether the workflow is running: QEOS does not dispatch blind."""
+
+    def __init__(self, group_name: str, retry_after: Optional[int] = None):
+        super().__init__(f"GitHub could not be asked whether {group_name} is running; try again.")
+        self.group_name, self.retry_after = group_name, retry_after
+
+
+class RepositoryNotTarget(Exception):
+    """The repository suite was synced from another repository than the CI target's."""
+
+    def __init__(self, source_repo: str):
+        super().__init__(f"Set up Run from QEOS in Project Settings for {source_repo}")
+        self.source_repo = source_repo
 
 
 def now() -> datetime:
@@ -134,9 +160,17 @@ def _target_and_token(db: Session, project_id: int) -> Tuple[CiTarget, str]:
     return target, secret_box.decrypt(target.token_encrypted)
 
 
-def active_request(db: Session, project_id: int) -> Optional[RunRequest]:
+def active_request(db: Session, project_id: int, workflow: Optional[str] = None) -> Optional[RunRequest]:
+    """The active request of one workflow (the index allows one), or with no workflow the project's oldest."""
+    query = db.query(RunRequest).filter(RunRequest.project_id == project_id, RunRequest.status.in_(ACTIVE_STATUSES))
+    if workflow is not None:
+        return query.filter(RunRequest.workflow == workflow).one_or_none()
+    return query.order_by(RunRequest.id).first()
+
+
+def active_requests(db: Session, project_id: int) -> List[RunRequest]:
     return db.query(RunRequest).filter(
-        RunRequest.project_id == project_id, RunRequest.status.in_(ACTIVE_STATUSES)).one_or_none()
+        RunRequest.project_id == project_id, RunRequest.status.in_(ACTIVE_STATUSES)).order_by(RunRequest.id).all()
 
 
 def _pending_cancel(row: RunRequest, at: datetime) -> bool:
@@ -252,7 +286,7 @@ def refresh(db: Session, row: RunRequest, force: bool = False) -> RunRequest:
     target = db.get(CiTarget, row.project_id)
     if target is None:
         return row
-    rid, repo, workflow, encrypted = row.id, target.repo, target.workflow, target.token_encrypted
+    rid, repo, workflow, encrypted = row.id, target.repo, row.workflow or target.workflow, target.token_encrypted
     before = {name: getattr(row, name) for name in CHANGEABLE}
     work = RunRequest(id=rid, project_id=row.project_id, requested_at=row.requested_at, stopped_at=row.stopped_at,
                       **before)
@@ -276,32 +310,112 @@ def refresh(db: Session, row: RunRequest, force: bool = False) -> RunRequest:
     return row
 
 
+class RepositoryRun(NamedTuple):
+    """A run of repository suites: their own workflow, the leg's suite id (blank: the whole workflow)."""
+    workflow: str
+    suites_input: str
+    group_name: str
+    suites: List[Suite]
+
+
+def _repository_run(db: Session, project_id: int, suite_id: Optional[int],
+                    workflow_group: Optional[str]) -> Optional[RepositoryRun]:
+    """None for a hand-made suite or a case selection. The workflow dispatched is always one a synced suite
+    row names, never the request's own text (a workflow_group must match such a row)."""
+    if workflow_group is not None:
+        suites = (db.query(Suite).filter(Suite.project_id == project_id, Suite.origin == "repository",
+                                         Suite.workflow == workflow_group).order_by(Suite.id).all())
+        if not suites:
+            raise SuiteNotFound()
+        return RepositoryRun(suites[0].workflow, "", suites[0].group_name or suites[0].workflow, suites)
+    if suite_id is None:
+        return None
+    suite = db.query(Suite).filter(Suite.project_id == project_id, Suite.id == suite_id).one_or_none()
+    if suite is None:
+        raise SuiteNotFound()
+    if suite.origin != "repository":
+        return None
+    return RepositoryRun(suite.workflow, suite.external_id or "", suite.group_name or suite.workflow, [suite])
+
+
+def _members(db: Session, suites: List[Suite]) -> List[dict]:
+    """QEOS's view of the suites' membership, by suite then position, each case once. The workflow runs its
+    folders whatever QEOS thinks of the cases, so none of build_selection's checks apply."""
+    selection, seen = [], set()
+    for suite in suites:
+        cases = (db.query(Case).join(SuiteCase, SuiteCase.case_id == Case.id)
+                 .filter(SuiteCase.suite_id == suite.id).order_by(SuiteCase.position).all())
+        for case in cases:
+            if case.number not in seen:
+                seen.add(case.number)
+                selection.append({"case_number": case.number, "key": case_key(case.number),
+                                  "path": case.source_path, "name": case.scenario_name})
+    return selection
+
+
+def _check_repository(target: CiTarget, run: RepositoryRun) -> None:
+    """A suite synced without GITHUB_REPOSITORY (source_repo null) runs against the CI target as it is."""
+    for suite in run.suites:
+        if suite.source_repo and suite.source_repo.lower() != target.repo.lower():
+            raise RepositoryNotTarget(suite.source_repo)
+
+
+def _check_not_busy(target: CiTarget, token: str, run: RepositoryRun) -> None:
+    """A dispatch while the workflow runs or waits would let its concurrency group cancel one of the two."""
+    try:
+        busy = github_client.busy_run(token, target.repo, run.workflow, target.ref)
+    except github_client.RateLimited as exc:
+        raise GitHubUnavailable(run.group_name, exc.retry_after) from None
+    except github_client.GitHubError:
+        raise GitHubUnavailable(run.group_name) from None
+    if busy is None:
+        return
+    started = busy.get("run_started_at") or busy.get("created_at")
+    try:
+        started_at = datetime.fromisoformat(str(started).replace("Z", "+00:00")) if started else None
+    except ValueError:
+        started_at = None
+    raise WorkflowBusy(run.group_name, safe_run_url(busy.get("html_url")), aware(started_at))
+
+
 def create(db: Session, project_id: int, user_id: int, case_numbers: Optional[List[int]],
            suite_id: Optional[int], estimate_ms: Optional[int] = None,
-           estimate_upper_ms: Optional[int] = None) -> RunRequest:
+           estimate_upper_ms: Optional[int] = None, workflow_group: Optional[str] = None) -> RunRequest:
     target, token = _target_and_token(db, project_id)
-    selection, skipped_manual = build_selection(db, project_id, case_numbers, suite_id)
-    preview = dispatch_inputs(0, selection)
-    if len(preview["paths"]) + len(preview["names"]) + 20 > MAX_INPUT_CHARS:
-        raise BadSelection("This selection is too large for one GitHub dispatch: select fewer cases")
-    active = active_request(db, project_id)
+    repository = _repository_run(db, project_id, suite_id, workflow_group)
+    if repository is None:
+        selection, skipped_manual = build_selection(db, project_id, case_numbers, suite_id)
+        preview = dispatch_inputs(0, selection)
+        if len(preview["paths"]) + len(preview["names"]) + 20 > MAX_INPUT_CHARS:
+            raise BadSelection("This selection is too large for one GitHub dispatch: select fewer cases")
+        workflow, label = target.workflow, target.workflow
+    else:
+        _check_repository(target, repository)
+        selection, skipped_manual = _members(db, repository.suites), 0
+        workflow, label = repository.workflow, repository.group_name
+    active = active_request(db, project_id, workflow)
     if active is not None:
         refresh(db, active, force=True)  # a run that ended while nobody looked must not block Play
         if active.status in ACTIVE_STATUSES:
-            raise RunActive(active.id)
+            raise RunActive(active.id, label)
+    if repository is not None:
+        _check_not_busy(target, token, repository)  # before the row exists: a refusal holds no slot
     row = RunRequest(project_id=project_id, requested_by=user_id, requested_at=now(), selection=selection,
-                     suite_id=suite_id, status="queued", skipped_manual=skipped_manual,
+                     suite_id=suite_id, status="queued", skipped_manual=skipped_manual, workflow=workflow,
                      estimate_ms=estimate_ms, estimate_upper_ms=estimate_upper_ms)
     db.add(row)
     try:
         db.commit()
     except IntegrityError:
         db.rollback()
-        raise RunActive(None)  # another Play committed first (the partial unique index)
+        raise RunActive(None, label)  # another Play committed first (the partial unique index)
     db.refresh(row)
+    if repository is None:
+        inputs = dispatch_inputs(row.id, selection)
+    else:
+        inputs = {"suites": repository.suites_input, "request_id": str(row.id)}
     try:
-        started = github_client.dispatch(token, target.repo, target.workflow, target.ref,
-                                         dispatch_inputs(row.id, selection))
+        started = github_client.dispatch(token, target.repo, workflow, target.ref, inputs)
     except github_client.RateLimited:
         db.delete(row)
         db.commit()
@@ -344,7 +458,8 @@ def out(row: RunRequest) -> dict:
     selection = row.selection or []
     return {
         "id": row.id, "requested_by": row.requested_by, "requested_at": aware(row.requested_at),
-        "selection": selection, "case_count": len(selection), "suite_id": row.suite_id, "status": row.status,
+        "selection": selection, "case_count": len(selection), "suite_id": row.suite_id, "workflow": row.workflow,
+        "status": row.status,
         "conclusion": row.conclusion, "github_run_id": row.github_run_id, "github_run_url": row.github_run_url,
         "stopped_by": row.stopped_by, "stopped_at": aware(row.stopped_at), "error": row.error,
         "checked_at": aware(row.checked_at), "skipped_manual": row.skipped_manual or 0,

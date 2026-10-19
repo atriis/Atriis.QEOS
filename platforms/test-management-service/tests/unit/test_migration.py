@@ -100,17 +100,21 @@ def test_downgrade_to_002_drops_feature_name(tmp_path):
 
 RUN = ("INSERT INTO run_requests (project_id, requested_by, requested_at, selection, status)"
        " VALUES (:project, 1, '2026-10-07 10:00:00', '[]', :status)")
+RUN_IN = ("INSERT INTO run_requests (project_id, requested_by, requested_at, selection, status, workflow)"
+          " VALUES (:project, 1, '2026-10-07 10:00:00', '[]', :status, :workflow)")
 
 
-def test_one_active_run_per_project(migrated_engine):
+def test_one_active_run_per_project_and_workflow(migrated_engine):
+    ci = {"workflow": "qeos-run.yml"}
     with migrated_engine.begin() as conn:
-        conn.execute(text(RUN), {"project": 1, "status": "running"})
-        conn.execute(text(RUN), {"project": 1, "status": "completed"})
-        conn.execute(text(RUN), {"project": 1, "status": "failed_to_start"})
-        conn.execute(text(RUN), {"project": 2, "status": "queued"})
+        conn.execute(text(RUN_IN), {"project": 1, "status": "running", **ci})
+        conn.execute(text(RUN_IN), {"project": 1, "status": "completed", **ci})
+        conn.execute(text(RUN_IN), {"project": 1, "status": "failed_to_start", **ci})
+        conn.execute(text(RUN_IN), {"project": 2, "status": "queued", **ci})
+        conn.execute(text(RUN_IN), {"project": 1, "status": "queued", "workflow": "suite-flights.yml"})
     for status in ("queued", "running", "cancelling"):
         with pytest.raises(IntegrityError), migrated_engine.begin() as conn:
-            conn.execute(text(RUN), {"project": 1, "status": status})
+            conn.execute(text(RUN_IN), {"project": 1, "status": status, **ci})
 
 
 def test_run_status_is_constrained(migrated_engine):
@@ -251,7 +255,7 @@ def test_migration_009_backfills_run_workflow_and_downgrades(tmp_path):
             conn.execute(text(SUITE), {"project": 1, "name": "Old"})
     finally:
         engine.dispose()
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, "009")
     engine = create_engine(url)
     try:
         with engine.begin() as conn:
@@ -272,3 +276,43 @@ def test_migration_009_backfills_run_workflow_and_downgrades(tmp_path):
     finally:
         engine.dispose()
     command.upgrade(cfg, "head")
+
+
+def test_migration_010_fills_every_workflow_and_indexes_per_workflow(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'up10.db').as_posix()}"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(SERVICE_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "009")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO ci_targets (project_id, provider, repo, workflow, ref, token_encrypted, token_last4,"
+                " updated_by, updated_at) VALUES (1, 'github', 'o/r', 'qa.yml', 'main', 'x', 'abcd', 1,"
+                " '2026-10-08 10:00:00')"))
+            conn.execute(text(RUN), {"project": 1, "status": "running"})  # made after 009 by the old code
+            conn.execute(text(RUN), {"project": 2, "status": "completed"})  # a project without a CI target
+            conn.execute(text(RUN_IN), {"project": 1, "status": "completed", "workflow": "kept.yml"})
+    finally:
+        engine.dispose()
+    command.upgrade(cfg, "010")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(text("SELECT project_id, workflow FROM run_requests ORDER BY id")).all()
+            assert rows == [(1, "qa.yml"), (2, "qeos-run.yml"), (1, "kept.yml")]
+            conn.execute(text(RUN_IN), {"project": 1, "status": "queued", "workflow": "suite-flights.yml"})
+        with pytest.raises(IntegrityError), engine.begin() as conn:
+            conn.execute(text(RUN_IN), {"project": 1, "status": "queued", "workflow": "qa.yml"})
+        with engine.begin() as conn:  # the downgrade needs one active run per project again
+            conn.execute(text("UPDATE run_requests SET status = 'completed' WHERE workflow = 'suite-flights.yml'"))
+    finally:
+        engine.dispose()
+    command.downgrade(cfg, "009")
+    engine = create_engine(url)
+    try:
+        with pytest.raises(IntegrityError), engine.begin() as conn:  # one active run per project again
+            conn.execute(text(RUN_IN), {"project": 1, "status": "queued", "workflow": "other.yml"})
+    finally:
+        engine.dispose()

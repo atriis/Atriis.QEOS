@@ -246,7 +246,7 @@ def test_two_simultaneous_plays_the_index_decides_and_the_loser_is_409(project, 
     dispatch = github.dispatch(run_id=500)
     first = play(project, auth, case_numbers=[CARD])
     assert first.status_code == 201
-    monkeypatch.setattr(run_request_service, "active_request", lambda db, project_id: None)  # the race: no one seen
+    monkeypatch.setattr(run_request_service, "active_request", lambda db, project_id, workflow=None: None)  # the race: no one seen
     r = play(project, auth, case_numbers=[BOOK])
     assert r.status_code == 409
     assert r.json()["detail"]["code"] == "run_active" and r.json()["detail"]["run_request_id"] is None

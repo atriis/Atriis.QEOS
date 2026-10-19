@@ -54,7 +54,7 @@ Every project role reads. Owner, admin and member edit. A project the caller can
 | `GET` | `/ci-target` | `{available, configured, provider, repo, workflow, ref, token_last4, token_expires_at, updated_at, last_change}`; every role; the token itself is never returned |
 | `PUT` | `/ci-target` | owner or admin; `{repo, workflow="qeos-run.yml", ref="main", token?}`; the token is required on the first save; checked with GitHub first: 422 "token invalid or expired" (401), "token has no Actions access to this repository. Check that the token's resource owner is "<owner>" ..." (403, naming the repository's owner, since a token made under your own account cannot reach an organization's repository), "repository or workflow not found. The workflow file must exist on the repository's default branch" (404); 503 without `TM_SECRETS_KEY` or on a GitHub rate limit |
 | `DELETE` | `/ci-target` | owner or admin; 409 while a run is still active (the active run is first refreshed from GitHub, so one that already ended does not block); the audit trail (`ci_target_events`) is kept |
-| `POST` | `/run-requests` | owner, admin or member; `{case_numbers: [1..200]}` or `{suite_id}`; 201 with the request (also when it is `failed_to_start`); 412 no target; 409 `run_active`; 422 names the cases that cannot run (manual, archived, unknown, or with no scenario name yet: re-import). A whole suite skips its manual cases instead (`skipped_manual` in the response; 422 when none is automated) |
+| `POST` | `/run-requests` | owner, admin or member; one of `{case_numbers: [1..200]}`, `{suite_id}` or `{workflow_group: "<workflow file>"}` (Run all of a repository workflow; see Repository runs); 201 with the request (also when it is `failed_to_start`), whose `workflow` is the file dispatched; 412 no target; 409 `run_active` (the message names the workflow or group); 422 names the cases that cannot run (manual, archived, unknown, or with no scenario name yet: re-import). A whole suite skips its manual cases instead (`skipped_manual` in the response; 422 when none is automated) |
 | `POST` / `GET` | `/run-requests` (estimate) | `POST` also takes optional `estimate_ms` and `estimate_upper_ms` (integers 0–86 400 000, else 422; migration 008), which the dashboard got from ingestion's `POST /analytics/duration-estimate`; they are stored as sent (null when left out) and returned on every run-request read. Test Management never calls ingestion (ADR-022) |
 | `GET` | `/run-requests?limit=&offset=` | `{total, items}`, newest first; an active request is refreshed from GitHub when last checked over 5 s ago; `refreshing` says whether to keep polling |
 | `GET` | `/run-requests/run-urls?since=` | `{urls, truncated}`: the non-null `github_run_url` of requests made since `since` (ISO datetime; required, a naive datetime is treated as UTC; at most 500 days back), newest first, at most 5,000; every project role |
@@ -101,7 +101,8 @@ collector still accepts `QAV_API_KEY` and `QAV_URL`. Copying the new templates i
 ### Limits
 
 - 200 cases per run.
-- One active run per project.
+- One active run per project and workflow: hand-made suites and case selections share the CI target's
+  workflow; each repository workflow has its own (migration 010).
 - GitHub is polled at most every 5 s, only while someone views the run.
 - Workers 1, retries 0.
 - After a 204 dispatch (no run details returned), a run not seen 2 minutes after Play is
@@ -129,8 +130,10 @@ old imported case answers 422 "re-import the .feature files first".
   files. It cannot read or change code.
 - **Wider than QEOS's workflow:** that scope can start *any* `workflow_dispatch` workflow in the
   repository, deploy workflows included, and they run with the repository's secrets. It can also read run
-  logs. Use a dedicated repository for the test workflow where you can, or keep `qeos-run.yml` the only
-  workflow that has a `workflow_dispatch` trigger, so a leaked token reaches no more than that.
+  logs. Use a dedicated repository for the test workflow where you can, or keep `qeos-run.yml` and the
+  repository suite workflows (`suite-*.yml`) the only workflows that have a `workflow_dispatch` trigger,
+  so a leaked token reaches no more than that. QEOS itself dispatches only the CI target's workflow and
+  workflows a synced repository suite names.
 - **At rest:** it is stored Fernet-encrypted with `TM_SECRETS_KEY` and never returned or logged. Responses
   show the last 4 characters.
 - **Who can do what:** owners and admins set and remove it. Owners, admins and members can run and stop.
@@ -188,6 +191,29 @@ transaction as the cases.
   in QEOS (the suite takes its `suite_id` as name) and a suite cut at 1000.
 - `suite_changes` is part of `plan_hash`. An import without `suite_patterns` leaves repository suites
   as they are.
+
+### Repository runs
+
+Run on a repository suite (`suite_id`), or Run all of a workflow (`workflow_group`, the bare file name
+of a workflow some repository suite of the project has, else 404), dispatches that suite's own workflow,
+not the CI target's. It uses the CI target's repository, branch and token.
+
+- Inputs: `{"suites": "<suite_id>", "request_id": "<id>"}`; Run all sends `"suites": ""`.
+- `selection` is QEOS's view of the membership at dispatch (`case_number`, `key`, `path`, `name`;
+  path and name may be null), by suite then position, each case once. The 200-case limit and the
+  manual, archived and unnamed checks do not apply, and an empty suite still runs: the workflow runs
+  its folders. `skipped_manual` is 0.
+- The suite's `source_repo` must equal the CI target's `repo` (case-insensitive), else 409
+  `repository_mismatch` ("Set up Run from QEOS in Project Settings for <source_repo>"). A suite synced
+  without a repository (`source_repo` null) runs against the CI target as it is.
+- Before the request is made, GitHub is asked for the workflow's newest run on the branch that is
+  queued, in progress, waiting, pending or requested. If there is one: 409 `workflow_busy` ("Flights is
+  already running on GitHub (started 21:00). Try again when it finishes.", time in UTC) with `run_url`.
+  If GitHub cannot be asked (timeout, error, rate limit): 503 `github_unavailable` ("GitHub could not be
+  asked whether Flights is running; try again.", `Retry-After` on a rate limit). Nothing is dispatched
+  and no request is stored in either case.
+- Hand-made suites and case selections dispatch the CI target's workflow with `paths` and `names`, as
+  before, with no busy check.
 
 Limits (over any of them is 413, and the message names the setting):
 

@@ -27,7 +27,7 @@ class CiTarget(Base):
 
 
 class RunRequest(Base):
-    """One Play. The partial unique index keeps one active request per project."""
+    """One Play. The partial unique index keeps one active request per (project, workflow)."""
 
     __tablename__ = "run_requests"
     __table_args__ = (
@@ -35,7 +35,7 @@ class RunRequest(Base):
             "status IN ('queued','running','completed','cancelling','cancelled','failed_to_start')",
             name="chk_run_requests_status",
         ),
-        Index("uq_run_requests_one_active", "project_id", unique=True,
+        Index("uq_run_requests_one_active", "project_id", "workflow", unique=True,
               postgresql_where=text(ACTIVE_WHERE), sqlite_where=text(ACTIVE_WHERE)),
     )
 
@@ -57,7 +57,9 @@ class RunRequest(Base):
     # What the dashboard estimated before Play (from ingestion; test-management never asks it): null when unknown
     estimate_ms = Column(Integer, nullable=True)
     estimate_upper_ms = Column(Integer, nullable=True)
-    workflow = Column(String(100), nullable=True)  # the repository suite's workflow file; null: the project's default
+    # The workflow file dispatched: a repository suite's, else the CI target's. Always set since migration 010
+    # (a null would escape the one-active index)
+    workflow = Column(String(100), nullable=True)
 
 
 class CiTargetEvent(Base):

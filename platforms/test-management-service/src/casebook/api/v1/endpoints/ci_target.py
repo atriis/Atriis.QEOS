@@ -56,8 +56,7 @@ def delete_ci_target(
     db: Session = Depends(get_db),
     access: ProjectAccess = Depends(require_project_role(*MANAGE_ROLES)),
 ):
-    active = run_request_service.active_request(db, access.project_id)
-    if active is not None:
+    for active in run_request_service.active_requests(db, access.project_id):
         run_request_service.refresh(db, active, force=True)  # a run that ended unseen must not block Disconnect
     if ci_target_service.has_active_run(db, access.project_id):
         raise HTTPException(status.HTTP_409_CONFLICT, detail="A run is in progress: stop it or wait for it to end")
