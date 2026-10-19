@@ -164,6 +164,9 @@ details.
   they answer 503, never open.
 - **Dispatch targets.** Run from QEOS dispatches only workflow names taken from the project's synced repository
   suite rows or from its CI target, never a name from the browser. The token scope is unchanged (ADR-035).
+  The repository suite names come from whoever holds the project's import key (the CI sync with `--suites`), not
+  only from managers through `PUT /ci-target`. GitHub rejects a dispatch with inputs the workflow does not declare,
+  so this reaches only workflows that declare both `suites` and `request_id`.
 - **Stored secrets.** The GitHub token used by Run from QEOS is encrypted at rest
   (Fernet, `TM_SECRETS_KEY`) and never returned. Notification webhook URLs are
   never returned, and are checked against SSRF (vendor hosts, public addresses
