@@ -1088,7 +1088,33 @@ you delete it, the sync stops.
   archives anything.
 - A full sync that would archive more than half of the imported cases is refused (exit 1, 409
   `mass_archive`) unless you pass `--allow-mass-archive`.
-- `--dry-run` prints the plan and changes nothing. `--strict` exits 1 when a file fails to parse.
+- `--dry-run` prints the plan and changes nothing. `--strict` exits 1 when a file fails to parse or
+  a suite has a warning.
+- With `--suites PATTERN` (collector 0.10.0, repeatable) it also sends the repository's suite
+  workflows. See "Repository suites" below.
+
+**Repository suites.** A repository can define its suites as the matrix legs of GitHub Actions
+workflows. Add `--suites ".github/workflows/suite-*.yml"` to the sync command. The pattern names the
+repository's suite workflows: change it to match yours. Only files directly under
+`.github/workflows/` count, and a workflow name must match `^[A-Za-z0-9._-]{1,100}\.ya?ml$`.
+- Each workflow becomes a **group** on Test Cases → **Suites**. Each leg of the job that calls
+  `suite-runner.yml` becomes a **repository suite**. The leg's `suite_id`, `suite_name`, `test_path`
+  and `shard` are read; nothing else is stored. A sharded leg shows as "Half 1 of 2".
+- The cases of a suite are the live imported cases under the leg's folders and files, ordered by
+  path, then line. A suite holds at most 1000 cases; more are cut, with a warning.
+- Repository suites are **read-only**. Changing one answers 409 `repository_suite`: change the
+  workflow instead. Running them from QEOS comes in stage 2 and is not available yet.
+- A new leg is created, a changed leg is updated, and a leg that is gone is deleted, in the same
+  transaction as the cases. The patterns are authoritative for the workflows they cover: a covered
+  workflow that was synced before and is now missing loses its whole group. A workflow no pattern
+  covers is left alone.
+- A workflow that does not parse, or has no legs, keeps its previous suites and gives a warning.
+- Warnings are printed by the command: a `test_path` that matches no case, a leg without
+  `suite_id` or `test_path`, a repeated `suite_id`, a suite cut at 1000 cases, and a name that
+  clashes with a hand-made suite (the suite then takes its `suite_id` as name). A suite with a
+  warning is still synced with what matched. `--strict` turns warnings into a failure.
+- **Add to suite** on the Test Cases selection bar adds the selected cases to a suite made in QEOS,
+  and **Not in any suite** shows the imported cases that no repository suite holds.
 
 **Which branch it syncs from.** Only the repository's **default branch** (`main` or `master`).
 The collector reads it from the GitHub Actions event (`repository.default_branch`), GitLab's
@@ -1124,7 +1150,7 @@ picked, such as `MyRepo/tests/features/...`).
 
    on:
      push:
-       paths: ["tests/features/**"]
+       paths: ["tests/features/**", ".github/workflows/suite-*.yml"]
      workflow_dispatch:
        inputs:
          first_sync:
@@ -1142,11 +1168,12 @@ picked, such as `MyRepo/tests/features/...`).
              url: ${{ vars.QEOS_URL }}
              command: import-features
              patterns: "tests/features/**/*.feature"
-             extra-args: ${{ inputs.first_sync && '--allow-mass-archive' || '' }}
+             extra-args: ${{ inputs.first_sync && '--allow-mass-archive' || '' }} --suites ".github/workflows/suite-*.yml"
            env:
              QEOS_API_KEY: ${{ secrets.QEOS_API_KEY }}
    ```
-   Change the pattern and `paths:` if your features live elsewhere. The action (`command:
+   Change the pattern and `paths:` if your features live elsewhere. Change both suite patterns to
+   the one that names your suite workflows, or remove them if you have none. The action (`command:
    import-features`, from `collector-v0.9.3`) installs the collector from its own checkout, which
    GitHub downloads with the repository's access; `pip install "qeos-collector @ git+https://…"`
    cannot, while `Atriis.QEOS` is private: the runner has no credentials for it and the step
@@ -1157,10 +1184,10 @@ picked, such as `MyRepo/tests/features/...`).
    only if the project already has imported cases under other paths (see below).
 
 **When it runs.**
-- **Automatically, on every push that changes a file under `tests/features/`**, on any branch.
+- **Automatically, on every push that changes a file under `tests/features/` or a suite workflow**, on any branch.
   On the default branch it syncs. On another branch the job starts, prints `skipped`, and ends
   green in a few seconds. Merging a pull request is a push to the default branch, so a merge
-  syncs. A push that changes no file under `tests/features/` does not start the workflow.
+  syncs. A push that changes neither does not start the workflow.
 - **By hand**, from the Actions tab (**Run workflow**), for the first sync or to resync at any
   time.
 - **Never on a schedule, and never from QEOS.** Editing a case in QEOS does not change the

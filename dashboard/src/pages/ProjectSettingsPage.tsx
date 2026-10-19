@@ -70,13 +70,15 @@ function ciSnippets(origin: string): Record<string, PlatformSnippets> {
 # after the last download step, with the pattern under download-artifact's path (one QEOS run):
 #     patterns: shard-reports/**/cucumber-report.json`,
         sync: `# QEOS: keeps the test cases equal to the .feature files, so Test cases follows the repository.
-# Commit as .github/workflows/qeos-sync-cases.yml on the default branch; it runs on every push that changes a .feature file.
+# Commit as .github/workflows/qeos-sync-cases.yml on the default branch; it runs on every push that changes a .feature file
+# or a suite workflow. Change ".github/workflows/suite-*.yml" (here and in on.push.paths) to the pattern that names
+# your repository's suite workflows; they become read-only suites in QEOS. Drop both if you have none.
 # Needs the repository variable QEOS_URL (this QEOS address) and the repository secret QEOS_API_KEY.
 name: QEOS sync test cases
 
 on:
   push:
-    paths: ["tests/features/**"]
+    paths: ["tests/features/**", ".github/workflows/suite-*.yml"]
   workflow_dispatch:
     inputs:
       first_sync:
@@ -94,7 +96,7 @@ jobs:
           url: \${{ vars.QEOS_URL }}
           command: import-features
           patterns: "tests/features/**/*.feature"
-          extra-args: \${{ inputs.first_sync && '--allow-mass-archive' || '' }}
+          extra-args: \${{ inputs.first_sync && '--allow-mass-archive' || '' }} --suites ".github/workflows/suite-*.yml"
         env:
           QEOS_API_KEY: \${{ secrets.QEOS_API_KEY }}`,
       },

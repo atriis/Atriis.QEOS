@@ -211,7 +211,8 @@ test("the GitHub sync snippet is the standalone workflow with the first_sync inp
   expect(snippet.textContent?.startsWith("# QEOS: keeps the test cases equal to the .feature files")).toBe(true);
   expect(snippet).toHaveTextContent("Commit as .github/workflows/qeos-sync-cases.yml on the default branch");
   expect(snippet).toHaveTextContent("name: QEOS sync test cases");
-  expect(snippet).toHaveTextContent('paths: ["tests/features/**"]');
+  expect(snippet).toHaveTextContent('paths: ["tests/features/**", ".github/workflows/suite-*.yml"]');
+  expect(snippet).toHaveTextContent(`--suites ".github/workflows/suite-*.yml"`);
   expect(snippet).toHaveTextContent("first_sync");
   expect(snippet).toHaveTextContent("--allow-mass-archive");
   // through the action, which installs from its own checkout: pip from git+https cannot read a private Atriis.QEOS

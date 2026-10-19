@@ -94,3 +94,4 @@ On 2026-10-06 the user chose one endpoint for the dashboard upload now and a lat
 
 ## Related Decisions
 - [ADR-022: Test management is its own service](ADR-022-test-management-service.md)
+- [ADR-035: Repository suites](ADR-035-repository-suites.md): the suite workflows sync with the same import, in the same transaction.

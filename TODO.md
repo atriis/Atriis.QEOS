@@ -341,7 +341,7 @@ requested ones. Each group needs its own design spec before implementation.
 - [x] Create/add labels on TCs; filter and search by label
 - [x] Create suites — static (hand-picked TCs), ordered, edited in place
 - [x] Link a TC to the automated test that implements it; the case shows that test's latest result
-- [ ] Repository suites: sync the CI suite workflows' matrix legs into Suites (read-only), run them from QEOS through the repository's own workflows, Add to suite from the Test Cases selection, "Not in any suite" filter, sync warnings for broken suite paths, `qeos-run.yml` in OBT (spec `docs/superpowers/specs/2026-10-19-repository-suites-design.md`, ADR-035 to write)
+- [ ] Repository suites. Stage 1 done (2026-10-19, ADR-035): sync of the CI suite workflows' matrix legs into Suites (read-only), Add to suite, "Not in any suite" filter, sync warnings, `--suites` in collector 0.10.0. Stage 2 open: run them from QEOS through the repository's own workflows, `qeos-run.yml` in OBT, the run part of ADR-035 (spec `docs/superpowers/specs/2026-10-19-repository-suites-design.md`)
 - [ ] Last result per suite on the Suites list (passed, failed, not run, from its cases' latest results) *(follow-up of repository suites)*
 - [ ] Copy a repository suite into an editable QEOS suite *(follow-up of repository suites)*
 - [ ] Quiet window before the nightly: refuse or warn when a QEOS run of a repository suite could still be running at the scheduler's time *(follow-up of repository suites)*

@@ -228,7 +228,14 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   stores the duration estimate, and lists run URLs for the report.
 - **Suites**: unique name per project, ordered cases replaced as a whole by
   `PUT /suites/{id}/cases` (≤1000, unknown or repeated numbers are a 422); deleting a suite keeps
-  its cases. `GET /suites?created_by=me` lists the caller's own suites.
+  its cases. `GET /suites?created_by=me` lists the caller's own suites. `POST /suites/{id}/cases/append`
+  adds cases at the end.
+- **Repository suites** (ADR-035, migration 009): `POST /cases/import` also takes `suite_files`,
+  `suite_patterns` and `source_repo` and answers `suite_changes` and `suite_warnings`. Each matrix leg of a
+  suite workflow becomes a read-only suite (`origin = repository`, with `workflow`, `group_name`,
+  `external_id`, `shard`, `test_paths`, `source_repo`), synced in the import's transaction and part of
+  `plan_hash`. Changing one is 409 `repository_suite`. `GET /cases?suite=none` lists imported cases in no
+  repository suite. Running them from QEOS is stage 2.
 - Access: user JWT + project role via project-service (every role reads; owner/admin/member
   edit), the same contract as ingestion. The client is a copy of ingestion's (ADR-022).
 
