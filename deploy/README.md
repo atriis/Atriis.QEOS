@@ -98,8 +98,8 @@ is needed: the certificate is a real one.
 
 ## 7. Backups
 
-`deploy/backup.sh` dumps every database (one compressed file) and keeps 14 days. A failed run
-leaves no partial file. `bash deploy/backup.sh --local` does the same for a local stack
+`deploy/backup.sh` dumps every database (one compressed file), copies the screenshot storage (the MinIO volume, a
+second file) and keeps 14 days of both. A failed run leaves no partial file. `bash deploy/backup.sh --local` does the same for a local stack
 (`docker-compose.yml` only, no `QEOS_DOMAIN`). Schedule it daily:
 
 ```bash
@@ -122,16 +122,18 @@ qeos up -d --build --wait edge
 
 One `ERROR: role "postgres" already exists` during the restore is expected and harmless.
 
-**Screenshots are not in that dump.** Images live in MinIO, on the volume `qa-vision_qeos_minio_data`
-(ADR-036). `backup.sh` does not copy it. If you keep screenshots (Project Settings, off by default), copy the
-volume as well, next to the database dump:
+**Screenshots** are in the second file, `qeos-minio-<timestamp>.tar.gz`: images live in MinIO, on the volume
+`qa-vision_qeos_minio_data` (ADR-036). The copy is taken while MinIO runs. A stack that never started `minio` has no
+volume, and the script skips it. To restore the images, stop MinIO and untar into the volume:
 
 ```bash
-docker run --rm -v qa-vision_qeos_minio_data:/data:ro -v "$PWD/backups":/backup alpine   tar czf /backup/qeos-minio-$(date -u +%Y%m%dT%H%MZ).tar.gz -C /data .
+qeos stop minio
+docker run --rm -v qa-vision_qeos_minio_data:/data -v "$PWD/backups":/backup alpine:3.20 \
+  sh -c 'rm -rf /data/* /data/.minio.sys && tar xzf /backup/qeos-minio-<timestamp>.tar.gz -C /data'
+qeos up -d --wait edge
 ```
 
-To restore, stop `minio` (`qeos stop minio`), untar into an empty volume the same way, then start it again. Without
-the volume, results keep working and their screenshot buttons answer "not found". An existing install adds
+Without the volume, results keep working and their screenshot buttons answer "not found". An existing install adds
 `ARTIFACTS_S3_SECRET_KEY` to `.env` by hand before the update: `echo "ARTIFACTS_S3_SECRET_KEY=$(openssl rand -hex 20)" >> .env`.
 
 ## 8. Updates

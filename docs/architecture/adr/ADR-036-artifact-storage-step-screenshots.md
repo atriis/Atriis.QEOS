@@ -31,8 +31,8 @@ per-step images can reach several GB.
 
 ## Consequences
 
-- The VM backup must include the volume. `deploy/backup.sh` dumps databases only, so the deploy README gives the
-  volume copy and restore commands. Without the volume, results keep working and their images answer "not found".
+- The VM backup must include the volume. `deploy/backup.sh` copies it next to the database dump, and the deploy
+  README gives the restore commands. Without the volume, results keep working and their images answer "not found".
 - Images are not masked. QEOS cannot read text inside an image, so screenshots can show names, emails and booking
   data. This is why they are off by default, and SECURITY and the privacy notes say so.
 - Storage grows with images. They follow the retention days of the results they belong to, and are deleted with the

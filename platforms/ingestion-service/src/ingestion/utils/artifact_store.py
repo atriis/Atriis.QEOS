@@ -10,6 +10,14 @@ from src.ingestion.core.config import settings
 DELETE_CHUNK = 1000  # S3 delete_objects takes at most 1,000 keys
 
 
+class ArtifactNotFound(Exception):
+    """get() found no object under that key, in whichever store."""
+
+
+class ArtifactDeleteError(Exception):
+    """The store refused to delete some objects: they are still there."""
+
+
 def screenshot_key(project_id: int, sha256: str) -> str:
     """Content-addressed per project: the same image uploaded twice is stored once."""
     return f"screenshots/{project_id}/{sha256}"
@@ -38,7 +46,10 @@ class MemoryArtifactStore:
         self.objects[key] = (data, media_type)
 
     def get(self, key: str) -> bytes:
-        return self.objects[key][0]
+        try:
+            return self.objects[key][0]
+        except KeyError:
+            raise ArtifactNotFound(key) from None
 
     def delete(self, keys: List[str]) -> None:
         for key in keys:
@@ -63,20 +74,37 @@ class S3ArtifactStore:
             aws_secret_access_key=secret_key,
             region_name="us-east-1",  # MinIO ignores it; boto3 wants one
             # MinIO is addressed by host and port, not by a bucket subdomain
-            config=Config(s3={"addressing_style": "path"}, retries={"max_attempts": 3, "mode": "standard"}),
+            config=Config(
+                s3={"addressing_style": "path"},
+                # A MinIO that is down must fail an upload or a read in seconds, not hold its thread for minutes
+                connect_timeout=5, read_timeout=30, retries={"max_attempts": 2, "mode": "standard"},
+            ),
         )
 
     def put(self, key: str, data: bytes, media_type: str) -> None:
         self._client.put_object(Bucket=self._bucket, Key=key, Body=data, ContentType=media_type)
 
     def get(self, key: str) -> bytes:
-        return self._client.get_object(Bucket=self._bucket, Key=key)["Body"].read()
+        from botocore.exceptions import ClientError
+
+        try:
+            return self._client.get_object(Bucket=self._bucket, Key=key)["Body"].read()
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+                raise ArtifactNotFound(key) from exc
+            raise
 
     def delete(self, keys: List[str]) -> None:
         for start in range(0, len(keys), DELETE_CHUNK):
             chunk = keys[start:start + DELETE_CHUNK]
-            self._client.delete_objects(
+            response = self._client.delete_objects(
                 Bucket=self._bucket, Delete={"Objects": [{"Key": key} for key in chunk], "Quiet": True})
+            # A 200 can still carry per-key failures; a purge must not record success while objects remain
+            errors = response.get("Errors") or []
+            if errors:
+                first = errors[0]
+                raise ArtifactDeleteError(
+                    f"{len(errors)} of {len(chunk)} objects not deleted, e.g. {first.get('Key')}: {first.get('Code')}")
 
     def delete_prefix(self, prefix: str) -> int:
         deleted = 0

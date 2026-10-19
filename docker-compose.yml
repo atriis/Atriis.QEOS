@@ -264,10 +264,12 @@ services:
     environment:
       MINIO_ROOT_USER: ${ARTIFACTS_S3_ACCESS_KEY:-qeos}
       MINIO_ROOT_PASSWORD: ${ARTIFACTS_S3_SECRET_KEY:-qeos-minio-dev}
+      # The alias "local" for the healthcheck below, pointing at this container itself
+      MC_HOST_local: http://${ARTIFACTS_S3_ACCESS_KEY:-qeos}:${ARTIFACTS_S3_SECRET_KEY:-qeos-minio-dev}@127.0.0.1:9000
     volumes:
       - qeos_minio_data:/data
     healthcheck:
-      # The image has no shell or curl: mc's own readiness probe, with the alias given by MC_HOST_local
+      # The image has no shell or curl: mc's own readiness probe against the alias set by MC_HOST_local above
       test: ["CMD", "mc", "ready", "local"]
       interval: 5s
       timeout: 5s

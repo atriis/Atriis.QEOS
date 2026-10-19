@@ -145,6 +145,13 @@ details.
   tokens, private keys, key=value secrets, email addresses, card numbers) are
   masked before storage. Projects can add their own patterns, which run on RE2
   so that no pattern can stall ingestion. The failed Cucumber step's text, step definition and pattern are masked the same way, at upload and by the re-mask job. Each result's log (sent by collector 0.9.0 for log values, ADR-032) is masked the same way before it is stored and cut to 64 KB; it is never shown in full.
+- **Screenshots (ADR-036).** Step screenshots from test runs are stored in MinIO, a private bucket that is not
+  published outside the Docker network: only ingestion-service reads it. They are off by default for every project;
+  a project owner or admin turns them on in Project Settings. **Images are never masked.** QEOS cannot read text
+  inside an image, so a screenshot can show names, emails and booking data that the masking above would have
+  removed from text. Switch them on only for projects whose test data is safe to show to every project reader.
+  Images follow the retention days of their results and are deleted with the project. The MinIO volume holds them
+  in clear: back it up and protect it like the database dump (`deploy/backup.sh`).
 - **Gateway.** TLS 1.2/1.3. Per-IP rate limits: 20 requests/s on the API,
   10/s on uploads, and 5/s on sign-in, registration, password and MFA
   endpoints. 10 MB body cap. `X-Forwarded-For` is replaced, not appended, and
