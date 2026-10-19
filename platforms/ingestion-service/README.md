@@ -57,9 +57,16 @@ Receives test results from CI. Design: `docs/superpowers/specs/2026-09-29-ingest
 ## Collection settings
 
 `GET /api/v1/projects/{id}/collection-settings` (any project member) returns `collect_manual` (default
-`true`; no row means the defaults), `discarded_count`, `last_discarded_at`, `updated_at` and `updated_by`.
-`PUT` with `{"collect_manual": bool}` (owner or admin; other roles 403, non-members 404) upserts it and
-returns the stored settings.
+`true`; no row means the defaults), `keep_screenshots` (default `false`), `discarded_count`,
+`last_discarded_at`, `updated_at` and `updated_by`.
+`PUT` with `{"collect_manual": bool}`, `{"keep_screenshots": bool}` or both (owner or admin; other roles 403,
+non-members 404) upserts it and returns the stored settings. A field left out keeps its stored value; a body
+with neither, or with another field, is `422`.
+
+`keep_screenshots` allows step screenshots (ADR-036). Migration 025 adds the tables for them: `blobs` (one
+stored image per project and `sha256`, shared by every result that shows it; no cascade, a garbage collector
+deletes blobs) and `result_screenshots` (the images of one result, in `position` order, each with its step
+text, optional step line and optional `hook`; deleted with the result).
 
 With `collect_manual` off, an upload whose `run.trigger` is `manual` answers
 `202 {"discarded": true, "reason": "manual runs are not collected for this project"}` and stores nothing.

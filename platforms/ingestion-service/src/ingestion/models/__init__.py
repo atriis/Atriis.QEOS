@@ -10,6 +10,7 @@ from src.ingestion.models.muted import MutedTest
 from src.ingestion.models.notification_channel import NotificationChannel
 from src.ingestion.models.flaky_rollup import FlakyDaily, FlakyRollupDay
 from src.ingestion.models.run import Run, RunResult
+from src.ingestion.models.screenshot import Blob, ResultScreenshot
 
-__all__ = ["ApiKey", "CollectionSettings", "FlakyDaily", "FlakyRollupDay", "ImpactPair", "ImpactTestBase", "JobHeartbeat", "LogPattern", "LogValue", "MaskingPattern", "MutedTest",
-           "NotificationChannel", "Run", "RunChangedFile", "RunComponent", "RunImpact", "RunResult"]
+__all__ = ["ApiKey", "Blob", "CollectionSettings", "FlakyDaily", "FlakyRollupDay", "ImpactPair", "ImpactTestBase", "JobHeartbeat", "LogPattern", "LogValue", "MaskingPattern", "MutedTest",
+           "NotificationChannel", "ResultScreenshot", "Run", "RunChangedFile", "RunComponent", "RunImpact", "RunResult"]

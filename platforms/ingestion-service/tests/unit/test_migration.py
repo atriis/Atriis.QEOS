@@ -597,3 +597,31 @@ def test_the_value_index_downgrade_drops_it(tmp_path):
         assert "ix_log_values_value" not in names and "ix_log_values_result_id" in names  # 023 is still there
     finally:
         engine.dispose()
+
+
+def test_screenshot_tables_and_setting(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'screenshots_025.db').as_posix()}"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(SERVICE_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "head")
+    engine = create_engine(url)
+    try:
+        insp = inspect(engine)
+        assert {"blobs", "result_screenshots"} <= set(insp.get_table_names())
+        assert "keep_screenshots" in {c["name"] for c in insp.get_columns("collection_settings")}
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO collection_settings (project_id) VALUES (6)"))
+            assert conn.execute(text("SELECT keep_screenshots FROM collection_settings")).scalar() in (False, 0)
+            conn.execute(text("INSERT INTO blobs (project_id, sha256, media_type, bytes) VALUES (1, :h, 'image/png', 3)"),
+                         {"h": "a" * 64})
+        with pytest.raises(IntegrityError):  # one blob per (project, sha256)
+            with engine.begin() as conn:
+                conn.execute(text("INSERT INTO blobs (project_id, sha256, media_type, bytes) VALUES (1, :h, 'image/png', 3)"),
+                             {"h": "a" * 64})
+        command.downgrade(cfg, "024")
+        insp = inspect(engine)
+        assert not {"blobs", "result_screenshots"} & set(insp.get_table_names())
+        assert "keep_screenshots" not in {c["name"] for c in insp.get_columns("collection_settings")}
+    finally:
+        engine.dispose()

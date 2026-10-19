@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, Integer, true, text
+from sqlalchemy import Boolean, Column, DateTime, Integer, false, true, text
 
 from src.ingestion.db.base import Base
 
@@ -10,6 +10,8 @@ class CollectionSettings(Base):
 
     project_id = Column(Integer, primary_key=True, autoincrement=False)
     collect_manual = Column(Boolean, nullable=False, default=True, server_default=true())
+    # Step screenshots (ADR-036, migration 025): off until an owner or admin allows them
+    keep_screenshots = Column(Boolean, nullable=False, default=False, server_default=false())
     # Uploads, not runs: a matrix run uploads once per job
     discarded_count = Column(Integer, nullable=False, default=0, server_default=text("0"))
     last_discarded_at = Column(DateTime(timezone=True), nullable=True)
