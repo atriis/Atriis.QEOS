@@ -473,3 +473,17 @@ def test_a_store_failure_during_the_job_does_not_fail_the_pass(db, session_facto
     assert run_job(session_factory) == 0
     assert blob_ids(db) == []
     assert summary(capsys)["blobs_deleted"] == 1
+
+
+def test_gc_pages_by_id_and_a_skipped_row_does_not_stop_later_batches(db, store, add_blob, capsys):
+    from sqlalchemy import text
+
+    for number in range(7):  # four batches of two
+        add_blob(9, sha=format(number, "x"))
+    contended = db.execute(text("SELECT id FROM blobs WHERE sha256 = :h"), {"h": "2" * 64}).scalar()
+    db.execute(text("CREATE TRIGGER refuse BEFORE DELETE ON blobs WHEN OLD.sha256 = '" + "2" * 64 + "' "
+                    "BEGIN SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed'); END"))
+    db.commit()
+    assert retention.collect_unreferenced_blobs(db, store, NOW, batch=2, projects=[1]) == 6
+    assert blob_ids(db) == [contended]
+    assert len(store.objects) == 1

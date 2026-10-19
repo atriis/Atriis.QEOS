@@ -218,10 +218,10 @@ def _no_reference():
     return ~exists().where(ResultScreenshot.blob_id == Blob.id)
 
 
-def _unreferenced_blobs(db: Session, now: datetime, projects: Iterable[int], skip: Iterable[int] = ()) -> Query:
+def _unreferenced_blobs(db: Session, now: datetime, projects: Optional[Iterable[int]], after_id: int = 0) -> Query:
     query = db.query(Blob.id).filter(
-        _no_reference(), Blob.created_at < now - timedelta(days=BLOB_GRACE_DAYS), Blob.project_id.in_(list(projects)))
-    return query.filter(Blob.id.notin_(list(skip))) if skip else query
+        _no_reference(), Blob.created_at < now - timedelta(days=BLOB_GRACE_DAYS), Blob.id > after_id)
+    return query if projects is None else query.filter(Blob.project_id.in_(list(projects)))
 
 
 def _delete_blobs(db: Session, ids: List[int], cutoff: datetime) -> list:
@@ -255,17 +255,12 @@ def collect_unreferenced_blobs(
     that refers to it shows no image (the run and result are kept). Only images unreferenced for more than
     BLOB_GRACE_DAYS are exposed to it."""
     cutoff = now - timedelta(days=BLOB_GRACE_DAYS)
-    deleted, tried = 0, set()
-    scope = None if projects is None else list(projects)
+    deleted, last_id = 0, 0
     while True:
-        query = db.query(Blob.id).filter(
-            _no_reference(), Blob.created_at < cutoff, *([Blob.id.notin_(list(tried))] if tried else []))
-        if scope is not None:
-            query = query.filter(Blob.project_id.in_(scope))
-        ids = [blob_id for (blob_id,) in query.order_by(Blob.id).limit(batch)]
+        ids = [blob_id for (blob_id,) in _unreferenced_blobs(db, now, projects, last_id).order_by(Blob.id).limit(batch)]
         if not ids:
             return deleted
-        tried.update(ids)  # each candidate is tried once per pass, so the loop always ends
+        last_id = ids[-1]  # paged by id, whatever happens to the rows: a skipped one is left behind, the loop ends
         try:
             rows = _delete_blobs(db, ids, cutoff)
         except IntegrityError:
