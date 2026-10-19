@@ -1,6 +1,6 @@
 # Step screenshots: show the screenshots a test took, on the step that took them
 
-Date: 2026-10-19 · Status: for approval (builder check done) · Decision record to write: ADR-036
+Date: 2026-10-19 · Status: approved 2026-10-19 · Decision record to write: ADR-036
 
 ## 1. Intent
 
@@ -80,8 +80,8 @@ Anti-goals (failure even if it works):
 - Only ingestion-service talks to it, through an S3-compatible client (`boto3` or `minio` Python
   package, builder's choice) configured by `ARTIFACTS_S3_ENDPOINT`, `ARTIFACTS_S3_BUCKET`,
   `ARTIFACTS_S3_ACCESS_KEY`, `ARTIFACTS_S3_SECRET_KEY`. Any S3 service can replace MinIO later.
-- If the variables are not set, screenshots are off: the blob endpoints answer 404 and the collector
-  skips images. QEOS keeps working without object storage.
+- If the variables are not set, screenshots are off: the key check reports `screenshots: false`, the
+  blob PUT answers 403, and the collector skips images. QEOS keeps working without object storage.
 - Object key: `screenshots/{project_id}/{sha256}`. Content-addressed per project, so the same image
   uploaded twice is stored once and a retry is free.
 
