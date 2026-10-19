@@ -209,3 +209,66 @@ def test_migration_008_adds_nullable_run_estimates_and_downgrades(tmp_path):
     finally:
         engine.dispose()
     command.upgrade(cfg, "head")
+
+
+SUITE = "INSERT INTO suites (project_id, name, created_by) VALUES (:project, :name, 1)"
+LEG = ("INSERT INTO suites (project_id, name, created_by, origin, workflow, external_id)"
+       " VALUES (:project, :name, 1, :origin, :workflow, :external_id)")
+
+
+def test_migration_009_repository_suite_columns_and_constraints(migrated_engine):
+    with migrated_engine.begin() as conn:
+        conn.execute(text(SUITE), {"project": 1, "name": "Smoke"})
+        assert conn.execute(text("SELECT origin FROM suites")).scalar_one() == "manual"
+        leg = {"project": 1, "origin": "repository", "workflow": "w.yml", "external_id": "a"}
+        conn.execute(text(LEG), {**leg, "name": "A"})
+        conn.execute(text(LEG), {**leg, "name": "B", "workflow": "x.yml"})
+        conn.execute(text(LEG), {**leg, "name": "C", "project": 2})
+        # the same leg id is free for manual suites
+        conn.execute(text(LEG), {**leg, "name": "D", "origin": "manual"})
+        conn.execute(text(LEG), {**leg, "name": "E", "origin": "manual"})
+    with pytest.raises(IntegrityError), migrated_engine.begin() as conn:
+        conn.execute(text(LEG), {**leg, "name": "F"})
+    with pytest.raises(IntegrityError), migrated_engine.begin() as conn:
+        conn.execute(text(LEG), {**leg, "name": "G", "origin": "other"})
+
+
+def test_migration_009_backfills_run_workflow_and_downgrades(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'down9.db').as_posix()}"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(SERVICE_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "008")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "INSERT INTO ci_targets (project_id, provider, repo, workflow, ref, token_encrypted, token_last4,"
+                " updated_by, updated_at) VALUES (1, 'github', 'o/r', 'qa.yml', 'main', 'x', 'abcd', 1,"
+                " '2026-10-08 10:00:00')"))
+            conn.execute(text(RUN), {"project": 1, "status": "completed"})
+            conn.execute(text(RUN), {"project": 2, "status": "completed"})
+            conn.execute(text(SUITE), {"project": 1, "name": "Old"})
+    finally:
+        engine.dispose()
+    command.upgrade(cfg, "head")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:
+            rows = conn.execute(text("SELECT project_id, workflow FROM run_requests ORDER BY project_id")).all()
+            assert rows == [(1, "qa.yml"), (2, None)]
+            assert conn.execute(text("SELECT origin FROM suites")).scalar_one() == "manual"
+            conn.execute(text(RUN), {"project": 1, "status": "running"})
+        with pytest.raises(IntegrityError), engine.begin() as conn:  # the one-active index survives
+            conn.execute(text(RUN), {"project": 1, "status": "queued"})
+    finally:
+        engine.dispose()
+    command.downgrade(cfg, "008")
+    engine = create_engine(url)
+    try:
+        inspector = inspect(engine)
+        assert "workflow" not in {c["name"] for c in inspector.get_columns("run_requests")}
+        assert "origin" not in {c["name"] for c in inspector.get_columns("suites")}
+    finally:
+        engine.dispose()
+    command.upgrade(cfg, "head")

@@ -36,6 +36,13 @@ class SuiteOut(BaseModel):
     case_count: int
     created_at: datetime
     updated_at: Optional[datetime] = None
+    origin: str = "manual"
+    workflow: Optional[str] = None
+    group_name: Optional[str] = None
+    external_id: Optional[str] = None
+    shard: Optional[str] = None
+    test_paths: Optional[List[str]] = None
+    source_repo: Optional[str] = None
 
 
 class SuiteCaseOut(BaseModel):

@@ -18,13 +18,24 @@ class BadCaseList(Exception):
     pass
 
 
+class RepositorySuite(Exception):
+    """The suite mirrors a CI workflow of the test repository: sync owns it."""
+
+
+def ensure_manual(row: Suite) -> None:
+    if row.origin == "repository":
+        raise RepositorySuite()
+
+
 def _count(db: Session, suite_id: int) -> int:
     return db.query(func.count(SuiteCase.id)).filter(SuiteCase.suite_id == suite_id).scalar()
 
 
 def out(db: Session, row: Suite, with_cases: bool = False) -> dict:
     body = {"id": row.id, "name": row.name, "description": row.description, "case_count": _count(db, row.id),
-            "created_at": row.created_at, "updated_at": row.updated_at}
+            "created_at": row.created_at, "updated_at": row.updated_at, "origin": row.origin,
+            "workflow": row.workflow, "group_name": row.group_name, "external_id": row.external_id,
+            "shard": row.shard, "test_paths": row.test_paths, "source_repo": row.source_repo}
     if with_cases:
         cases = (
             db.query(Case).join(SuiteCase, SuiteCase.case_id == Case.id)

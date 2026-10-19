@@ -57,6 +57,7 @@ class RunRequest(Base):
     # What the dashboard estimated before Play (from ingestion; test-management never asks it): null when unknown
     estimate_ms = Column(Integer, nullable=True)
     estimate_upper_ms = Column(Integer, nullable=True)
+    workflow = Column(String(100), nullable=True)  # the repository suite's workflow file; null: the project's default
 
 
 class CiTargetEvent(Base):

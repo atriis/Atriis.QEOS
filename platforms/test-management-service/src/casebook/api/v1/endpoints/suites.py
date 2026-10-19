@@ -10,12 +10,22 @@ from src.casebook.service import suite_service
 router = APIRouter()  # mounted at /projects/{project_id}/suites
 
 DUPLICATE = "A suite with this name already exists in the project"
+READ_ONLY = {"code": "repository_suite", "message": "This suite mirrors the test repository and cannot be changed here"}
 
 
 def _suite_or_404(db: Session, access: ProjectAccess, suite_id: int):
     row = suite_service.get_suite(db, access.project_id, suite_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Suite not found")
+    return row
+
+
+def _manual_suite_or_409(db: Session, access: ProjectAccess, suite_id: int):
+    row = _suite_or_404(db, access, suite_id)
+    try:
+        suite_service.ensure_manual(row)
+    except suite_service.RepositorySuite:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=READ_ONLY)
     return row
 
 
@@ -61,7 +71,7 @@ def update_suite(
     db: Session = Depends(get_db),
     access: ProjectAccess = Depends(require_project_role(*EDIT_ROLES)),
 ):
-    row = _suite_or_404(db, access, suite_id)
+    row = _manual_suite_or_409(db, access, suite_id)
     try:
         row = suite_service.update_suite(db, row, payload.model_dump(exclude_unset=True))
     except suite_service.DuplicateName:
@@ -76,7 +86,7 @@ def set_suite_cases(
     db: Session = Depends(get_db),
     access: ProjectAccess = Depends(require_project_role(*EDIT_ROLES)),
 ):
-    row = _suite_or_404(db, access, suite_id)
+    row = _manual_suite_or_409(db, access, suite_id)
     try:
         row = suite_service.set_cases(db, row, payload.cases)
     except suite_service.BadCaseList as exc:
@@ -90,5 +100,5 @@ def delete_suite(
     db: Session = Depends(get_db),
     access: ProjectAccess = Depends(require_project_role(*EDIT_ROLES)),
 ):
-    suite_service.delete_suite(db, _suite_or_404(db, access, suite_id))
+    suite_service.delete_suite(db, _manual_suite_or_409(db, access, suite_id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
