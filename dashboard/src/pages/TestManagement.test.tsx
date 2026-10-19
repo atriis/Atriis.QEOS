@@ -256,7 +256,21 @@ test("a repository suite page is read-only and shows where it comes from", async
   expect(screen.queryByRole("button", { name: /^save/i })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: /move|remove/i })).not.toBeInTheDocument();
   expect(screen.queryByLabelText(/find cases to add/i)).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /delete suite/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /delete the suite/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /run suite/i })).not.toBeInTheDocument();
+});
+
+test("a manual suite page keeps its edit controls and Run suite", async () => {
+  asRole("member");
+  const sc = (n: number) => ({ number: n, key: `TC-${n}`, title: `Case ${n}`, status: "draft", priority: "medium", labels: [], automated_test_key: null });
+  server.use(http.get(`${P}/suites/1`, () => HttpResponse.json({ ...manualSuite(1, "Smoke"), cases: [sc(1), sc(2)] })));
+  renderAt("/projects/42/suites/1");
+  expect(await screen.findByRole("button", { name: /move tc-1 down/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /remove tc-1 from the suite/i })).toBeInTheDocument();
+  expect(screen.getByLabelText(/find cases to add/i)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /save order and cases|saved/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /delete the suite smoke/i })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /run suite/i })).toBeInTheDocument();
 });
 
 test("a sharded repository suite page explains the halves", async () => {

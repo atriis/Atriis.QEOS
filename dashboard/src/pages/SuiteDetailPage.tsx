@@ -108,9 +108,12 @@ export default function SuiteDetailPage() {
       </p>
       <PageHeader title={suite.data.name} subtitle={suite.data.description || undefined}
         meta={estimate.data?.estimate_ms != null ? `Estimated duration ${estimateText(estimate.data)}` : undefined} />
-      <RunControl projectId={id} cases={suite.data.cases.map((c) => ({ number: c.number, title: c.title, manual: c.source_path === null, testKey: c.automated_test_key }))}
-        selection={{ suite_id: sid }} label="Run suite" emphasis={!dirty && !detailsDirty}
-        emptyReason={suite.data.cases.length === 0 ? "This suite has no cases" : "This suite has no automated cases"} />
+      {/* A repository suite runs through its own workflow: no Run until that exists (Task 10) */}
+      {!fromRepo && (
+        <RunControl projectId={id} cases={suite.data.cases.map((c) => ({ number: c.number, title: c.title, manual: c.source_path === null, testKey: c.automated_test_key }))}
+          selection={{ suite_id: sid }} label="Run suite" emphasis={!dirty && !detailsDirty}
+          emptyReason={suite.data.cases.length === 0 ? "This suite has no cases" : "This suite has no automated cases"} />
+      )}
 
       {fromRepo && (
         <section className="card" aria-labelledby="suite-source">

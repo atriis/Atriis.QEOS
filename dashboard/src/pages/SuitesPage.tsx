@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react";
 import { FormEvent, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -68,6 +69,7 @@ export default function SuitesPage() {
       {suites.data != null && groupSuites(suites.data).map((g) => (
         <details key={g.group} className="suite-group" open>
           <summary>
+            <ChevronRight className="chevron" size={16} aria-hidden="true" />
             <h2>{g.group} <span className="muted">({g.suites.length} {g.suites.length === 1 ? "suite" : "suites"})</span></h2>
             {g.workflow && <span className="muted">{g.workflow}</span>}
           </summary>
