@@ -20,10 +20,10 @@ from sqlalchemy.orm import Session, sessionmaker, undefer
 from src.ingestion.core.config import settings
 from src.ingestion.models import ResultScreenshot, Run, RunResult
 from src.ingestion.models.run import FAILED_STEP_DEFINITION_LENGTH, FAILED_STEP_PATTERN_LENGTH, FAILED_STEP_TEXT_LENGTH
+from src.ingestion.models.screenshot import STEP_TEXT_LENGTH
 from src.ingestion.service import log_pattern_service, log_value_service, masking_pattern_service
 from src.ingestion.service.ingest_service import CI_RUN_URL_LENGTH, COMMIT_MESSAGE_LENGTH, mask, truncate_utf8
 
-SCREENSHOT_STEP_TEXT_LENGTH = 1000  # result_screenshots.step_text
 
 
 class _ProjectPatterns:
@@ -88,7 +88,7 @@ def _results_pass(
                 if text_changed:
                     shots_changed = True
                     if not dry_run:
-                        shot.step_text = text[:SCREENSHOT_STEP_TEXT_LENGTH]
+                        shot.step_text = text[:STEP_TEXT_LENGTH]
             shown_changed = (message_changed or details_changed or step_changed or definition_changed or pattern_changed
                              or shots_changed)
             if not (shown_changed or log_changed):

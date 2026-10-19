@@ -4,6 +4,8 @@ from sqlalchemy.sql import func
 
 from src.ingestion.db.base import Base
 
+STEP_TEXT_LENGTH = 1000  # result_screenshots.step_text
+
 
 class Blob(Base):
     """One stored image per (project, sha256), shared by every result that shows it. The bytes live in the artifact
@@ -35,6 +37,6 @@ class ResultScreenshot(Base):
     result_id = Column(Integer, ForeignKey("test_results.id", ondelete="CASCADE"), nullable=False)
     position = Column(Integer, nullable=False)
     blob_id = Column(Integer, ForeignKey("blobs.id"), nullable=False)
-    step_text = Column(String(1000), nullable=False)
+    step_text = Column(String(STEP_TEXT_LENGTH), nullable=False)
     step_line = Column(Integer, nullable=True)
     hook = Column(String(8), nullable=True)

@@ -16,6 +16,7 @@ from src.ingestion.models import ApiKey, Blob, LogValue, ResultScreenshot, Run, 
 from src.ingestion.models.run import (
     FAILED_STEP_DEFINITION_LENGTH, FAILED_STEP_PATTERN_LENGTH, FAILED_STEP_TEXT_LENGTH, FULL_SCOPE,
 )
+from src.ingestion.models.screenshot import STEP_TEXT_LENGTH
 from src.ingestion.schemas.collect import RunUpload
 from src.ingestion.service import (
     blob_service, collection_settings_service, impact_service, log_pattern_service, log_value_service,
@@ -134,7 +135,10 @@ def _blob_ids(db: Session, project_id: int, upload: RunUpload, store: Optional[A
     hashes = {shot.sha256 for result in upload.results for shot in result.screenshots or ()}
     if not hashes or not blob_service.screenshots_enabled(db, project_id, store):
         return None
-    rows = db.query(Blob.sha256, Blob.id).filter(Blob.project_id == project_id, Blob.sha256.in_(hashes)).all()
+    # FOR KEY SHARE (a no-op on SQLite): the blob cleanup job deletes with a re-checked NOT EXISTS, so a blob locked here
+    # and then referenced by this upload survives, and the insert below cannot fail on a blob deleted under it
+    rows = (db.query(Blob.sha256, Blob.id).filter(Blob.project_id == project_id, Blob.sha256.in_(hashes))
+            .with_for_update(key_share=True, read=True).all())
     return {sha: blob_id for sha, blob_id in rows}
 
 
@@ -224,7 +228,8 @@ def ingest(
             log, log_kinds = mask(result.log, patterns)
             kinds = message_kinds | details_kinds | step_kinds | definition_kinds | pattern_kinds
             shots = []
-            for index, shot in enumerate(result.screenshots or () if blob_ids is not None else ()):
+            references = (result.screenshots or ()) if blob_ids is not None else ()
+            for index, shot in enumerate(references):
                 if shot.sha256 not in blob_ids:
                     shots_unknown += 1
                     continue
@@ -232,7 +237,7 @@ def ingest(
                 kinds |= shot_kinds  # the step text is shown on the run page, like failed_step_text
                 shots.append({
                     "position": index, "blob_id": blob_ids[shot.sha256],
-                    "step_text": shot_text[:FAILED_STEP_TEXT_LENGTH], "step_line": shot.step_line, "hook": shot.hook,
+                    "step_text": shot_text[:STEP_TEXT_LENGTH], "step_line": shot.step_line, "hook": shot.hook,
                 })
             shots_pending.append(shots)
             # The log counts in the redactions metric; `redacted` stays about the text the run page shows
@@ -276,7 +281,13 @@ def ingest(
             shot_rows = [{"result_id": result_id, **shot}
                          for result_id, shots in zip(result_ids, shots_pending) for shot in shots]
             if shot_rows:
-                db.execute(insert(ResultScreenshot), shot_rows)
+                # A savepoint: an image problem (a blob gone after all) drops the screenshots, never the run
+                try:
+                    with db.begin_nested():
+                        db.execute(insert(ResultScreenshot), shot_rows)
+                except IntegrityError:
+                    logger.warning("screenshots dropped, a blob was deleted during the upload: project=%s run=%s",
+                                   key.project_id, run.id)
         else:
             db.execute(insert(RunResult), rows)  # one executemany, not 20,000 ORM objects
 

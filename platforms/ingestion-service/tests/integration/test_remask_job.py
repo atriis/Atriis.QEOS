@@ -210,6 +210,12 @@ def test_remask_updates_screenshot_step_text(db, session_factory, add_run, capsy
     db.add(ResultScreenshot(result_id=result.id, position=1, blob_id=blob.id, step_text="Given nothing secret"))
     db.commit()
 
+    assert run_job(session_factory, "--dry-run") == 0
+    db.expire_all()
+    assert SECRET in db.query(ResultScreenshot).order_by(ResultScreenshot.position).first().step_text
+    assert db.get(RunResult, result.id).redacted is False
+    assert summary(capsys)["results_changed"] == 1
+
     assert run_job(session_factory) == 0
     db.expire_all()
     first, second = db.query(ResultScreenshot).order_by(ResultScreenshot.position).all()
