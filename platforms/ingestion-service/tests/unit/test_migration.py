@@ -625,3 +625,29 @@ def test_screenshot_tables_and_setting(tmp_path):
         assert "keep_screenshots" not in {c["name"] for c in insp.get_columns("collection_settings")}
     finally:
         engine.dispose()
+
+
+def test_blobs_created_at_becomes_not_null_and_old_rows_are_backfilled(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'blobs_026.db').as_posix()}"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(SERVICE_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "025")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:  # 025 allowed a blob without a time
+            conn.execute(text("INSERT INTO blobs (project_id, sha256, media_type, bytes, created_at)"
+                              " VALUES (1, :h, 'image/png', 3, NULL)"), {"h": "a" * 64})
+        command.upgrade(cfg, "026")
+        created = {c["name"]: c for c in inspect(engine).get_columns("blobs")}["created_at"]
+        assert not created["nullable"]
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT created_at FROM blobs")).scalar() is not None  # backfilled
+            conn.execute(text("INSERT INTO blobs (project_id, sha256, media_type, bytes) VALUES (1, :h, 'image/png', 3)"),
+                         {"h": "b" * 64})  # the server default fills it
+            assert conn.execute(text("SELECT COUNT(*) FROM blobs WHERE created_at IS NULL")).scalar() == 0
+        command.downgrade(cfg, "025")
+        assert {c["name"]: c for c in inspect(engine).get_columns("blobs")}["created_at"]["nullable"]
+        command.upgrade(cfg, "head")
+    finally:
+        engine.dispose()

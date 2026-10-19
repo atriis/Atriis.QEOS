@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column("sha256", sa.String(length=64), nullable=False),
         sa.Column("media_type", sa.String(length=32), nullable=False),
         sa.Column("bytes", sa.Integer(), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.UniqueConstraint("project_id", "sha256", name="uq_blobs_project_sha256"),
     )
     op.create_table(
