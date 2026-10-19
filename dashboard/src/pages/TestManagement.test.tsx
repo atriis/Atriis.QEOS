@@ -7,7 +7,8 @@ import { server } from "../test/server";
 import { setAccessToken } from "../auth/tokens";
 import CasesPage from "./CasesPage";
 import CaseEditorPage from "./CaseEditorPage";
-import SuitesPage from "./SuitesPage";
+import SuitesPage, { groupSuites } from "./SuitesPage";
+import type { Suite } from "../api/cases";
 import SuiteDetailPage from "./SuiteDetailPage";
 
 const P = "/api/v1/projects/42";
@@ -201,6 +202,69 @@ test("a suite is created from the suites list", async () => {
   await userEvent.type(await screen.findByLabelText(/^name/i), "Smoke");
   await userEvent.click(screen.getByRole("button", { name: /create suite/i }));
   expect(await screen.findByRole("link", { name: "Smoke" })).toHaveAttribute("href", "/projects/42/suites/5");
+});
+
+const repoSuite = (id: number, name: string, extra: object = {}) => ({
+  id, name, description: null, case_count: 3, created_at: "2026-10-06T10:00:00Z", updated_at: null,
+  origin: "repository", workflow: "suite-flights.yml", group_name: "Flights", external_id: "flights-amadeus-non-booking",
+  shard: null, test_paths: ["tests/features/flights/amadeus"], source_repo: "atriis/Atriis.Test.Automation.OBT", ...extra,
+});
+const manualSuite = (id: number, name: string) => ({
+  id, name, description: null, case_count: 1, created_at: "2026-10-06T10:00:00Z", updated_at: null,
+  origin: "manual", workflow: null, group_name: null, external_id: null, shard: null, test_paths: null, source_repo: null,
+});
+
+test("the suites tab groups repository suites by workflow and hand-made ones last", async () => {
+  asRole("member");
+  server.use(http.get(`${P}/suites`, () => HttpResponse.json([
+    manualSuite(1, "Smoke"),
+    repoSuite(2, "Amadeus non-booking"),
+    repoSuite(3, "Big folder 1/2", { shard: "1/2", external_id: "big-1", group_name: "Hotels", workflow: "suite-hotels.yml" }),
+  ])));
+  renderAt("/projects/42/suites");
+  const flights = await screen.findByRole("heading", { name: /flights/i });
+  expect(flights).toHaveTextContent("1 suite");
+  const headings = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent ?? "");
+  expect(headings.findIndex((t) => /flights/i.test(t))).toBeLessThan(headings.findIndex((t) => /hotels/i.test(t)));
+  expect(headings.findIndex((t) => /hotels/i.test(t))).toBeLessThan(headings.findIndex((t) => /made in qeos/i.test(t)));
+  expect(screen.getByRole("heading", { name: /made in qeos/i })).toHaveTextContent("1 suite");
+  expect(screen.getByText("Half 1 of 2")).toBeInTheDocument();
+  expect(screen.getAllByText("From repository")).toHaveLength(2);
+  expect(screen.getByRole("link", { name: "Smoke" })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /create suite/i })).toBeInTheDocument();
+});
+
+test("groupSuites orders repository groups by name, then Made in QEOS", () => {
+  const groups = groupSuites([
+    manualSuite(1, "Smoke"), repoSuite(2, "b", { group_name: "Shell", workflow: "suite-shell.yml" }), repoSuite(3, "a"),
+  ] as Suite[]);
+  expect(groups.map((g) => g.group)).toEqual(["Flights", "Shell", "Made in QEOS"]);
+  expect(groups[0].workflow).toBe("suite-flights.yml");
+  expect(groups[2].workflow).toBeNull();
+});
+
+test("a repository suite page is read-only and shows where it comes from", async () => {
+  asRole("member");
+  const sc = (n: number) => ({ number: n, key: `TC-${n}`, title: `Case ${n}`, status: "draft", priority: "medium", labels: [], automated_test_key: null });
+  server.use(http.get(`${P}/suites/2`, () => HttpResponse.json({ ...repoSuite(2, "Amadeus non-booking"), cases: [sc(1), sc(2)] })));
+  renderAt("/projects/42/suites/2");
+  expect(await screen.findByText("suite-flights.yml")).toBeInTheDocument();
+  expect(screen.getByText("flights-amadeus-non-booking")).toBeInTheDocument();
+  expect(screen.getByText("tests/features/flights/amadeus")).toBeInTheDocument();
+  expect(screen.getByText("Managed by the repository: change the workflow to change this suite.")).toBeInTheDocument();
+  expect(screen.getByRole("link", { name: "TC-2" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^save/i })).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /move|remove/i })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText(/find cases to add/i)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /delete suite/i })).not.toBeInTheDocument();
+});
+
+test("a sharded repository suite page explains the halves", async () => {
+  asRole("member");
+  server.use(http.get(`${P}/suites/3`, () => HttpResponse.json({ ...repoSuite(3, "Big folder 1/2", { shard: "1/2" }), cases: [] })));
+  renderAt("/projects/42/suites/3");
+  expect(await screen.findByText("Half 1 of 2")).toBeInTheDocument();
+  expect(screen.getByText(/GitHub splits this folder between Half 1 and Half 2 at run time; both list the whole folder\./)).toBeInTheDocument();
 });
 
 test("a suite's cases are added, reordered and saved as one ordered list", async () => {

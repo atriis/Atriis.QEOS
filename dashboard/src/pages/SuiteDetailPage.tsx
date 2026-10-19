@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { ArrowDown, ArrowLeft, ArrowUp, X } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { SuiteCase, deleteSuite, getSuite, listCases, setSuiteCases, updateSuite } from "../api/cases";
+import { SuiteCase, deleteSuite, getSuite, listCases, setSuiteCases, shardText, updateSuite } from "../api/cases";
 import ConfirmButton from "../components/ConfirmButton";
 import RunControl from "../components/RunControl";
 import ErrorBanner from "../components/ErrorBanner";
@@ -16,7 +16,7 @@ export default function SuiteDetailPage() {
   const { projectId, suiteId } = useParams();
   const id = Number(projectId);
   const sid = Number(suiteId);
-  const canEdit = useCanEdit(id) === true;
+  const canEditProject = useCanEdit(id) === true;
   const qc = useQueryClient();
   const navigate = useNavigate();
 
@@ -34,6 +34,10 @@ export default function SuiteDetailPage() {
 
   // The saved suite's automated cases are what Run suite runs (manual ones are skipped)
   const estimate = useDurationEstimate(id, (suite.data?.cases ?? []).filter((c) => c.source_path !== null).map((c) => c.automated_test_key));
+
+  // A suite synced from the repository is read-only: its workflow decides what it holds
+  const fromRepo = suite.data?.origin === "repository";
+  const canEdit = canEditProject && !fromRepo;
 
   const [search, setSearch] = useState("");
   const [asked, setAsked] = useState<string | null>(null);
@@ -107,6 +111,27 @@ export default function SuiteDetailPage() {
       <RunControl projectId={id} cases={suite.data.cases.map((c) => ({ number: c.number, title: c.title, manual: c.source_path === null, testKey: c.automated_test_key }))}
         selection={{ suite_id: sid }} label="Run suite" emphasis={!dirty && !detailsDirty}
         emptyReason={suite.data.cases.length === 0 ? "This suite has no cases" : "This suite has no automated cases"} />
+
+      {fromRepo && (
+        <section className="card" aria-labelledby="suite-source">
+          <h2 id="suite-source">From the repository</h2>
+          <dl className="suite-facts">
+            <dt>Workflow</dt><dd>{suite.data.workflow}</dd>
+            <dt>Suite id</dt><dd>{suite.data.external_id}</dd>
+            {suite.data.source_repo && <><dt>Repository</dt><dd>{suite.data.source_repo}</dd></>}
+            {suite.data.shard && <><dt>Shard</dt><dd>{shardText(suite.data.shard)}</dd></>}
+            {suite.data.test_paths && suite.data.test_paths.length > 0 && (
+              <><dt>Test paths</dt><dd>{suite.data.test_paths.map((t) => <div key={t}>{t}</div>)}</dd></>
+            )}
+          </dl>
+          {suite.data.shard && (
+            <p className="muted">
+              GitHub splits this folder between Half 1 and Half 2 at run time; both list the whole folder.
+            </p>
+          )}
+          <p className="muted">Managed by the repository: change the workflow to change this suite.</p>
+        </section>
+      )}
 
       <section className="card" aria-labelledby="suite-cases">
         <h2 id="suite-cases">Cases, in order <span className="muted">({cases.length})</span></h2>

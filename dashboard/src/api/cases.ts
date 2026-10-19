@@ -183,6 +183,21 @@ export interface Suite {
   case_count: number;
   created_at: string;
   updated_at: string | null;
+  /** "repository" suites come from a workflow in the product repository and are read-only here. */
+  origin?: "manual" | "repository";
+  workflow?: string | null;
+  group_name?: string | null;
+  external_id?: string | null;
+  /** "1/2" for the first of two halves of one folder. */
+  shard?: string | null;
+  test_paths?: string[] | null;
+  source_repo?: string | null;
+}
+
+/** "1/2" as "Half 1 of 2". */
+export function shardText(shard: string): string {
+  const [n, of] = shard.split("/");
+  return `Half ${n} of ${of}`;
 }
 
 export interface SuiteCase {
