@@ -95,10 +95,11 @@ def _export(db: Session, project_id: int) -> Iterator[bytes]:
         results = (db.query(RunResult).options(undefer(RunResult.log)).filter_by(run_id=run_id)
                    .order_by(RunResult.id).yield_per(1000))
         for result in results:
-            record = {"type": "result", **_row(result, _RESULT_INTERNAL), "log_values": values.get(result.id, [])}
+            result_line = {"type": "result", **_row(result, _RESULT_INTERNAL),
+                           "log_values": values.get(result.id, [])}
             if result.id in screenshots:
-                record["screenshots"] = screenshots[result.id]
-            yield _line(record)
+                result_line["screenshots"] = screenshots[result.id]
+            yield _line(result_line)
         db.expunge_all()  # keep the session from growing with every exported row
 
 

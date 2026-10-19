@@ -224,11 +224,16 @@ service runs it with `--loop`):
   values and screenshot references (`result_screenshots`).
 - Then a **garbage pass** deletes the screenshot images (ADR-036) that no result shows any more and that are
   older than 7 days (the 7 days cover an image uploaded before its run, or a part resent days later): the `blobs`
-  rows first, committed, then their objects in storage. "Unreferenced" is checked again inside the `DELETE`, so a
-  result linked meanwhile keeps its image. A store that refuses to delete is logged (`gc_objects_not_deleted`) and
-  leaves an orphan object, never a row pointing at a missing image. Without artifact storage only the rows go.
-  Blobs of a project on legal hold stay. The summary counts `blobs_deleted`; `--dry-run` counts them without
-  deleting.
+  rows first, committed, then their objects in storage. "Unreferenced" is checked again inside the `DELETE`, but on its
+  own snapshot, so a reference committed while ingest held its lock can be missed; the foreign key from
+  `result_screenshots` then refuses that delete, the batch is retried one image at a time, and an image that still
+  fails is skipped and logged (`gc_blobs_skipped`) until the next pass. A store that refuses to delete is logged
+  (`gc_objects_not_deleted`) and leaves an orphan object, never a row pointing at a missing image. Without artifact
+  storage only the rows go. Only projects that project-service listed are touched, and never one on legal hold: an
+  empty answer deletes no image. `RETENTION_BATCH_SIZE` also sets the batch size here. The summary counts
+  `blobs_deleted`; `--dry-run` counts the images unreferenced now, not those the pass would free by deleting runs.
+  Known limit: an image uploaded again between the row delete and the object delete loses its object (the run and
+  result are kept, the image is missing); only images unreferenced for more than 7 days are exposed.
 - A **deleted** project (ADR-034) keeps everything, keys included, for `PROJECT_DELETE_GRACE_DAYS` (default 7):
   it can still be restored as it was. After that the pass purges it in every service, each step recorded in
   project-service (`POST /internal/v1/projects/{id}/purge-state`) so a failed pass resumes: `started` (refused for
@@ -311,7 +316,7 @@ run (`type: run`, with its `changed_files` and `components`) followed by its res
 (`type: result`, with `failed_step_text`, `failed_step_line`, `failed_step_definition` and `failed_step_pattern`). Each result line carries its `log` and `log_values` (`[{"pattern", "value"}]`). A result with screenshots also carries `screenshots` (`[{"step_text", "step_line", "hook", "media_type", "bytes", "sha256"}]`, in position order; omitted when it has none). **The screenshot images are not exported, only these references**, and they are deleted with the project. The format stays `1`: the field is additive and the export has no version rule beyond that number. Text is exported as stored, masked. For a legal request, or before deleting
 a project. The dashboard's Settings → Data has a download button.
 - `RETENTION_INTERVAL_HOURS` (default 24) between passes with `--loop`; `RETENTION_BATCH_SIZE`
-  (default 500) runs per transaction. One pass at a time (PostgreSQL advisory lock).
+  (default 500) runs per transaction, and images per batch of the garbage pass. One pass at a time (PostgreSQL advisory lock).
 - Logs one JSON line per pass; the password is never logged (`user:***@host`).
 
 ## Analytics

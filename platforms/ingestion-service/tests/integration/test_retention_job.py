@@ -331,7 +331,7 @@ def blob_ids(db):
 
 def test_gc_deletes_unreferenced_blob_older_than_7_days(db, session_factory, answer, add_blob, store):
     add_blob(8)
-    answer([])
+    answer([live(1, 30)])
     assert run_job(session_factory) == 0
     assert blob_ids(db) == []
     assert store.objects == {}
@@ -339,7 +339,7 @@ def test_gc_deletes_unreferenced_blob_older_than_7_days(db, session_factory, ans
 
 def test_gc_keeps_unreferenced_blob_6_days_old(db, session_factory, answer, add_blob, store):
     keep = add_blob(6)
-    answer([])
+    answer([live(1, 30)])
     assert run_job(session_factory) == 0
     assert blob_ids(db) == [keep]
     assert len(store.objects) == 1
@@ -379,7 +379,7 @@ def test_retention_deletes_screenshot_rows_with_results(db, session_factory, ans
 def test_gc_deletes_rows_and_skips_objects_without_a_store(db, session_factory, answer, add_blob, monkeypatch):
     add_blob(8)
     monkeypatch.setattr(retention, "get_artifact_store", lambda: None)
-    answer([])
+    answer([live(1, 30)])
     assert run_job(session_factory) == 0
     assert blob_ids(db) == []
 
@@ -392,7 +392,7 @@ def test_gc_deletes_only_what_the_delete_itself_finds_unreferenced(db, store, ad
     result = db.query(RunResult).filter_by(run_id=add_run(1, 1)).one()
     db.add(ResultScreenshot(result_id=result.id, position=0, blob_id=kept, step_text="When x"))
     db.commit()
-    assert retention.collect_unreferenced_blobs(db, store, NOW) == 1
+    assert retention.collect_unreferenced_blobs(db, store, NOW, projects=[1]) == 1
     assert blob_ids(db) == [kept]
     assert len(store.objects) == 1
 
@@ -406,7 +406,7 @@ def test_gc_survives_a_store_that_refuses_to_delete(db, store, add_blob, capsys)
         raise ArtifactDeleteError("1 of 1 objects not deleted")
 
     store.delete = refuse
-    assert retention.collect_unreferenced_blobs(db, store, NOW) == 1
+    assert retention.collect_unreferenced_blobs(db, store, NOW, projects=[1]) == 1
     assert blob_ids(db) == []
     assert "gc_objects_not_deleted" in capsys.readouterr().err
 
@@ -414,13 +414,13 @@ def test_gc_survives_a_store_that_refuses_to_delete(db, store, add_blob, capsys)
 def test_gc_works_in_batches(db, store, add_blob):
     for letter in "abcde":
         add_blob(9, sha=letter)
-    assert retention.collect_unreferenced_blobs(db, store, NOW, batch=2) == 5
+    assert retention.collect_unreferenced_blobs(db, store, NOW, batch=2, projects=[1]) == 5
     assert blob_ids(db) == [] and store.objects == {}
 
 
 def test_dry_run_gc_deletes_nothing(db, session_factory, answer, add_blob, store):
     keep = add_blob(9)
-    answer([])
+    answer([live(1, 30)])
     assert run_job(session_factory, "--dry-run") == 0
     assert blob_ids(db) == [keep] and len(store.objects) == 1
 
@@ -430,3 +430,46 @@ def test_gc_leaves_blobs_of_a_project_on_legal_hold(db, session_factory, answer,
     answer([{**live(1, 30), "legal_hold": True}])
     assert run_job(session_factory) == 0
     assert blob_ids(db) == [keep]
+
+
+def test_gc_touches_only_listed_projects(db, session_factory, answer, add_blob):
+    keep = add_blob(9, project_id=2)
+    answer([live(1, 30)])
+    assert run_job(session_factory) == 0
+    assert blob_ids(db) == [keep]
+
+
+def test_an_empty_answer_deletes_no_blob(db, session_factory, answer, add_blob, store):
+    keep = add_blob(9)
+    answer([])
+    assert run_job(session_factory) == 0
+    assert blob_ids(db) == [keep] and len(store.objects) == 1
+
+
+def test_gc_skips_a_blob_the_database_refuses_to_delete_and_deletes_the_rest(db, store, add_blob, capsys):
+    from sqlalchemy import text
+
+    first, contended, last = add_blob(9, sha="a"), add_blob(9, sha="b"), add_blob(9, sha="c")
+    # What the foreign key does to a delete that missed a reference committed meanwhile
+    db.execute(text("CREATE TRIGGER refuse BEFORE DELETE ON blobs WHEN OLD.sha256 = '" + "b" * 64 + "' "
+                    "BEGIN SELECT RAISE(ABORT, 'FOREIGN KEY constraint failed'); END"))
+    db.commit()
+    assert retention.collect_unreferenced_blobs(db, store, NOW, batch=5, projects=[1]) == 2
+    assert blob_ids(db) == [contended]
+    assert len(store.objects) == 1
+    assert "gc_blobs_skipped" in capsys.readouterr().err and first < last
+
+
+def test_a_store_failure_during_the_job_does_not_fail_the_pass(db, session_factory, answer, add_blob, store, capsys):
+    from src.ingestion.utils.artifact_store import ArtifactDeleteError
+
+    add_blob(9)
+
+    def refuse(keys):
+        raise ArtifactDeleteError("not deleted")
+
+    store.delete = refuse
+    answer([live(1, 30)])
+    assert run_job(session_factory) == 0
+    assert blob_ids(db) == []
+    assert summary(capsys)["blobs_deleted"] == 1

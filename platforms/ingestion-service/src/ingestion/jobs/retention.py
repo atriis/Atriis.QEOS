@@ -16,12 +16,13 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Iterator, List, Optional
+from typing import Callable, Iterable, Iterator, List, Optional
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
 from sqlalchemy import exists, select, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Query, Session, sessionmaker
 
 from src.ingestion.core.config import settings
@@ -173,9 +174,11 @@ def run_pass(
         runs = db.query(Run.id).filter(
             Run.project_id == policy.project_id, Run.created_at < now - timedelta(days=policy.days))
         runs_deleted += runs.count() if dry_run else _delete_in_batches(db, runs, batch_size)
-    held = {policy.project_id for policy in policies if policy.legal_hold}
-    blobs_deleted = (_unreferenced_blobs(db, now, held).count() if dry_run
-                     else collect_unreferenced_blobs(db, store, now, batch_size, exclude_projects=held))
+    # Only projects project-service listed, and never one on hold: an empty or partial answer deletes nothing more.
+    # A dry run counts the images unreferenced now, not those this pass's run deletion would free.
+    gc_projects = sorted(policy.project_id for policy in policies if not policy.legal_hold)
+    blobs_deleted = (_unreferenced_blobs(db, now, gc_projects).count() if dry_run
+                     else collect_unreferenced_blobs(db, store, now, batch_size, projects=gc_projects))
     listed = {policy.project_id for policy in policies}
     known = {pid for (pid,) in db.query(Run.project_id).distinct()} | {
         pid for (pid,) in db.query(ApiKey.project_id).distinct()
@@ -215,31 +218,66 @@ def _no_reference():
     return ~exists().where(ResultScreenshot.blob_id == Blob.id)
 
 
-def _unreferenced_blobs(db: Session, now: datetime, exclude_projects=frozenset()) -> Query:
-    query = db.query(Blob.id).filter(_no_reference(), Blob.created_at < now - timedelta(days=BLOB_GRACE_DAYS))
-    return query.filter(Blob.project_id.notin_(exclude_projects)) if exclude_projects else query
+def _unreferenced_blobs(db: Session, now: datetime, projects: Iterable[int], skip: Iterable[int] = ()) -> Query:
+    query = db.query(Blob.id).filter(
+        _no_reference(), Blob.created_at < now - timedelta(days=BLOB_GRACE_DAYS), Blob.project_id.in_(list(projects)))
+    return query.filter(Blob.id.notin_(list(skip))) if skip else query
 
 
-def collect_unreferenced_blobs(
-    db: Session, store: Optional[ArtifactStore], now: datetime, batch: int = 500, exclude_projects=frozenset(),
-) -> int:
-    """Deletes the images (ADR-036) that no result shows and that are older than BLOB_GRACE_DAYS, in batches.
-    "Unreferenced" is checked again inside the DELETE, so an ingest that links a blob meanwhile saves it. Rows go
-    first and are committed, then the objects of exactly the rows deleted: a crash in between leaves an orphan
-    object, which is harmless, where the other order could leave a row pointing at a missing image. Without a
-    store only the rows go. Returns the rows deleted."""
-    cutoff = now - timedelta(days=BLOB_GRACE_DAYS)
-    deleted = 0
-    while True:
-        ids = [blob_id for (blob_id,) in
-               _unreferenced_blobs(db, now, exclude_projects).order_by(Blob.id).limit(batch)]
-        if not ids:
-            return deleted
-        rows = db.execute(
+def _delete_blobs(db: Session, ids: List[int], cutoff: datetime) -> list:
+    """One DELETE in its own savepoint, so a failure leaves the transaction usable. Returns the rows deleted."""
+    with db.begin_nested():
+        return db.execute(
             Blob.__table__.delete()
             .where(Blob.id.in_(ids), _no_reference(), Blob.created_at < cutoff)
             .returning(Blob.id, Blob.project_id, Blob.sha256)
         ).all()
+
+
+def collect_unreferenced_blobs(
+    db: Session, store: Optional[ArtifactStore], now: datetime, batch: int = 500,
+    projects: Optional[Iterable[int]] = None,
+) -> int:
+    """Deletes the images (ADR-036) that no result shows and that are older than BLOB_GRACE_DAYS, in batches, for
+    `projects` only (None: every project; an empty collection: none). Returns the rows deleted.
+
+    Rows go first and are committed, then the objects of exactly the rows deleted: a crash in between leaves an
+    orphan object, which is harmless, where the other order could leave a row pointing at a missing image.
+    Without a store only the rows go.
+
+    What protects an image that a result starts showing meanwhile: the DELETE checks "unreferenced" again, but on
+    its own snapshot, so under READ COMMITTED it can miss a reference committed while it waited for ingest's lock.
+    Then the foreign key from result_screenshots refuses the delete (IntegrityError). The batch is retried one row at
+    a time, each in a savepoint, and a row that still fails is skipped and logged (`gc_blobs_skipped`): the next
+    pass sees it referenced. One contended image never stalls the batch or the pass.
+
+    Known limit: an image uploaded again between the row delete and the object delete loses its object, so a result
+    that refers to it shows no image (the run and result are kept). Only images unreferenced for more than
+    BLOB_GRACE_DAYS are exposed to it."""
+    cutoff = now - timedelta(days=BLOB_GRACE_DAYS)
+    deleted, tried = 0, set()
+    scope = None if projects is None else list(projects)
+    while True:
+        query = db.query(Blob.id).filter(
+            _no_reference(), Blob.created_at < cutoff, *([Blob.id.notin_(list(tried))] if tried else []))
+        if scope is not None:
+            query = query.filter(Blob.project_id.in_(scope))
+        ids = [blob_id for (blob_id,) in query.order_by(Blob.id).limit(batch)]
+        if not ids:
+            return deleted
+        tried.update(ids)  # each candidate is tried once per pass, so the loop always ends
+        try:
+            rows = _delete_blobs(db, ids, cutoff)
+        except IntegrityError:
+            rows, skipped = [], []
+            for blob_id in ids:
+                try:
+                    rows += _delete_blobs(db, [blob_id], cutoff)
+                except IntegrityError:
+                    skipped.append(blob_id)
+            if skipped:
+                _log({"event": "gc_blobs_skipped", "blob_ids": skipped,
+                      "reason": "referenced while the pass ran"}, error=True)
         db.commit()
         deleted += len(rows)
         if store is not None and rows:
@@ -248,8 +286,6 @@ def collect_unreferenced_blobs(
             except Exception as exc:  # the rows are gone: orphan objects waste space but break nothing
                 _log({"event": "gc_objects_not_deleted", "blobs": len(rows),
                       "error": f"{type(exc).__name__}: {exc}"}, error=True)
-        if not rows:
-            return deleted  # every candidate got a reference meanwhile; a new pass finds the rest
 
 
 @contextmanager

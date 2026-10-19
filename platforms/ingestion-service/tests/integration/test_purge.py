@@ -181,3 +181,27 @@ def test_purge_without_a_store_deletes_only_the_rows(db, session_factory, answer
     assert run_job(session_factory) == 0
     db.expire_all()
     assert db.query(Blob).count() == 0
+
+
+def test_a_store_that_fails_during_the_purge_fails_the_step_and_keeps_the_rows(
+        db, session_factory, answer, services, monkeypatch):
+    from src.ingestion.jobs import purge
+    from src.ingestion.models import Blob
+    from src.ingestion.utils.artifact_store import MemoryArtifactStore
+
+    store = MemoryArtifactStore()
+
+    def broken(prefix):
+        raise RuntimeError("storage is down")
+
+    store.delete_prefix = broken
+    monkeypatch.setattr(purge, "get_artifact_store", lambda: store)
+    db.add(Blob(project_id=1, sha256="a" * 64, media_type="image/png", bytes=1))
+    db.commit()
+    answer([gone(1, days_ago=8)])
+    routes = services(1)
+    assert run_job(session_factory) == 1
+    db.expire_all()
+    assert db.query(Blob).count() == 1  # the next pass finds them and retries
+    steps = [call.request.read() for call in routes["step"].calls]
+    assert b'{"step":"ingestion"}' not in steps and routes["row"].call_count == 0
