@@ -55,6 +55,8 @@ export interface CaseQuery {
   folder?: string;
   linked?: "true" | "false";
   feature?: string;
+  /** "none": imported, active cases in no repository suite. */
+  suite?: "none";
   /** Azure DevOps work item number: matches the label ado-<n>. */
   ado?: string;
   limit: number;
@@ -244,6 +246,13 @@ export function updateSuite(
 /** Replaces the suite's whole ordered list of cases. */
 export function setSuiteCases(projectId: number, suiteId: number, numbers: number[]): Promise<SuiteDetail> {
   return apiFetch(`${base(projectId)}/suites/${suiteId}/cases`, { method: "PUT", body: JSON.stringify({ cases: numbers }) });
+}
+
+/** Adds cases to the end of a manual suite; the ones already in it are counted, not repeated. */
+export function appendSuiteCases(
+  projectId: number, suiteId: number, numbers: number[],
+): Promise<{ added: number; already: number; suite: SuiteDetail }> {
+  return apiFetch(`${base(projectId)}/suites/${suiteId}/cases/append`, { method: "POST", body: JSON.stringify({ cases: numbers }) });
 }
 
 export function deleteSuite(projectId: number, suiteId: number): Promise<void> {

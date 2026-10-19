@@ -17,6 +17,7 @@ import FilterBar from "../components/FilterBar";
 import FilterChips, { revealFilters, type AppliedFilter, type QuickChip } from "../components/FilterChips";
 import FiltersDisclosure from "../components/FiltersDisclosure";
 import FilterSelect from "../components/FilterSelect";
+import AddToSuiteDialog from "../components/AddToSuiteDialog";
 import FolderSelect from "../components/FolderSelect";
 import PeriodRange from "../components/PeriodRange";
 import FeatureList from "../components/FeatureList";
@@ -34,12 +35,12 @@ import { tableCardClass, useIsWide } from "../lib/useIsWide";
 const RESULTS = ["passed", "failed", "skipped", "never"];
 const LEGEND = [["passed", "Passed"], ["failed", "Failed"], ["rerun", "Re-run"], ["skipped", "Skipped"]] as const;
 // `period` (a preset) or `from`/`to` (a custom range): only cases with a result in that period (2026-10-16)
-const KEYS = ["q", "label", "status", "priority", "folder", "linked", "result", "period", "from", "to"] as const;
+const KEYS = ["q", "label", "status", "priority", "folder", "linked", "suite", "result", "period", "from", "to"] as const;
 // The form also holds where the search looks; it is part of the search, not a filter of its own (no chip)
 const FORM_KEYS = [...KEYS, "search_in"] as const;
 type Values = Record<(typeof FORM_KEYS)[number], string>;
 // Filters GET /features cannot apply: with one of these the Feature view groups the matching cases itself
-const CASE_ONLY = ["result", "period", "from", "to"] as const;
+const CASE_ONLY = ["result", "suite", "period", "from", "to"] as const;
 type Group = "feature" | "scenario";
 const LIKELY_AFFECTED_ID = "likely-affected";
 const SEARCH_IN_NAMES: Record<SearchIn, string> = { feature: "Feature", scenario: "Scenario", both: "Both" };
@@ -58,11 +59,12 @@ const QUICK: QuickChip[] = [
 // How an applied filter reads in its chip
 const FILTER_NAMES: Record<(typeof KEYS)[number], string> = {
   q: "Search", label: "Label", status: "Status", priority: "Priority", folder: "Folder",
-  linked: "Link", result: "Latest result", period: "Period", from: "Period", to: "Period",
+  linked: "Link", suite: "Suite", result: "Latest result", period: "Period", from: "Period", to: "Period",
 };
 const VALUE_NAMES: Partial<Record<(typeof KEYS)[number], Record<string, string>>> = {
   status: { draft: "Draft", ready: "Ready", archived: "Archived" },
   linked: { true: "Linked", false: "Not linked" },
+  suite: { none: "Not in any suite" },
   result: { passed: "Passed", failed: "Failed", skipped: "Skipped", never: "Never ran" },
 };
 const isPreset = (s: string): s is Preset => (PRESETS as readonly string[]).includes(s);
@@ -180,7 +182,7 @@ export default function CasesPage() {
     queryFn: async () => {
       const base = {
         search: applied.q || undefined, search_in: applied.q ? searchIn : undefined, status, priority,
-        folder: applied.folder || undefined,
+        folder: applied.folder || undefined, suite: applied.suite === "none" ? ("none" as const) : undefined,
         limit: caseLimit, offset: caseOffset,
       };
       const plain = { ...base, label: applied.label || undefined, linked: linked as "true" | "false" | undefined };
@@ -361,6 +363,8 @@ export default function CasesPage() {
               options={PRIORITIES.map((p) => ({ value: p, label: p }))} />
             <FilterSelect label="Link" value={form.linked} onChange={(v) => setForm({ ...form, linked: v })}
               options={[{ value: "true", label: "Linked" }, { value: "false", label: "Not linked" }]} />
+            <FilterSelect label="Suite" value={form.suite} onChange={(v) => setForm({ ...form, suite: v })}
+              options={[{ value: "none", label: "Not in any suite" }]} />
             <FilterSelect label="Latest result" value={form.result} onChange={(v) => setForm({ ...form, result: v })}
               options={[{ value: "passed", label: "Passed" }, { value: "failed", label: "Failed" }, { value: "skipped", label: "Skipped" }, { value: "never", label: "Never ran" }]} />
         </FiltersDisclosure>
@@ -440,6 +444,7 @@ export default function CasesPage() {
           <RunControl projectId={id} cases={[...picked].map(([number, p]) => ({ number, title: p.title, testKey: p.testKey }))}
             selection={{ case_numbers: [...picked.keys()] }} label={`Run selected (${picked.size})`}
             onStarted={() => { setPicked(new Map()); (tableRef.current ?? headingRef.current)?.focus(); }} />
+          <AddToSuiteDialog projectId={id} numbers={[...picked.keys()]} onDone={() => queryClient.invalidateQueries({ queryKey: ["cases", id] })} />
           {selectionEstimate.data?.estimate_ms != null && (
             <span className="run-selection-estimate">{`· ${approxDuration(selectionEstimate.data.estimate_ms)}`}</span>
           )}

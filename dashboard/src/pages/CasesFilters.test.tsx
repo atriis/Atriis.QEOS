@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
@@ -88,4 +88,64 @@ test("active filters open the disclosure even when the reader last left it close
   renderCases("/projects/42/cases?group=scenario&priority=high&status=ready");
   await screen.findByLabelText("Search");
   expect(disclosure()).toHaveAttribute("open");
+});
+
+const kase = (number: number) => ({
+  number, key: `TC-${number}`, title: `Case ${number}`, description: null, steps: [], labels: [], priority: "medium",
+  status: "draft", automated_test_key: null, automated_name: null, created_by: 1, created_at: "2026-10-06T10:00:00Z",
+  updated_by: null, updated_at: null, suites: [], source_path: "tests/features/a.feature", gherkin: "Scenario: x", feature_name: "A",
+});
+
+test("the Suite filter offers Not in any suite and lists with suite=none", async () => {
+  mockNarrow(false);
+  let asked: URLSearchParams | null = null;
+  server.use(http.get(`${P}/cases`, ({ request }) => {
+    asked = new URL(request.url).searchParams;
+    return HttpResponse.json({ total: 1, items: [kase(1)] });
+  }));
+  renderCases();
+  await userEvent.selectOptions(await screen.findByRole("combobox", { name: "Suite" }), "Not in any suite");
+  await userEvent.click(screen.getByRole("button", { name: "Apply" }));
+  await screen.findByRole("checkbox", { name: "Select TC-1 Case 1" });
+  expect(asked!.get("suite")).toBe("none");
+});
+
+test("with a latest-result filter, Not in any suite goes in the search body", async () => {
+  mockNarrow(false);
+  // The Failing tile searches too (without the suite): look at every body
+  const bodies: Record<string, unknown>[] = [];
+  server.use(
+    http.get(`${P}/analytics/latest-keys`, () => HttpResponse.json({ keys: ["t1"] })),
+    http.post(`${P}/cases/search`, async ({ request }) => {
+      bodies.push((await request.json()) as Record<string, unknown>);
+      return HttpResponse.json({ total: 1, items: [kase(1)] });
+    }),
+  );
+  renderCases("/projects/42/cases?group=scenario&suite=none&result=failed");
+  await screen.findByRole("checkbox", { name: "Select TC-1 Case 1" });
+  await vi.waitFor(() => expect(bodies.some((b) => b.suite === "none")).toBe(true));
+});
+
+test("Add to suite sits next to Run selected, and the selection survives the dialog closing", async () => {
+  mockNarrow(false);
+  server.use(
+    http.get(`${P}/cases`, () => HttpResponse.json({ total: 2, items: [kase(1), kase(2)] })),
+    http.get(`${P}/suites`, () => HttpResponse.json([])),
+  );
+  renderCases();
+  await userEvent.click(await screen.findByRole("checkbox", { name: "Select TC-1 Case 1" }));
+  const bar = screen.getByRole("region", { name: "Selected cases" });
+  expect(within(bar).getByRole("button", { name: "Run selected (1)" })).toBeInTheDocument();
+  await userEvent.click(within(bar).getByRole("button", { name: "Add to suite" }));
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(within(bar).getByRole("button", { name: "Run selected (1)" })).toBeInTheDocument();
+  expect(screen.getByRole("checkbox", { name: "Select TC-1 Case 1" })).toBeChecked();
+});
+
+test("a viewer sees no Add to suite", async () => {
+  mockNarrow(false);
+  server.use(http.get(P, () => HttpResponse.json({ id: 42, organization_id: 1, name: "Web", my_role: "viewer" })));
+  renderCases();
+  await screen.findByRole("heading", { name: "Test cases" });
+  expect(screen.queryByRole("button", { name: "Add to suite" })).not.toBeInTheDocument();
 });
