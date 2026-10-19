@@ -38,6 +38,7 @@ def list_cases(
     linked: Optional[bool] = Query(None),
     feature: Optional[str] = Query(None, max_length=500, pattern=NO_NUL),
     ado: Optional[str] = Query(None, pattern=r"^[0-9]{1,12}$"),
+    suite: Optional[Literal["none"]] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -46,7 +47,7 @@ def list_cases(
     total, rows = case_service.list_cases(
         db, access.project_id, search=search, search_in=search_in, labels=label, status=status_filter, priority=priority,
         include_archived=include_archived, origin=origin, limit=limit, offset=offset,
-        folder=folder, linked=linked, feature=feature, ado=ado,
+        folder=folder, linked=linked, feature=feature, ado=ado, suite=suite,
     )
     return {"total": total, "items": [case_service.out(r) for r in rows]}
 

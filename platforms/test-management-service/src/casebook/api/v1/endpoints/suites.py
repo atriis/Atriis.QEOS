@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from src.casebook.api.deps import EDIT_ROLES, READ_ROLES, ProjectAccess, get_db, require_project_role
-from src.casebook.schemas.suite import SuiteCasesIn, SuiteCreate, SuiteDetail, SuiteOut, SuiteUpdate
+from src.casebook.schemas.suite import SuiteAppendOut, SuiteCasesIn, SuiteCreate, SuiteDetail, SuiteOut, SuiteUpdate
 from src.casebook.service import suite_service
 
 router = APIRouter()  # mounted at /projects/{project_id}/suites
@@ -92,6 +92,21 @@ def set_suite_cases(
     except suite_service.BadCaseList as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     return suite_service.out(db, row, with_cases=True)
+
+
+@router.post("/{suite_id}/cases/append", response_model=SuiteAppendOut)
+def append_suite_cases(
+    suite_id: int,
+    payload: SuiteCasesIn,
+    db: Session = Depends(get_db),
+    access: ProjectAccess = Depends(require_project_role(*EDIT_ROLES)),
+):
+    row = _manual_suite_or_409(db, access, suite_id)
+    try:
+        added, already = suite_service.append_cases(db, row, payload.cases)
+    except suite_service.BadCaseList as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
+    return {"added": added, "already": already, "suite": suite_service.out(db, row, with_cases=True)}
 
 
 @router.delete("/{suite_id}", status_code=status.HTTP_204_NO_CONTENT)

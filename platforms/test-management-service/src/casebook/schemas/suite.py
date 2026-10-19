@@ -29,6 +29,12 @@ class SuiteCasesIn(BaseModel):
     cases: List[Annotated[int, Field(ge=1)]] = Field(max_length=MAX_SUITE_CASES)
 
 
+class SuiteAppendOut(BaseModel):
+    added: int
+    already: int
+    suite: "SuiteDetail"
+
+
 class SuiteOut(BaseModel):
     id: int
     name: str
@@ -58,3 +64,6 @@ class SuiteCaseOut(BaseModel):
 
 class SuiteDetail(SuiteOut):
     cases: List[SuiteCaseOut]
+
+
+SuiteAppendOut.model_rebuild()

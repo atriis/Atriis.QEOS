@@ -2,7 +2,7 @@
 import re
 from collections import Counter
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from sqlalchemy import case as sql_case, exists, false, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -133,7 +133,8 @@ def filtered_cases(db: Session, project_id: int, *, search: Optional[str], label
                    status: Optional[str], priority: Optional[str], include_archived: bool,
                    origin: Optional[str] = None, folder: Optional[str] = None, linked: Optional[bool] = None,
                    feature: Optional[str] = None, ado: Optional[str] = None,
-                   test_keys: Optional[List[str]] = None, keys_mode: str = "include", search_in: str = "scenario"):
+                   test_keys: Optional[List[str]] = None, keys_mode: str = "include", search_in: str = "scenario",
+                   suite: Optional[Literal["none"]] = None):
     """The query behind GET /cases and GET /features, and the ordering a TC-key search wants (or None)."""
     query = db.query(Case).filter(Case.project_id == project_id)
     if status is not None:
@@ -162,6 +163,10 @@ def filtered_cases(db: Session, project_id: int, *, search: Optional[str], label
         query = query.filter(Case.feature_name == feature)
     if ado is not None:
         query = query.filter(exists().where(CaseLabel.case_id == Case.id, CaseLabel.label == f"ado-{ado}"))
+    if suite == "none":  # imported, live cases that no repository suite holds (the manual-suite ones still show)
+        query = query.filter(
+            Case.source_key.isnot(None), Case.status != "archived",
+            ~exists().where(SuiteCase.case_id == Case.id, Suite.id == SuiteCase.suite_id, Suite.origin == "repository"))
     if test_keys is not None:
         keys = list({k.lower() for k in test_keys})
         if keys_mode == "include":

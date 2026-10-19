@@ -119,6 +119,7 @@ class CaseSearch(BaseModel):
     linked: Optional[bool] = None
     feature: Optional[Folder] = None
     ado: Optional[AdoId] = None
+    suite: Optional[Literal["none"]] = None
     test_keys: Optional[List[TestKey]] = Field(None, max_length=20000)
     keys_mode: Literal["include", "exclude"] = "include"
     limit: int = Field(50, ge=1, le=200)

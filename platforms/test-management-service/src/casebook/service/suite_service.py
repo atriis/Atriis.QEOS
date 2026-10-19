@@ -1,12 +1,13 @@
 """Suites: a named, ordered list of a project's cases."""
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from src.casebook.models import Case, Suite, SuiteCase
+from src.casebook.schemas.suite import MAX_SUITE_CASES
 from src.casebook.service.case_service import _escape_like, case_key
 
 
@@ -108,6 +109,33 @@ def set_cases(db: Session, row: Suite, numbers: List[int]) -> Suite:
     db.commit()
     db.refresh(row)
     return row
+
+
+def append_cases(db: Session, row: Suite, numbers: List[int]) -> Tuple[int, int]:
+    """Adds the numbers the suite lacks at its end, in the order given. Returns (added, already in it)."""
+    if len(set(numbers)) != len(numbers):
+        raise BadCaseList("A case can be in a suite once")
+    found = {
+        c.number: c.id for c in
+        db.query(Case.number, Case.id).filter(Case.project_id == row.project_id, Case.number.in_(numbers)).all()
+    } if numbers else {}
+    missing = [n for n in numbers if n not in found]
+    if missing:
+        raise BadCaseList("No such case: " + ", ".join(case_key(n) for n in missing[:10]))
+    present = {
+        case_id for (case_id,) in db.query(SuiteCase.case_id).filter(SuiteCase.suite_id == row.id).all()
+    }
+    new = [found[n] for n in numbers if found[n] not in present]
+    if len(present) + len(new) > MAX_SUITE_CASES:
+        raise BadCaseList(f"A suite holds at most {MAX_SUITE_CASES} cases")
+    last = db.query(func.max(SuiteCase.position)).filter(SuiteCase.suite_id == row.id).scalar()
+    start = 0 if last is None else last + 1
+    db.add_all(SuiteCase(suite_id=row.id, case_id=cid, position=start + i) for i, cid in enumerate(new))
+    if new:
+        row.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(row)
+    return len(new), len(numbers) - len(new)
 
 
 def delete_suite(db: Session, row: Suite) -> None:
