@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import re
 from collections import Counter
 from datetime import datetime, timezone
@@ -11,14 +12,20 @@ from sqlalchemy.orm import Session
 
 from qeos_shared.keys import test_key
 from src.ingestion.core.config import settings
-from src.ingestion.models import ApiKey, LogValue, Run, RunChangedFile, RunComponent, RunResult
+from src.ingestion.models import ApiKey, Blob, LogValue, ResultScreenshot, Run, RunChangedFile, RunComponent, RunResult
 from src.ingestion.models.run import (
     FAILED_STEP_DEFINITION_LENGTH, FAILED_STEP_PATTERN_LENGTH, FAILED_STEP_TEXT_LENGTH, FULL_SCOPE,
 )
 from src.ingestion.schemas.collect import RunUpload
-from src.ingestion.service import collection_settings_service, impact_service, log_pattern_service, log_value_service, masking_pattern_service
+from src.ingestion.service import (
+    blob_service, collection_settings_service, impact_service, log_pattern_service, log_value_service,
+    masking_pattern_service,
+)
 from src.ingestion.utils import custom_masking, metrics
+from src.ingestion.utils.artifact_store import ArtifactStore
 from src.ingestion.utils.redaction import redact
+
+logger = logging.getLogger(__name__)
 
 CI_RUN_URL_LENGTH = 2048
 COMMIT_MESSAGE_LENGTH = 500
@@ -73,10 +80,13 @@ def _request_hash(upload: RunUpload) -> str:
     for name, default in _LATER_RUN_FIELDS.items():
         if data["run"].get(name, default) == default:
             data["run"].pop(name, None)
-    # Result fields added by migrations 021, 022 and 023: absent from the hash while null, for the same reason
+    # Result fields added by migrations 021, 022 and 023, and screenshots (025): absent from the hash while null, for
+    # the same reason
     for result in data["results"]:
         if result.get("log") is None:
             result.pop("log", None)
+        if result.get("screenshots") is None:
+            result.pop("screenshots", None)
         step = result.get("failed_step")
         if step is None:
             result.pop("failed_step", None)
@@ -117,7 +127,21 @@ def _replay(run: Run, request_hash: str) -> tuple[Run, bool]:
     return run, False
 
 
-def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optional[str]) -> tuple[Run, bool]:
+def _blob_ids(db: Session, project_id: int, upload: RunUpload, store: Optional[ArtifactStore]) -> Optional[dict[str, int]]:
+    """sha256 -> blob id for every image the upload refers to, in one query. Only this project's blobs: a hash stored
+    for another project is not found. None when the upload refers to none or the project does not keep screenshots:
+    the references are dropped silently, an image problem never fails a run upload."""
+    hashes = {shot.sha256 for result in upload.results for shot in result.screenshots or ()}
+    if not hashes or not blob_service.screenshots_enabled(db, project_id, store):
+        return None
+    rows = db.query(Blob.sha256, Blob.id).filter(Blob.project_id == project_id, Blob.sha256.in_(hashes)).all()
+    return {sha: blob_id for sha, blob_id in rows}
+
+
+def ingest(
+    db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optional[str],
+    store: Optional[ArtifactStore] = None,
+) -> tuple[Run, bool]:
     request_hash = _request_hash(upload)
     if idempotency_key is not None:
         existing = _existing(db, key.project_id, idempotency_key)
@@ -144,6 +168,9 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
     if commit_message is not None:
         commit_message = commit_message[:COMMIT_MESSAGE_LENGTH]
     masked_kinds: Counter = Counter()
+    blob_ids = _blob_ids(db, key.project_id, upload, store)
+    shots_pending: list[list[dict]] = []  # per result, in row order: its screenshot rows without result_id
+    shots_unknown = 0
     run = Run(
         project_id=key.project_id,
         api_key_id=key.id,
@@ -196,6 +223,18 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
             step_pattern, pattern_kinds = mask(step.pattern if step else None, patterns)
             log, log_kinds = mask(result.log, patterns)
             kinds = message_kinds | details_kinds | step_kinds | definition_kinds | pattern_kinds
+            shots = []
+            for index, shot in enumerate(result.screenshots or () if blob_ids is not None else ()):
+                if shot.sha256 not in blob_ids:
+                    shots_unknown += 1
+                    continue
+                shot_text, shot_kinds = mask(shot.step_text, patterns)
+                kinds |= shot_kinds  # the step text is shown on the run page, like failed_step_text
+                shots.append({
+                    "position": index, "blob_id": blob_ids[shot.sha256],
+                    "step_text": shot_text[:FAILED_STEP_TEXT_LENGTH], "step_line": shot.step_line, "hook": shot.hook,
+                })
+            shots_pending.append(shots)
             # The log counts in the redactions metric; `redacted` stays about the text the run page shows
             masked_kinds.update(kinds | log_kinds)
             message, cut_message = truncate_utf8(message, settings.MAX_TEXT_BYTES)
@@ -222,15 +261,22 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
                 "failed_step_pattern": step_pattern[:FAILED_STEP_PATTERN_LENGTH] if step_pattern is not None else None,
                 "log": log,
             })
-        if log_patterns and any(row["log"] for row in rows):
-            # Values need each result's id: one executemany with RETURNING, in the order the rows were sent (ADR-032)
+        scan_logs = bool(log_patterns) and any(row["log"] for row in rows)
+        if scan_logs or any(shots_pending):
+            # Log values and screenshots need each result's id: one executemany with RETURNING, in the order the rows
+            # were sent (ADR-032, ADR-036)
             result_ids = db.execute(
                 insert(RunResult).returning(RunResult.id, sort_by_parameter_order=True), rows
             ).scalars().all()
-            values = [value for result_id, row in zip(result_ids, rows)
-                      for value in log_value_service.rows_for(result_id, row["log"], log_patterns)]
-            if values:
-                db.execute(insert(LogValue), values)
+            if scan_logs:
+                values = [value for result_id, row in zip(result_ids, rows)
+                          for value in log_value_service.rows_for(result_id, row["log"], log_patterns)]
+                if values:
+                    db.execute(insert(LogValue), values)
+            shot_rows = [{"result_id": result_id, **shot}
+                         for result_id, shots in zip(result_ids, shots_pending) for shot in shots]
+            if shot_rows:
+                db.execute(insert(ResultScreenshot), shot_rows)
         else:
             db.execute(insert(RunResult), rows)  # one executemany, not 20,000 ORM objects
 
@@ -251,6 +297,9 @@ def ingest(db: Session, key: ApiKey, upload: RunUpload, idempotency_key: Optiona
 
         key.last_used_at = datetime.now(timezone.utc)
         db.commit()
+        if shots_unknown:
+            logger.info("upload references screenshots that are not stored for the project: project=%s run=%s dropped=%s",
+                        key.project_id, run.id, shots_unknown)
         custom_names = {pattern.name for pattern in patterns}
         for kind, results in masked_kinds.items():
             # Project-chosen names would give the metric unbounded label values: one "custom" label

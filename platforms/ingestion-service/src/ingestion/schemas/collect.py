@@ -111,6 +111,21 @@ class FailedStepIn(BaseModel):
     _clean_text = field_validator("text", "definition", "pattern", mode="after")(_replace_unstorable)
 
 
+class ScreenshotIn(BaseModel):
+    """A step screenshot the collector already uploaded to PUT /collect/blobs/{sha256} (ADR-036): the run upload only
+    refers to it. Strict, unlike failed_step: a collector that sends the field knows this shape."""
+    model_config = ConfigDict(extra="forbid")
+
+    sha256: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+    media_type: Literal["image/png", "image/jpeg", "image/webp"]
+    step_text: Annotated[str, StringConstraints(max_length=1000)]
+    step_line: Optional[int] = Field(None, ge=1, le=1_000_000)
+    hook: Optional[Literal["before", "after"]] = None
+
+    # Free text like the failed step's: replaced, never rejected
+    _clean_text = field_validator("step_text", mode="after")(_replace_unstorable)
+
+
 class ResultIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -127,6 +142,8 @@ class ResultIn(BaseModel):
     failed_step: Optional[FailedStepIn] = None
     # The result's log (ADR-032, collector 0.9.0): masked and cut to 64 KB by the service, never rejected
     log: Optional[str] = None
+    # Step screenshots (ADR-036, spec 2026-10-19 §5.3): references to blobs, in the order shown
+    screenshots: Optional[list[ScreenshotIn]] = Field(None, max_length=50)
 
     _no_unstorable = field_validator("suite", "class_name", "name", "file", "owner", mode="before")(_reject_unstorable)
     _clean_text = field_validator("message", "details", "log", mode="after")(_replace_unstorable)

@@ -155,3 +155,28 @@ def test_unknown_failed_step_fields_are_ignored():
     step = {"text": "When x", "line": 3, "hook": "before", "location": {"uri": "f.feature"}}
     parsed = RunUpload.model_validate(body(results=[{"name": "t", "status": "failed", "failed_step": step}]))
     assert parsed.results[0].failed_step.model_dump() == {"text": "When x", "line": 3, "definition": None, "pattern": None}
+
+
+SHOT = {"sha256": "a" * 64, "media_type": "image/png", "step_text": "Given a step"}
+
+
+def test_a_result_may_carry_screenshots():
+    upload = RunUpload.model_validate(body(results=[{"name": "t", "status": "failed", "screenshots": [
+        {**SHOT, "step_line": 3, "hook": "after"}]}]))
+    [shot] = upload.results[0].screenshots
+    assert (shot.sha256, shot.step_line, shot.hook) == ("a" * 64, 3, "after")
+
+
+def test_more_than_50_screenshots_are_rejected():
+    results = [{"name": "t", "status": "failed", "screenshots": [SHOT] * 51}]
+    with pytest.raises(ValidationError):
+        RunUpload.model_validate(body(results=results))
+
+
+@pytest.mark.parametrize("shot", [
+    {**SHOT, "sha256": "A" * 64}, {**SHOT, "sha256": "a" * 63}, {**SHOT, "media_type": "image/gif"},
+    {**SHOT, "step_text": "x" * 1001}, {**SHOT, "step_line": 0}, {**SHOT, "hook": "during"}, {**SHOT, "extra": 1},
+])
+def test_a_bad_screenshot_is_rejected(shot):
+    with pytest.raises(ValidationError):
+        RunUpload.model_validate(body(results=[{"name": "t", "status": "failed", "screenshots": [shot]}]))

@@ -93,13 +93,14 @@ def collect_run(
     background: BackgroundTasks,
     db: Session = Depends(get_db),
     key: ApiKey = Depends(get_api_key),
+    store: Optional[ArtifactStore] = Depends(get_artifact_store),
     idempotency_key: Optional[str] = Header(
         None, alias="Idempotency-Key", min_length=1, max_length=255, pattern=r"^[\x21-\x7e]+$"
     ),
 ):
     with metrics.DURATION.time():
         try:
-            run, created = ingest_service.ingest(db, key, upload, idempotency_key)
+            run, created = ingest_service.ingest(db, key, upload, idempotency_key, store)
         except ingest_service.Discarded as exc:
             metrics.DISCARDED.labels(reason="manual").inc()
             logger.warning("upload discarded: project=%s api_key_id=%s ci_run_url=%s reason=%s",

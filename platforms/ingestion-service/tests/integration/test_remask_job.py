@@ -8,7 +8,7 @@ from sqlalchemy.orm import sessionmaker
 
 from src.ingestion.core.config import settings
 from src.ingestion.jobs import remask
-from src.ingestion.models import Run, RunResult
+from src.ingestion.models import Blob, ResultScreenshot, Run, RunResult
 from src.ingestion.models.run import FAILED_STEP_TEXT_LENGTH
 
 WHEN = datetime(2026, 9, 1, tzinfo=timezone.utc)
@@ -198,3 +198,23 @@ def test_a_dry_run_leaves_the_log_and_its_values(db, session_factory, add_run):
     db.expire_all()
     assert SECRET in db.query(RunResult).filter_by(run_id=run_id).one().log
     assert db.query(LogValue).count() == 1
+
+
+def test_remask_updates_screenshot_step_text(db, session_factory, add_run, capsys):
+    run_id = add_run(results=[("plain", None)])
+    result = results(db, run_id)[0]
+    blob = Blob(project_id=1, sha256="a" * 64, media_type="image/png", bytes=1)
+    db.add(blob)
+    db.flush()
+    db.add(ResultScreenshot(result_id=result.id, position=0, blob_id=blob.id, step_text=f"Given token {SECRET}"))
+    db.add(ResultScreenshot(result_id=result.id, position=1, blob_id=blob.id, step_text="Given nothing secret"))
+    db.commit()
+
+    assert run_job(session_factory) == 0
+    db.expire_all()
+    first, second = db.query(ResultScreenshot).order_by(ResultScreenshot.position).all()
+    assert SECRET not in first.step_text and "[REDACTED:github_token]" in first.step_text
+    assert second.step_text == "Given nothing secret"
+    assert db.get(RunResult, result.id).redacted is True
+    report = summary(capsys)
+    assert report["results_changed"] == 1 and report["kinds"] == {"github_token": 1}

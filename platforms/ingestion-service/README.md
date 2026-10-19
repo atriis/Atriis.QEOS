@@ -97,6 +97,7 @@ can sync cases without a user login. See ADR-024.
 - `message` and `details` over 64 KB are truncated (the result's `truncated` is true), never rejected.
 - A result may carry `failed_step` `{"text": 1-1000 characters, "line": 1-1,000,000, "definition": 1-500, "pattern": 1-1000}` (the Gherkin step that failed, sent by collector 0.6.0 and later; `definition` and `pattern` from 0.8.0; from 0.9.1 also on a skipped result, the step the scenario stopped at). They are stored in `failed_step_text`, `failed_step_line` (migration 021), `failed_step_definition` and `failed_step_pattern` (migration 022), the text fields after masking. Out-of-range values are `422`; unknown fields inside `failed_step` are ignored (a newer collector's additions never cost the upload); omitting it is fine.
 - A result may carry `log` (a string: the scenario's text attachments or the test case's `system-out`, sent by collector 0.9.0). It is masked, cut to 64 KB and stored in `test_results.log` (migration 023); it is never rejected for its size and never returned by the run endpoints.
+- A result may carry `screenshots` (at most 50, in the order shown; collector 0.10 and later, ADR-036): `[{"sha256": 64 lowercase hex, "media_type": "image/png"|"image/jpeg"|"image/webp", "step_text": up to 1000 characters, "step_line": 1-1,000,000, "hook": "before"|"after"}]`, with `step_line` and `hook` optional. The upload only refers to images the collector already stored with `PUT /api/v1/collect/blobs/{sha256}`; ingestion links each reference to the project's blob and stores a `result_screenshots` row with its `position` (the index in the list). The `step_text` is masked like the failed step's text (and counts toward the result's `redacted`), and `remask` masks it again. An unknown field inside a screenshot is `422`, as are a bad hash, more than 50 or an unsupported `media_type`. A reference is dropped silently, never failing the upload, when the project's `keep_screenshots` setting is off, no artifact storage is configured, or the hash is not stored for the uploading key's project (another project's blob never links); the dropped count is logged.
 - `status`: `passed`, `failed`, `skipped`, `errored` (`error` is accepted as `errored`).
 - `finished_at` may be at most 1 hour ahead of the server clock.
 - Through the gateway, uploads are limited to 10 per second per IP (burst 20).
@@ -147,7 +148,7 @@ Every project role can read; roles come from project-service.
 
 ## Masking
 
-Before a result is stored, its `message`, `details`, `log` and the failed step's `text`, `definition` and `pattern` are masked, and so are the run's commit
+Before a result is stored, its `message`, `details`, `log`, the failed step's `text`, `definition` and `pattern` and each screenshot's `step_text` are masked, and so are the run's commit
 subject (`commit_message`) and a password inside its `ci_run_url`. Each masked value becomes `[REDACTED:<kind>]`; the text around it stays
 readable. Test names, suites, classes, files and branches are never changed.
 

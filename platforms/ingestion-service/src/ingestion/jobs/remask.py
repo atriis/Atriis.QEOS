@@ -2,8 +2,8 @@
 
     python -m src.ingestion.jobs.remask [--dry-run] [--project ID] [--batch-size N]
 
-For results stored before masking existed, or before a pattern was added. Message, details, the failed step and the
-log are re-masked; a log that changes has its log values read again. Masking skips what is
+For results stored before masking existed, or before a pattern was added. Message, details, the failed step, the
+log and the step text of screenshots are re-masked; a log that changes has its log values read again. Masking skips what is
 already masked, so a second pass changes nothing and the command is safe to repeat. Rows are
 walked by id in batches, each committed on its own, so a long pass never holds one huge
 transaction and can be stopped and run again.
@@ -18,10 +18,12 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, sessionmaker, undefer
 
 from src.ingestion.core.config import settings
-from src.ingestion.models import Run, RunResult
+from src.ingestion.models import ResultScreenshot, Run, RunResult
 from src.ingestion.models.run import FAILED_STEP_DEFINITION_LENGTH, FAILED_STEP_PATTERN_LENGTH, FAILED_STEP_TEXT_LENGTH
 from src.ingestion.service import log_pattern_service, log_value_service, masking_pattern_service
 from src.ingestion.service.ingest_service import CI_RUN_URL_LENGTH, COMMIT_MESSAGE_LENGTH, mask, truncate_utf8
+
+SCREENSHOT_STEP_TEXT_LENGTH = 1000  # result_screenshots.step_text
 
 
 class _ProjectPatterns:
@@ -66,6 +68,9 @@ def _results_pass(
         if not batch:
             return scanned, changed
         relogged: dict = {}
+        shots: dict = {}
+        for shot in db.query(ResultScreenshot).filter(ResultScreenshot.result_id.in_([r.id for r, _ in batch])):
+            shots.setdefault(shot.result_id, []).append(shot)
         for row, row_project in batch:
             scanned += 1
             patterns = patterns_for(row_project)
@@ -76,7 +81,16 @@ def _results_pass(
             definition, definition_changed, definition_cut = _remask_text(row.failed_step_definition, patterns, row_kinds)
             pattern, pattern_changed, pattern_cut = _remask_text(row.failed_step_pattern, patterns, row_kinds)
             log, log_changed, _ = _remask_text(row.log, patterns, row_kinds)
-            shown_changed = message_changed or details_changed or step_changed or definition_changed or pattern_changed
+            # A screenshot's step text is shown like the failed step's (ADR-036)
+            shots_changed = False
+            for shot in shots.get(row.id, ()):
+                text, text_changed, _ = _remask_text(shot.step_text, patterns, row_kinds)
+                if text_changed:
+                    shots_changed = True
+                    if not dry_run:
+                        shot.step_text = text[:SCREENSHOT_STEP_TEXT_LENGTH]
+            shown_changed = (message_changed or details_changed or step_changed or definition_changed or pattern_changed
+                             or shots_changed)
             if not (shown_changed or log_changed):
                 continue
             changed += 1

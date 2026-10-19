@@ -112,6 +112,7 @@ def test_an_upload_hashed_before_migration_022_still_replays(client, make_key):
         result["failed_step"].pop("definition", None)
         result["failed_step"].pop("pattern", None)
         result.pop("log", None)  # pre-023 dumps had no log key either
+        result.pop("screenshots", None)  # nor screenshots (025)
     for name, default in ingest_service._LATER_RUN_FIELDS.items():
         if data["run"].get(name, default) == default:
             data["run"].pop(name, None)
