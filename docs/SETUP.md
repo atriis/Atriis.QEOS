@@ -1347,6 +1347,9 @@ be read ("Run #N has no readable change data"). Viewers do not get the button.
 
 - **Test cases** → tick imported cases → **Run selected (N)** → check the list and
   `repo @ branch` → **Run**.
+- To group cases without running them, tick them → **Add to suite**: pick a manual suite or
+  **New suite…**. The filter **Suite → Not in any suite** shows the imported cases that no
+  repository suite covers yet.
 - Or open one case → **Run**, or a suite → **Run suite** (its manual cases are skipped).
 - The run panel on **Test cases** (and on the case page) shows the state, a link to the GitHub
   run, and **Stop**. **Runs → Requested runs** lists every request, with who started or stopped it.
