@@ -1,4 +1,6 @@
 """Configuration management for Ingestion Service."""
+from typing import Optional
+
 from qeos_shared.config import BaseServiceSettings
 
 
@@ -32,6 +34,13 @@ class Settings(BaseServiceSettings):
     # stopped runs again when it starts (off in the tests)
     LOG_SCAN_BATCH_SIZE: int = 500
     LOG_SCAN_RESUME_ON_STARTUP: bool = True
+
+    # Artifact storage for screenshots (ADR-036): any S3-compatible service, MinIO in the compose files. Unless all
+    # four are set there is no store and screenshots are off
+    ARTIFACTS_S3_ENDPOINT: Optional[str] = None
+    ARTIFACTS_S3_BUCKET: Optional[str] = None
+    ARTIFACTS_S3_ACCESS_KEY: Optional[str] = None
+    ARTIFACTS_S3_SECRET_KEY: Optional[str] = None
 
     # Public origin of the dashboard, for the run link in failure notifications. Empty: no link
     DASHBOARD_URL: str = ""

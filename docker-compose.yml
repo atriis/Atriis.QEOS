@@ -80,6 +80,14 @@ x-ingestion-env: &ingestion-env
   # Run links in failure notifications (Slack/Teams/webhook) point at the gateway
   DASHBOARD_URL: https://localhost:${GATEWAY_HTTPS_PORT:-8443}
 
+# Artifact storage for screenshots (ADR-036). ingestion-service and ingestion-retention only. The one key pair is
+# MinIO's root user: ingestion is its only client. deploy/docker-compose.prod.yml requires the secret.
+x-artifacts-env: &artifacts-env
+  ARTIFACTS_S3_ENDPOINT: http://minio:9000
+  ARTIFACTS_S3_BUCKET: qeos-artifacts
+  ARTIFACTS_S3_ACCESS_KEY: ${ARTIFACTS_S3_ACCESS_KEY:-qeos}
+  ARTIFACTS_S3_SECRET_KEY: ${ARTIFACTS_S3_SECRET_KEY:-qeos-minio-dev}
+
 x-testmgmt-env: &testmgmt-env
   <<: *build-env
   DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/testmgmt_db
@@ -238,11 +246,45 @@ services:
   ingestion-service:
     build: *ingestion-build
     image: qeos/ingestion-service:local
-    environment: *ingestion-env
+    environment:
+      <<: [*ingestion-env, *artifacts-env]
     healthcheck: *app-healthcheck
     depends_on:
       ingestion-migrate:
         condition: service_completed_successfully
+      minio-init:
+        condition: service_completed_successfully
+
+  # Object storage for screenshots (ADR-036). Not published: only ingestion reaches it, on the compose network.
+  # The image is pinned by digest (Chainguard's build of MinIO, which has the mc client too: MinIO stopped
+  # publishing images on Docker Hub); to update, pull the new image and copy its digest here and in minio-init.
+  minio:
+    image: cgr.dev/chainguard/minio@sha256:709099319add48dfb44aa596a7070d3ddd8dd04d7ae881765719aec29df9e510
+    command: ["server", "/data"]
+    environment:
+      MINIO_ROOT_USER: ${ARTIFACTS_S3_ACCESS_KEY:-qeos}
+      MINIO_ROOT_PASSWORD: ${ARTIFACTS_S3_SECRET_KEY:-qeos-minio-dev}
+    volumes:
+      - qeos_minio_data:/data
+    healthcheck:
+      # The image has no shell or curl: mc's own readiness probe, with the alias given by MC_HOST_local
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  # Creates the private bucket once and exits. No anonymous policy is set: every read goes through ingestion.
+  minio-init:
+    image: cgr.dev/chainguard/minio@sha256:709099319add48dfb44aa596a7070d3ddd8dd04d7ae881765719aec29df9e510
+    entrypoint: ["mc", "mb", "--ignore-existing", "local/qeos-artifacts"]
+    environment:
+      MC_HOST_local: http://${ARTIFACTS_S3_ACCESS_KEY:-qeos}:${ARTIFACTS_S3_SECRET_KEY:-qeos-minio-dev}@minio:9000
+    depends_on:
+      minio:
+        condition: service_healthy
+    restart: "no"
 
   # Test cases and suites (ADR-022)
   test-management-service:
@@ -261,13 +303,15 @@ services:
     image: qeos/ingestion-service:local
     pull_policy: never
     environment:
-      <<: *ingestion-env
+      <<: [*ingestion-env, *artifacts-env]
       # test-management's internal API, for the purge of deleted projects after PROJECT_DELETE_GRACE_DAYS (spec 2026-10-16)
       TEST_MANAGEMENT_INTERNAL_URL: http://ingestion-service:${INTERNAL_API_PASSWORD:?set INTERNAL_API_PASSWORD (service-to-service internal APIs; URL-safe characters)}@test-management-service:8000
       PROJECT_DELETE_GRACE_DAYS: ${PROJECT_DELETE_GRACE_DAYS:-7}
     command: ["python", "-m", "src.ingestion.jobs.retention", "--loop"]
     depends_on:
       ingestion-migrate:
+        condition: service_completed_successfully
+      minio-init:
         condition: service_completed_successfully
       project-service:
         condition: service_healthy
@@ -568,6 +612,9 @@ volumes:
     name: qa-vision_qav_postgres_data
   qeos_gateway_certs:
     name: qa-vision_qav_gateway_certs
+  # Screenshots (ADR-036): back it up with the databases (deploy/README.md section 7)
+  qeos_minio_data:
+    name: qa-vision_qeos_minio_data
   # Monitoring profile (Ruling 16). Grafana needs no backup: everything in it is provisioned from the repo
   qeos_prometheus_data:
     name: qa-vision_qeos_prometheus_data

@@ -29,6 +29,8 @@ SECRET_KEY=$(secret 64)
 INTERNAL_API_PASSWORD=$(secret 40)
 POSTGRES_PASSWORD=$(secret 40)
 TM_SECRETS_KEY=$tm_key
+# Screenshot storage (MinIO): ingestion's key pair is MinIO's root user; the password is generated once, keep it
+ARTIFACTS_S3_SECRET_KEY=$(secret 40)
 # Monitoring (Prometheus, Alertmanager, Grafana): uncomment the four lines below to turn it on. Left
 # commented, no monitoring database role is created. MONITORING_ENABLED opens /grafana/ at the gateway
 # to QEOS superusers. 8 GB RAM recommended. See deploy/README.md section 10.

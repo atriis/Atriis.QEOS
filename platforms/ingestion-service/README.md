@@ -550,6 +550,12 @@ scoring missed its budget (p95 249 ms): reading the pairs of a change's units wa
   so a project-service outage never stops uploads. Key management and reads need
   project-service (503 if it is down).
 
+- Artifact storage for screenshots (ADR-036): `src/ingestion/utils/artifact_store.py`, an S3-compatible bucket
+  (MinIO in the compose files, private, not published). Set `ARTIFACTS_S3_ENDPOINT`, `ARTIFACTS_S3_BUCKET`,
+  `ARTIFACTS_S3_ACCESS_KEY` and `ARTIFACTS_S3_SECRET_KEY` together; if any is unset there is no store and QEOS works
+  without screenshots. Objects are keyed `screenshots/{project_id}/{sha256}`. The MinIO volume is not in
+  `deploy/backup.sh`; see deploy/README.md section 7.
+
 ## Known limitations
 
 - JSON only — parsing JUnit XML and other formats is the collector's job.

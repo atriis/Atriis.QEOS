@@ -49,7 +49,7 @@ bash deploy/init-env.sh qeos.example.com ops@example.com
 ```
 
 `init-env.sh` writes `.env` (mode 600, git-ignored) with the domain and freshly generated
-secrets: `SECRET_KEY`, `INTERNAL_API_PASSWORD`, `POSTGRES_PASSWORD`, `TM_SECRETS_KEY`. It also writes `GRAFANA_ADMIN_PASSWORD` and `MONITORING_DB_PASSWORD`
+secrets: `SECRET_KEY`, `INTERNAL_API_PASSWORD`, `POSTGRES_PASSWORD`, `TM_SECRETS_KEY`, `ARTIFACTS_S3_SECRET_KEY` (the password of the screenshot storage, section 7). It also writes `GRAFANA_ADMIN_PASSWORD` and `MONITORING_DB_PASSWORD`
 commented out (section 10). It refuses to overwrite
 an existing `.env`. **Back this file up somewhere safe**: losing it means losing access to
 the database. Include it in every `.env` backup: `TM_SECRETS_KEY` encrypts the GitHub tokens used to
@@ -121,6 +121,18 @@ qeos up -d --build --wait edge
 ```
 
 One `ERROR: role "postgres" already exists` during the restore is expected and harmless.
+
+**Screenshots are not in that dump.** Images live in MinIO, on the volume `qa-vision_qeos_minio_data`
+(ADR-036). `backup.sh` does not copy it. If you keep screenshots (Project Settings, off by default), copy the
+volume as well, next to the database dump:
+
+```bash
+docker run --rm -v qa-vision_qeos_minio_data:/data:ro -v "$PWD/backups":/backup alpine   tar czf /backup/qeos-minio-$(date -u +%Y%m%dT%H%MZ).tar.gz -C /data .
+```
+
+To restore, stop `minio` (`qeos stop minio`), untar into an empty volume the same way, then start it again. Without
+the volume, results keep working and their screenshot buttons answer "not found". An existing install adds
+`ARTIFACTS_S3_SECRET_KEY` to `.env` by hand before the update: `echo "ARTIFACTS_S3_SECRET_KEY=$(openssl rand -hex 20)" >> .env`.
 
 ## 8. Updates
 

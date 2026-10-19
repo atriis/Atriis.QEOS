@@ -27,6 +27,11 @@ services:
     restart: unless-stopped
   ingestion-retention:
     restart: unless-stopped
+  minio:
+    restart: unless-stopped
+    environment:
+      # init-env.sh writes it. The base file hands the same value to ingestion and minio-init as the key pair
+      MINIO_ROOT_PASSWORD: ${ARTIFACTS_S3_SECRET_KEY:?set ARTIFACTS_S3_SECRET_KEY (see deploy/README.md)}
   analytics-rollup:
     restart: unless-stopped
   impact-rollup:

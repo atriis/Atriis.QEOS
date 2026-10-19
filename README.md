@@ -150,9 +150,11 @@ flowchart TB
 
     subgraph INFRA["Infrastructure"]
         PG[("PostgreSQL 15 (postgres)<br/>one database per service")]
+        OBJ[("MinIO (minio)<br/>step screenshots")]
     end
     EXEC & QIP & PLAT --> PG
-    TARGET["target infrastructure, not deployed:<br/>Redis · Kafka · Neo4j · Qdrant<br/>ClickHouse · object storage"]
+    ING --> OBJ
+    TARGET["target infrastructure, not deployed:<br/>Redis · Kafka · Neo4j · Qdrant<br/>ClickHouse"]
     PG ~~~ TARGET
 
     classDef target fill:#eee,stroke:#999,stroke-dasharray:4 3,color:#555
@@ -229,6 +231,7 @@ into test-management-service ([SETUP §4.2.3](docs/SETUP.md)).
 | Jobs | [`platforms/ingestion-service/src/ingestion/jobs/`](platforms/ingestion-service/src/ingestion/jobs/) | Intelligence (QIP) | `ingestion-retention`, `analytics-rollup` (flaky rollups), `impact-rollup` (test impact statistics) and `weekly-summary`: containers of the ingestion image |
 | Collector | [`collector/`](collector/README.md) | Integrations | The CI-side uploader and feature sync (`pip`, single-file `.pyz` or container image) |
 | PostgreSQL | [`scripts/postgres-init.sh`](scripts/postgres-init.sh) | Infrastructure | `postgres`: PostgreSQL 15, one database per service, created on every start if missing |
+| MinIO | [`docker-compose.yml`](docker-compose.yml) | Infrastructure | `minio`: S3-compatible object storage for step screenshots, private, not published; only ingestion-service reaches it ([ADR-036](docs/architecture/adr/ADR-036-artifact-storage-step-screenshots.md)) |
 | Shared library | [`shared/qeos_shared/`](shared/) | Shared kernel | Settings, database session, mail and metrics helpers |
 | Monitoring | [`monitoring/`](monitoring/) | Observability (§11) | Prometheus, Alertmanager, Grafana and the `node-exporter`, `cadvisor` and `postgres-exporter` exporters (opt-in profile) |
 | Production package | [`deploy/`](deploy/README.md) | Deployment (§9, L0) | Single-VM deployment: the same services behind `edge`, a Caddy TLS proxy |

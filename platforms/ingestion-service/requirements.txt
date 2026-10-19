@@ -9,6 +9,8 @@ PyJWT==2.15.1
 python-dotenv==1.2.4
 httpx==0.28.1
 respx==0.23.1
+# S3 client for artifact storage (MinIO), ADR-036
+boto3==1.43.114
 prometheus-client==0.26.0
 # Linear-time regex engine for user-supplied masking patterns: no pattern can stall ingestion
 google-re2==1.1.20251105
