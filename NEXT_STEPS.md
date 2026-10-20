@@ -16,4 +16,3 @@ CI, and listed shipped features as unbuilt).
 - **Playwright attachments.** Playwright JSON attachments are file paths on the CI disk and carry no per-step data; they need their own design.
 - **Videos and traces.** The MinIO storage and blob endpoints are built to be reused for them.
 - **`.qeos.yml` key for no-screenshots.** Today only `--no-screenshots` / `QEOS_NO_SCREENSHOTS=1`.
-- **MinIO storage-used panel.** Prometheus does not scrape MinIO yet; add a scrape job (MinIO exposes Prometheus metrics) and a panel on the Grafana host dashboard.

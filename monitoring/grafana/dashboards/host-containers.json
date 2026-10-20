@@ -1,7 +1,7 @@
 {
   "uid": "qeos-host-containers",
   "title": "Host and containers",
-  "description": "VM CPU, memory and disk with trend; per container CPU, memory and restarts (spec §6)",
+  "description": "VM CPU, memory and disk with trend; per container CPU, memory and restarts (spec §6); screenshot storage in MinIO (ADR-036)",
   "tags": ["qeos"],
   "timezone": "utc",
   "schemaVersion": 39,
@@ -40,6 +40,14 @@
     {"id": 7, "type": "timeseries", "title": "Container restarts in the last hour", "gridPos": {"h": 8, "w": 24, "x": 0, "y": 24},
      "datasource": {"type": "prometheus", "uid": "prometheus"},
      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
-     "targets": [{"refId": "A", "expr": "sum by (container_label_com_docker_compose_service) (changes(container_start_time_seconds{name!=\"\"}[1h]))", "legendFormat": "{{container_label_com_docker_compose_service}}"}]}
+     "targets": [{"refId": "A", "expr": "sum by (container_label_com_docker_compose_service) (changes(container_start_time_seconds{name!=\"\"}[1h]))", "legendFormat": "{{container_label_com_docker_compose_service}}"}]},
+    {"id": 8, "type": "timeseries", "title": "Screenshot storage used", "description": "Bytes in MinIO (ADR-036). MinIO counts them in a background scan, so the line moves every few minutes and is empty until the first scan ends", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+     "datasource": {"type": "prometheus", "uid": "prometheus"},
+     "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []},
+     "targets": [{"refId": "A", "expr": "max(minio_cluster_usage_total_bytes)", "legendFormat": "used"}]},
+    {"id": 9, "type": "timeseries", "title": "Screenshots stored", "description": "Objects in MinIO (ADR-036): one per distinct image per project. Updated by the same background scan", "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+     "datasource": {"type": "prometheus", "uid": "prometheus"},
+     "fieldConfig": {"defaults": {"unit": "short", "min": 0}, "overrides": []},
+     "targets": [{"refId": "A", "expr": "max(minio_cluster_usage_object_total)", "legendFormat": "objects"}]}
   ]
 }

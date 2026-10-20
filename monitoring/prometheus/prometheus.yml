@@ -35,6 +35,11 @@ scrape_configs:
     static_configs: [{targets: ["cadvisor:8080"]}]
   - job_name: postgres
     static_configs: [{targets: ["postgres-exporter:9187"]}]
+  # Screenshot storage (ADR-036). No bearer token: docker-compose.yml sets MINIO_PROMETHEUS_AUTH_TYPE=public, and
+  # MinIO has no published port, so only containers on the compose network reach it
+  - job_name: minio
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs: [{targets: ["minio:9000"]}]
   - job_name: prometheus
     static_configs: [{targets: ["localhost:9090"]}]
   - job_name: alertmanager

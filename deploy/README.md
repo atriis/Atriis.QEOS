@@ -270,7 +270,7 @@ within a minute. The first is Grafana's home page.
 | Service detail | one service (pick it at the top): per endpoint rate and latency, status codes, requests in flight, process memory and CPU |
 | Jobs and uploads | time since each background job's last success and error ("never" when there is none since the service started), uploads accepted and rejected, results per hour, upload time, test executions and cases created |
 | PostgreSQL | connections, database sizes, transactions, cache hit rate, locks, slowest statements |
-| Host and containers | VM CPU, memory and disk with a 24 hour disk prediction; per container CPU, memory and restarts |
+| Host and containers | VM CPU, memory and disk with a 24 hour disk prediction; per container CPU, memory and restarts; screenshot storage used and screenshots stored in MinIO |
 
 How to open them: a superuser chooses **Monitoring** in the account menu (or opens `https://<domain>/grafana/`)
 with the usual QEOS login; the item shows only to superusers while `MONITORING_ENABLED` is true. A
@@ -294,6 +294,9 @@ collected on purpose (it could carry secrets or personal data); look a `queryid`
   copy secrets or personal data into Prometheus. The slowest-statements view shows the `queryid` and
   timings only.
 - cAdvisor is v0.54.1: v0.52.1 finds no container under Docker's containerd image store.
+- MinIO has no exporter: Prometheus scrapes its own `/minio/v2/metrics/cluster`, without a token
+  (`MINIO_PROMETHEUS_AUTH_TYPE=public`, safe because MinIO has no published port). It counts bytes and objects
+  in a background scan, so the screenshot panels move every few minutes and show 0 until the first scan ends.
 
 **Alerts.** Each channel turns on when its settings are present; an unset one is left out:
 

@@ -39,3 +39,6 @@ per-step images can reach several GB.
   project. A shorter image retention is a possible later step.
 - A new dependency: `boto3` in ingestion's `requirements.txt` (the collector stays standard-library only).
 - MinIO is another container on the one VM (ADR-019). Updating it means copying a new digest in two places.
+- With the monitoring profile, Prometheus scrapes MinIO's cluster metrics without a token
+  (`MINIO_PROMETHEUS_AUTH_TYPE=public`; MinIO has no published port), and the Host and containers dashboard shows
+  the bytes and objects stored.

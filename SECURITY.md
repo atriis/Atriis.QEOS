@@ -146,7 +146,10 @@ details.
   masked before storage. Projects can add their own patterns, which run on RE2
   so that no pattern can stall ingestion. The failed Cucumber step's text, step definition and pattern are masked the same way, at upload and by the re-mask job, and so is the step text of a screenshot (the images themselves are never masked, below). Each result's log (sent by collector 0.9.0 for log values, ADR-032) is masked the same way before it is stored and cut to 64 KB; it is never shown in full.
 - **Screenshots (ADR-036).** Step screenshots from test runs are stored in MinIO, a private bucket that is not
-  published outside the Docker network: only ingestion-service reads it. They are off by default for every project;
+  published outside the Docker network: only ingestion-service reads it. MinIO's Prometheus metrics need no token
+  (`MINIO_PROMETHEUS_AUTH_TYPE=public`), so any container on the compose network can read them: bucket names, object
+  counts, bytes used and disk capacity, never object names or contents. This is acceptable only while MinIO keeps no
+  published port. Screenshots are off by default for every project;
   a project owner or admin turns them on in Project Settings. **Images are never masked.** QEOS cannot read text
   inside an image, so a screenshot can show names, emails and booking data that the masking above would have
   removed from text. Switch them on only for projects whose test data is safe to show to every project reader.
