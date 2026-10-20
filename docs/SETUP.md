@@ -1800,7 +1800,8 @@ by default**, per project. Turn them on only where every project reader may see 
 2. **Project toggle.** Owner or admin: Project Settings, **Keep screenshots from uploads**, on. It is off by default.
    Turning it off later does not delete stored images; they age out with the retention days.
 3. **Collector.** Nothing to add: 0.11.0 asks QEOS first (`GET /api/v1/collect/key` answers `screenshots: true|false`)
-   and sends images only when allowed. `--no-screenshots` (or `QEOS_NO_SCREENSHOTS=1`) skips them for one run.
+   and sends images only when allowed. `--no-screenshots` (or `QEOS_NO_SCREENSHOTS=1`) skips them for one run; `no-screenshots: true` in
+   `.qeos.yml` (collector 0.12.0) skips them for every run of that repository.
 4. **Per-step images (optional).** The tests decide how often to capture. With Playwright and cucumber-js, add an
    `AfterStep` hook that attaches a screenshot when `QEOS_STEP_SHOTS=1` (collector README, "Step screenshots"), so only
    chosen runs pay for it.

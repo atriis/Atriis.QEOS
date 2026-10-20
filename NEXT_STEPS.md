@@ -15,4 +15,3 @@ CI, and listed shipped features as unbuilt).
 - **Separate image retention.** Images follow their results' retention days. If storage grows, add a shorter retention for images only.
 - **Playwright attachments.** Playwright JSON attachments are file paths on the CI disk and carry no per-step data; they need their own design.
 - **Videos and traces.** The MinIO storage and blob endpoints are built to be reused for them.
-- **`.qeos.yml` key for no-screenshots.** Today only `--no-screenshots` / `QEOS_NO_SCREENSHOTS=1`.

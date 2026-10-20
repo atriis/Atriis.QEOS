@@ -693,3 +693,14 @@ def test_dry_run_keeps_references_and_uploads_nothing(cucumber_report, capsys):
     assert main(["upload", str(cucumber_report), "--no-changes", "--dry-run"], {}) == 0
     out = capsys.readouterr().out
     assert SHA_A in out and base64.b64encode(IMG_A).decode() not in out
+
+
+def test_no_screenshots_from_qeos_yml(platform, cucumber_report, capsys, tmp_path, monkeypatch):
+    # A repository turns screenshots off once, in .qeos.yml, instead of on every CI command
+    (tmp_path / ".qeos.yml").write_text("no-screenshots: true\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    platform.key_check = SCREENSHOTS_ON
+    results = upload_run(platform, cucumber_report)
+    assert platform.blob_requests == []
+    assert [r["path"] for r in platform.requests] == ["/api/v1/collect/runs"]
+    assert "screenshots" not in results[0] and "screenshots" not in results[1]

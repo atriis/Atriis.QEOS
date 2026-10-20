@@ -109,7 +109,7 @@ def _run_options(parser: argparse.ArgumentParser) -> None:
                              "the next invocation (default: $QEOS_SPOOL)")
     parser.add_argument("--no-screenshots", action="store_true",
                         help="send no step screenshots: no image upload, no references in the run "
-                             "(default: $QEOS_NO_SCREENSHOTS)")
+                             "(default: $QEOS_NO_SCREENSHOTS, or no-screenshots: true in .qeos.yml)")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -546,7 +546,8 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
         # (finished_at alone always differs). So each invocation adds its own random suffix: the
         # collector's retries reuse the key, and a POST stored without an answer is replayed.
         key = f"{ci.idempotency_key or 'local'}-{uuid.uuid4().hex[:12]}"
-    skip_screenshots = args.no_screenshots or env.get("QEOS_NO_SCREENSHOTS", "").strip().lower() in _TRUE
+    skip_screenshots = (args.no_screenshots or env.get("QEOS_NO_SCREENSHOTS", "").strip().lower() in _TRUE
+                        or file_config.get("no-screenshots") is True)
     _send_screenshots(results, None if args.dry_run else url, api_key, context, say, skip=skip_screenshots,
                       sleep=sleep, clock=clock)
     parts = build_parts(run, results, key, changes, components)

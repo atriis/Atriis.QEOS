@@ -479,6 +479,7 @@ environment: staging
 ca-file: certs/internal-ca.pem
 spool: .qeos-spool
 fail-on-error: true
+no-screenshots: true   # from 0.12.0: never send step screenshots from this repository
 patterns:
   - "reports/**/*.xml"
 components:
@@ -588,8 +589,8 @@ with the step they belong to, and QEOS shows them on that Gherkin line and in th
   images again; QEOS drops the references whose image it no longer has.
 - **Older platform.** A 422 naming `results.N.screenshots` (a QEOS without screenshots) or anything inside it gets
   the upload once more without any result's `screenshots`, under the same Idempotency-Key, as for `log` above.
-- **Turning it off.** `--no-screenshots` (or `QEOS_NO_SCREENSHOTS=1`) skips all of this: no key check, no image, no
-  references.
+- **Turning it off.** `--no-screenshots` (or `QEOS_NO_SCREENSHOTS=1`, or `no-screenshots: true` in `.qeos.yml` from 0.12.0)
+  skips all of this: no key check, no image, no references.
 - **Privacy.** QEOS cannot mask an image. Screenshots can show names, emails and booking data; turn the project
   setting on only where that is acceptable.
 
