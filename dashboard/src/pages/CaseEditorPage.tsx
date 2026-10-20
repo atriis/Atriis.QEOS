@@ -227,8 +227,9 @@ function CaseEditor() {
   /** The shown line of a step that ran (the failed one, or one with screenshots); null while the file is loading. */
   const locateShown = useMemo<Locate | null>(() => {
     if (!c) return null;
-    // A case without Gherkin shows no step lines: its screenshots all go under the Screenshots link
-    if (!c.gherkin) return () => null;
+    // Gherkin is shown only on an imported case (a manual one may still carry it): without shown lines, the
+    // screenshots all go under the Screenshots link
+    if (!c.source_path || !c.gherkin) return () => null;
     // Wait for the file rather than mark a provisional line that then jumps
     if (wantsFeature && feature.isPending) return null;
     const shown = stepLines(c.gherkin);

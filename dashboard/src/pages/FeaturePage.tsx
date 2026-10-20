@@ -218,7 +218,7 @@ export default function FeaturePage() {
                 {c.automated_test_key != null && latest.isSuccess && (runId != null && !result
                   ? <span className="badge badge-muted">Not in run #{runId}</span>
                   : <LastResultPill result={result} />)}
-                {shots && shots.unplaced > 0 && <ScreenshotButton kind="link" count={shots.unplaced} onOpen={() => shotViewer.open(shots.of)} />}
+                {shots && shots.unplaced > 0 && <ScreenshotButton kind="link" name={c.key} count={shots.unplaced} onOpen={() => shotViewer.open(shots.of)} />}
                 {lastRuns(c.automated_test_key, { hideEmpty: latest.isSuccess, href: caseAsOfRun(id, c.number) })}
               </div>
             </div>

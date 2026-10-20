@@ -224,6 +224,13 @@ test("a step edited since the run puts its screenshots under a Screenshots link 
   expect(await screen.findByRole("dialog", { name: /Screenshots — by city/ })).toBeInTheDocument();
 });
 
+test("a manual case that carries Gherkin shows no step lines, so its screenshots all go under the Screenshots link", async () => {
+  setup(kase({ source_path: null }), result({ status: "passed", result_id: 77, screenshot_steps: [shot("Then I see results", 7, 2)] }));
+  renderCase();
+  expect(await screen.findByRole("button", { name: "Screenshots (2)" })).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /^Screenshots for this step/ })).toBeNull();
+});
+
 test("no screenshot steps, no camera and no link", async () => {
   setup(kase(), result({ status: "passed", result_id: 77 }));
   renderCase();

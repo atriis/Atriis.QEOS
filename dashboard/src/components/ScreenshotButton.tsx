@@ -26,7 +26,8 @@ export function useScreenshotViewer() {
 interface Props {
   count: number;
   /** "step": a camera on a Gherkin line, the count shown above 1; "link": "Screenshots" by a result pill;
-   *  "count": a camera and the count on a run's result row, named after the test (`name`). */
+   *  "count": a camera and the count on a run's result row, named after the test (`name`). A "link" with a `name`
+   *  says it too, for a page that lists several tests' links. */
   kind: "step" | "link" | "count";
   name?: string;
   onOpen: () => void;
@@ -34,8 +35,9 @@ interface Props {
 
 /** Opens a result's step screenshots (ADR-036); nothing is requested until it is pressed. */
 export default function ScreenshotButton({ count, kind, name, onOpen }: Props) {
-  // A row of a run's results names its test; on a case or a scenario card the test is the page's
-  const accessible = kind === "step" ? `Screenshots for this step (${count})` : kind === "link" ? `Screenshots (${count})` : `Screenshots of ${name} (${count})`;
+  // A row of a run's results, or a scenario card among others, names its test; on a case page the test is the page's
+  const accessible = kind === "step" ? `Screenshots for this step (${count})`
+    : name != null ? `Screenshots of ${name} (${count})` : `Screenshots (${count})`;
   return (
     <button type="button" className={`shot-button shot-button-${kind}`} aria-label={accessible} aria-haspopup="dialog" onClick={onOpen}>
       <Camera size={14} aria-hidden="true" />

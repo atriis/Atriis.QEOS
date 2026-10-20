@@ -374,9 +374,31 @@ test("a scenario's step screenshots sit on its card; a Background step's go to i
   const cards = await screen.findAllByRole("article");
   const button = await within(cards[0]).findByRole("button", { name: "Screenshots for this step (3)" });
   expect(button.closest(".gk-line")).toHaveTextContent("When a");
-  expect(within(cards[0]).getByRole("button", { name: "Screenshots (1)" })).toBeInTheDocument();
+  expect(within(cards[0]).getByRole("button", { name: "Screenshots of TC-12 (1)" })).toBeInTheDocument();
   expect(within(screen.getByLabelText("Feature")).queryByRole("button")).toBeNull();
   expect(within(cards[1]).queryByRole("button", { name: /^Screenshots/ })).toBeNull();
+});
+
+test("each card's Screenshots link names its case, so a screen reader's list of them has no duplicates", async () => {
+  const content = ["Feature: Login", "", "  Background:", "    Given bg", "", "  Scenario: Good password", "    When a", "",
+    "  Scenario: Bad password", "    Then b"].join("\n");
+  const shot = (count: number) => ({ step_text: "Given bg", step_line: 4, hook: null, count });
+  server.use(
+    http.get(`${P}/features/detail`, () => HttpResponse.json({ ...DETAIL, content, cases: [
+      detailCase(12, { scenario_name: "Good password", line: 6, automated_test_key: KEY }),
+      detailCase(13, { scenario_name: "Bad password", line: 9, automated_test_key: KEY2 }),
+    ] })),
+    http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
+      [KEY]: result("passed", { result_id: 5, screenshot_steps: [shot(1)] }),
+      [KEY2]: result("passed", { result_id: 6, screenshot_steps: [shot(2)] }),
+    } })),
+  );
+  renderAt();
+  const cards = await screen.findAllByRole("article");
+  expect(await within(cards[0]).findByRole("button", { name: "Screenshots of TC-12 (1)" })).toHaveTextContent("Screenshots");
+  expect(within(cards[1]).getByRole("button", { name: "Screenshots of TC-13 (2)" })).toBeInTheDocument();
+  const names = screen.getAllByRole("button", { name: /^Screenshots of/ }).map((b) => b.getAttribute("aria-label"));
+  expect(new Set(names).size).toBe(names.length);
 });
 
 test("on a failed line with screenshots, Tab goes line, camera, then the tip; Shift+Tab comes back the same way", async () => {
