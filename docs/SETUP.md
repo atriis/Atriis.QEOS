@@ -1800,13 +1800,13 @@ by default**, per project. Turn them on only where every project reader may see 
    `AfterStep` hook that attaches a screenshot when `QEOS_STEP_SHOTS=1` (collector README, "Step screenshots"), so only
    chosen runs pay for it.
 
-Limits: 5 MB per image, 50 per result, 5,000 per run. Images are deleted with their results (retention) or with the
-project; an image no result shows is deleted after 7 days. The data export carries references only, not the images.
+Limits: 5 MB per image, 50 per result, 5,000 per run, and 2 minutes for the image phase, before the run upload (the
+images not stored by then are left out; collector README, "Step screenshots", gives the worst case). Images are
+deleted with their results (retention) or with the project; an image no result shows is deleted after 7 days. The
+data export carries references only, not the images.
 
 **Verify (4.11):** after a run with the toggle on, the collector prints `screenshots: N stored, 0 skipped`, and the
 case page shows the camera on the step.
-
----
 
 ---
 

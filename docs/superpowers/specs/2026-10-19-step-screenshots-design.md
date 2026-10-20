@@ -1,6 +1,6 @@
 # Step screenshots: show the screenshots a test took, on the step that took them
 
-Date: 2026-10-19 · Status: shipped 2026-10-20 (approved 2026-10-19) · Decision record to write: ADR-036
+Date: 2026-10-19 · Status: shipped 2026-10-20 (approved 2026-10-19) · Decision record: ADR-036
 
 ## 1. Intent
 
