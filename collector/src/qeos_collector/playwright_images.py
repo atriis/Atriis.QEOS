@@ -12,7 +12,7 @@ import base64
 import binascii
 import hashlib
 import os
-from typing import Optional
+from typing import Optional, Union
 
 IMAGE_MEDIA_TYPES = ("image/png", "image/jpeg", "image/webp")
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
@@ -35,6 +35,32 @@ REASONS = {
 }
 
 
+class FileImage:
+    """An image file named by the report: its path, size and SHA-256, computed by streaming. The bytes are read again
+    only when the image is uploaded (a run can hold thousands of them), and `read` returns None when the file changed
+    or disappeared since, so a reference never points at other bytes."""
+
+    __slots__ = ("path", "size", "sha256")
+
+    def __init__(self, path: str, size: int, sha256: str):
+        self.path, self.size, self.sha256 = path, size, sha256
+
+    def read(self) -> Optional[bytes]:
+        try:
+            with open(self.path, "rb") as fh:
+                data = fh.read(MAX_IMAGE_BYTES + 1)
+        except OSError:
+            return None
+        if len(data) != self.size or hashlib.sha256(data).hexdigest() != self.sha256:
+            return None
+        return data
+
+
+def image_bytes(value: Union[bytes, "FileImage"]) -> Optional[bytes]:
+    """The bytes to upload for an image value: inline bytes as they are, a FileImage read (None when it changed)."""
+    return value.read() if isinstance(value, FileImage) else value
+
+
 def magic_matches(media_type: str, data: bytes) -> bool:
     if media_type == "image/png":
         return data.startswith(b"\x89PNG\r\n\x1a\n")
@@ -52,7 +78,8 @@ def _inside(path: str, root: str) -> bool:
         return False
 
 
-def _read(raw_path: str, report_dir: str, root: str, skips: dict) -> Optional[bytes]:
+def _read(raw_path: str, report_dir: str, root: str, skips: dict) -> "Optional[tuple[bytes, FileImage]]":
+    """(first bytes, FileImage) of an image file the report names, or None (counted into `skips`)."""
     path = raw_path if os.path.isabs(raw_path) else os.path.join(report_dir, raw_path)
     real = os.path.realpath(path)
     if not _inside(real, root):
@@ -69,12 +96,23 @@ def _read(raw_path: str, report_dir: str, root: str, skips: dict) -> Optional[by
     if info.st_size > MAX_IMAGE_BYTES:
         skips["large"] = skips.get("large", 0) + 1
         return None
+    digest = hashlib.sha256()
+    head = b""
+    size = 0
     try:
         with open(real, "rb") as fh:
-            return fh.read(MAX_IMAGE_BYTES + 1)
+            for chunk in iter(lambda: fh.read(64 * 1024), b""):
+                if not head:
+                    head = chunk[:16]
+                digest.update(chunk)
+                size += len(chunk)
+                if size > MAX_IMAGE_BYTES:  # grew since the stat
+                    skips["large"] = skips.get("large", 0) + 1
+                    return None
     except OSError:
         skips["missing"] = skips.get("missing", 0) + 1
         return None
+    return head, FileImage(real, size, digest.hexdigest())
 
 
 def _failing_step(steps: object) -> Optional[dict]:
@@ -125,33 +163,35 @@ def attempt_screenshots(attempt: dict, report_dir: str, root: str, skips: dict) 
             continue
         if media not in IMAGE_MEDIA_TYPES:
             continue
-        data: Optional[bytes]
+        value: Union[bytes, FileImage]
         if isinstance(attachment.get("body"), str):
             try:
-                data = base64.b64decode(attachment["body"], validate=True)
+                value = base64.b64decode(attachment["body"], validate=True)
             except (binascii.Error, ValueError):
                 skips["bad_body"] = skips.get("bad_body", 0) + 1
                 continue
-            if len(data) > MAX_IMAGE_BYTES:
+            if len(value) > MAX_IMAGE_BYTES:
                 skips["large"] = skips.get("large", 0) + 1
                 continue
+            head, digest = value[:16], hashlib.sha256(value).hexdigest()
         elif isinstance(attachment.get("path"), str) and attachment["path"]:
-            data = _read(attachment["path"], report_dir, root, skips)
-            if data is None:
+            read = _read(attachment["path"], report_dir, root, skips)
+            if read is None:
                 continue
+            head, value = read
+            digest = value.sha256
         else:
             continue
-        if not magic_matches(media, data):
+        if not magic_matches(media, head):
             skips["not_image"] = skips.get("not_image", 0) + 1
             continue
         rank, suffix = _label(str(attachment.get("name") or ""))
         text = f"{base} ({suffix})" if suffix else base
-        found.append((rank, position, media, data, text[:STEP_TEXT_LENGTH]))
+        found.append((rank, position, media, value, digest, text[:STEP_TEXT_LENGTH]))
 
     screenshots: list = []
     images: dict = {}
-    for _, _, media, data, text in sorted(found, key=lambda item: (item[0], item[1])):
-        digest = hashlib.sha256(data).hexdigest()
+    for _, _, media, data, digest, text in sorted(found, key=lambda item: (item[0], item[1])):
         reference = {"sha256": digest, "media_type": media, "step_text": text, "step_line": line, "hook": "after"}
         if reference in screenshots:
             continue

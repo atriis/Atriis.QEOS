@@ -723,3 +723,29 @@ def test_playwright_screenshots_take_the_same_upload_path(platform, tmp_path, mo
     assert [r["sha"] for r in platform.blob_requests if r["method"] == "PUT"] == [SHA_A]
     assert results[0]["screenshots"] == [{"sha256": SHA_A, "media_type": "image/png", "step_text": "End of test",
                                           "step_line": None, "hook": "after"}]
+
+
+def test_a_playwright_file_that_changed_before_upload_is_left_out(platform, tmp_path, monkeypatch):
+    from qeos_collector import cli as cli_module
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "test-results").mkdir()
+    shot = tmp_path / "test-results" / "shot.png"
+    shot.write_bytes(IMG_A)
+    report = tmp_path / "results.json"
+    report.write_text(json.dumps({"config": {}, "suites": [{"title": "a.spec.ts", "file": "a.spec.ts", "specs": [
+        {"title": "pays", "file": "a.spec.ts", "tests": [{"projectName": "chromium", "results": [
+            {"status": "failed", "duration": 5, "retry": 0,
+             "attachments": [{"name": "screenshot", "contentType": "image/png", "path": str(shot)}]}]}]}]}]}),
+        encoding="utf-8")
+    real_parse = cli_module.parse_file
+
+    def parse_then_change(path):
+        parsed = real_parse(path)
+        shot.write_bytes(IMG_B)  # the file changes between reading the report and uploading
+        return parsed
+
+    monkeypatch.setattr(cli_module, "parse_file", parse_then_change)
+    platform.key_check = SCREENSHOTS_ON
+    results = upload_run(platform, report)
+    assert [r for r in platform.blob_requests if r["method"] == "PUT"] == []
+    assert "screenshots" not in results[0]

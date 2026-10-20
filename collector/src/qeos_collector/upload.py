@@ -17,6 +17,7 @@ from typing import Callable, Dict, Mapping, Optional, Set, Tuple
 
 from qeos_collector import __version__
 from qeos_collector.payload import Part
+from qeos_collector.playwright_images import FileImage, image_bytes
 
 COLLECT_PATH = "/api/v1/collect/runs"
 KEY_CHECK_PATH = "/api/v1/collect/key"
@@ -200,7 +201,7 @@ class _StopImages(Exception):
 def upload_images(
     base_url: str,
     key: str,
-    images: Dict[str, Tuple[str, bytes]],
+    images: "Dict[str, Tuple[str, bytes | FileImage]]",
     budget_seconds: float = IMAGE_BUDGET_SECONDS,
     workers: int = IMAGE_WORKERS,
     *,
@@ -269,7 +270,7 @@ def upload_images(
     return stored
 
 
-def _store_image(url: str, headers: Mapping[str, str], media_type: str, data: bytes,
+def _store_image(url: str, headers: Mapping[str, str], media_type: str, data: "bytes | FileImage",
                  context: Optional[ssl.SSLContext], deadline: float, *, first: bool,
                  clock: Callable[[], float], sleep: Callable[[float], None], rand: Callable[[], float]) -> bool:
     """True when QEOS holds the image: already there (HEAD 200) or stored now (PUT 200/201)."""
@@ -277,7 +278,10 @@ def _store_image(url: str, headers: Mapping[str, str], media_type: str, data: by
     if status == 200:
         return True
     if status == 404:
-        status = _blob_request(url, "PUT", data, {**headers, "Content-Type": media_type}, context, deadline, False,
+        body = image_bytes(data)  # a Playwright file is read only now, and only when QEOS does not have it yet
+        if body is None:
+            return False  # the file changed or went away since the report was read: left out of the run
+        status = _blob_request(url, "PUT", body, {**headers, "Content-Type": media_type}, context, deadline, False,
                                clock, sleep, rand)
         if status in (200, 201):
             return True

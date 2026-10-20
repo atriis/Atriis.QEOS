@@ -8,6 +8,7 @@ import os
 import pytest
 
 from qeos_collector.formats import parse_file
+from qeos_collector.playwright_images import FileImage
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
 JPEG = b"\xff\xd8\xff\xe0" + b"\x01" * 32
@@ -69,7 +70,11 @@ def test_failure_screenshot_from_disk_and_body_on_the_failing_step(workdir):
         {"sha256": sha(JPEG), "media_type": "image/jpeg", "step_text": "expect(locator).toBeVisible() (checkout page)",
          "step_line": 42, "hook": "after"},
     ]
-    assert failed["_images"] == {sha(PNG): ("image/png", PNG), sha(JPEG): ("image/jpeg", JPEG)}
+    # inline bodies are kept as bytes; a file is kept as a reference and read again only when it is uploaded
+    assert failed["_images"][sha(JPEG)] == ("image/jpeg", JPEG)
+    media, ref = failed["_images"][sha(PNG)]
+    assert media == "image/png" and isinstance(ref, FileImage) and ref.size == len(PNG)
+    assert ref.read() == PNG
     assert passed["screenshots"] == [{"sha256": sha(PNG), "media_type": "image/png", "step_text": "End of test",
                                       "step_line": None, "hook": "after"}]
 
@@ -154,3 +159,15 @@ def test_a_report_without_attachments_is_unchanged(workdir):
     path = report(workdir, [{"status": "passed", "duration": 10, "retry": 0}])
     row = parse_file(path).results[0]
     assert "screenshots" not in row and "_images" not in row
+
+
+def test_a_file_changed_after_parsing_is_not_read_as_the_old_image(workdir):
+    shot = workdir / "test-results" / "shot.png"
+    shot.write_bytes(PNG)
+    path = report(workdir, [{"status": "failed", "duration": 10, "retry": 0,
+                             "attachments": [attachment("screenshot", "image/png", path=shot)]}])
+    _, ref = parse_file(path).results[0]["_images"][sha(PNG)]
+    shot.write_bytes(DIFF)  # overwritten before the upload
+    assert ref.read() is None
+    shot.unlink()
+    assert ref.read() is None

@@ -625,7 +625,9 @@ reporter: [["json", { outputFile: "results.json" }]],
 - **Only files in the checkout.** A report is just JSON, so a file it names is read only when it resolves (symlinks
   followed) inside the working directory, is at most 5 MB, and starts like the image type it claims. Anything else
   is skipped and counted in one warning. If Playwright's `outputDir` is outside the checkout, the collector says so:
-  set it inside. A relative path is read from the report's folder.
+  set it inside. A relative path is read from the report's folder. From 0.13.1 a file is only hashed while the
+  report is read and read again when it is uploaded, so a large run does not hold every image in memory; a file that
+  changed in between is left out.
 
 ## Network and security
 
