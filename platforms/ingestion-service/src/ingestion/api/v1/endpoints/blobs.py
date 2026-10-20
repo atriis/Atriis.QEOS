@@ -12,7 +12,9 @@ from src.ingestion.api.deps import get_db
 from src.ingestion.api.key_auth import get_api_key
 from src.ingestion.models import ApiKey
 from src.ingestion.service import blob_service
-from src.ingestion.utils.artifact_store import ArtifactStore, get_artifact_store
+from src.ingestion.utils.artifact_store import (
+    BUSY_RETRY_AFTER, ArtifactStore, ArtifactStoreBusy, get_artifact_store,
+)
 
 router = APIRouter()  # mounted at /collect/blobs
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -55,7 +57,9 @@ def _bad_request(detail: str) -> HTTPException:
 
 
 def _check_enabled(db: Session, project_id: int, store: Optional[ArtifactStore]) -> None:
-    if not blob_service.screenshots_enabled(db, project_id, store):
+    enabled = blob_service.screenshots_enabled(db, project_id, store)
+    db.commit()  # no connection held while the body arrives
+    if not enabled:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=SCREENSHOTS_OFF)
 
 
@@ -79,12 +83,18 @@ async def put_blob(
     key: ApiKey = Depends(get_api_key), store: Optional[ArtifactStore] = Depends(get_artifact_store),
 ):
     _checked_hash(sha256)
-    await run_in_threadpool(_check_enabled, db, key.project_id, store)
+    project_id = key.project_id  # read before the commit below expires the key
+    await run_in_threadpool(_check_enabled, db, project_id, store)
     media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if media_type not in blob_service.MEDIA_TYPES:
         raise _bad_request("Content-Type must be image/png, image/jpeg or image/webp")
     data = await _read_capped(request)
-    created = await run_in_threadpool(_store_checked, db, store, key.project_id, sha256, media_type, data)
+    try:
+        created = await run_in_threadpool(_store_checked, db, store, project_id, sha256, media_type, data)
+    except ArtifactStoreBusy:
+        # The collector counts a 5xx as one skipped image; the run upload is not touched
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Artifact storage busy",
+                            headers={"Retry-After": BUSY_RETRY_AFTER})
     if not created:
         response.status_code = status.HTTP_200_OK
     return {"sha256": sha256}

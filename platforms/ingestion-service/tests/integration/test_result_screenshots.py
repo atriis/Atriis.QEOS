@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 from src.ingestion.models import Blob, ResultScreenshot, RunResult
+from src.ingestion.utils import artifact_store
 from src.ingestion.utils.artifact_store import MemoryArtifactStore, get_artifact_store, screenshot_key
 
 T0 = datetime(2026, 10, 1, tzinfo=timezone.utc)
@@ -120,6 +121,33 @@ def test_image_503_without_store(client, auth, project_role, seed_run, db, store
     shot = add_shot(db, result, add_blob(db), 0)
     app.dependency_overrides[get_artifact_store] = lambda: None
     assert client.get(f"/api/v1/projects/1/screenshots/{shot.id}", headers=auth()).status_code == 503
+
+
+def test_image_holds_no_transaction_while_reading(client, auth, project_role, seed_run, db, store):
+    project_role("viewer")
+    shot = add_shot(db, result_of(db, seed_run(T0)), add_blob(db), 0)
+    store.put(screenshot_key(1, SHA), PNG, "image/png")
+    seen = []
+    original = store.get
+    store.get = lambda key: (seen.append(db.in_transaction()), original(key))[1]
+    assert client.get(f"/api/v1/projects/1/screenshots/{shot.id}", headers=auth()).status_code == 200
+    assert seen == [False]
+
+
+def test_image_503_with_retry_after_when_the_store_is_busy(client, auth, project_role, seed_run, db, store,
+                                                           monkeypatch):
+    project_role("viewer")
+    shot = add_shot(db, result_of(db, seed_run(T0)), add_blob(db), 0)
+    store.put(screenshot_key(1, SHA), PNG, "image/png")
+    monkeypatch.setattr(artifact_store, "SLOT_WAIT_SECONDS", 0)
+    for _ in range(artifact_store.STORE_CALLS):
+        assert artifact_store._slots.acquire(blocking=False)
+    try:
+        resp = client.get(f"/api/v1/projects/1/screenshots/{shot.id}", headers=auth())
+    finally:
+        for _ in range(artifact_store.STORE_CALLS):
+            artifact_store._slots.release()
+    assert resp.status_code == 503 and resp.headers["retry-after"] == artifact_store.BUSY_RETRY_AFTER
 
 
 def test_row_pointing_at_another_projects_blob_is_not_served(client, auth, project_role, seed_run, db, store):

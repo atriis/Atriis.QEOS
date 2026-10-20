@@ -3,11 +3,16 @@ Only ingestion talks to it. Without all four ARTIFACTS_S3_* settings there is no
 before without screenshots. get_artifact_store() takes no request, so FastAPI routes and batch jobs (retention,
 purge) call it the same way."""
 import threading
-from typing import Dict, List, Optional, Protocol, Tuple
+from contextlib import contextmanager
+from typing import Dict, Iterator, List, Optional, Protocol, Tuple
 
 from src.ingestion.core.config import settings
 
 DELETE_CHUNK = 1000  # S3 delete_objects takes at most 1,000 keys
+# A slow store must not take every request thread: past this many calls at once, a request answers 503 at once
+STORE_CALLS = 8
+SLOT_WAIT_SECONDS = 2.0
+BUSY_RETRY_AFTER = "5"
 
 
 class ArtifactNotFound(Exception):
@@ -16,6 +21,25 @@ class ArtifactNotFound(Exception):
 
 class ArtifactDeleteError(Exception):
     """The store refused to delete some objects: they are still there."""
+
+
+class ArtifactStoreBusy(Exception):
+    """Every request slot for the store is taken: the caller answers 503 with Retry-After."""
+
+
+_slots = threading.BoundedSemaphore(STORE_CALLS)
+
+
+@contextmanager
+def store_slot() -> Iterator[None]:
+    """Holds one of STORE_CALLS slots around a request's store call, or raises ArtifactStoreBusy after a short wait.
+    Hold no database connection while in it: a hung store then costs threads, never the pool that run uploads use."""
+    if not _slots.acquire(timeout=SLOT_WAIT_SECONDS):
+        raise ArtifactStoreBusy()
+    try:
+        yield
+    finally:
+        _slots.release()
 
 
 def screenshot_key(project_id: int, sha256: str) -> str:
@@ -77,7 +101,7 @@ class S3ArtifactStore:
             config=Config(
                 s3={"addressing_style": "path"},
                 # A MinIO that is down must fail an upload or a read in seconds, not hold its thread for minutes
-                connect_timeout=5, read_timeout=30, retries={"max_attempts": 2, "mode": "standard"},
+                connect_timeout=5, read_timeout=10, retries={"max_attempts": 2, "mode": "standard"},
             ),
         )
 

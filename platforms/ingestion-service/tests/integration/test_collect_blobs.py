@@ -4,6 +4,7 @@ import hashlib
 import pytest
 
 from src.ingestion.models import Blob, CollectionSettings
+from src.ingestion.utils import artifact_store
 from src.ingestion.utils.artifact_store import MemoryArtifactStore, get_artifact_store, screenshot_key
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"pixels" * 10
@@ -148,3 +149,31 @@ def test_another_project_stores_its_own_copy(client, store, headers, make_key, d
     assert set(store.objects) == {screenshot_key(7, sha(PNG)), screenshot_key(8, sha(PNG))}
     assert client.head(url(PNG), headers=headers).status_code == 200
     assert client.head(url(PNG), headers=other_headers).status_code == 200
+
+
+def test_put_holds_no_transaction_while_storing(client, store, headers, db):
+    """A slow store must not hold a pooled connection, or it starves the run uploads that share the pool."""
+    seen = []
+    original = store.put
+    store.put = lambda *args: (seen.append(db.in_transaction()), original(*args))
+    assert put(client, headers).status_code == 201
+    assert seen == [False]
+    assert db.query(Blob).count() == 1
+
+
+@pytest.fixture
+def store_busy(monkeypatch):
+    """Every store slot taken, and no wait for one."""
+    monkeypatch.setattr(artifact_store, "SLOT_WAIT_SECONDS", 0)
+    for _ in range(artifact_store.STORE_CALLS):
+        assert artifact_store._slots.acquire(blocking=False)
+    yield
+    for _ in range(artifact_store.STORE_CALLS):
+        artifact_store._slots.release()
+
+
+def test_put_503_with_retry_after_when_the_store_is_busy(client, store, headers, db, store_busy):
+    response = put(client, headers)
+    assert response.status_code == 503
+    assert response.headers["retry-after"] == artifact_store.BUSY_RETRY_AFTER
+    assert db.query(Blob).count() == 0 and store.objects == {}

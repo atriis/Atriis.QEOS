@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from src.ingestion.models import Blob
 from src.ingestion.service import collection_settings_service
-from src.ingestion.utils.artifact_store import ArtifactStore, screenshot_key
+from src.ingestion.utils.artifact_store import ArtifactStore, screenshot_key, store_slot
 
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 MEDIA_TYPES = ("image/png", "image/jpeg", "image/webp")
@@ -35,11 +35,15 @@ def find_blob(db: Session, project_id: int, sha256: str) -> Optional[Blob]:
 def store_blob(db: Session, store: ArtifactStore, project_id: int, sha256: str, media_type: str,
                data: bytes) -> Blob:
     """Idempotent: a stored image is returned as it is, with no second put. The object goes in before the row, so a
-    row never points at nothing; a crash in between leaves an object the next upload of it simply reuses."""
+    row never points at nothing; a crash in between leaves an object the next upload of it simply reuses.
+    The transaction ends before the put, so a slow store holds a thread but no pooled connection. Raises
+    ArtifactStoreBusy when every store slot is taken."""
     existing = find_blob(db, project_id, sha256)
     if existing is not None:
         return existing
-    store.put(screenshot_key(project_id, sha256), data, media_type)
+    db.commit()  # ends the transaction and hands the connection back to the pool
+    with store_slot():
+        store.put(screenshot_key(project_id, sha256), data, media_type)
     # ON CONFLICT DO NOTHING in either dialect: two uploads of one image at once both succeed, with one row
     insert = postgresql.insert if db.get_bind().dialect.name == "postgresql" else sqlite.insert
     db.execute(
