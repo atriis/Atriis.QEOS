@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import math
 import os
@@ -179,8 +180,14 @@ def _parse_cucumber_file(path: str, parsed: ParsedFile) -> ParsedFile:
     features = [f for f in data if isinstance(f, dict) and "elements" in f] if isinstance(data, list) else []
     if not features:
         return _skip(parsed, "not Cucumber JSON (no features with elements)")
+    skips: dict = {}
     for feature in features:
-        _cucumber_feature(feature, parsed)
+        _cucumber_feature(feature, parsed, skips=skips)
+    if skips.get("large"):
+        parsed.warnings.append(f"skipped {skips['large']} screenshot(s) over 5 MB in {path}")
+    if skips.get("over"):
+        parsed.warnings.append(
+            f"skipped {skips['over']} screenshot(s) beyond {MAX_SCREENSHOTS_PER_RESULT} per result in {path}")
     if parsed.unnamed:
         parsed.warnings.append(f"skipped {parsed.unnamed} test case(s) without a name in {path}")
     return parsed
@@ -191,19 +198,35 @@ def _parse_cucumber_file(path: str, parsed: ParsedFile) -> ParsedFile:
 # are never part of the log
 LOG_MEDIA_TYPES = ("text/x.cucumber.log+plain", "text/plain")
 
+# Step screenshots (spec 2026-10-19 §5.2): image attachments, each tied to the step it belongs to
+IMAGE_MEDIA_TYPES = ("image/png", "image/jpeg", "image/webp")
+MAX_IMAGE_BYTES = 5 * 1024 * 1024
+MAX_SCREENSHOTS_PER_RESULT = 50
 
-def _attachment_text(attachment: object) -> Optional[str]:
+
+def _attachment_fields(attachment: object) -> "Optional[tuple[str, str, bool]]":
+    """(media type without parameters, lowercased; data; whether the data is the raw content, not base64) of an
+    attachment in any of the field spellings of cucumber's formats; None without a media type or data."""
     if not isinstance(attachment, dict):
         return None
     media = attachment.get("mime_type") or attachment.get("media_type") or attachment.get("mediaType")
-    if not isinstance(media, str) or media.split(";", 1)[0].strip().lower() not in LOG_MEDIA_TYPES:
+    if not isinstance(media, str):
         return None
     data = attachment.get("data") if attachment.get("data") is not None else attachment.get("body")
     if not isinstance(data, str) or not data:
         return None
     # cucumber's message formats name the encoding; the classic JSON never does and always base64-encodes
     encoding = attachment.get("contentEncoding") or attachment.get("content_encoding")
-    if isinstance(encoding, str) and encoding.strip().upper() == "IDENTITY":
+    identity = isinstance(encoding, str) and encoding.strip().upper() == "IDENTITY"
+    return media.split(";", 1)[0].strip().lower(), data, identity
+
+
+def _attachment_text(attachment: object) -> Optional[str]:
+    fields = _attachment_fields(attachment)
+    if fields is None or fields[0] not in LOG_MEDIA_TYPES:
+        return None
+    _, data, identity = fields
+    if identity:
         return data
     try:
         raw = base64.b64decode(data, validate=True)
@@ -211,6 +234,18 @@ def _attachment_text(attachment: object) -> Optional[str]:
         return data  # a formatter that wrote the text itself (it has spaces or other non-base64 characters)
     # A cut multi-byte character or binary bytes under a text media type become U+FFFD, never a failed parse
     return raw.decode("utf-8", errors="replace")
+
+
+def _attachment_image(attachment: object) -> "Optional[tuple[str, bytes]]":
+    """(media type, bytes) of an image attachment; None for anything else, for data that is not valid base64, and for
+    an IDENTITY encoding (binary cannot travel as raw text)."""
+    fields = _attachment_fields(attachment)
+    if fields is None or fields[0] not in IMAGE_MEDIA_TYPES or fields[2]:
+        return None
+    try:
+        return fields[0], base64.b64decode(fields[1], validate=True)
+    except (binascii.Error, ValueError):
+        return None
 
 
 def _step_texts(step: object) -> list:
@@ -228,6 +263,79 @@ def _step_texts(step: object) -> list:
     return texts
 
 
+def _step_entry(step: dict) -> Optional[dict]:
+    """The step as the dashboard matches it: {text, line?}, keyword and name joined and cut, with the line when it is
+    a plausible one. Shared by failed_step and the screenshots. None for a step without text."""
+    step_name = f"{step.get('keyword', '')}{step.get('name', '')}".strip()
+    if not step_name:
+        return None
+    entry = {"text": step_name[:STEP_TEXT_LENGTH]}
+    line = step.get("line")
+    if isinstance(line, int) and not isinstance(line, bool) and 1 <= line <= 1_000_000:
+        entry["line"] = line
+    return entry
+
+
+def _hook_kind(step: dict, real_seen: bool) -> Optional[str]:
+    """"before" or "after" for a cucumber-js hook entry in the steps list, None for a real step. The keyword names it;
+    a hidden entry without one is a before hook until the first real step has been seen."""
+    keyword = str(step.get("keyword") or "").strip().lower()
+    if keyword in ("before", "after"):
+        return keyword
+    if step.get("hidden") is True:
+        return "after" if real_seen else "before"
+    return None
+
+
+def _scenario_screenshots(element: dict, steps: list, skips: dict) -> "tuple[list, dict]":
+    """The scenario's image attachments as [{sha256, media_type, step_text, step_line, hook?}] in step order, plus
+    {sha256: (media_type, bytes)}. An image on a real step goes to that step; one on a Before hook to the first real
+    step, one on an After hook to the last real step that was not skipped (the last one when all were), each with
+    `hook`. cucumber-jvm's element-level before/after follow the same rules. Skipped images are counted into `skips`."""
+    before = element.get("before") if isinstance(element.get("before"), list) else []
+    after = element.get("after") if isinstance(element.get("after"), list) else []
+    entries = [(step, "before") for step in before if isinstance(step, dict)]
+    real: list = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        kind = _hook_kind(step, bool(real))
+        if kind is None:
+            real.append(step)
+        entries.append((step, kind))
+    entries += [(step, "after") for step in after if isinstance(step, dict)]
+    if not real:
+        return [], {}
+
+    ran = [step for step in real if str((step.get("result") or {}).get("status") or "") != "skipped"]
+    targets = {"before": real[0], "after": (ran or real)[-1]}
+    screenshots: list = []
+    images: dict = {}
+    for step, kind in entries:
+        for key in ("embeddings", "attachments"):
+            attachments = step.get(key)
+            for attachment in attachments if isinstance(attachments, list) else []:
+                image = _attachment_image(attachment)
+                target = _step_entry(targets[kind] if kind else step) if image is not None else None
+                if target is None:
+                    continue
+                media_type, data = image
+                if len(data) > MAX_IMAGE_BYTES:
+                    skips["large"] = skips.get("large", 0) + 1
+                    continue
+                if len(screenshots) >= MAX_SCREENSHOTS_PER_RESULT:
+                    skips["over"] = skips.get("over", 0) + 1
+                    continue
+                digest = hashlib.sha256(data).hexdigest()
+                images[digest] = (media_type, data)
+                reference = {"sha256": digest, "media_type": media_type, "step_text": target["text"],
+                             "step_line": target.get("line")}
+                if kind:
+                    reference["hook"] = kind
+                screenshots.append(reference)
+    return screenshots, images
+
+
 def _scenario_log(element: dict, steps: list) -> Optional[str]:
     """The scenario's text attachments in order: cucumber-jvm's scenario hooks (`before`), then its steps (cucumber-js
     hook steps and Background steps included), then `after`; joined by newlines and cut to 64 KB. None without text."""
@@ -237,13 +345,15 @@ def _scenario_log(element: dict, steps: list) -> Optional[str]:
     return _cut(log) if log.strip() else None
 
 
-def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] = None) -> None:
+def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] = None,
+                      skips: Optional[dict] = None) -> None:
     """The feature's scenarios (and outline rows) as results. With `lines`, each result's scenario line too (an int,
     or None), in step with parsed.results: run-impact's discovery reads a dry run through this parser, and then a
     scenario without a name is kept too (an empty name), so that it still runs in a stage."""
     suite = str(feature.get("name") or "")
     # Windows runners report "tests\features\a.feature"; the key must not depend on the OS (ADR-023)
     uri = str(feature.get("uri") or "").replace("\\", "/")
+    skips = skips if skips is not None else {}
     background: list = []
     for element in feature.get("elements") or []:
         if not isinstance(element, dict):
@@ -309,11 +419,8 @@ def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] =
                 note = "\n".join(text.strip() for text in _step_texts(stopped_at) if text.strip())
                 _attach(row, note or reason,
                         "\n".join(part for part in (step_name, reason, note, message.strip()) if part))
-            if step_name:
-                entry = {"text": step_name[:STEP_TEXT_LENGTH]}
-                line = stopped_at.get("line")
-                if isinstance(line, int) and not isinstance(line, bool) and 1 <= line <= 1_000_000:
-                    entry["line"] = line
+            entry = _step_entry(stopped_at)
+            if entry is not None:
                 definition = _step_definition(stopped_at)
                 if definition is not None:
                     entry["definition"] = definition
@@ -322,6 +429,10 @@ def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] =
         log = _scenario_log(element, steps)
         if log is not None:
             row["log"] = log
+        screenshots, images = _scenario_screenshots(element, steps, skips)
+        if screenshots:
+            row["screenshots"] = screenshots
+            row["_images"] = images  # private: uploaded apart, kept out of the body by payload.py
         parsed.results.append(row)
         if lines is not None:
             line = element.get("line")

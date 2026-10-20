@@ -1,6 +1,7 @@
 """Cucumber JSON (cucumber-jvm/js/rb classic formatter) through the same
 dispatcher: a feature's scenarios become results in the shared shape."""
 import base64
+import hashlib
 import json
 from datetime import datetime, timezone
 
@@ -507,3 +508,135 @@ def test_an_unknown_encoding_is_treated_as_absent(tmp_path):
 
 def test_invalid_base64_under_base64_encoding_is_kept_as_text(tmp_path):
     assert log_of(tmp_path, [encoded_step("not base64!", "BASE64")]) == "not base64!"
+
+
+# --- step screenshots (spec 2026-10-19 §5.2) -------------------------------------------------------------------
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x01" * 16
+PNG_SHA = hashlib.sha256(PNG).hexdigest()
+
+
+def image_on(entry, data=PNG, media="image/png"):
+    entry.setdefault("embeddings", []).append({"data": b64(data), "mime_type": media})
+    return entry
+
+
+def hook(keyword, status="passed", *images):
+    entry = {"keyword": keyword, "hidden": True, "result": {"status": status}}
+    for data in images:
+        image_on(entry, data)
+    return entry
+
+
+def shots_of(tmp_path, steps, background=None, **element):
+    elements = [{"type": "background", "name": "", "steps": background}] if background else []
+    elements.append({"type": "scenario", "name": "S", "steps": steps, **element})
+    parsed = parse_file(write(tmp_path, [{"uri": "f.feature", "name": "F", "elements": elements}]))
+    return parsed.results[0], parsed
+
+
+def test_image_on_step_gets_that_step(tmp_path):
+    row, _ = shots_of(tmp_path, [step("Given ", "a user", 4, "passed"),
+                                 image_on(step("When ", "I search", 5, "passed"))],
+                      background=[image_on(step("Given ", "logged in", 3, "passed"), b"bg")])
+    assert row["screenshots"] == [
+        {"sha256": hashlib.sha256(b"bg").hexdigest(), "media_type": "image/png", "step_text": "Given logged in",
+         "step_line": 3},
+        {"sha256": PNG_SHA, "media_type": "image/png", "step_text": "When I search", "step_line": 5},
+    ]
+    assert row["_images"] == {PNG_SHA: ("image/png", PNG), hashlib.sha256(b"bg").hexdigest(): ("image/png", b"bg")}
+
+
+def test_after_hook_image_goes_to_last_step_that_ran(tmp_path):
+    row, _ = shots_of(tmp_path, [step("Given ", "a", 1, "passed"), step("When ", "b", 2, "passed"),
+                                 step("Then ", "c", 3, "skipped"), hook("After", "passed", PNG)])
+    assert row["screenshots"] == [{"sha256": PNG_SHA, "media_type": "image/png", "step_text": "When b",
+                                   "step_line": 2, "hook": "after"}]
+
+
+def test_after_hook_image_on_failed_scenario_goes_to_failed_step(tmp_path):
+    row, _ = shots_of(tmp_path, [step("Given ", "a", 1, "passed"), step("When ", "b", 2, "failed", "boom"),
+                                 step("Then ", "c", 3, "skipped"), hook("After", "passed", PNG)])
+    assert row["screenshots"][0]["step_text"] == "When b"
+    assert row["screenshots"][0]["hook"] == "after"
+
+
+def test_jvm_after_array_image(tmp_path):
+    row, _ = shots_of(tmp_path, [step("Given ", "a", 1, "passed"), step("When ", "b", 2, "passed")],
+                      after=[image_on({"result": {"status": "passed"}})])
+    assert row["screenshots"] == [{"sha256": PNG_SHA, "media_type": "image/png", "step_text": "When b",
+                                   "step_line": 2, "hook": "after"}]
+
+
+def test_before_hook_image_goes_to_first_step(tmp_path):
+    row, _ = shots_of(tmp_path, [hook("Before", "passed", PNG), step("Given ", "a", 1, "passed"),
+                                 step("When ", "b", 2, "passed")])
+    assert row["screenshots"] == [{"sha256": PNG_SHA, "media_type": "image/png", "step_text": "Given a",
+                                   "step_line": 1, "hook": "before"}]
+
+
+def test_jvm_before_array_image_goes_to_first_step(tmp_path):
+    row, _ = shots_of(tmp_path, [step("Given ", "a", 1, "passed")], before=[image_on({"result": {}})])
+    assert row["screenshots"][0]["step_text"] == "Given a"
+    assert row["screenshots"][0]["hook"] == "before"
+
+
+def test_all_skipped_with_hook_images_never_lands_on_hook_entry(tmp_path):
+    row, _ = shots_of(tmp_path, [hook("Before", "passed", b"b"), step("Given ", "a", 1, "skipped"),
+                                 step("Then ", "z", 2, "skipped"), hook("After", "passed", b"a")])
+    assert [(s["step_text"], s["hook"]) for s in row["screenshots"]] == [("Given a", "before"), ("Then z", "after")]
+
+
+def test_hook_images_without_real_steps_are_dropped(tmp_path):
+    row, _ = shots_of(tmp_path, [hook("Before", "passed", PNG)])
+    assert "screenshots" not in row and "_images" not in row
+
+
+def test_image_over_5mb_skipped(tmp_path):
+    big = b"\x00" * (5 * 1024 * 1024 + 1)
+    row, parsed = shots_of(tmp_path, [image_on(image_on(step("Given ", "a", 1, "passed"), big), PNG)])
+    assert [s["sha256"] for s in row["screenshots"]] == [PNG_SHA]
+    assert len([w for w in parsed.warnings if "screenshot" in w]) == 1
+    assert "1 screenshot" in parsed.warnings[-1]
+
+
+def test_51st_image_skipped(tmp_path):
+    entry = step("Given ", "a", 1, "passed")
+    for number in range(52):
+        image_on(entry, b"img%d" % number)
+    row, parsed = shots_of(tmp_path, [entry])
+    assert len(row["screenshots"]) == 50 and len(row["_images"]) == 50
+    assert [w for w in parsed.warnings if "2 screenshot" in w]
+
+
+def test_text_attachments_still_become_log(tmp_path):
+    entry = image_on(logging_step("When ", "a", "kept"))
+    row, _ = shots_of(tmp_path, [entry])
+    assert row["log"] == "kept" and len(row["screenshots"]) == 1
+
+
+def test_non_image_and_bad_base64_are_ignored(tmp_path):
+    entry = step("When ", "a", 1, "passed")
+    entry["embeddings"] = [{"data": "!!not base64!!", "mime_type": "image/png"},
+                           {"data": b64("x"), "mime_type": "image/gif"},
+                           {"data": PNG.decode("latin-1"), "mime_type": "image/png", "contentEncoding": "IDENTITY"}]
+    row, _ = shots_of(tmp_path, [entry])
+    assert "screenshots" not in row
+
+
+def test_message_format_field_names(tmp_path):
+    entry = step("When ", "a", 1, "passed")
+    entry["attachments"] = [{"body": b64(PNG), "mediaType": "image/jpeg; x=1"}]
+    row, _ = shots_of(tmp_path, [entry])
+    assert row["screenshots"][0]["media_type"] == "image/jpeg"
+
+
+def test_payload_does_not_contain_image_bytes(tmp_path):
+    from qeos_collector.payload import build_parts
+    row, _ = shots_of(tmp_path, [image_on(step("Given ", "a", 1, "passed"))])
+    parts = build_parts({"ci_provider": "x"}, [row], "key")
+    body = json.loads(parts[0].body)
+    assert "_images" not in body["results"][0]
+    assert body["results"][0]["screenshots"][0]["sha256"] == PNG_SHA
+    assert b64(PNG).encode() not in parts[0].body
+    assert "_images" in row  # the row itself keeps them for the upload

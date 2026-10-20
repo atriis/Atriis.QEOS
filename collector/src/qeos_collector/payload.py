@@ -157,7 +157,8 @@ def summarize(results: Sequence[dict]) -> Dict[str, int]:
 
 def _fit(run: dict, chunk: List[dict], changes: "dict | None" = None,
          components: "List[dict] | None" = None) -> List[Tuple[bytes, int]]:
-    payload = {"run": run, "results": chunk}
+    # "_images" is the collector's own: the bytes are uploaded apart and never part of the body
+    payload = {"run": run, "results": [{k: v for k, v in row.items() if k != "_images"} for row in chunk]}
     if changes is not None:
         payload["changes"] = changes
     if components:
