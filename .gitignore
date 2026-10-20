@@ -2,6 +2,8 @@
 .claude-flow/
 .claude/.proven-config-version
 .claude/proven-config.json
+.claude/projects/
+.impeccable/
 .playwright-mcp/
 .env
 reports/
