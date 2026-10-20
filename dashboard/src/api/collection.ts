@@ -4,6 +4,8 @@ import { apiFetch } from "./http";
 
 export interface CollectionSettings {
   collect_manual: boolean;
+  /** Keep step screenshots from uploads (ADR-036), off by default; absent from an older server, which reads as off. */
+  keep_screenshots?: boolean;
   discarded_count: number;
   last_discarded_at: string | null;
   updated_at: string | null;
@@ -16,6 +18,7 @@ export function getCollectionSettings(projectId: number): Promise<CollectionSett
   return apiFetch(base(projectId));
 }
 
-export function putCollectionSettings(projectId: number, collectManual: boolean): Promise<CollectionSettings> {
-  return apiFetch(base(projectId), { method: "PUT", body: JSON.stringify({ collect_manual: collectManual }) });
+/** Changes only the settings sent; the others keep their stored value. */
+export function putCollectionSettings(projectId: number, change: { collect_manual?: boolean; keep_screenshots?: boolean }): Promise<CollectionSettings> {
+  return apiFetch(base(projectId), { method: "PUT", body: JSON.stringify(change) });
 }

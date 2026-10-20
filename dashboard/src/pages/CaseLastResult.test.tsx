@@ -184,3 +184,57 @@ test("the case page links each value to its runs and shows no Log button (the ru
   expect(within(line).getByRole("button", { name: "Copy trip_id 3960562" })).toHaveTextContent("3960562");
   expect(screen.queryByRole("button", { name: /^Log of/ })).toBeNull();
 });
+
+const shot = (step_text: string, step_line: number | null, count = 1, hook: "before" | "after" | null = null) =>
+  ({ step_text, step_line, hook, count });
+
+test("a step with screenshots has a camera button with the count, and no Screenshots link when all are placed", async () => {
+  // The step's own image and the end-of-scenario image placed on it: one button for both
+  setup(kase(), result({ result_id: 77, failed_step: { text: "When I search Lisbon", line: 6 },
+    screenshot_steps: [shot("When I search Lisbon", 6), shot("When I search Lisbon", 6, 1, "after")] }));
+  renderCase();
+  const button = await screen.findByRole("button", { name: "Screenshots for this step (2)" });
+  expect(button).toHaveTextContent("2");
+  // On the failed line, beside its mark
+  expect(button.closest(".gk-failed")).toHaveTextContent("When I search <city>");
+  expect(screen.queryByRole("button", { name: /^Screenshots \(/ })).toBeNull();
+});
+
+test("one screenshot shows the camera without a visible count", async () => {
+  setup(kase(), result({ status: "passed", result_id: 77, screenshot_steps: [shot("Then I see results", 7)] }));
+  renderCase();
+  const button = await screen.findByRole("button", { name: "Screenshots for this step (1)" });
+  expect(button).not.toHaveTextContent("1");
+});
+
+test("a Background step's screenshots sit on the Background line of the case", async () => {
+  setup(kase(), result({ status: "passed", result_id: 77, screenshot_steps: [shot("Given I am logged in", 3)] }));
+  renderCase();
+  const button = await screen.findByRole("button", { name: "Screenshots for this step (1)" });
+  expect(button.closest(".gherkin > span")).toHaveTextContent("Given I am logged in");
+});
+
+test("a step edited since the run puts its screenshots under a Screenshots link that opens the viewer", async () => {
+  setup(kase(), result({ status: "passed", result_id: 77, screenshot_steps: [shot("When I filter by price", 6, 2)] }));
+  server.use(http.get(`${P}/runs/9/results/77/screenshots`, () => HttpResponse.json({ screenshots: [] })));
+  renderCase();
+  const link = await screen.findByRole("button", { name: "Screenshots (2)" });
+  expect(screen.queryByRole("button", { name: /^Screenshots for this step/ })).toBeNull();
+  await userEvent.click(link);
+  expect(await screen.findByRole("dialog", { name: /Screenshots — by city/ })).toBeInTheDocument();
+});
+
+test("no screenshot steps, no camera and no link", async () => {
+  setup(kase(), result({ status: "passed", result_id: 77 }));
+  renderCase();
+  await screen.findByText(/passed/i, { selector: ".badge *, .badge" });
+  expect(screen.queryByRole("button", { name: /^Screenshots/ })).toBeNull();
+});
+
+test("a viewer, who cannot edit the case, can still open its screenshots", async () => {
+  setup(kase(), result({ status: "passed", result_id: 77, screenshot_steps: [shot("Then I see results", 7, 2)] }));
+  server.use(http.get(P, () => HttpResponse.json({ id: 42, organization_id: 1, name: "Web", my_role: "viewer" })));
+  renderCase();
+  await screen.findByText(/only owners, admins and members can change test cases/i);
+  expect(await screen.findByRole("button", { name: "Screenshots for this step (2)" })).toBeEnabled();
+});

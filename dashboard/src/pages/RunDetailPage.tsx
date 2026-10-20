@@ -11,6 +11,7 @@ import FilterBar from "../components/FilterBar";
 import ImpactCard from "../components/ImpactCard";
 import LogPanel from "../components/LogPanel";
 import Message from "../components/Message";
+import ScreenshotButton, { useScreenshotViewer } from "../components/ScreenshotButton";
 import StatusDot from "../components/StatusDot";
 import StatusPill from "../components/StatusPill";
 import { isSubset, stagesLine } from "../lib/runScope";
@@ -31,6 +32,7 @@ export default function RunDetailPage() {
   const { projectId, runId } = useParams();
   const id = Number(runId);
   const { values, offset, update, setOffset } = useUrlState(DEFAULTS, PAGE);
+  const shotViewer = useScreenshotViewer();
   const status: RunStatusFilter | "" = oneOf(values.status, STATUSES, "" as never);
   // Rows scoped to a log value (spec 2026-10-15 §3.2): the counts stay the run's
   const scoped: { value?: string; pattern?: string } =
@@ -242,7 +244,13 @@ export default function RunDetailPage() {
                       <td className="num">{formatDuration(r.duration_ms)}</td>
                       <td>
                         <Message text={r.message} name={r.name} />
-                        <LogPanel projectId={Number(projectId)} runId={run.id} resultId={r.id} name={r.name} />
+                        <div className="result-tools">
+                          <LogPanel projectId={Number(projectId)} runId={run.id} resultId={r.id} name={r.name} />
+                          {(r.screenshot_count ?? 0) > 0 && (
+                            <ScreenshotButton kind="count" name={r.name} count={r.screenshot_count!}
+                              onOpen={() => shotViewer.open({ projectId: Number(projectId), runId: run.id, resultId: r.id, name: r.name })} />
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -259,6 +267,7 @@ export default function RunDetailPage() {
           )}
         </>
       )}
+      {shotViewer.viewer}
     </section>
   );
 }

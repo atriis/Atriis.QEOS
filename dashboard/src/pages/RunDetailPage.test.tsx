@@ -428,3 +428,19 @@ test("a value no result holds says so, once, with the way back", async () => {
   expect(screen.queryByText("No results in this run.")).toBeNull();
   expect(screen.getByRole("link", { name: "Show all results" })).toBeInTheDocument();
 });
+
+test("a result with screenshots shows a camera count beside its log; one without shows none", async () => {
+  server.use(
+    http.get("/api/v1/runs/61", () => HttpResponse.json(detail([
+      { ...result, screenshot_count: 3 },
+      { ...result, id: 2, test_key: "tests/a.py::TestLogin::test_no", name: "test_no", screenshot_count: 0 },
+    ]))),
+    http.get("/api/v1/projects/42/runs/61/results/1/screenshots", () => HttpResponse.json({ screenshots: [] })),
+  );
+  renderDetail();
+  const button = await screen.findByRole("button", { name: "Screenshots of test_ok (3)" });
+  expect(button).toHaveTextContent("3");
+  expect(screen.queryByRole("button", { name: /^Screenshots of test_no/ })).toBeNull();
+  await userEvent.click(button);
+  expect(await screen.findByRole("dialog", { name: /Screenshots — test_ok/ })).toBeInTheDocument();
+});

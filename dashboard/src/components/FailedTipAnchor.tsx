@@ -80,13 +80,16 @@ export default function FailedTipAnchor({ tip, className, dataLine, children }: 
         }
         if (e.key !== "Tab") return;
         // The tip is a portal at the end of the body: carry Tab into it and back out by hand, in reading order
+        // (the line, any button on it such as a screenshot camera, then the tip)
         const inTip = Array.from(el?.querySelectorAll<HTMLElement>(TABBABLE) ?? []);
-        if (e.target === line) {
-          if (!e.shiftKey && inTip.length) { e.preventDefault(); inTip[0].focus(); }
+        const inLine = [line, ...Array.from(line.querySelectorAll<HTMLElement>(TABBABLE))];
+        const lastInLine = inLine[inLine.length - 1];
+        if (inLine.includes(e.target as HTMLElement)) {
+          if (!e.shiftKey && e.target === lastInLine && inTip.length) { e.preventDefault(); inTip[0].focus(); }
           return;
         }
         if (!inTip.length) return;
-        if (e.shiftKey && e.target === inTip[0]) { e.preventDefault(); line.focus(); }
+        if (e.shiftKey && e.target === inTip[0]) { e.preventDefault(); lastInLine.focus(); }
         else if (!e.shiftKey && e.target === inTip[inTip.length - 1]) {
           const next = tabbableAfter(line, el);
           if (next) { e.preventDefault(); next.focus(); }

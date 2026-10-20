@@ -17,9 +17,11 @@ import LogValuesLine from "../components/LogValuesLine";
 import RunContextNote from "../components/RunContextNote";
 import PageHeader from "../components/PageHeader";
 import RunControl from "../components/RunControl";
+import ScreenshotButton, { useScreenshotViewer } from "../components/ScreenshotButton";
 import { type Block, splitFeature } from "../lib/featureBlocks";
 import { locateFailedStep, scenarioSteps, stepLines } from "../lib/failedStep";
 import { GROUP_CASES_MAX, featureDetailQuery, fileLabel } from "../lib/featureQueries";
+import { placeScreenshots } from "../lib/screenshotLines";
 import { runParam, useScrollToFailure } from "../lib/runContext";
 import { useCanEdit } from "../lib/useCanEdit";
 
@@ -111,6 +113,7 @@ export default function FeaturePage() {
   const results = latest.data ?? {};
   const resultOf = (c: FeatureCase) => (c.automated_test_key ? results[c.automated_test_key.toLowerCase()] : undefined);
   const spreadOf = useStepSpread(id, cases.map(resultOf));
+  const shotViewer = useScreenshotViewer();
   const split = useMemo(() => {
     if (!source) return null;
     return splitFeature(source.text, [...source.lines.values()]);
@@ -132,6 +135,21 @@ export default function FeaturePage() {
     if (line >= block.start && line <= block.end) return { line: line - block.start + 1, result };
     // Outside the scenario's own block: inherited from a Background (feature- or rule-level)
     return { background: steps[at].text, result };
+  };
+
+  /** Where a case's step screenshots go: lines of its own block; a Background step (shown once for every scenario)
+   *  belongs to no single card's Gherkin, so its images go to the card's Screenshots link. */
+  const shotsOf = (c: FeatureCase, block: Block) => {
+    const result = resultOf(c);
+    const heading = source?.lines.get(c.number);
+    if (!result?.screenshot_steps || result.result_id == null || !source || heading == null) return null;
+    const steps = stored ? scenarioSteps(source.text, heading) : stepLines(source.text, block.start, block.end);
+    const placed = placeScreenshots((step) => {
+      const at = locateFailedStep(steps, stored ? step : { text: step.text });
+      const line = at == null ? null : steps[at].line;
+      return line != null && line >= block.start && line <= block.end ? line - block.start + 1 : null;
+    }, result.screenshot_steps);
+    return { ...placed, of: { projectId: id, runId: result.run_id, resultId: result.result_id, name: c.title } };
   };
 
   const cards: { c: FeatureCase; block: Block }[] = [];
@@ -188,6 +206,7 @@ export default function FeaturePage() {
       {cards.map(({ c, block }) => {
         const failure = failureOf(c, block);
         const result = resultOf(c);
+        const shots = shotsOf(c, block);
         return (
           <article key={c.number} className="card scenario-card" aria-label={`${c.key} ${c.title}`}>
             <div className="scenario-card-head">
@@ -199,6 +218,7 @@ export default function FeaturePage() {
                 {c.automated_test_key != null && latest.isSuccess && (runId != null && !result
                   ? <span className="badge badge-muted">Not in run #{runId}</span>
                   : <LastResultPill result={result} />)}
+                {shots && shots.unplaced > 0 && <ScreenshotButton kind="link" count={shots.unplaced} onOpen={() => shotViewer.open(shots.of)} />}
                 {lastRuns(c.automated_test_key, { hideEmpty: latest.isSuccess, href: caseAsOfRun(id, c.number) })}
               </div>
             </div>
@@ -206,6 +226,7 @@ export default function FeaturePage() {
             {failure?.background != null && <BackgroundFailure projectId={id} step={failure.background} result={failure.result} spread={spreadOf(failure.result)} />}
             <div className="feature-source">
               <GherkinBlock text={block.text} label={`${c.key} Gherkin`} numbered startLine={block.start}
+                annotations={shots ? new Map([...shots.byLine].map(([line, p]) => [line, <ScreenshotButton kind="step" count={p.count} onOpen={() => shotViewer.open({ ...shots.of, step: p.step })} />])) : undefined}
                 failed={failure?.line != null
                   ? { line: failure.line, tone: toneOf(failure.result), tip: <FailedStepTip projectId={id} result={failure.result} spread={spreadOf(failure.result)} /> }
                   : undefined} />
@@ -227,6 +248,7 @@ export default function FeaturePage() {
           </ul>
         </div>
       )}
+      {shotViewer.viewer}
     </section>
   );
 }

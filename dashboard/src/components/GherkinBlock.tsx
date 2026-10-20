@@ -18,7 +18,7 @@ interface Props {
   numbered?: boolean;
   /** The file line the first line stands for (a scenario cut out of a file); numbered blocks only. `failed.line` and `annotations` stay relative to the block. */
   startLine?: number;
-  /** Extra content at the end of a 1-based line, such as a scenario's case chip. Numbered blocks only. */
+  /** Extra content at the end of a 1-based line, such as a step's screenshot button; not selected when the Gherkin is copied. */
   annotations?: Map<number, ReactNode>;
   /** Marks one 1-based line as the step the scenario stopped at (`tone` failed by default); `tip` shows on hover and keyboard focus (Escape closes it). */
   failed?: { line: number; tip: ReactNode; tone?: StepTone };
@@ -42,7 +42,7 @@ function FailedLine({ numbered, n, tip, tone = "failed", children, note, trailin
           {mark}
           {note}
         </span>
-      ) : mark}
+      ) : <>{mark}{note}</>}
       {trailing}
     </FailedTipAnchor>
   );
@@ -51,12 +51,13 @@ function FailedLine({ numbered, n, tip, tone = "failed", children, note, trailin
 /** Gherkin: highlighted, never editable. */
 export default function GherkinBlock({ text, label = "Gherkin", numbered = false, startLine = 1, annotations, failed }: Props) {
   const lines = text.split("\n");
+  const noteAt = (n: number) => (annotations?.has(n) ? <span className="gk-note">{annotations.get(n)}</span> : undefined);
   if (numbered) {
     return (
       <pre className="gherkin numbered" aria-label={label} tabIndex={0}>
         {lines.map((line, i) => failed?.line === i + 1 ? (
           <FailedLine key={i} numbered n={i + startLine} tip={failed.tip} tone={failed.tone}
-            note={annotations?.has(i + 1) ? <span className="gk-note">{annotations.get(i + 1)}</span> : undefined}>
+            note={noteAt(i + 1)}>
             {tokenizeLine(line).map((t, j) => <span key={j} className={`gk-${t.kind}`}>{t.text}</span>)}
           </FailedLine>
         ) : (
@@ -65,7 +66,7 @@ export default function GherkinBlock({ text, label = "Gherkin", numbered = false
             <span className="gk-code">
               {tokenizeLine(line).map((t, j) => <span key={j} className={`gk-${t.kind}`}>{t.text}</span>)}
             </span>
-            {annotations?.has(i + 1) && <span className="gk-note">{annotations.get(i + 1)}</span>}
+            {noteAt(i + 1)}
           </span>
         ))}
       </pre>
@@ -76,13 +77,14 @@ export default function GherkinBlock({ text, label = "Gherkin", numbered = false
       {lines.map((line, i) => failed?.line === i + 1 ? (
         <span key={i}>
           {/* The line feed lives inside the block-level failed line, so it ends that line without adding a blank one */}
-          <FailedLine numbered={false} n={i + 1} tip={failed.tip} tone={failed.tone} trailing={i < lines.length - 1 ? "\n" : undefined}>
+          <FailedLine numbered={false} n={i + 1} tip={failed.tip} tone={failed.tone} note={noteAt(i + 1)} trailing={i < lines.length - 1 ? "\n" : undefined}>
             {tokenizeLine(line).map((t, j) => <span key={j} className={`gk-${t.kind}`}>{t.text}</span>)}
           </FailedLine>
         </span>
       ) : (
         <span key={i}>
           {tokenizeLine(line).map((t, j) => <span key={j} className={`gk-${t.kind}`}>{t.text}</span>)}
+          {noteAt(i + 1)}
           {i < lines.length - 1 && "\n"}
         </span>
       ))}

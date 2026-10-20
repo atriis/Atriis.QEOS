@@ -12,9 +12,11 @@ import { useStepSpread } from "../lib/failedSteps";
 import { runParam, statusWord, useScrollToFailure } from "../lib/runContext";
 import { featureDetailQuery } from "../lib/featureQueries";
 import { locateFailedStep, matchesStep, scenarioSteps, stepLines } from "../lib/failedStep";
+import { type Locate, placeScreenshots } from "../lib/screenshotLines";
 import ConfirmButton from "../components/ConfirmButton";
 import ErrorBanner from "../components/ErrorBanner";
 import GherkinBlock, { toneOf } from "../components/GherkinBlock";
+import ScreenshotButton, { useScreenshotViewer } from "../components/ScreenshotButton";
 import RunControl from "../components/RunControl";
 import RunPanel from "../components/RunPanel";
 import StatusDot from "../components/StatusDot";
@@ -220,25 +222,37 @@ function CaseEditor() {
     enabled: key != null,
     queryFn: () => getLatestResults(id, [key!], runId ?? undefined).then((r) => r.results[key!.toLowerCase()] ?? null),
   });
-  const wantsFeature = !!c?.source_path && latest.data?.failed_step != null;
+  const wantsFeature = !!c?.source_path && (latest.data?.failed_step != null || (latest.data?.screenshot_steps?.length ?? 0) > 0);
   const feature = useQuery({ ...featureDetailQuery(id, c?.source_path ?? ""), enabled: wantsFeature });
-  const failedLine = useMemo(() => {
-    const step = latest.data?.failed_step;
-    if (!c?.gherkin || !step) return null;
+  /** The shown line of a step that ran (the failed one, or one with screenshots); null while the file is loading. */
+  const locateShown = useMemo<Locate | null>(() => {
+    if (!c) return null;
+    // A case without Gherkin shows no step lines: its screenshots all go under the Screenshots link
+    if (!c.gherkin) return () => null;
     // Wait for the file rather than mark a provisional line that then jumps
     if (wantsFeature && feature.isPending) return null;
     const shown = stepLines(c.gherkin);
     const source = feature.data?.content;
     const scenarioLine = feature.data?.cases.find((fc) => fc.number === c.number)?.line ?? null;
-    const mapped = source && scenarioLine ? locateFailedStep(scenarioSteps(source, scenarioLine), step) : null;
-    // The file's steps must line up with the displayed ones; if not, trust the text alone
-    const index = mapped != null && shown[mapped] && matchesStep(shown[mapped].text, step.text)
-      ? mapped
-      : locateFailedStep(shown, { text: step.text });
-    return index != null && shown[index] ? shown[index].line : null;
-  }, [c, latest.data, feature.data, feature.isPending, wantsFeature]);
+    const fileSteps = source && scenarioLine ? scenarioSteps(source, scenarioLine) : null;
+    return (step) => {
+      const mapped = fileSteps ? locateFailedStep(fileSteps, step) : null;
+      // The file's steps must line up with the displayed ones; if not, trust the text alone
+      const index = mapped != null && shown[mapped] && matchesStep(shown[mapped].text, step.text)
+        ? mapped
+        : locateFailedStep(shown, { text: step.text });
+      return index != null && shown[index] ? shown[index].line : null;
+    };
+  }, [c, feature.data, feature.isPending, wantsFeature]);
+  const failedStep = latest.data?.failed_step;
+  const failedLine = failedStep && locateShown ? locateShown(failedStep) : null;
+  const shots = useMemo(
+    () => (locateShown && latest.data?.result_id != null ? placeScreenshots(locateShown, latest.data.screenshot_steps) : null),
+    [locateShown, latest.data],
+  );
   useScrollToFailure(runId, failedLine != null);
   const spreadOf = useStepSpread(id, [latest.data]);
+  const shotViewer = useScreenshotViewer();
 
   if (number !== null && existing.error != null) {
     return (
@@ -258,6 +272,20 @@ function CaseEditor() {
   }
   const readOnly = !canEdit;
   const imported = c?.source_path != null;
+  const result = latest.data;
+  const shotOf = result?.result_id != null && c
+    ? { projectId: id, runId: result.run_id, resultId: result.result_id, name: c.automated_name ?? c.title }
+    : null;
+  const annotations = shots && shotOf
+    ? new Map([...shots.byLine].map(([line, p]) => [line, <ScreenshotButton kind="step" count={p.count} onOpen={() => shotViewer.open({ ...shotOf, step: p.step })} />]))
+    : undefined;
+  // The pill, with the images of steps not shown in the Gherkin beside it
+  const resultLine = key != null && latest.isSuccess && (runId == null || result != null) && (
+    <div className="result-line">
+      <LastResultPill result={result} />
+      {shotOf && shots && shots.unplaced > 0 && <ScreenshotButton kind="link" count={shots.unplaced} onOpen={() => shotViewer.open(shotOf)} />}
+    </div>
+  );
 
   return (
     <section>
@@ -306,14 +334,17 @@ function CaseEditor() {
             <span>Preconditions and context <span className="muted">(optional)</span></span>
             <textarea rows={3} maxLength={10000} value={draft.description} onChange={(e) => change("description", e.target.value)} />
           </label>
+        </fieldset>
 
+        {/* The result, its values and the Gherkin are read-only by nature: outside the disabled fieldset, so a viewer can still copy a value or open screenshots */}
           {imported ? (
             <>
               <h2>Gherkin</h2>
-              {key != null && latest.isSuccess && (runId == null || latest.data != null) && <LastResultPill result={latest.data} />}
+              {resultLine}
               {key != null && latest.data != null && <LogValuesLine values={latest.data.values} projectId={id} />}
               <GherkinBlock
                 text={c?.gherkin ?? ""}
+                annotations={annotations}
                 failed={failedLine != null && latest.data
                   ? { line: failedLine, tone: toneOf(latest.data), tip: <FailedStepTip projectId={id} result={latest.data} spread={spreadOf(latest.data)} /> }
                   : undefined}
@@ -321,8 +352,9 @@ function CaseEditor() {
             </>
           ) : (
             <>
-          {key != null && latest.isSuccess && (runId == null || latest.data != null) && <LastResultPill result={latest.data} />}
+          {resultLine}
           {key != null && latest.data != null && <LogValuesLine values={latest.data.values} projectId={id} />}
+          <fieldset disabled={readOnly} className="plain-fieldset">
           <h2 id={`${ids}-steps`}>Steps</h2>
           <ol className="steps" aria-labelledby={`${ids}-steps`}>
             {draft.steps.map((s, i) => (
@@ -362,10 +394,12 @@ function CaseEditor() {
               </button>
             </div>
           )}
+          </fieldset>
 
             </>
           )}
 
+        <fieldset disabled={readOnly} className="plain-fieldset">
           <label>
             <span>Labels <span className="muted">(comma separated)</span></span>
             <input readOnly={imported} value={draft.labels} onChange={(e) => change("labels", e.target.value)} placeholder="e.g. checkout, smoke"
@@ -408,6 +442,7 @@ function CaseEditor() {
           onLink={(key, name) => link.mutate({ automated_test_key: key, ...(key ? { automated_name: name } : {}) })}
         />
       )}
+      {shotViewer.viewer}
     </section>
   );
 }

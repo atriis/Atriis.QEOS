@@ -355,3 +355,46 @@ test("a scenario card links its values to their runs and shows no Log button (th
   expect(within(line).getByRole("button", { name: "Copy trip_id 3960562" })).toHaveTextContent("3960562");
   expect(within(cards[0]).queryByRole("button", { name: /^Log of/ })).toBeNull();
 });
+
+test("a scenario's step screenshots sit on its card; a Background step's go to its Screenshots link, never the shared Background", async () => {
+  const content = ["Feature: Login", "", "  Background:", "    Given bg", "", "  Scenario: Good password", "    When a", "",
+    "  Scenario: Bad password", "    Then b"].join("\n");
+  const shot = (step_text: string, step_line: number, count = 1) => ({ step_text, step_line, hook: null, count });
+  server.use(
+    http.get(`${P}/features/detail`, () => HttpResponse.json({ ...DETAIL, content, cases: [
+      detailCase(12, { scenario_name: "Good password", line: 6, automated_test_key: KEY }),
+      detailCase(13, { scenario_name: "Bad password", line: 9, automated_test_key: KEY2 }),
+    ] })),
+    http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
+      [KEY]: result("passed", { result_id: 5, screenshot_steps: [shot("Given bg", 4), shot("When a", 7, 3)] }),
+      [KEY2]: result("passed", { result_id: 6 }),
+    } })),
+  );
+  renderAt();
+  const cards = await screen.findAllByRole("article");
+  const button = await within(cards[0]).findByRole("button", { name: "Screenshots for this step (3)" });
+  expect(button.closest(".gk-line")).toHaveTextContent("When a");
+  expect(within(cards[0]).getByRole("button", { name: "Screenshots (1)" })).toBeInTheDocument();
+  expect(within(screen.getByLabelText("Feature")).queryByRole("button")).toBeNull();
+  expect(within(cards[1]).queryByRole("button", { name: /^Screenshots/ })).toBeNull();
+});
+
+test("on a failed line with screenshots, Tab goes line, camera, then the tip; Shift+Tab comes back the same way", async () => {
+  server.use(
+    http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
+      [KEY]: result("failed", { message: "boom", result_id: 5, failed_step: { text: 'Given I type "secret"', line: 5 },
+        screenshot_steps: [{ step_text: 'Given I type "secret"', step_line: 5, hook: "after", count: 2 }] }),
+    } })),
+  );
+  renderAt();
+  const camera = await screen.findByRole("button", { name: "Screenshots for this step (2)" });
+  const line = camera.closest(".gk-failed") as HTMLElement;
+  act(() => line.focus());
+  const tip = await screen.findByRole("tooltip");
+  await userEvent.tab();
+  expect(document.activeElement).toBe(camera);
+  await userEvent.tab();
+  expect(document.activeElement).toBe(within(tip).getByRole("link", { name: "Open run" }));
+  await userEvent.tab({ shift: true });
+  expect(document.activeElement).toBe(camera);
+});
