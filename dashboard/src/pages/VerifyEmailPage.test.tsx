@@ -103,6 +103,13 @@ test("a next in the verification link works the same", async () => {
   expect(await screen.findByText("INVITATION")).toBeInTheDocument();
 });
 
+test("a link opened in another browser, with nothing remembered, still lands on the invitation", async () => {
+  verifyOk();
+  localStorage.clear();
+  renderWithInvitation("?token=tok-123&next=%2Finvitations%2Fx");
+  expect(await screen.findByText("INVITATION")).toBeInTheDocument();
+});
+
 test("an unsafe next never leaves the app", async () => {
   verifyOk();
   localStorage.setItem("qeos.afterVerify", JSON.stringify({ next: "//evil.example", at: Date.now() }));

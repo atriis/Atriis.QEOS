@@ -7,8 +7,10 @@
  */
 export function safeNext(raw: string | null | undefined): string | null {
   if (!raw || !raw.startsWith("/") || raw.startsWith("//")) return null;
+  // U+0085 and U+FEFF are named because JS and Python disagree on which of them "\s" covers: the
+  // auth-service's RegisterRequest.next check refuses exactly the same characters
   // eslint-disable-next-line no-control-regex
-  if (/[\\\s\u0000-\u001f\u007f]/.test(raw)) return null;
+  if (/[\\\s\u0000-\u001f\u007f\u0085\ufeff]/.test(raw)) return null;
   // Back to the login page would loop
   if (raw === "/login" || raw.startsWith("/login?") || raw.startsWith("/login/") || raw.startsWith("/login#")) return null;
   return raw;

@@ -179,3 +179,71 @@ test("an unsafe next is never sent with the registration", async () => {
   await screen.findByText(/check your email to complete/i);
   expect(sent).toEqual({ email: "pedro@example.com", password: "UmaPasswordForte123" });
 });
+
+async function registerWith(next: string) {
+  render(
+    <MemoryRouter initialEntries={[`/register?next=${encodeURIComponent(next)}`]}>
+      <Routes>
+        <Route path="/register" element={<RegisterPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+  await userEvent.type(screen.getByLabelText(/email/i), "pedro@example.com");
+  await userEvent.type(screen.getByLabelText(/password/i), "UmaPasswordForte123");
+  await userEvent.click(screen.getByRole("button", { name: /create account/i }));
+}
+
+test("an auth-service that refuses next still registers the person: asked once more without it", async () => {
+  localStorage.clear();
+  const bodies: Record<string, string>[] = [];
+  server.use(
+    http.post("/api/v1/auth/register", async ({ request }) => {
+      const body = (await request.json()) as Record<string, string>;
+      bodies.push(body);
+      if ("next" in body) {
+        return HttpResponse.json(
+          { detail: [{ type: "extra_forbidden", loc: ["body", "next"], msg: "Extra inputs are not permitted" }] },
+          { status: 422 },
+        );
+      }
+      return HttpResponse.json({ message: "ok" }, { status: 202 });
+    }),
+  );
+  await registerWith("/invitations/tok-1");
+  expect(await screen.findByText(/check your email to complete/i)).toBeInTheDocument();
+  expect(bodies).toEqual([
+    { email: "pedro@example.com", password: "UmaPasswordForte123", next: "/invitations/tok-1" },
+    { email: "pedro@example.com", password: "UmaPasswordForte123" },
+  ]);
+  // This browser still remembers the invitation for a link opened here
+  expect(JSON.parse(localStorage.getItem("qeos.afterVerify")!).next).toBe("/invitations/tok-1");
+});
+
+test("a 422 about another field is shown, not retried", async () => {
+  let calls = 0;
+  server.use(
+    http.post("/api/v1/auth/register", () => {
+      calls += 1;
+      return HttpResponse.json(
+        { detail: [{ type: "value_error", loc: ["body", "email"], msg: "value is not a valid email address" }] },
+        { status: 422 },
+      );
+    }),
+  );
+  await registerWith("/invitations/tok-1");
+  expect(await screen.findByText(/not a valid email/i)).toBeInTheDocument();
+  expect(calls).toBe(1);
+});
+
+test("a next longer than the auth-service accepts is not sent", async () => {
+  let sent: Record<string, string> | null = null;
+  server.use(
+    http.post("/api/v1/auth/register", async ({ request }) => {
+      sent = (await request.json()) as Record<string, string>;
+      return HttpResponse.json({ message: "ok" }, { status: 202 });
+    }),
+  );
+  await registerWith("/invitations/" + "a".repeat(2048));
+  await screen.findByText(/check your email to complete/i);
+  expect(sent).toEqual({ email: "pedro@example.com", password: "UmaPasswordForte123" });
+});

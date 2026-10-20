@@ -55,8 +55,10 @@ class RegisterRequest(UserBase):
 
 
 # Backslash, whitespace and control characters: browsers strip tabs and newlines and read a
-# backslash as "/", so "/<tab>/evil.example" or "/<backslash>evil.example" would become "//evil.example"
-_UNSAFE_PATH_CHARS = re.compile(r"[\\\s\x00-\x1f\x7f]")
+# backslash as "/", so "/<tab>/evil.example" or "/<backslash>evil.example" would become "//evil.example".
+# U+0085 and U+FEFF are named because Python and JS disagree on which of them \s covers: the
+# dashboard's safeNext refuses exactly the same characters
+_UNSAFE_PATH_CHARS = re.compile(r"[\\\s\x00-\x1f\x7f\x85\ufeff]")
 
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None

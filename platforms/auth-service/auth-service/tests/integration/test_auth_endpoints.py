@@ -369,7 +369,27 @@ def test_without_a_next_the_verification_link_is_unchanged(client, monkeypatch):
 
 @pytest.mark.parametrize(
     "unsafe",
-    ["//evil.example", "https://evil.example", "/\\evil.example", "/\t/evil.example", "invitations/x", "/login?next=/x", "/" + "a" * 2048],
+    [
+        "//evil.example",
+        "https://evil.example",
+        "javascript:alert(1)",
+        "/\\evil.example",
+        "/\t/evil.example",
+        "/\n/evil.example",
+        "/a\u2028b",
+        "/a\u3000b",
+        "/a\x7fb",
+        "/a\x00b",
+        # Named in the rule because Python "\s" and JS "\s" disagree on them; the dashboard refuses them too
+        "/a\x85b",
+        "/a\ufeffb",
+        "invitations/x",
+        "/login",
+        "/login?next=/x",
+        "/login#x",
+        "/login/x",
+        "/" + "a" * 2048,
+    ],
 )
 def test_a_next_that_could_leave_the_site_is_refused(client, monkeypatch, unsafe):
     links = _sent_links(monkeypatch)
@@ -379,3 +399,24 @@ def test_a_next_that_could_leave_the_site_is_refused(client, monkeypatch, unsafe
     )
     assert response.status_code == 422, response.text
     assert links == []
+
+
+@pytest.mark.parametrize(
+    "safe, encoded",
+    [
+        ("/", "%2F"),
+        ("/projects/1/runs?a=1&b=2#top", "%2Fprojects%2F1%2Fruns%3Fa%3D1%26b%3D2%23top"),
+        # Accepted as a path, but encoded once more in the link: the dashboard decodes it once, back to
+        # "/%2F%2Fevil", a path on this site, never "//evil"
+        ("/%2F%2Fevil", "%2F%252F%252Fevil"),
+    ],
+)
+def test_a_safe_next_is_encoded_whole_into_the_link(client, monkeypatch, safe, encoded):
+    links = _sent_links(monkeypatch)
+    response = client.post(
+        "/api/v1/auth/register",
+        json={"email": "safe@example.com", "password": "securepassword123", "next": safe},
+    )
+    assert response.status_code == 202, response.text
+    # The token is URL-safe base64, so the only "&" is the one before next
+    assert links[0].split("&", 1)[1] == f"next={encoded}"

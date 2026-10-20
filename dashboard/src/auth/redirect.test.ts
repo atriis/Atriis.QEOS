@@ -21,6 +21,9 @@ describe("safeNext accepts only same-origin relative paths", () => {
     ["bare host", "evil.example"],
     ["empty", ""],
     ["login itself, which would loop", "/login?next=/x"],
+    // Named in the rule because JS "\s" and Python "\s" disagree on them; the auth-service refuses them too
+    ["a next-line character (U+0085)", "/a\u0085b"],
+    ["a byte-order mark (U+FEFF)", "/a\ufeffb"],
   ])("rejects %s", (_name, raw) => expect(safeNext(raw)).toBeNull());
 
   test("rejects a missing value", () => {

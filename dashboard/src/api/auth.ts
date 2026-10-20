@@ -1,4 +1,4 @@
-import { apiFetch } from "./http";
+import { ApiError, apiFetch } from "./http";
 import { clearTokens, setAccessToken } from "../auth/tokens";
 
 interface TokenOut {
@@ -28,12 +28,34 @@ export async function login(email: string, password: string): Promise<MfaChallen
   return null;
 }
 
+/** The longest `next` the auth-service accepts. */
+const MAX_NEXT = 2048;
+
+/** A 422 naming the `next` field: an auth-service from before `next` (it refuses unknown fields), or one refusing this value. */
+function refusesNext(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 422) return false;
+  const detail = (err.body as { detail?: unknown } | undefined)?.detail;
+  return Array.isArray(detail) && detail.some((d) => Array.isArray(d?.loc) && d.loc[d.loc.length - 1] === "next");
+}
+
 /** `next` (a safe in-app path, e.g. an invitation) rides in the emailed verification link. */
 export async function register(email: string, password: string, fullName?: string, next?: string | null): Promise<void> {
   const body: Record<string, string> = { email, password };
   if (fullName?.trim()) body.full_name = fullName.trim();
-  if (next) body.next = next;
-  await apiFetch("/api/v1/auth/register", { method: "POST", body: JSON.stringify(body) });
+  const send = (b: Record<string, string>) =>
+    apiFetch("/api/v1/auth/register", { method: "POST", body: JSON.stringify(b) });
+  if (!next || next.length > MAX_NEXT) {
+    await send(body);
+    return;
+  }
+  try {
+    await send({ ...body, next });
+  } catch (err) {
+    // A 422 creates no registration, so asking once more without `next` is safe: the person still registers,
+    // and the dashboard's own memory of the page covers a link opened in this browser
+    if (!refusesNext(err)) throw err;
+    await send(body);
+  }
 }
 
 /** Completes registration from the emailed link and signs the person in. */

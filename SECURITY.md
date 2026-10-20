@@ -228,6 +228,17 @@ details.
   refused with 400 before it is proxied, so Grafana does not receive the QEOS
   credential either way. With `MONITORING_ENABLED` unset or false,
   `/grafana/` is a JSON 404 for everyone.
+- **Return paths after sign-in (`next`).** The dashboard follows a `next` only through
+  `safeNext`: a path that starts with exactly one `/`, holds no backslash, whitespace or control
+  character (U+0085 and U+FEFF included) and is not `/login`; anything else lands on `/`.
+  Registration sends it to the auth-service so the verification email can carry it
+  (`&next=…`, encoded whole); `RegisterRequest.next` applies the same rules, at most 2048
+  characters, and refuses anything else with 422 (the dashboard then registers again without
+  it). The dashboard validates the value again when it reads it from the link or from storage,
+  never trusting either. An invitee's `next` is `/invitations/<token>`, so the invitation token
+  now also appears in the verification email, in the auth-service log when SMTP is off, and in
+  the verify page's URL (so in `Referer` headers and access logs): treat it like the
+  verification link itself.
 - **The `/monitoring` hand-off page (monitoring).** Anyone can craft a
   `/monitoring?next=` link, so the dashboard does not rely on the gateway's
   own restriction of `next`. It reads the raw value, decodes it exactly once
