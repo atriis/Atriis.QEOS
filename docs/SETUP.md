@@ -40,6 +40,7 @@ instead.
    - [4.8 Ctrl K search and KPI tiles](#48-ctrl-k-search-and-kpi-tiles)
    - [4.9 Security operations](#49-security-operations)
    - [4.10 Log values](#410-log-values)
+   - [4.11 Step screenshots](#411-step-screenshots)
 5. [Wiring a real test repository end to end](#5-wiring-a-real-test-repository-end-to-end)
 6. [Production](#6-production)
 7. [Upgrades and maintenance](#7-upgrades-and-maintenance)
@@ -1774,6 +1775,38 @@ of them shows only the results that hold it, with "Show all results" to widen.
 **Verify (4.10):** after a run, open `test-results/cucumber-report.json` and check that the steps carry
 `embeddings` with `"mime_type": "text/x.cucumber.log+plain"`; `qeos-collector upload "test-results/*.json" --dry-run`
 prints each result's `log`.
+
+### 4.11 Step screenshots
+
+A camera button appears on each Gherkin step that has screenshots (test case page and feature page), and a camera count
+on a run's results. The images come from the Cucumber JSON report (`image/png`, `image/jpeg`, `image/webp`), from
+collector 0.11.0. A screenshot taken at the end of a scenario (OBT does this today) shows on the last step that ran.
+
+**Privacy first.** QEOS cannot mask an image: a screenshot can show names, emails and booking data. Screenshots are **off
+by default**, per project. Turn them on only where every project reader may see that data (see SECURITY.md).
+
+**Setup:**
+
+1. **Storage.** The local stack and the production package start MinIO (`minio`, `minio-init`, volume
+   `qa-vision_qeos_minio_data`), private and not published. Ingestion reaches it through `ARTIFACTS_S3_ENDPOINT`,
+   `ARTIFACTS_S3_BUCKET`, `ARTIFACTS_S3_ACCESS_KEY` and `ARTIFACTS_S3_SECRET_KEY`; set all four or screenshots stay off.
+   Locally the defaults work (`.env.example` lists the optional overrides). Production needs `ARTIFACTS_S3_SECRET_KEY`;
+   `deploy/init-env.sh` generates it. `deploy/backup.sh` copies the volume (deploy/README.md section 7).
+2. **Project toggle.** Owner or admin: Project Settings, **Keep screenshots from uploads**, on. It is off by default.
+   Turning it off later does not delete stored images; they age out with the retention days.
+3. **Collector.** Nothing to add: 0.11.0 asks QEOS first (`GET /api/v1/collect/key` answers `screenshots: true|false`)
+   and sends images only when allowed. `--no-screenshots` (or `QEOS_NO_SCREENSHOTS=1`) skips them for one run.
+4. **Per-step images (optional).** The tests decide how often to capture. With Playwright and cucumber-js, add an
+   `AfterStep` hook that attaches a screenshot when `QEOS_STEP_SHOTS=1` (collector README, "Step screenshots"), so only
+   chosen runs pay for it.
+
+Limits: 5 MB per image, 50 per result, 5,000 per run. Images are deleted with their results (retention) or with the
+project; an image no result shows is deleted after 7 days. The data export carries references only, not the images.
+
+**Verify (4.11):** after a run with the toggle on, the collector prints `screenshots: N stored, 0 skipped`, and the
+case page shows the camera on the step.
+
+---
 
 ---
 

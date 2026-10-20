@@ -153,6 +153,6 @@ An Alembic migration in ingestion-service adds `redacted BOOLEAN NOT NULL DEFAUL
 - Re-mask results stored before this change (one-off command).
 - Custom masking patterns per project.
 - Masking identity fields.
-- Artifacts (screenshots, logs) — masking applies when they exist.
+- Artifacts (screenshots, logs) — step screenshots shipped 2026-10-20 (ADR-036) and are **not masked**: QEOS cannot read text inside an image, so they are off by default per project (owner/admin toggle "Keep screenshots from uploads") and SECURITY.md says so. Only the screenshots' step text is masked. Other artifacts: masking applies when they exist.
 - Legal hold and data export before deletion.
 - mTLS between services.

@@ -1,6 +1,6 @@
 # Step screenshots: show the screenshots a test took, on the step that took them
 
-Date: 2026-10-19 · Status: approved 2026-10-19 · Decision record to write: ADR-036
+Date: 2026-10-19 · Status: shipped 2026-10-20 (approved 2026-10-19) · Decision record to write: ADR-036
 
 ## 1. Intent
 
@@ -140,7 +140,7 @@ Run upload:
 - `ResultIn.screenshots`: optional list, max 50, each with sha256 (64 hex), media_type (one of three),
   step_text (≤1000), step_line (1..1e6, optional), hook (`before`|`after`, optional).
 - New table `result_screenshots`: id, result_id (FK `test_results`, ON DELETE CASCADE), position,
-  blob_id (FK `blobs`), step_text, step_line, hook. Alembic migration 025.
+  blob_id (FK `blobs`), step_text, step_line, hook. Alembic migration 025 (migration 026 later made `blobs.created_at` NOT NULL).
 - A reference whose blob is not in `blobs` for this project is dropped silently (counted in logs).
 - `step_text` is masked with the project's masking patterns, like `failed_step_text`, and the re-mask
   job (`jobs/remask.py`) re-masks `result_screenshots.step_text` when patterns change, as it does for

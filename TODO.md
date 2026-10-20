@@ -114,7 +114,7 @@
 - [ ] Queue-based processing for 1000+ events/second — *Phase 2 exit criterion*
 - [x] PII detection and redaction; retention policies — masking on ingest, `ingestion-retention` job
 - [~] mTLS between agent and platform — collector side done (`--client-cert`/`--client-key`); server-side enforcement (nginx ssl_verify_client) is a deployment decision
-- [ ] Artifacts (screenshots, videos, traces, logs)
+- [~] Artifacts (screenshots, videos, traces, logs) — step screenshots shipped 2026-10-20 (ADR-036, collector 0.11.0); videos, traces and Playwright attachments remain
 - [x] Per-test history endpoints — analytics `tests/{test_key}/history`, dashboard History view
 - [x] Revoke a project's API keys when the project is deleted — superseded by project deletion (ADR-034): keys stay during the 7 days (uploads answer 410, a restore brings them back) and are deleted by the purge
 - [x] Project deletion (ADR-034, 2026-10-16) — Settings › Data, name typed to confirm, 7 days pending and restorable by owners and admins (greyed in the project list; members see a notice), then purged in test-management, ingestion and project-service in recorded, resumable steps
@@ -176,7 +176,8 @@ Richer data
 - [x] Code-change data, not just JUnit: changed files and diff stats per run — collector gitdiff module, ingestion migration 005 + run API, dashboard Changes card. Correlation analytics remain Phase 6 input.
 - [x] Components under test: `--component NAME@SHA` (or `QEOS_COMPONENTS`) records which repo versions the run exercised (e.g. the product build an E2E suite ran against) — ingestion migration 008 + run API, "Under test" line on run detail. Dormant Phase 6 input; cross-repo correlation and Workspaces stay behind their triggers (ADR-018).
 - [x] Test ownership from CODEOWNERS — collector matches each result's `file` (git semantics, last line wins; root/.github/docs locations), ingestion stores `owner` per result (migration 009), run detail shows it
-- [ ] Artifact upload (screenshots, videos, traces) — blocked behind the blueprint's MinIO adoption trigger (artifact storage); starts when the artifacts feature is pulled, not before
+- [~] Artifact upload (screenshots, videos, traces) — step screenshots from Cucumber JSON done (ADR-036, collector 0.11.0, off by default per project); Playwright attachments, videos and traces not started
+- [ ] Step screenshots follow-ups (ADR-036): a separate, shorter retention for images if storage grows; Playwright JSON attachments (files on the CI disk, no per-step data); videos and traces on the same storage; a `.qeos.yml` key for no-screenshots (today `--no-screenshots` / `QEOS_NO_SCREENSHOTS=1`); MinIO scrape job and a storage-used panel on the Grafana dashboards
 
 Reliability and operations
 - [x] Keep a failed upload on disk and retry it later — automatic via `--spool` (below); a separate `retry` command adds nothing, the next upload resends first
@@ -400,7 +401,7 @@ requested ones. Each group needs its own design spec before implementation.
 - [x] Search runs by a log value: `value`/`pattern` on the runs list and the run page, a Log value filter on Runs, a "runs" link on every value chip (spec `docs/superpowers/specs/2026-10-15-log-values-follow-ups-design.md`).
 - [x] Show a result's whole log: on demand on the run page, the case page and the feature cards, values marked, copy and download (same spec).
 - [ ] TC run history (pass/fail/duration over time) — already planned in roadmap Phases 2–3
-- [ ] View screenshots and screen recordings attached to a run
+- [~] View screenshots and screen recordings attached to a run — screenshots done (camera button on Gherkin steps and run results, ADR-036); recordings not started
 - [ ] Playwright trace viewer and step-by-step logs per failed TC *(suggested)*
 - [x] Compare two runs side by side. `/projects/{id}/runs/{run}/compare/{base}` sorts each test
   into new failures, fixed, still failing, slower, added and removed. The run page links to a
@@ -481,7 +482,7 @@ after the one before it is proven:
 These are not features, but groups B, C, D, E and G cannot ship without them:
 - [x] Frontend application (React/TypeScript, per the roadmap tech stack): `dashboard/`
 - [ ] GitHub App integration — scoped repo access, workflow dispatch, secrets API — instead of personal access tokens
-- [ ] Artifact storage for screenshots, videos and traces (S3-compatible; MinIO for local development)
+- [~] Artifact storage for screenshots, videos and traces (S3-compatible; MinIO for local development) — MinIO on compose and production, screenshots only (ADR-036); videos and traces reuse it
 - [ ] Job queue for runs and AI requests (Redis is not in the stack: it waits on its blueprint trigger)
 - [ ] Secrets management (Vault or cloud equivalent) — brought forward from "prepare for" to required
 - [ ] Permissions per action: who may run tests, edit config, manage secrets, accept AI changes

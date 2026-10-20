@@ -23,7 +23,7 @@ per-step images can reach several GB.
   twice is stored once, and a project's images all sit under one prefix, which is how a project purge deletes them.
   A prefix to delete always ends with `/`, so project 1 never matches project 10.
 - **Off by default.** If any of the four settings is unset, `get_artifact_store()` returns `None` and screenshots
-  are off. QEOS keeps working. A project must also switch screenshots on in its settings (a later task).
+  are off. QEOS keeps working. A project must also switch screenshots on in its settings (owner or admin, "Keep screenshots from uploads", off by default).
 - **One key pair.** The compose files use MinIO's root user as ingestion's key pair, with a dev default for a
   local stack. The production package requires `ARTIFACTS_S3_SECRET_KEY`, and `deploy/init-env.sh` generates it.
 - **The MinIO image is pinned by digest.** MinIO no longer publishes images on Docker Hub, so the compose files use
