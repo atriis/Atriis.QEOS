@@ -104,6 +104,7 @@
 - [ ] JWT validation and per-user limits at the gateway — *when the gateway should reject bad tokens itself*
 - [ ] API docs through the gateway — *when a frontend or partner needs browsable docs*
 - [ ] WebSockets / SSE — *Phase 3, real-time features*. Deferred by ADR-021: new runs reach the dashboard by polling every 30 s; push starts (SSE first, Redis fan-out) when the collector streams partial results
+- [ ] Run ingestion's PostgreSQL-only tests in CI: a `postgres:16` service in the `tests` job for ingestion-service and `QEOS_TEST_POSTGRES_URL` pointing at a `qeos_test` database, so `tests/integration/test_screenshots_postgres.py` (the screenshot `FOR KEY SHARE` lock and link savepoint, ADR-036) runs on every push instead of only by hand
 - [ ] `scripts/smoke_gateway.sh` targets the stack named in `COMPOSE_PROJECT_NAME` — today its bare `docker compose exec/run/ps` calls reach the project pinned by `name: qeos` in `docker-compose.yml`, so a smoke run against a second stack (another project name) signs tokens, runs `psql` and the jobs inside the developer's running `qeos` stack and leaves smoke users and keys there (found 2026-10-20). Pass `-p "${COMPOSE_PROJECT_NAME:-qeos}"` on every compose call, or refuse to run when the named stack is not the one the HTTP checks reach
 
 ### Ingestion (Phase 2, step 1)

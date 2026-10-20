@@ -596,3 +596,10 @@ cp .env.example .env                                         # set SECRET_KEY = 
 ```
 
 Tests: `SECRET_KEY=test-secret .venv/Scripts/python.exe -m pytest tests/ -q`
+
+The suite runs on SQLite. Two screenshot paths need a real PostgreSQL (ADR-036): the `FOR KEY SHARE` lock on the
+blobs an upload links, and the savepoint that keeps a run when its screenshot links fail.
+`tests/integration/test_screenshots_postgres.py` covers them and is skipped unless `QEOS_TEST_POSTGRES_URL` is set.
+It drops and creates the ingestion tables, so it refuses any URL that is not localhost with a database name
+containing `test` or `scratch`. Its docstring has the throwaway-container commands for bash and PowerShell. CI does
+not run it yet (TODO).
