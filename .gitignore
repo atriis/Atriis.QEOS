@@ -9,3 +9,6 @@
 reports/
 backups/
 .env.bak
+__pycache__/
+*.py[cod]
+*.bak
