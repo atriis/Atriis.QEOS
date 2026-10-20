@@ -99,7 +99,7 @@ jobs:
         ports:
           - 55432:5432
         options: >-
-          --health-cmd "pg_isready -U postgres -d qeos_test"
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d qeos_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
@@ -129,6 +129,8 @@ jobs:
       # "N passed" with nothing skipped, so a lost QEOS_TEST_POSTGRES_URL turns the job red instead of green.
       - name: Run the PostgreSQL-only tests
         run: |
+          # The default shell has no pipefail: without it, tee's exit code would hide a pytest failure
+          set -o pipefail
           python -m pytest tests/integration/test_screenshots_postgres.py -q -rs --junitxml=reports/junit-postgres.xml | tee "$RUNNER_TEMP/pytest-postgres.log"
           if ! tail -n 1 "$RUNNER_TEMP/pytest-postgres.log" | grep -Eq '^[0-9]+ passed(, [0-9]+ warnings?)? in '; then
             echo "::error::the PostgreSQL-only tests did not all run and pass (skipped, or no tests collected)"

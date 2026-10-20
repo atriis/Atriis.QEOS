@@ -43,9 +43,13 @@ fi
 COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-qeos}"
 for pair in "443:$HTTPS_PORT:GATEWAY_HTTPS_PORT" "80:$HTTP_PORT:GATEWAY_HTTP_PORT"; do
   IFS=: read -r container_port expected_port port_var <<< "$pair"
-  published="$(docker compose port gateway "$container_port" 2>/dev/null | head -n 1)"
+  port_err="$(mktemp)"
+  published="$(docker compose port gateway "$container_port" 2>"$port_err" | head -n 1)"
+  published="${published%$'\r'}"
+  compose_error="$(tr '\r\n' '  ' < "$port_err")"
+  rm -f "$port_err"
   if [ -z "$published" ]; then
-    echo "FAIL  the gateway is not running in compose project '$COMPOSE_PROJECT': start it, or set COMPOSE_PROJECT_NAME to the stack under test"
+    echo "FAIL  the gateway is not running in compose project '$COMPOSE_PROJECT': start it, or set COMPOSE_PROJECT_NAME to the stack under test (docker compose port: ${compose_error:-no output})"
     exit 1
   fi
   if [ "${published##*:}" != "$expected_port" ]; then

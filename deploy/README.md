@@ -296,7 +296,7 @@ collected on purpose (it could carry secrets or personal data); look a `queryid`
 - cAdvisor is v0.54.1: v0.52.1 finds no container under Docker's containerd image store.
 - MinIO has no exporter: Prometheus scrapes its own `/minio/v2/metrics/cluster`, without a token
   (`MINIO_PROMETHEUS_AUTH_TYPE=public`, safe because MinIO has no published port). It counts bytes and objects
-  in a background scan, so the screenshot panels move every few minutes and show 0 until the first scan ends.
+  in a background scan, so the screenshot panels move every few minutes and show no data until the first scan ends.
 
 **Alerts.** Each channel turns on when its settings are present; an unset one is left out:
 

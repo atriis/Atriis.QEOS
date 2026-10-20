@@ -266,8 +266,8 @@ services:
       MINIO_ROOT_PASSWORD: ${ARTIFACTS_S3_SECRET_KEY:-qeos-minio-dev}
       # The alias "local" for the healthcheck below, pointing at this container itself
       MC_HOST_local: http://${ARTIFACTS_S3_ACCESS_KEY:-qeos}:${ARTIFACTS_S3_SECRET_KEY:-qeos-minio-dev}@127.0.0.1:9000
-      # Prometheus scrapes /minio/v2/metrics/cluster without a token (monitoring profile). Safe only because MinIO
-      # has no published port: the metrics are readable from the compose network, never from the host or outside
+      # Prometheus scrapes /minio/v2/metrics/cluster without a token. Always on: readable by containers on the compose
+      # network and by the host via the container IP, never published
       MINIO_PROMETHEUS_AUTH_TYPE: public
     volumes:
       - qeos_minio_data:/data
