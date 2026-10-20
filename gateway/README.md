@@ -9,7 +9,7 @@ Design: `docs/superpowers/specs/2026-09-28-api-gateway-design.md`.
 |---|---|
 | `/api/v1/organizations/{id}/projects…` | project-service |
 | `/api/v1/projects/{id}/cases…`, `…/case-labels…`, `…/case-folders…`, `…/case-features…`, `…/case-areas`, `…/features…`, `…/suites…`, `…/ci-target…`, `…/run-requests…` | test-management-service |
-| `/api/v1/projects/{id}/api-keys…`, `…/runs…`, `…/analytics…`, `…/masking-patterns…`, `…/log-patterns…`, `…/export`, `…/notification-channels…`, `…/collection-settings` | ingestion-service |
+| `/api/v1/projects/{id}/api-keys…`, `…/runs…`, `…/analytics…`, `…/masking-patterns…`, `…/log-patterns…`, `…/export`, `…/notification-channels…`, `…/collection-settings`, `…/screenshots…` | ingestion-service |
 | `/api/v1/runs…`, `/api/v1/collect…` | ingestion-service |
 | `/api/v1/projects…` | project-service |
 | `/api/v1/organizations…`, `/api/v1/invitations…` | organization-service |

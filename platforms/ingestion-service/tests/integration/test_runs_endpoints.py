@@ -455,3 +455,19 @@ def test_get_run_scopes_its_rows_to_the_value_and_keeps_its_counts(client, auth,
     assert [r["id"] for r in body["results"]] == [holder.id]
     assert body["total"] == 3 and body["failed"] == 1  # the run's counts describe the run
     assert client.get(f"/api/v1/runs/{run.id}?value=3960562&pattern=route_key", headers=auth()).json()["results"] == []
+
+
+def test_run_detail_screenshot_count(client, auth, project_role, make_run, db):
+    from src.ingestion.models import Blob, ResultScreenshot
+
+    run = make_run(statuses=("passed", "failed"))
+    blob = Blob(project_id=1, sha256="b" * 64, media_type="image/png", bytes=1)
+    db.add(blob)
+    db.flush()
+    first = db.query(RunResult).filter_by(run_id=run.id).order_by(RunResult.id).first()
+    for position in range(2):
+        db.add(ResultScreenshot(result_id=first.id, position=position, blob_id=blob.id, step_text="s"))
+    db.commit()
+    project_role("viewer")
+    results = client.get(f"/api/v1/runs/{run.id}", headers=auth()).json()["results"]
+    assert [r["screenshot_count"] for r in results] == [2, 0]

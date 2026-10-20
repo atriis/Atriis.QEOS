@@ -105,6 +105,7 @@ class ResultOut(BaseModel):
     file: Optional[str] = None
     owner: Optional[str] = None
     quarantined: bool = False  # failed or errored, and the test is in quarantine
+    screenshot_count: int = 0  # step screenshots of the result (ADR-036)
 
 
 class LogValueOut(BaseModel):
@@ -119,6 +120,19 @@ class ResultLogOut(BaseModel):
 
     log: Optional[str] = None
     values: list[LogValueOut] = []
+
+
+class ScreenshotOut(BaseModel):
+    id: int
+    step_text: str
+    step_line: Optional[int] = None
+    hook: Optional[str] = None
+    media_type: str
+    bytes: int
+
+
+class ResultScreenshotsOut(BaseModel):
+    screenshots: list[ScreenshotOut] = []
 
 
 class ChangedFileOut(BaseModel):

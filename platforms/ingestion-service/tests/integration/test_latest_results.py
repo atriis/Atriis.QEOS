@@ -201,3 +201,27 @@ def test_the_latest_result_names_its_result_id(client, auth, project_role, seed_
     key = report_key("search")
     got = client.post(URL, json={"keys": [key]}, headers=auth()).json()["results"][key]
     assert got["result_id"] == row.id and got["run_id"] == run.id
+
+
+def test_screenshot_steps_group_by_step_and_are_absent_without_screenshots(client, auth, project_role, seed_run, db):
+    from src.ingestion.models import Blob, ResultScreenshot
+
+    project_role("viewer")
+    run = seed_run(T0, results=(("search", "failed", 5), ("other", "passed", 5)))
+    blob = Blob(project_id=1, sha256="a" * 64, media_type="image/png", bytes=1)
+    db.add(blob)
+    db.flush()
+    result = db.query(RunResult).filter_by(run_id=run.id, name="search").one()
+    steps = [("Given a", 3, None), ("Then b", 7, None), ("Given a", 3, None), ("End", None, "after")]
+    for position, (text, line, hook) in enumerate(steps):
+        db.add(ResultScreenshot(result_id=result.id, position=position, blob_id=blob.id, step_text=text,
+                                step_line=line, hook=hook))
+    db.commit()
+    keys = [report_key("search"), report_key("other")]
+    results = client.post(URL, json={"keys": keys}, headers=auth()).json()["results"]
+    assert results[keys[0]]["screenshot_steps"] == [
+        {"step_text": "Given a", "step_line": 3, "hook": None, "count": 2},
+        {"step_text": "Then b", "step_line": 7, "hook": None, "count": 1},
+        {"step_text": "End", "step_line": None, "hook": "after", "count": 1},
+    ]
+    assert "screenshot_steps" not in results[keys[1]]

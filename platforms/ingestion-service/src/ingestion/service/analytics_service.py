@@ -10,7 +10,7 @@ from src.ingestion.analytics.failed_steps import step_key
 from src.ingestion.analytics.flaky import FlipCount, LatestExecution, MixedCommit
 from src.ingestion.analytics.trends import RunRow, as_utc, pass_rate
 from src.ingestion.models import MutedTest, Run, RunResult
-from src.ingestion.service import log_value_service
+from src.ingestion.service import log_value_service, screenshot_read
 
 
 def _count(*statuses: str):
@@ -353,6 +353,7 @@ def latest_results(db: Session, project_id: int, keys: List[str], run_id: Option
     )
     rows = list(db.execute(select(ranked).where(ranked.c.position == 1)).mappings())
     values = log_value_service.values_by_result(db, [r["result_id"] for r in rows])
+    steps = screenshot_read.steps_by_result(db, [r["result_id"] for r in rows])
     out = {}
     for r in rows:
         entry = {"status": r["status"], "run_id": r["run_id"], "result_id": r["result_id"], "branch": r["branch"],
@@ -364,6 +365,8 @@ def latest_results(db: Session, project_id: int, keys: List[str], run_id: Option
                               r["failed_step_definition"], r["failed_step_pattern"])
         if step:
             entry["failed_step"] = step
+        if r["result_id"] in steps:  # absent when the result has no screenshots (ADR-036)
+            entry["screenshot_steps"] = steps[r["result_id"]]
         out[r["test_key"]] = entry
     return out
 
