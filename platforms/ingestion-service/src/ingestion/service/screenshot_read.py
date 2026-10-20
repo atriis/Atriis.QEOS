@@ -8,12 +8,12 @@ from sqlalchemy.orm import Session
 from src.ingestion.models import Blob, ResultScreenshot, Run, RunResult
 
 
-def list_for_result(db: Session, result_id: int) -> List[dict]:
+def list_for_result(db: Session, project_id: int, result_id: int) -> List[dict]:
     rows = db.execute(
         select(ResultScreenshot.id, ResultScreenshot.step_text, ResultScreenshot.step_line, ResultScreenshot.hook,
                Blob.media_type, Blob.bytes)
         .join(Blob, Blob.id == ResultScreenshot.blob_id)
-        .where(ResultScreenshot.result_id == result_id)
+        .where(ResultScreenshot.result_id == result_id, Blob.project_id == project_id)
         .order_by(ResultScreenshot.position, ResultScreenshot.id)
     ).mappings()
     return [dict(r) for r in rows]

@@ -105,12 +105,30 @@ def test_image_non_member_404(client, auth, project_role, seed_run, db, store):
     assert client.get(f"/api/v1/projects/1/screenshots/{shot.id}", headers=auth()).status_code == 404
 
 
-def test_image_404_when_object_missing_503_without_store(client, auth, project_role, seed_run, db, store):
+def test_image_404_when_object_missing(client, auth, project_role, seed_run, db, store):
+    project_role("viewer")
+    result = result_of(db, seed_run(T0))
+    shot = add_shot(db, result, add_blob(db), 0)
+    assert client.get(f"/api/v1/projects/1/screenshots/{shot.id}", headers=auth()).status_code == 404
+
+
+def test_image_503_without_store(client, auth, project_role, seed_run, db, store):
     from src.ingestion.api.main import app
 
     project_role("viewer")
     result = result_of(db, seed_run(T0))
     shot = add_shot(db, result, add_blob(db), 0)
-    assert client.get(f"/api/v1/projects/1/screenshots/{shot.id}", headers=auth()).status_code == 404
     app.dependency_overrides[get_artifact_store] = lambda: None
     assert client.get(f"/api/v1/projects/1/screenshots/{shot.id}", headers=auth()).status_code == 503
+
+
+def test_row_pointing_at_another_projects_blob_is_not_served(client, auth, project_role, seed_run, db, store):
+    project_role("viewer")
+    run = seed_run(T0)
+    result = result_of(db, run)
+    shot = add_shot(db, result, add_blob(db, project_id=2), 0)
+    store.put(screenshot_key(2, SHA), PNG, "image/png")
+    store.put(screenshot_key(1, SHA), PNG, "image/png")
+    assert client.get(f"/api/v1/projects/1/screenshots/{shot.id}", headers=auth()).status_code == 404
+    listed = client.get(f"/api/v1/projects/1/runs/{run.id}/results/{result.id}/screenshots", headers=auth())
+    assert listed.json() == {"screenshots": []}

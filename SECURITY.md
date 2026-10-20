@@ -156,6 +156,11 @@ details.
   types (PNG, JPEG, WebP), first bytes that match the declared type, a SHA-256 equal to the path, at most 5 MB. An image
   is stored and looked up per project (`screenshots/{project_id}/{sha256}`), so a key sees only its own project's
   images. It answers 403 when the project has screenshots off or QEOS has no storage configured.
+  Reading: `GET /api/v1/projects/{id}/screenshots/{screenshot_id}` serves the image unmasked, streamed through
+  ingestion-service, with a user JWT and the read roles of the project. A non-member, and an id that belongs to
+  another project, both get 404. There are no presigned URLs and the bucket is never public. The response carries
+  `Cache-Control: private, max-age=3600`, so a browser may keep an image for up to an hour after the user loses
+  access to the project, and `X-Content-Type-Options: nosniff`.
 - **Gateway.** TLS 1.2/1.3. Per-IP rate limits: 20 requests/s on the API,
   10/s on uploads, 50/s (burst 100, 6 MB body) on screenshot uploads, and 5/s on sign-in, registration, password and MFA
   endpoints. 10 MB body cap elsewhere. `X-Forwarded-For` is replaced, not appended, and

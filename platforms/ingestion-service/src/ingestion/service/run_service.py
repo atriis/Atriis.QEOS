@@ -101,6 +101,13 @@ def result_log(db: Session, run_id: int, result_id: int) -> tuple[bool, Optional
     return (False, None) if row is None else (True, row[0])
 
 
+def result_in_run(db: Session, run_id: int, result_id: int) -> bool:
+    """Whether the result is in that run, by id alone (no log column read)."""
+    return db.execute(
+        select(RunResult.id).where(RunResult.id == result_id, RunResult.run_id == run_id)
+    ).first() is not None
+
+
 def quarantined_failures(db: Session, run: Run) -> set:
     """test_keys of the run's failed or errored tests that are quarantined (muted) in its project.
     Quarantined tests still run and are still shown; their failures just do not count."""

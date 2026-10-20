@@ -110,10 +110,9 @@ def get_result_screenshots(
     # A run of another project is indistinguishable from a missing one
     if run is None or run.project_id != access.project_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
-    found, _ = run_service.result_log(db, run.id, result_id)
-    if not found:
+    if not run_service.result_in_run(db, run.id, result_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Result not found")
-    return ResultScreenshotsOut(screenshots=screenshot_read.list_for_result(db, result_id))
+    return ResultScreenshotsOut(screenshots=screenshot_read.list_for_result(db, access.project_id, result_id))
 
 
 @project_router.get("/{run_id}/impact", response_model=RunImpactOut)
