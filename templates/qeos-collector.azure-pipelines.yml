@@ -24,7 +24,7 @@
 #     - checkout: self
 #       fetchDepth: 2
 #     - script: |
-#         python -m pip install --quiet "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.12.0#subdirectory=collector"
+#         python -m pip install --quiet "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.13.0#subdirectory=collector"
 #         qeos-collector run-impact --url https://qeos.example.com -- npx cucumber-js --tags "not @wip"
 #       displayName: Tests, the likely affected first
 #       env:
@@ -41,7 +41,7 @@ parameters:
     default: ""
   - name: ref
     type: string
-    default: collector-v0.12.0
+    default: collector-v0.13.0
   # Reporting is a side effect: by default a failed upload does not fail the pipeline
   - name: failOnError
     type: boolean
