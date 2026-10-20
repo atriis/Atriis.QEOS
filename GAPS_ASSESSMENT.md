@@ -16,7 +16,7 @@ the gateway, CI and benchmarks and listed them as absent).
 1. **No metrics backend**: ingestion exposes Prometheus metrics; no Prometheus server/Grafana (trigger: first multi-node deployment).
 2. **No event bus / queue**: ingestion is synchronous (trigger: 1000+ events/s).
 3. **Service-to-service auth**: organization-service cannot verify users against auth-service without a superuser token (TODO gateway follow-up).
-4. **Artifacts**: no screenshot/video/trace storage (trigger: MinIO slice).
+4. **Artifacts**: step screenshots are stored (MinIO, ADR-036, 2026-10-20); videos, traces and Playwright attachments are not yet (NEXT_STEPS).
 5. **Unverified integrations**: real-tenant SSO sign-in, collector `--ca-file` against the dev self-signed cert, SAML (blocked on an IdP).
 6. **Dead prototype weight**: six unwired directories (flagged with READMEs) awaiting archive-or-revive decisions.
 7. **Phase 2 exit unproven**: no real-project deployments of the collector; 10k-execution ingestion target untested outside benchmarks.
