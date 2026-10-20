@@ -36,6 +36,23 @@ else
     exit 1
   fi
 fi
+# The compose calls below reach this checkout's compose project (COMPOSE_PROJECT_NAME, else `name: qeos`); the HTTP
+# checks reach whatever publishes the localhost ports. They must be the same stack: on 2026-10-20 a run aimed at a
+# second stack ran psql, token signing and the jobs inside the developer's running one. So the project's gateway
+# must be running and publish exactly the ports the checks use
+COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-qeos}"
+for pair in "443:$HTTPS_PORT:GATEWAY_HTTPS_PORT" "80:$HTTP_PORT:GATEWAY_HTTP_PORT"; do
+  IFS=: read -r container_port expected_port port_var <<< "$pair"
+  published="$(docker compose port gateway "$container_port" 2>/dev/null | head -n 1)"
+  if [ -z "$published" ]; then
+    echo "FAIL  the gateway is not running in compose project '$COMPOSE_PROJECT': start it, or set COMPOSE_PROJECT_NAME to the stack under test"
+    exit 1
+  fi
+  if [ "${published##*:}" != "$expected_port" ]; then
+    echo "FAIL  compose project '$COMPOSE_PROJECT' publishes gateway port $container_port on ${published##*:}, but the checks would go to localhost:$expected_port: set $port_var=${published##*:}, or COMPOSE_PROJECT_NAME to the stack that publishes $expected_port"
+    exit 1
+  fi
+done
 BASE="https://localhost:${HTTPS_PORT}"
 
 TMP="$(mktemp -d)"
