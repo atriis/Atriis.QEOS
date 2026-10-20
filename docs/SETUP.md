@@ -280,7 +280,10 @@ bash scripts/smoke_gateway.sh
 ```
 It ends with `all gateway checks passed`. Run it on a **local** stack only: it refuses to start
 when `DOCKER_HOST`, or else the current docker context, points anywhere but a local socket
-(`unix://` or `npipe://`). It talks to
+(`unix://` or `npipe://`). It also refuses to start unless the gateway of the compose project it
+reaches (`COMPOSE_PROJECT_NAME`, else `qeos`) is running and publishes exactly `GATEWAY_HTTPS_PORT`
+(default 8443) and `GATEWAY_HTTP_PORT` (default 8080), so its checks and its `docker compose exec/run`
+calls always hit the same stack. If you changed the ports in `.env`, export them too. It talks to
 `https://localhost:${GATEWAY_HTTPS_PORT:-8443}` and leaves its own "Smoke …" organizations,
 projects, runs and a test account (`smoke-invitee-…@example.com`) in the database. These
 belong to no real user, so they do not appear in your dashboard. It also triggers the login
@@ -349,6 +352,7 @@ and `curl.exe https://localhost:8443/health --ssl-no-revoke` (PowerShell) or
 | `exec … no such file or directory` while building | A shell script got CRLF endings. Re-checkout it: `git checkout -- <file>`. |
 | `curl` on Windows fails on a trusted certificate | Windows checks revocation, which a local CA does not publish. Add `--ssl-no-revoke`. |
 | The smoke test fails with `SECRET_KEY is not set` | Export the variables first (`set -a; . ./.env; set +a`). |
+| The smoke test fails with `compose project '…' publishes gateway port …` or `the gateway is not running in compose project '…'` | The smoke reached another stack than the one on the ports. Export `GATEWAY_HTTPS_PORT` / `GATEWAY_HTTP_PORT` (or `COMPOSE_PROJECT_NAME`) with the values the stack under test was started with. |
 
 ---
 
@@ -2013,8 +2017,10 @@ GRAFANA_ADMIN_PASSWORD=<letters and digits>
 MONITORING_DB_PASSWORD=<letters and digits>
 ```
 
-then `docker compose up -d --build --wait gateway prometheus alertmanager grafana node-exporter cadvisor postgres-exporter`. Prometheus then scrapes every service, and Alertmanager sends alerts to the channels you
-set. Five dashboards are provisioned. With `MONITORING_ENABLED=true` the gateway serves Grafana at
+then `docker compose up -d --build --wait gateway prometheus alertmanager grafana node-exporter cadvisor postgres-exporter`. Prometheus then scrapes every service and MinIO's storage metrics (`MINIO_PROMETHEUS_AUTH_TYPE=public`;
+MinIO is never published), and Alertmanager sends alerts to the channels you set. Five dashboards are
+provisioned; the Host and containers one also shows screenshot storage used and screenshots stored, with no
+data until MinIO's first background scan ends (a minute or so after start). With `MONITORING_ENABLED=true` the gateway serves Grafana at
 `https://localhost:8443/grafana/` to superusers only: sign in to the dashboard as a superuser and choose
 **Monitoring** in the account menu (any Grafana link works too: the dashboard's `/monitoring` page hands
 the sign-in over and comes back). Break-glass, when auth-service is down: Grafana's own admin login on
