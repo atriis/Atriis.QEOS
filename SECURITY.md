@@ -160,6 +160,9 @@ details.
   types (PNG, JPEG, WebP), first bytes that match the declared type, a SHA-256 equal to the path, at most 5 MB. An image
   is stored and looked up per project (`screenshots/{project_id}/{sha256}`), so a key sees only its own project's
   images. It answers 403 when the project has screenshots off or QEOS has no storage configured.
+  For a Playwright report (collector 0.13.0), the collector reads a file the report names only when it resolves,
+  symlinks followed, inside the working directory, is at most 5 MB and starts like the image type it claims, so a
+  tampered report cannot make it upload another file from the CI machine.
   Reading: `GET /api/v1/projects/{id}/screenshots/{screenshot_id}` serves the image unmasked, read through
   ingestion-service, with a user JWT and the read roles of the project. A non-member, and an id that belongs to
   another project, both get 404. There are no presigned URLs and the bucket is never public. The response carries

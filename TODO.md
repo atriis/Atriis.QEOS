@@ -116,7 +116,7 @@
 - [ ] Queue-based processing for 1000+ events/second — *Phase 2 exit criterion*
 - [x] PII detection and redaction; retention policies — masking on ingest, `ingestion-retention` job
 - [~] mTLS between agent and platform — collector side done (`--client-cert`/`--client-key`); server-side enforcement (nginx ssl_verify_client) is a deployment decision
-- [~] Artifacts (screenshots, videos, traces, logs) — step screenshots shipped 2026-10-20 (ADR-036, collector 0.11.0); videos, traces and Playwright attachments remain
+- [~] Artifacts (screenshots, videos, traces, logs) — step screenshots shipped 2026-10-20 (ADR-036, collector 0.11.0); Playwright screenshots 2026-10-20 (collector 0.13.0); videos and traces remain
 - [x] Per-test history endpoints — analytics `tests/{test_key}/history`, dashboard History view
 - [x] Revoke a project's API keys when the project is deleted — superseded by project deletion (ADR-034): keys stay during the 7 days (uploads answer 410, a restore brings them back) and are deleted by the purge
 - [x] Project deletion (ADR-034, 2026-10-16) — Settings › Data, name typed to confirm, 7 days pending and restorable by owners and admins (greyed in the project list; members see a notice), then purged in test-management, ingestion and project-service in recorded, resumable steps
@@ -178,8 +178,8 @@ Richer data
 - [x] Code-change data, not just JUnit: changed files and diff stats per run — collector gitdiff module, ingestion migration 005 + run API, dashboard Changes card. Correlation analytics remain Phase 6 input.
 - [x] Components under test: `--component NAME@SHA` (or `QEOS_COMPONENTS`) records which repo versions the run exercised (e.g. the product build an E2E suite ran against) — ingestion migration 008 + run API, "Under test" line on run detail. Dormant Phase 6 input; cross-repo correlation and Workspaces stay behind their triggers (ADR-018).
 - [x] Test ownership from CODEOWNERS — collector matches each result's `file` (git semantics, last line wins; root/.github/docs locations), ingestion stores `owner` per result (migration 009), run detail shows it
-- [~] Artifact upload (screenshots, videos, traces) — step screenshots from Cucumber JSON done (ADR-036, collector 0.11.0, off by default per project); Playwright attachments, videos and traces not started
-- [ ] Step screenshots follow-ups (ADR-036): a separate, shorter retention for images if storage grows; Playwright JSON attachments (files on the CI disk, no per-step data); videos and traces on the same storage. Done 2026-10-20: `no-screenshots: true` in `.qeos.yml` (collector 0.12.0); the `minio` scrape job and the "Screenshot storage used" and "Screenshots stored" panels on the Host and containers dashboard
+- [~] Artifact upload (screenshots, videos, traces) — step screenshots from Cucumber JSON done (ADR-036, collector 0.11.0, off by default per project); Playwright JSON image attachments done (collector 0.13.0, spec 2026-10-20); videos and traces not started
+- [ ] Step screenshots follow-ups (ADR-036): a separate, shorter retention for images if storage grows; videos and traces on the same storage. Done 2026-10-20: Playwright JSON image attachments (collector 0.13.0, spec `docs/superpowers/specs/2026-10-20-playwright-screenshots-design.md`); `no-screenshots: true` in `.qeos.yml` (collector 0.12.0); the `minio` scrape job and the "Screenshot storage used" and "Screenshots stored" panels on the Host and containers dashboard
 
 Reliability and operations
 - [x] Keep a failed upload on disk and retry it later — automatic via `--spool` (below); a separate `retry` command adds nothing, the next upload resends first

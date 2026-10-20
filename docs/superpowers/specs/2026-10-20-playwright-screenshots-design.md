@@ -63,7 +63,11 @@ For each attempt, collect attachments whose `contentType` is one of the three im
     Playwright writes absolute paths under the project's `test-results/`, which is inside the checkout in CI;
   - it is a regular file of at most 5 MB (checked with `os.stat` before reading);
   - its first bytes match the declared type (PNG, JPEG or WebP magic bytes, the same check ingestion makes).
-  A file that no longer exists (the CI step cleaned up) is skipped, counted.
+  A file that no longer exists (the CI step cleaned up) is skipped, counted. A relative `path` (a custom
+  `outputDir`) is resolved from the report file's folder before the check.
+- **Visual comparisons.** A failed `toHaveScreenshot()` attaches `<name>-expected`, `<name>-actual` and
+  `<name>-diff` images. They are labelled "Expected", "Actual" and "Difference" (in that order, before the
+  attempt's other images) instead of the raw names.
 - **Step reference** (the viewer groups by it):
   - `hook: "after"` for every Playwright image (taken by the test, not on a known step);
   - `step_text`: the title of the attempt's failing step when there is one (the deepest step in `steps[]` with an
@@ -76,7 +80,9 @@ For each attempt, collect attachments whose `contentType` is one of the three im
   the 120-second image budget, 4 parallel uploads, the 422 downgrade.
 - Output: one line as today (`screenshots: N stored, M skipped`) plus, when any were skipped for a Playwright
   reason, one summary line with counts by reason (outside the working directory, missing, too large, not an image,
-  video/trace not sent yet). Never print the skipped paths' contents; the paths themselves may be printed.
+  video/trace not sent yet). Never print the skipped paths' contents; the paths themselves may be printed. When
+  every path attachment was outside the working directory, add once: "Playwright images are outside the working
+  directory; set `outputDir` inside the checkout".
 
 ### 4.3 Docs
 

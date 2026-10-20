@@ -15,6 +15,7 @@ import xml.etree.ElementTree as ET
 from typing import Iterator, Optional
 from xml.parsers import expat
 
+from qeos_collector import playwright_images
 from qeos_collector.junit import (
     CLASS_NAME_LENGTH, MAX_DURATION_MS, MAX_FILE_BYTES, NAME_LENGTH, SUITE_LENGTH,
     ParsedFile, _cut, _first_line, _read_xml, _Refused, _seconds, _skip, _timestamp, _walk,
@@ -174,8 +175,12 @@ def _parse_cucumber_file(path: str, parsed: ParsedFile) -> ParsedFile:
     except (OSError, ValueError) as exc:
         return _skip(parsed, f"not well-formed JSON ({exc})")
     if isinstance(data, dict) and isinstance(data.get("suites"), list) and "config" in data:
+        # image attachments (spec 2026-10-20): paths resolve from the report's folder, reads stay in the working dir
+        context = {"report_dir": os.path.dirname(os.path.abspath(path)), "root": os.path.realpath(os.getcwd()),
+                   "skips": {}, "read": 0}
         for suite in data["suites"]:
-            _playwright_suite(suite, parsed)
+            _playwright_suite(suite, parsed, context)
+        parsed.warnings.extend(playwright_images.skip_warning(path, context["skips"], context["read"] > 0))
         return parsed
     features = [f for f in data if isinstance(f, dict) and "elements" in f] if isinstance(data, list) else []
     if not features:
@@ -450,11 +455,11 @@ _PLAYWRIGHT_STATUS = {"passed": "passed", "failed": "failed", "timedOut": "faile
                       "interrupted": "errored", "skipped": "skipped"}
 
 
-def _playwright_suite(suite: dict, parsed: ParsedFile) -> None:
+def _playwright_suite(suite: dict, parsed: ParsedFile, context: Optional[dict] = None) -> None:
     if not isinstance(suite, dict):
         return
     for child in suite.get("suites") or []:
-        _playwright_suite(child, parsed)
+        _playwright_suite(child, parsed, context)
     for spec in suite.get("specs") or []:
         if not isinstance(spec, dict):
             continue
@@ -481,6 +486,13 @@ def _playwright_suite(suite: dict, parsed: ParsedFile) -> None:
                 if any(m.strip() for m in messages):
                     joined = "\n\n".join(m for m in messages if m.strip())
                     _attach(row, _first_line(joined), joined)
+                if context is not None:
+                    screenshots, images = playwright_images.attempt_screenshots(
+                        attempt, context["report_dir"], context["root"], context["skips"])
+                    if screenshots:
+                        context["read"] += len(screenshots)
+                        row["screenshots"] = screenshots
+                        row["_images"] = images  # private: uploaded apart, kept out of the body by payload.py
                 parsed.results.append(row)
 
 

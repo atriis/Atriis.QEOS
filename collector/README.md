@@ -551,7 +551,8 @@ showing up, but its failures stop counting. With `--gate`, the collector decides
   From 0.11.0 image attachments become step screenshots: see [Step screenshots](#step-screenshots-cucumber-from-0110).
 - Playwright's JSON reporter (`--reporter=json`): every retry attempt is kept as its own
   result (a flaky spec shows as fail+pass in one run), project name as suite, spec file as
-  class, `timedOut` counts as failed and `interrupted` as errored.
+  class, `timedOut` counts as failed and `interrupted` as errored. From 0.13.0 its image attachments become
+  screenshots: see [Playwright screenshots](#playwright-screenshots-from-0130).
 - Skips, with a warning, files over 50 MB, files that are not well-formed XML, and files that
   declare a DOCTYPE or entities (JUnit never needs one; refusing them blocks XML entity attacks).
 - Cuts failure messages, output and logs to 64 KB, as the platform does.
@@ -603,6 +604,28 @@ AfterStep(async function () {
   this.attach(await this.page.screenshot({ animations: "disabled", timeout: 10000 }), "image/png");
 });
 ```
+
+### Playwright screenshots (from 0.13.0)
+
+With Playwright's own runner and its JSON reporter, the images a test attached reach QEOS the same way, on that
+attempt's result (each retry keeps its own). Upload, limits, the project switch and `--no-screenshots` are as above.
+
+```js
+// playwright.config.ts
+use: { screenshot: "only-on-failure" },
+reporter: [["json", { outputFile: "results.json" }]],
+```
+
+- **What is sent.** Image attachments (`image/png`, `image/jpeg`, `image/webp`), whether the report holds them inline
+  (`testInfo.attach(name, { body, contentType })`) or as a file path (the failure screenshot). Videos and traces are
+  not sent yet; they are counted as skipped.
+- **Where they show.** The report does not say which step took an image, so each one is shown as taken at the end of
+  the test, labelled with the failing step's title (or "End of test") and the attachment's name when it is not
+  `screenshot`. A failed `toHaveScreenshot()` shows its images first, as "Expected", "Actual" and "Difference".
+- **Only files in the checkout.** A report is just JSON, so a file it names is read only when it resolves (symlinks
+  followed) inside the working directory, is at most 5 MB, and starts like the image type it claims. Anything else
+  is skipped and counted in one warning. If Playwright's `outputDir` is outside the checkout, the collector says so:
+  set it inside. A relative path is read from the report's folder.
 
 ## Network and security
 

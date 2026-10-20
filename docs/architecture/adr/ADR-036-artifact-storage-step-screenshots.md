@@ -37,6 +37,8 @@ per-step images can reach several GB.
   data. This is why they are off by default, and SECURITY and the privacy notes say so.
 - Storage grows with images. They follow the retention days of the results they belong to, and are deleted with the
   project. A shorter image retention is a possible later step.
+- Playwright's JSON reporter uses the same path from collector 0.13.0 (spec 2026-10-20): image attachments only,
+  files read only inside the CI working directory. No server change was needed.
 - A new dependency: `boto3` in ingestion's `requirements.txt` (the collector stays standard-library only).
 - MinIO is another container on the one VM (ADR-019). Updating it means copying a new digest in two places.
 - With the monitoring profile, Prometheus scrapes MinIO's cluster metrics without a token

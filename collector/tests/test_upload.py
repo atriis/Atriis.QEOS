@@ -704,3 +704,22 @@ def test_no_screenshots_from_qeos_yml(platform, cucumber_report, capsys, tmp_pat
     assert platform.blob_requests == []
     assert [r["path"] for r in platform.requests] == ["/api/v1/collect/runs"]
     assert "screenshots" not in results[0] and "screenshots" not in results[1]
+
+
+def test_playwright_screenshots_take_the_same_upload_path(platform, tmp_path, monkeypatch):
+    # spec 2026-10-20: a Playwright failure screenshot on disk goes up as a blob and the result references it
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "test-results").mkdir()
+    shot = tmp_path / "test-results" / "test-failed-1.png"
+    shot.write_bytes(IMG_A)
+    report = tmp_path / "results.json"
+    report.write_text(json.dumps({"config": {}, "suites": [{"title": "a.spec.ts", "file": "a.spec.ts", "specs": [
+        {"title": "pays", "file": "a.spec.ts", "tests": [{"projectName": "chromium", "results": [
+            {"status": "failed", "duration": 5, "retry": 0,
+             "attachments": [{"name": "screenshot", "contentType": "image/png", "path": str(shot)}]}]}]}]}]}),
+        encoding="utf-8")
+    platform.key_check = SCREENSHOTS_ON
+    results = upload_run(platform, report)
+    assert [r["sha"] for r in platform.blob_requests if r["method"] == "PUT"] == [SHA_A]
+    assert results[0]["screenshots"] == [{"sha256": SHA_A, "media_type": "image/png", "step_text": "End of test",
+                                          "step_line": None, "hook": "after"}]

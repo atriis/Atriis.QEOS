@@ -1786,6 +1786,9 @@ prints each result's `log`.
 A camera button appears on each Gherkin step that has screenshots (test case page and feature page), and a camera count
 on a run's results. The images come from the Cucumber JSON report (`image/png`, `image/jpeg`, `image/webp`), from
 collector 0.11.0. A screenshot taken at the end of a scenario (OBT does this today) shows on the last step that ran.
+From collector 0.13.0, Playwright's own JSON reporter works too: the images a test attached (the failure screenshot
+with `screenshot: "only-on-failure"`) show on that result's camera count, labelled with the failing step. The files
+must sit inside the checkout (keep Playwright's `outputDir` there). Videos and traces are not sent yet.
 
 **Privacy first.** QEOS cannot mask an image: a screenshot can show names, emails and booking data. Screenshots are **off
 by default**, per project. Turn them on only where every project reader may see that data (see SECURITY.md).
