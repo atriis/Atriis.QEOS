@@ -7,6 +7,7 @@ from typing import Optional
 import hashlib
 import logging
 import secrets
+from urllib.parse import quote
 from src.auth.api import deps
 from src.auth.service.auth_service import AuthService
 from src.auth.service.user_service import UserService
@@ -86,6 +87,10 @@ def register_user(
     # The dashboard route, not the raw API endpoint: the SPA page calls the API
     # and signs the person in, instead of showing them a JSON blob
     verification_link = f"{settings.BASE_URL}/verify-email?token={token}"
+    # An invitee's way back to the invitation (validated as a same-site path by RegisterRequest).
+    # Not stored: a resent link falls back to the dashboard's own memory of it.
+    if user_in.next:
+        verification_link += f"&next={quote(user_in.next, safe='')}"
     EmailSender.send_verification_email(user_in.email, verification_link)
 
     return {"message": "Check your email to complete registration"}

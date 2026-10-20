@@ -28,9 +28,11 @@ export async function login(email: string, password: string): Promise<MfaChallen
   return null;
 }
 
-export async function register(email: string, password: string, fullName?: string): Promise<void> {
+/** `next` (a safe in-app path, e.g. an invitation) rides in the emailed verification link. */
+export async function register(email: string, password: string, fullName?: string, next?: string | null): Promise<void> {
   const body: Record<string, string> = { email, password };
   if (fullName?.trim()) body.full_name = fullName.trim();
+  if (next) body.next = next;
   await apiFetch("/api/v1/auth/register", { method: "POST", body: JSON.stringify(body) });
 }
 

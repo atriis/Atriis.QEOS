@@ -95,3 +95,26 @@ test("a session that fails to refresh returns to login, remembering the page and
   expect(router.state.location.search).toBe("?next=%2Faccount%2Fsecurity&reason=expired");
   expect(await screen.findByText(/your session expired, sign in again/i)).toBeInTheDocument();
 });
+
+test("a signed-in invitee with no organization yet reaches the invitation, not the first-project setup", async () => {
+  setAccessToken("acc");
+  const { http, HttpResponse } = await import("msw");
+  const { server } = await import("./test/server");
+  server.use(
+    http.get("/api/v1/organizations", () => HttpResponse.json([])),
+    http.get("/api/v1/projects", () => HttpResponse.json([])),
+    http.get("/api/v1/invitations/tok-1", () =>
+      HttpResponse.json({ organization_id: 7, organization_name: "Acme QA", email: "dave@example.com", role: "member", expires_at: "2099-01-01T00:00:00Z" })),
+  );
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter initialEntries={["/invitations/tok-1"]}>
+        <AppRoutes />
+        <Here />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  expect(await screen.findByRole("button", { name: /accept invitation/i })).toBeInTheDocument();
+  expect(screen.getByTestId("here")).toHaveTextContent("/invitations/tok-1");
+});

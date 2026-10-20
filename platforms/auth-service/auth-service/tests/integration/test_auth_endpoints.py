@@ -1,5 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from src.auth.models.pending_registration import PendingRegistration
 from src.auth.models.user import User
 
@@ -336,3 +338,44 @@ def test_resend_verification_answers_identically_regardless_of_state(client, reg
     messages = {r.json()["message"] for r in responses}
     assert bodies == {200}
     assert len(messages) == 1
+
+
+def _sent_links(monkeypatch):
+    from src.auth.service.email_sender import EmailSender
+
+    links = []
+    monkeypatch.setattr(EmailSender, "send_verification_email", staticmethod(lambda to, link: links.append(link)))
+    return links
+
+
+def test_the_verification_link_carries_the_page_the_person_was_heading_to(client, monkeypatch):
+    """An invitee registers from /invitations/<token>; the emailed link is often opened in
+    another browser, so the way back travels in the link, not only in the first tab's storage."""
+    links = _sent_links(monkeypatch)
+    response = client.post(
+        "/api/v1/auth/register",
+        json={"email": "invitee@example.com", "password": "securepassword123", "next": "/invitations/tok-1?x=1"},
+    )
+    assert response.status_code == 202, response.text
+    assert len(links) == 1
+    assert links[0].endswith("&next=%2Finvitations%2Ftok-1%3Fx%3D1")
+
+
+def test_without_a_next_the_verification_link_is_unchanged(client, monkeypatch):
+    links = _sent_links(monkeypatch)
+    client.post("/api/v1/auth/register", json={"email": "plain@example.com", "password": "securepassword123"})
+    assert "next=" not in links[0]
+
+
+@pytest.mark.parametrize(
+    "unsafe",
+    ["//evil.example", "https://evil.example", "/\\evil.example", "/\t/evil.example", "invitations/x", "/login?next=/x", "/" + "a" * 2048],
+)
+def test_a_next_that_could_leave_the_site_is_refused(client, monkeypatch, unsafe):
+    links = _sent_links(monkeypatch)
+    response = client.post(
+        "/api/v1/auth/register",
+        json={"email": "evil@example.com", "password": "securepassword123", "next": unsafe},
+    )
+    assert response.status_code == 422, response.text
+    assert links == []

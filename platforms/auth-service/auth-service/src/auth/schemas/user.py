@@ -1,5 +1,7 @@
 # src/services/auth-service/src/auth/schemas/user.py
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+import re
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 
@@ -35,6 +37,26 @@ class RegisterRequest(UserBase):
     model_config = STRICT_INPUT
 
     password: str = Field(..., min_length=8)
+    # The dashboard page the person was heading to (an invitation), carried into the emailed
+    # link: that link is often opened in another browser, where the first tab's storage is not.
+    # Same rules as the dashboard's safeNext, so the link can never point off the site.
+    next: Optional[str] = Field(None, max_length=2048)
+
+    @field_validator("next")
+    @classmethod
+    def _same_site_path(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        if not value.startswith("/") or value.startswith("//") or _UNSAFE_PATH_CHARS.search(value):
+            raise ValueError("next must be a path on this site")
+        if value == "/login" or value.startswith(("/login?", "/login/", "/login#")):
+            raise ValueError("next must not be the sign-in page")
+        return value
+
+
+# Backslash, whitespace and control characters: browsers strip tabs and newlines and read a
+# backslash as "/", so "/<tab>/evil.example" or "/<backslash>evil.example" would become "//evil.example"
+_UNSAFE_PATH_CHARS = re.compile(r"[\\\s\x00-\x1f\x7f]")
 
 class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None

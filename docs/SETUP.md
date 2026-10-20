@@ -435,7 +435,9 @@ member's role: remove the member and invite them again with the new role.
 2. Under **Invitations**, enter the email, pick a role, and choose **Invite**.
 3. Choose **Copy link**. The `https://…/invitations/<token>` link is shown **once**. Send it
    to the person yourself.
-4. The invitee creates an account (or signs in) and opens the link. The link expires after
+4. The invitee opens the link, then signs in or chooses **Create account**. A new account's
+   verification link carries the invitation along, so after verifying (in any browser) the
+   invitee lands on the invitation and chooses **Accept invitation**. The link expires after
    **7 days** and works once. Pending invitations can be revoked from the same page.
 
 Anyone who is signed in and holds the link can accept it: QEOS does not check that the email

@@ -26,7 +26,8 @@ export default function RegisterPage() {
     setError(null);
     setBusy(true);
     try {
-      await register(email, password, fullName);
+      // In the emailed link too: it is often opened in another browser, where this tab's storage is not
+      await register(email, password, fullName, next && next !== "/" ? next : null);
       rememberAfterVerify(next);
       setDone(true);
     } catch (err) {
