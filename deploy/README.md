@@ -133,8 +133,8 @@ docker run --rm -v qa-vision_qeos_minio_data:/data -v "$PWD/backups":/backup alp
 qeos up -d --wait edge
 ```
 
-Without the volume, results keep working and their screenshot buttons answer "not found". An existing install adds
-`ARTIFACTS_S3_SECRET_KEY` to `.env` by hand before the update: `echo "ARTIFACTS_S3_SECRET_KEY=$(openssl rand -hex 20)" >> .env`.
+Without the volume, results keep working and their screenshot buttons answer "not found". An install made before
+step screenshots adds `ARTIFACTS_S3_SECRET_KEY` once before updating (section 8).
 
 ## 8. Updates
 
@@ -176,6 +176,17 @@ qeos up -d --wait edge
 Without the key everything else works, but Project Settings shows "Running tests from QEOS is not
 configured on this server" and Play stays disabled. Keep the key in your `.env` backups: changing or losing
 it makes stored GitHub tokens unreadable, and owners then save them again in Settings.
+
+**Existing installs and `ARTIFACTS_S3_SECRET_KEY` (step screenshots, ADR-036).** An install made before step
+screenshots has no `ARTIFACTS_S3_SECRET_KEY`, and `qeos up` then stops with a "required variable" error (the old
+stack keeps running). Add it once, by hand, before `git pull` and the update above:
+
+```bash
+echo "ARTIFACTS_S3_SECRET_KEY=$(openssl rand -hex 20)" >> .env
+```
+
+It is the password of the screenshot storage (MinIO, section 7). Keep it in your `.env`
+backups.
 
 ### Upgrading from QA Vision names
 
