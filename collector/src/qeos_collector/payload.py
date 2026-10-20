@@ -125,6 +125,8 @@ def parse_components(values: Sequence[str]) -> List[dict]:
 
 def build_parts(run: dict, results: List[dict], idempotency_key: str,
                 changes: "dict | None" = None, components: "List[dict] | None" = None) -> List[Part]:
+    # "_images" is the collector's own: the bytes are uploaded apart and never part of the body
+    results = [{k: v for k, v in row.items() if k != "_images"} if "_images" in row else row for row in results]
     chunks = [results[i:i + MAX_RESULTS_PER_PART] for i in range(0, len(results), MAX_RESULTS_PER_PART)]
     encoded: List[Tuple[bytes, int]] = []
     for chunk in chunks:
@@ -157,8 +159,7 @@ def summarize(results: Sequence[dict]) -> Dict[str, int]:
 
 def _fit(run: dict, chunk: List[dict], changes: "dict | None" = None,
          components: "List[dict] | None" = None) -> List[Tuple[bytes, int]]:
-    # "_images" is the collector's own: the bytes are uploaded apart and never part of the body
-    payload = {"run": run, "results": [{k: v for k, v in row.items() if k != "_images"} for row in chunk]}
+    payload = {"run": run, "results": chunk}
     if changes is not None:
         payload["changes"] = changes
     if components:

@@ -4,12 +4,16 @@ POST /api/v1/collect/impact answers with the suggestion in SUGGESTED_JSON (a JSO
 POST /api/v1/collect/runs appends the body to UPLOADS_FILE (one JSON line each) and answers 201;
 POST /api/v1/collect/token grants an import token for project 1, and POST /api/v1/projects/1/cases/import
 appends the import body to UPLOADS_FILE as well and answers as a dry run would (every file created).
+GET /api/v1/collect/key reports screenshots on; HEAD/PUT /api/v1/collect/blobs/{sha256} keep step screenshots in memory
+(HEAD 200 once stored, else 404; PUT 201, then 200).
 Binds 127.0.0.1 only, so the collector's http:// localhost rule applies."""
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 PORT, SUGGESTED, UPLOADS = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+BLOBS = "/api/v1/collect/blobs/"
+STORED = set()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -58,6 +62,37 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def do_GET(self):
+        if self.path == "/api/v1/collect/key":
+            self._answer(200, {"project_id": 1, "name": "fake", "can_read_impact": True, "screenshots": True})
+        else:
+            self._answer(404, {"detail": "Not Found"})
+
+    def do_HEAD(self):
+        self._empty(200 if self.path.startswith(BLOBS) and self.path[len(BLOBS):] in STORED else 404)
+
+    def do_PUT(self):
+        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if not self.path.startswith(BLOBS):
+            self._empty(404)
+            return
+        sha = self.path[len(BLOBS):]
+        self._empty(200 if sha in STORED else 201)
+        STORED.add(sha)
+
+    def _answer(self, status, answer):
+        data = json.dumps(answer).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _empty(self, status):
+        self.send_response(status)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def log_message(self, *args):
         pass

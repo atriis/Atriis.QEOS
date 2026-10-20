@@ -6,13 +6,25 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import pytest
 
 
+BLOBS = "/api/v1/collect/blobs/"
+
+
 class FakePlatform:
-    """Answers POSTs with scripted responses, in order, and records every request."""
+    """Answers POSTs with scripted responses, in order, and records every request. Blob HEAD/PUT answer by sha256
+    instead (they run in parallel, so no order): HEAD 200 for what is in `stored`, else 404; PUT `put_status` (201 by
+    default) and stores it on 2xx. `blob_delay` slows each blob request; `blob_hangup` drops the connection.
+    `key_check`, when set, answers GET /collect/key."""
 
     def __init__(self):
         self.url = ""
         self.responses = []
         self.requests = []
+        self.stored = set()
+        self.put_status = {}
+        self.blob_delay = 0.0
+        self.blob_hangup = False
+        self.blob_requests = []
+        self.key_check = None
 
     def reply(self, status, body=None, headers=None, delay=0.0):
         self.responses.append((status, {} if body is None else body, headers or {}, delay))
@@ -43,7 +55,43 @@ def platform():
             self.wfile.write(data)
 
         def do_GET(self):
+            if self.path == "/api/v1/collect/key" and fake.key_check is not None:
+                self._answer(200, fake.key_check)
+                return
             self.do_POST()
+
+        def do_HEAD(self):
+            self._blob("HEAD", b"")
+
+        def do_PUT(self):
+            self._blob("PUT", self.rfile.read(int(self.headers.get("Content-Length", 0))))
+
+        def _blob(self, method, body):
+            sha = self.path[len(BLOBS):] if self.path.startswith(BLOBS) else ""
+            with lock:
+                fake.blob_requests.append({"method": method, "sha": sha, "headers": self.headers, "body": body})
+            time.sleep(fake.blob_delay)
+            if fake.blob_hangup:
+                self.close_connection = True
+                return
+            with lock:
+                if method == "HEAD":
+                    status = 200 if sha in fake.stored else 404
+                else:
+                    status = fake.put_status.get(sha, 201)
+                    if status in (200, 201):
+                        fake.stored.add(sha)
+            self.send_response(status)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def _answer(self, status, payload):
+            data = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
 
         def log_message(self, *args):
             pass

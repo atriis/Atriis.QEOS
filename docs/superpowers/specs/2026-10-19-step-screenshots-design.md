@@ -85,7 +85,7 @@ Anti-goals (failure even if it works):
 - Object key: `screenshots/{project_id}/{sha256}`. Content-addressed per project, so the same image
   uploaded twice is stored once and a retry is free.
 
-### 5.2 Collector 0.10.0
+### 5.2 Collector 0.11.0
 
 Parsing (`formats.py`):
 

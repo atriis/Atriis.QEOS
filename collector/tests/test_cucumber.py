@@ -609,6 +609,16 @@ def test_51st_image_skipped(tmp_path):
     assert [w for w in parsed.warnings if "2 screenshot" in w]
 
 
+def test_the_same_image_twice_on_one_step_is_one_reference(tmp_path):
+    entry = image_on(image_on(step("Given ", "a", 1, "passed")))
+    for number in range(50):
+        image_on(entry, b"img%d" % number)
+    row, parsed = shots_of(tmp_path, [entry, image_on(step("When ", "b", 2, "passed"))])
+    assert [s["sha256"] for s in row["screenshots"]].count(PNG_SHA) == 1  # one per step, not counted twice
+    assert len(row["screenshots"]) == 50
+    assert [w for w in parsed.warnings if "2 screenshot(s) beyond" in w]  # img49, and When b's PNG
+
+
 def test_text_attachments_still_become_log(tmp_path):
     entry = image_on(logging_step("When ", "a", "kept"))
     row, _ = shots_of(tmp_path, [entry])

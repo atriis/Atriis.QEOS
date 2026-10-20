@@ -1,4 +1,4 @@
-"""POST one part to /api/v1/collect/runs, retrying what is worth retrying."""
+"""POST one part to /api/v1/collect/runs, retrying what is worth retrying; before it, the step screenshots."""
 from __future__ import annotations
 
 import http.client
@@ -6,11 +6,13 @@ import json
 import math
 import random
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Callable, Mapping, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor
+from typing import Callable, Dict, Mapping, Optional, Set, Tuple
 
 from qeos_collector import __version__
 from qeos_collector.payload import Part
@@ -30,6 +32,14 @@ OLDER_PLATFORM = ("the platform is older than this collector and refused the fai
 LOG_FIELD = "log"
 OLDER_PLATFORM_LOG = ("the platform is older than this collector and refused the results' log: sent again without "
                       "it (upgrade QEOS to see log values)")
+SCREENSHOTS_FIELD = "screenshots"
+OLDER_PLATFORM_SCREENSHOTS = ("the platform is older than this collector and refused the results' screenshots: sent "
+                              "again without them (upgrade QEOS to see step screenshots)")
+# Step screenshots (spec 2026-10-19 §5.2): the images go up before the run, each on its own, best effort
+BLOBS_PATH = "/api/v1/collect/blobs/"
+MAX_IMAGES_PER_RUN = 5000
+IMAGE_BUDGET_SECONDS = 120
+IMAGE_WORKERS = 4
 
 
 def _ignore(message: str) -> None:
@@ -177,6 +187,130 @@ def check_key(url: str, api_key: str, context: Optional[ssl.SSLContext] = None) 
     raise UploadError(f"the platform answered {status}: {_detail(body)}")
 
 
+class _OutOfTime(Exception):
+    """The image phase's budget ran out."""
+
+
+class _StopImages(Exception):
+    """Every other image would get the same answer (unreachable, no access, screenshots off): stop the phase."""
+
+
+def upload_images(
+    base_url: str,
+    key: str,
+    images: Dict[str, Tuple[str, bytes]],
+    budget_seconds: float = IMAGE_BUDGET_SECONDS,
+    workers: int = IMAGE_WORKERS,
+    *,
+    context: Optional[ssl.SSLContext] = None,
+    warn: Callable[[str], None] = _ignore,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+    rand: Callable[[], float] = random.random,
+) -> Set[str]:
+    """Stores each image (sha256 -> (media type, bytes)) with HEAD, then PUT when missing, on
+    /collect/blobs/{sha256} before the run (spec 2026-10-19 §5.2), and returns the sha256s QEOS holds; the caller
+    drops every other reference. Best effort: never raises, and each reason images were left out is one `warn`.
+    The first request goes alone, so a platform that cannot be reached costs one request, not one per image."""
+    shas = list(images)
+    if len(shas) > MAX_IMAGES_PER_RUN:
+        warn(f"{len(shas) - MAX_IMAGES_PER_RUN} beyond {MAX_IMAGES_PER_RUN} per run")
+        shas = shas[:MAX_IMAGES_PER_RUN]
+    if not shas:
+        return set()
+    prefix = base_url.strip().rstrip("/") + BLOBS_PATH
+    headers = {"Authorization": f"Bearer {key}", "User-Agent": f"qeos-collector/{__version__}"}
+    # Its own budget: the run upload after it keeps its whole TIME_BUDGET_SECONDS
+    deadline = clock() + budget_seconds
+    lock = threading.Lock()
+    stopped: list = []
+    late = threading.Event()
+
+    def store(sha: str, first: bool = False) -> bool:
+        if stopped:
+            return False
+        if clock() >= deadline:
+            late.set()
+            return False
+        media_type, data = images[sha]
+        try:
+            return _store_image(prefix + sha, headers, media_type, data, context, deadline, first=first,
+                                clock=clock, sleep=sleep, rand=rand)
+        except _OutOfTime:
+            late.set()
+        except _StopImages as exc:
+            with lock:
+                stopped.append(str(exc))
+        return False
+
+    stored = {shas[0]} if store(shas[0], first=True) else set()
+    if len(shas) > 1 and not stopped:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            stored.update(sha for sha, ok in zip(shas[1:], pool.map(store, shas[1:])) if ok)
+    if stopped:
+        warn(stopped[0])
+    if late.is_set():
+        warn(f"out of time after {budget_seconds:g} s")
+    return stored
+
+
+def _store_image(url: str, headers: Mapping[str, str], media_type: str, data: bytes,
+                 context: Optional[ssl.SSLContext], deadline: float, *, first: bool,
+                 clock: Callable[[], float], sleep: Callable[[float], None], rand: Callable[[], float]) -> bool:
+    """True when QEOS holds the image: already there (HEAD 200) or stored now (PUT 200/201)."""
+    status = _blob_request(url, "HEAD", None, headers, context, deadline, first, clock, sleep, rand)
+    if status == 200:
+        return True
+    if status == 404:
+        status = _blob_request(url, "PUT", data, {**headers, "Content-Type": media_type}, context, deadline, False,
+                               clock, sleep, rand)
+        if status in (200, 201):
+            return True
+    if status == 401:
+        raise _StopImages("the API key is invalid or revoked (401)")
+    if status == 403:
+        raise _StopImages("screenshots are off for this project (403)")
+    if status == 410:
+        raise _StopImages("the project is pending deletion (410)")
+    if 300 <= status < 400:
+        raise _StopImages(f"the platform redirected ({status})")
+    return False  # this image only: refused (400, 413) or out of attempts
+
+
+def _blob_request(url: str, method: str, data: Optional[bytes], headers: Mapping[str, str],
+                  context: Optional[ssl.SSLContext], deadline: float, first: bool,
+                  clock: Callable[[], float], sleep: Callable[[float], None], rand: Callable[[], float]) -> int:
+    """The answer's status, retrying 429, 5xx and dropped connections as upload_part does but within the image
+    phase's deadline; 0 when the attempts ran out."""
+    attempt = 0
+    while True:
+        attempt += 1
+        left = deadline - clock()
+        if left <= 0:
+            raise _OutOfTime()
+        try:
+            status, _, response_headers = _send(url, data, headers, context, method=method,
+                                                timeout=min(TIMEOUT_SECONDS, left))
+        except (OSError, http.client.HTTPException) as exc:
+            if clock() >= deadline:
+                raise _OutOfTime() from None
+            if first or _is_tls_error(exc):
+                raise _StopImages(f"cannot reach the platform ({_reason(exc)})") from None
+            wait = _backoff(attempt, rand)
+        else:
+            if status == 429:
+                wait = _retry_after(response_headers)
+            elif status >= 500:
+                wait = _backoff(attempt, rand)
+            else:
+                return status
+        if attempt >= MAX_ATTEMPTS:
+            return 0
+        if clock() + wait > deadline:
+            raise _OutOfTime()
+        sleep(wait)
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     # Following a redirect would re-send the Authorization header to wherever it points
     def redirect_request(self, req, fp, code, msg, headers, newurl):
@@ -184,14 +318,15 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _send(
-    endpoint: str, body: Optional[bytes], headers: Mapping[str, str], context: Optional[ssl.SSLContext]
+    endpoint: str, body: Optional[bytes], headers: Mapping[str, str], context: Optional[ssl.SSLContext],
+    method: Optional[str] = None, timeout: Optional[float] = None,
 ) -> Tuple[int, bytes, Mapping[str, str]]:
     # build_opener keeps the default ProxyHandler, so HTTPS_PROXY / NO_PROXY are honoured
     opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context), _NoRedirect)
-    method = "POST" if body is not None else "GET"
+    method = method or ("POST" if body is not None else "GET")
     request = urllib.request.Request(endpoint, data=body, headers=dict(headers), method=method)
     try:
-        with opener.open(request, timeout=TIMEOUT_SECONDS) as response:
+        with opener.open(request, timeout=TIMEOUT_SECONDS if timeout is None else timeout) as response:
             return response.status, response.read(), response.headers
     except urllib.error.HTTPError as exc:
         try:
@@ -234,23 +369,27 @@ def _json(body: bytes) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _refused_fields(body: bytes) -> Tuple[bool, bool]:
-    """(step details, log): which of this collector's newer fields a 422 forbids (FastAPI: {"detail": [{"loc": …}]})."""
+def _refused_fields(body: bytes) -> Tuple[bool, bool, bool]:
+    """(step details, log, screenshots): which of this collector's newer fields a 422 forbids (FastAPI: {"detail":
+    [{"loc": …}]})."""
     try:
         detail = json.loads(body).get("detail")
     except (ValueError, AttributeError):
-        return False, False
+        return False, False, False
     if not isinstance(detail, list):
-        return False, False
+        return False, False, False
     locs = [error["loc"] for error in detail if isinstance(error, dict) and isinstance(error.get("loc"), list)]
     step = any(loc[-2:-1] == ["failed_step"] and loc[-1] in STEP_DETAILS for loc in locs)
     log = any(len(loc) >= 3 and loc[-1] == LOG_FIELD and loc[-3] == "results" for loc in locs)
-    return step, log
+    # The field itself (an older platform) or anything inside it: a screenshot reference never costs the run
+    shots = any(SCREENSHOTS_FIELD in loc and loc.index(SCREENSHOTS_FIELD) >= 2
+                and loc[loc.index(SCREENSHOTS_FIELD) - 2] == "results" for loc in locs)
+    return step, log, shots
 
 
 def _downgrade(payload: bytes, body: bytes, warn: Callable[[str], None]) -> Optional[bytes]:
     """The payload without the newer fields the 422 names, one warning per kind; None when there is nothing to strip."""
-    step, log = _refused_fields(body)
+    step, log, shots = _refused_fields(body)
     stripped, notes = None, []
     if step:
         without = without_step_details(payload)
@@ -262,6 +401,11 @@ def _downgrade(payload: bytes, body: bytes, warn: Callable[[str], None]) -> Opti
         if without is not None:
             payload = stripped = without
             notes.append(OLDER_PLATFORM_LOG)
+    if shots:
+        without = without_screenshots(payload)
+        if without is not None:
+            payload = stripped = without
+            notes.append(OLDER_PLATFORM_SCREENSHOTS)
     for note in notes:
         warn(note)
     return stripped
@@ -288,14 +432,23 @@ def without_step_details(body: bytes) -> Optional[bytes]:
 
 def without_log(body: bytes) -> Optional[bytes]:
     """The body without the results' `log`; None when no result has one (nothing to retry without)."""
+    return _without_result_field(body, LOG_FIELD)
+
+
+def without_screenshots(body: bytes) -> Optional[bytes]:
+    """The body without the results' `screenshots`; None when no result has them (nothing to retry without)."""
+    return _without_result_field(body, SCREENSHOTS_FIELD)
+
+
+def _without_result_field(body: bytes, name: str) -> Optional[bytes]:
     try:
         data = json.loads(body)
     except ValueError:
         return None
     removed = False
     for result in (data.get("results") if isinstance(data, dict) else None) or []:
-        if isinstance(result, dict) and LOG_FIELD in result:
-            del result[LOG_FIELD]
+        if isinstance(result, dict) and name in result:
+            del result[name]
             removed = True
     if not removed:
         return None

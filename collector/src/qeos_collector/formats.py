@@ -323,15 +323,17 @@ def _scenario_screenshots(element: dict, steps: list, skips: dict) -> "tuple[lis
                 if len(data) > MAX_IMAGE_BYTES:
                     skips["large"] = skips.get("large", 0) + 1
                     continue
-                if len(screenshots) >= MAX_SCREENSHOTS_PER_RESULT:
-                    skips["over"] = skips.get("over", 0) + 1
-                    continue
                 digest = hashlib.sha256(data).hexdigest()
-                images[digest] = (media_type, data)
                 reference = {"sha256": digest, "media_type": media_type, "step_text": target["text"],
                              "step_line": target.get("line")}
                 if kind:
                     reference["hook"] = kind
+                if reference in screenshots:  # the same image again on the same step: once, and counted once
+                    continue
+                if len(screenshots) >= MAX_SCREENSHOTS_PER_RESULT:
+                    skips["over"] = skips.get("over", 0) + 1
+                    continue
+                images[digest] = (media_type, data)
                 screenshots.append(reference)
     return screenshots, images
 

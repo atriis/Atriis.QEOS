@@ -164,6 +164,7 @@ variable, and both win over what is detected from the CI system.
 | `--fail-on-error` | `QEOS_FAIL_ON_ERROR=1` | Exit 1 if the upload fails |
 | `--gate` | `QEOS_GATE=1` | Exit 1 if the run has failures outside quarantine, or could not be uploaded (see below) |
 | `--spool` | `QEOS_SPOOL` | Directory keeping parts a failed upload could not deliver; the next invocation resends them first, under their original Idempotency-Key (so nothing is ever stored twice). Capped at 100 files; rejected uploads (401/409) are never spooled. Point it at a persistent runner path — a wiped workspace wipes the spool |
+| `--no-screenshots` | `QEOS_NO_SCREENSHOTS=1` | Send no step screenshots: no image upload and no references in the run (see [Step screenshots](#step-screenshots-cucumber-from-0110)) |
 | `--dry-run` | — | Print the JSON; upload nothing |
 | — | `QEOS_ACTION_EXTRA_ARGS` | More flags as one string, split into words as a POSIX shell would (quotes group; nothing is expanded or run; a backslash escapes, so write paths with `/`). Flags only: a `--` or a word that is no flag's value is refused (exit 2), so nothing can start a test command. The variable is not passed on to the test command. The GitHub Action passes its `extra-args` this way. GitLab's `QEOS_EXTRA_ARGS` is a different variable, which the template puts on the command line |
 
@@ -546,6 +547,7 @@ showing up, but its failures stop counting. With `--gate`, the collector decides
   Collector 0.8.0 also works with a platform that has migration 021 but not 022 (the one that adds these two fields): that platform answers 422 naming `failed_step.definition` or `failed_step.pattern`, and the collector then sends the upload once more without `definition` and `pattern`, under the same Idempotency-Key, and logs one line saying the platform is older than the collector. No other 422 is retried (a platform without migration 021 refuses `failed_step` itself, so there is nothing to strip); uploads saved with `--spool` get the same retry when they are resent.
   Collector 0.9.0 sends `log` (above); a platform without ingestion migration 023 answers 422 naming `results.N.log`, and the collector sends the upload once more without any result's `log`, under the same Idempotency-Key, and logs one line saying the platform is older than the collector. A platform older than both 022 and 023 names both in one 422: both are stripped in that one retry.
   From 0.9.0 each scenario also carries `log`: its text attachments (`text/x.cucumber.log+plain`, as cucumber-js's `this.log()` writes them, and `text/plain`; decoded from base64 when so encoded; an attachment's `contentEncoding` is honoured when present: `IDENTITY` keeps the text, `BASE64` decodes) in step order, hook and Background steps included, joined by newlines and cut to 64 KB; images and other attachments never. No text, no `log`. QEOS masks it, stores it and reads log values from it.
+  From 0.11.0 image attachments become step screenshots: see [Step screenshots](#step-screenshots-cucumber-from-0110).
 - Playwright's JSON reporter (`--reporter=json`): every retry attempt is kept as its own
   result (a flaky spec shows as fail+pass in one run), project name as suite, spec file as
   class, `timedOut` counts as failed and `interrupted` as errored.
@@ -553,6 +555,46 @@ showing up, but its failures stop counting. With `--gate`, the collector decides
   declare a DOCTYPE or entities (JUnit never needs one; refusing them blocks XML entity attacks).
 - Cuts failure messages, output and logs to 64 KB, as the platform does.
 - More than 20,000 results (or 9 MB) are sent as several runs, `part 1 of N` and so on.
+
+## Step screenshots (Cucumber, from 0.11.0)
+
+Images a Cucumber scenario attached (`image/png`, `image/jpeg`, `image/webp`, in the classic JSON report) reach QEOS
+with the step they belong to, and QEOS shows them on that Gherkin line and in the run's results.
+
+- **What is sent.** Each image goes up on its own before the run: `HEAD /api/v1/collect/blobs/{sha256}`, then, when
+  QEOS does not have it yet, `PUT` with the raw bytes and their `Content-Type`. The same image is sent once per run,
+  however many steps attached it. The run itself carries only references, per result in step order:
+  `screenshots: [{sha256, media_type, step_text, step_line, hook}]`. An image attached in a Before hook goes to the
+  first step and one in an After hook to the last step that ran, with `hook` saying so.
+- **Only when QEOS takes them.** The collector asks first (the key check, `GET /api/v1/collect/key`). Screenshots are
+  off by default: a project owner or admin turns on **Keep screenshots from uploads** in Project Settings. When they
+  are off, when QEOS is older than 0.11.0's screenshots, or when the key check fails, no image is sent and the run
+  goes without `screenshots`.
+- **Best effort.** An image problem never fails the upload. The image phase has its own 2 minutes (the run upload
+  keeps its own 2 minutes after it), sends up to 4 images at a time, and retries 429 and 5xx answers as the run
+  upload does. When the first request cannot reach QEOS at all, every image is skipped at once. A reference whose
+  image was not stored is left out of the run. One line sums it up: `screenshots: 12 stored, 0 skipped`, with the
+  reason in brackets when images were left out.
+- **Limits.** 5 MB per image, 50 per result and 5,000 per run; the rest are skipped with a warning. QEOS accepts
+  PNG, JPEG and WebP only.
+- **Spool.** Parts kept with `--spool` hold the references, never the images. A part resent later does not upload
+  images again; QEOS drops the references whose image it no longer has.
+- **Older platform.** A 422 naming `results.N.screenshots` (a QEOS without screenshots) or anything inside it gets
+  the upload once more without any result's `screenshots`, under the same Idempotency-Key, as for `log` above.
+- **Turning it off.** `--no-screenshots` (or `QEOS_NO_SCREENSHOTS=1`) skips all of this: no key check, no image, no
+  references.
+- **Privacy.** QEOS cannot mask an image. Screenshots can show names, emails and booking data; turn the project
+  setting on only where that is acceptable.
+
+Taking a screenshot per step is the test suite's choice. With Playwright and cucumber-js, an optional `AfterStep`
+hook turns them on for one run without slowing the nightly:
+
+```js
+AfterStep(async function () {
+  if (process.env.QEOS_STEP_SHOTS !== "1") return;
+  this.attach(await this.page.screenshot({ animations: "disabled", timeout: 10000 }), "image/png");
+});
+```
 
 ## Network and security
 
@@ -562,7 +604,7 @@ showing up, but its failures stop counting. With `--gate`, the collector decides
 - `HTTPS_PROXY` and `NO_PROXY` are honoured.
 - Redirects are not followed, so the key is never sent anywhere but `QEOS_URL`.
 - Retries: connection errors, timeouts and 5xx answers are retried after 1, 2, 4 and 8 seconds;
-  429 waits for `Retry-After` (at most 10 s). At most 5 attempts and 2 minutes per run. The one other retry is the 422 about `failed_step.definition` or `failed_step.pattern` above, sent once more without those two fields.
+  429 waits for `Retry-After` (at most 10 s). At most 5 attempts and 2 minutes per run. The one other retry is the 422 about `failed_step.definition` or `failed_step.pattern` above, sent once more without those two fields (and likewise without `log` or `screenshots`). Step screenshots retry the same way within their own 2 minutes, before the run.
 - The API key is never printed.
 
 ## Develop

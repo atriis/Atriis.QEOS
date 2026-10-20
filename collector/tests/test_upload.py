@@ -1,12 +1,18 @@
+import base64
+import hashlib
 import json
 import socket
 import threading
+import time
 
 import pytest
 
 from qeos_collector import __version__, upload
+from qeos_collector.cli import main
 from qeos_collector.payload import Part
-from qeos_collector.upload import ConfigError, UploadError, endpoint_for, make_context, upload_part
+from qeos_collector.upload import (
+    MAX_IMAGES_PER_RUN, ConfigError, UploadError, endpoint_for, make_context, upload_images, upload_part,
+)
 
 KEY = "qeos_test_key_123"
 PART = Part(body=b'{"run":{},"results":[]}', idempotency_key="gh-1-1-test", count=0)
@@ -446,3 +452,191 @@ def test_without_log_strips_only_the_log():
     assert body["results"] == [{"name": "t", "status": "passed"}, {"name": "u", "status": "passed"}]
     assert upload.without_log(PART.body) is None
     assert upload.without_log(b"not json") is None
+
+
+# --- step screenshots (spec 2026-10-19 §5.2): images go up before the run, the run carries references ----------
+
+IMG_A, IMG_B, IMG_C = (b"\x89PNG\r\n\x1a\n" + bytes([n]) * 16 for n in (1, 2, 3))
+SHA_A, SHA_B, SHA_C = (hashlib.sha256(data).hexdigest() for data in (IMG_A, IMG_B, IMG_C))
+IMAGES = {SHA_A: ("image/png", IMG_A), SHA_B: ("image/png", IMG_B), SHA_C: ("image/png", IMG_C)}
+SCREENSHOTS_ON = {"project_id": 1, "name": "ci", "screenshots": True}
+
+
+def shot_step(keyword, text, line, *images):
+    return {"keyword": keyword, "name": text, "line": line, "result": {"status": "passed", "duration": 1},
+            "embeddings": [{"data": base64.b64encode(data).decode(), "mime_type": "image/png"} for data in images]}
+
+
+@pytest.fixture
+def cucumber_report(tmp_path):
+    feature = {"uri": "f.feature", "name": "F", "elements": [
+        {"type": "scenario", "name": "one", "line": 2,
+         "steps": [shot_step("Given ", "a", 3, IMG_A), shot_step("When ", "b", 4, IMG_B)]},
+        {"type": "scenario", "name": "two", "line": 6, "steps": [shot_step("Given ", "c", 7, IMG_C, IMG_A)]},
+    ]}
+    path = tmp_path / "cucumber.json"
+    path.write_text(json.dumps([feature]), encoding="utf-8")
+    return path
+
+
+def upload_run(platform, report, *argv, **env):
+    platform.reply(201, RECEIPT)
+    code = main(["upload", str(report), "--no-changes", *argv],
+                {"QEOS_URL": platform.url, "QEOS_API_KEY": KEY, **env}, sleep=lambda seconds: None)
+    run = [r for r in platform.requests if r["path"] == "/api/v1/collect/runs"]
+    assert code == 0 and len(run) == 1
+    return json.loads(run[0]["body"])["results"]
+
+
+def shas(results):
+    return [[s["sha256"] for s in r.get("screenshots", [])] for r in results]
+
+
+def screenshot_lines(capsys):
+    return [line for line in capsys.readouterr().err.splitlines() if "screenshots" in line]
+
+
+def test_images_uploaded_then_run_references_them(platform, cucumber_report, capsys):
+    platform.key_check = SCREENSHOTS_ON
+    results = upload_run(platform, cucumber_report)
+
+    puts = [r for r in platform.blob_requests if r["method"] == "PUT"]
+    assert sorted(r["sha"] for r in puts) == sorted([SHA_A, SHA_B, SHA_C])  # each image once
+    put = next(r for r in puts if r["sha"] == SHA_A)
+    assert put["body"] == IMG_A
+    assert put["headers"]["Content-Type"] == "image/png"
+    assert put["headers"]["Authorization"] == f"Bearer {KEY}"
+    assert put["headers"]["User-Agent"] == f"qeos-collector/{__version__}"
+    assert shas(results) == [[SHA_A, SHA_B], [SHA_C, SHA_A]]
+    assert "_images" not in results[0]
+    assert screenshot_lines(capsys) == ["qeos: screenshots: 3 stored, 0 skipped"]
+
+
+def test_head_200_skips_put(platform):
+    platform.stored.add(SHA_B)
+    assert upload_images(platform.url, KEY, IMAGES) == {SHA_A, SHA_B, SHA_C}
+    assert sorted(r["sha"] for r in platform.blob_requests if r["method"] == "PUT") == sorted([SHA_A, SHA_C])
+
+
+def test_key_without_screenshots_field_skips_images(platform, cucumber_report, capsys):
+    platform.key_check = {"project_id": 1, "name": "ci"}  # a QEOS older than screenshots
+    results = upload_run(platform, cucumber_report)
+    assert platform.blob_requests == []
+    assert "screenshots" not in results[0] and "screenshots" not in results[1]
+    (line,) = screenshot_lines(capsys)
+    assert "0 stored, 3 skipped" in line and "older" in line
+
+
+def test_screenshots_false_skips_images(platform, cucumber_report, capsys):
+    platform.key_check = {"project_id": 1, "name": "ci", "screenshots": False}
+    results = upload_run(platform, cucumber_report)
+    assert platform.blob_requests == []
+    assert "screenshots" not in results[0] and "screenshots" not in results[1]
+    (line,) = screenshot_lines(capsys)
+    assert "off for this project" in line
+
+
+def test_failed_key_check_skips_images(platform, cucumber_report, capsys):
+    platform.reply(401, {"detail": "no"})  # the key check; the run's reply is scripted after it
+    results = upload_run(platform, cucumber_report)
+    assert platform.blob_requests == [] and "screenshots" not in results[0]
+    (line,) = screenshot_lines(capsys)
+    assert "key check failed" in line
+
+
+def test_failed_put_drops_only_that_reference(platform, cucumber_report, capsys):
+    platform.key_check = SCREENSHOTS_ON
+    platform.put_status[SHA_B] = 400
+    results = upload_run(platform, cucumber_report)
+    assert shas(results) == [[SHA_A], [SHA_C, SHA_A]]
+    assert screenshot_lines(capsys) == ["qeos: screenshots: 2 stored, 1 skipped"]
+
+
+def test_budget_exhausted_drops_remaining(platform):
+    platform.blob_delay = 0.3
+    many = {hashlib.sha256(b"%d" % n).hexdigest(): ("image/png", b"%d" % n) for n in range(12)}
+    notes = []
+    started = time.monotonic()
+    stored = upload_images(platform.url, KEY, many, budget_seconds=0.5, warn=notes.append)
+    assert time.monotonic() - started < 2.0
+    assert len(stored) < len(many)
+    assert len(platform.blob_requests) < 2 * len(many)
+    assert notes == ["out of time after 0.5 s"]
+
+
+def test_connection_error_skips_all_images_run_still_uploads(platform, cucumber_report, capsys):
+    platform.key_check = SCREENSHOTS_ON
+    platform.blob_hangup = True
+    results = upload_run(platform, cucumber_report)
+    assert len(platform.blob_requests) == 1  # the first request only: nothing retried, nothing else tried
+    assert "screenshots" not in results[0] and "screenshots" not in results[1]
+    (line,) = screenshot_lines(capsys)
+    assert "0 stored, 3 skipped" in line and "cannot reach" in line
+
+
+@pytest.mark.parametrize("argv, env", [(["--no-screenshots"], {}), ([], {"QEOS_NO_SCREENSHOTS": "1"})])
+def test_no_screenshots_flag(platform, cucumber_report, capsys, argv, env):
+    platform.key_check = SCREENSHOTS_ON
+    results = upload_run(platform, cucumber_report, *argv, **env)
+    assert platform.blob_requests == []
+    assert [r["path"] for r in platform.requests] == ["/api/v1/collect/runs"]  # no key check either
+    assert "screenshots" not in results[0] and "screenshots" not in results[1]
+    assert screenshot_lines(capsys) == []
+
+
+def test_422_downgrade_removes_screenshots(platform):
+    part = Part(body=json.dumps({"run": {}, "results": [
+        {"name": "t", "status": "passed", "log": "x",
+         "screenshots": [{"sha256": SHA_A, "media_type": "image/png", "step_text": "Given a", "step_line": 3}]},
+    ]}).encode(), idempotency_key="gh-1-1-shots", count=1)
+    platform.reply(422, {"detail": [{"type": "extra_forbidden", "loc": ["body", "results", 0, "screenshots"],
+                                     "msg": "Extra inputs are not permitted"}]})
+    platform.reply(201, RECEIPT)
+    warnings = []
+    assert send_step(platform, warnings, part) == (201, RECEIPT)
+    second = json.loads(platform.requests[1]["body"])["results"][0]
+    assert "screenshots" not in second and second["log"] == "x"
+    assert platform.requests[1]["headers"]["Idempotency-Key"] == "gh-1-1-shots"
+    assert len(warnings) == 1 and "screenshots" in warnings[0]
+
+
+def test_a_422_inside_a_screenshot_reference_also_removes_screenshots(platform):
+    part = Part(body=json.dumps({"run": {}, "results": [{"name": "t", "status": "passed", "screenshots": [
+        {"sha256": SHA_A, "media_type": "image/png", "step_text": "Given a", "hook": "around"}]}]}).encode(),
+        idempotency_key="gh-1-1-shot-field", count=1)
+    platform.reply(422, {"detail": [{"type": "literal_error",
+                                     "loc": ["body", "results", 0, "screenshots", 0, "hook"], "msg": "bad"}]})
+    platform.reply(201, RECEIPT)
+    assert send_step(platform, [], part) == (201, RECEIPT)  # a screenshot never costs the run
+    assert "screenshots" not in json.loads(platform.requests[1]["body"])["results"][0]
+
+
+def test_5001st_image_skipped_with_one_warning(monkeypatch):
+    calls = []
+    monkeypatch.setattr(upload, "_store_image", lambda url, *args, **kwargs: calls.append(url) or True)
+    many = {f"{n:064x}": ("image/png", b"x") for n in range(MAX_IMAGES_PER_RUN + 1)}
+    notes = []
+    stored = upload_images("http://127.0.0.1:1", KEY, many, warn=notes.append)
+    assert MAX_IMAGES_PER_RUN == 5000
+    assert len(stored) == 5000 and len(calls) == 5000
+    assert f"{MAX_IMAGES_PER_RUN:064x}" not in stored  # the last one, in report order
+    assert notes == ["1 beyond 5000 per run"]
+
+
+def test_spooled_parts_keep_references_but_never_image_bytes(platform, cucumber_report, tmp_path):
+    platform.key_check = SCREENSHOTS_ON
+    spool = tmp_path / "spool"
+    for _ in range(5):
+        platform.reply(503)
+    main(["upload", str(cucumber_report), "--no-changes", "--spool", str(spool)],
+         {"QEOS_URL": platform.url, "QEOS_API_KEY": KEY}, sleep=lambda seconds: None)
+    (record,) = [json.loads(p.read_text(encoding="utf-8")) for p in spool.glob("*.json")]
+    body = base64.b64decode(record["body"])
+    assert shas(json.loads(body)["results"]) == [[SHA_A, SHA_B], [SHA_C, SHA_A]]
+    assert base64.b64encode(IMG_A) not in body and b"_images" not in body
+
+
+def test_dry_run_keeps_references_and_uploads_nothing(cucumber_report, capsys):
+    assert main(["upload", str(cucumber_report), "--no-changes", "--dry-run"], {}) == 0
+    out = capsys.readouterr().out
+    assert SHA_A in out and base64.b64encode(IMG_A).decode() not in out

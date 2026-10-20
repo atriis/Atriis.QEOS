@@ -24,7 +24,7 @@ from qeos_collector.payload import (
 )
 from qeos_collector.spool import spool_part, spooled_parts
 from qeos_collector.upload import (
-    ConfigError, UploadError, check_key, endpoint_for, make_context, upload_part,
+    ConfigError, UploadError, check_key, endpoint_for, make_context, upload_images, upload_part,
 )
 
 CI_PROVIDERS = ("github_actions", "gitlab_ci", "jenkins", "azure_pipelines", "other", "local")
@@ -106,6 +106,9 @@ def _run_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--spool", metavar="DIR",
                         help="keep parts a failed upload could not deliver in DIR and resend them on "
                              "the next invocation (default: $QEOS_SPOOL)")
+    parser.add_argument("--no-screenshots", action="store_true",
+                        help="send no step screenshots: no image upload, no references in the run "
+                             "(default: $QEOS_NO_SCREENSHOTS)")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -432,7 +435,7 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
         return ((flag or "").strip() or env.get(name, "").strip()
                 or (from_file(file_key) if file_key else None) or detected)
 
-    endpoint, context = "", None
+    endpoint, context, url = "", None, None
     if not args.dry_run:
         url = pick(args.url, "QEOS_URL", file_key="url")
         if not url:
@@ -542,6 +545,9 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
         # (finished_at alone always differs). So each invocation adds its own random suffix: the
         # collector's retries reuse the key, and a POST stored without an answer is replayed.
         key = f"{ci.idempotency_key or 'local'}-{uuid.uuid4().hex[:12]}"
+    skip_screenshots = args.no_screenshots or env.get("QEOS_NO_SCREENSHOTS", "").strip().lower() in _TRUE
+    _send_screenshots(results, None if args.dry_run else url, api_key, context, say, skip=skip_screenshots,
+                      sleep=sleep, clock=clock)
     parts = build_parts(run, results, key, changes, components)
 
     if args.dry_run:
@@ -581,6 +587,44 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
         stored.append(f"run {run_id} ({of})")
     # The last part's receipt counts the whole run: the gate reads it
     return receipt
+
+
+def _send_screenshots(results: List[dict], url: Optional[str], api_key: str, context, say: _Output, *, skip: bool,
+                      sleep, clock) -> None:
+    """Step screenshots (spec 2026-10-19 §5.2): uploads the rows' images, then keeps only the references to images
+    QEOS holds, so the run never points at a missing one. Every row loses its `_images` here, so the bytes are not
+    held through the run upload. A dry run (no url) keeps the references and uploads nothing. Best effort: whatever
+    goes wrong is one line, and the run is still sent."""
+    images: dict = {}
+    for row in results:
+        images.update(row.pop("_images", None) or {})
+    if url is None and not skip:
+        return
+    stored: set = set()
+    if images and not skip:
+        notes: List[str] = []
+        try:
+            identity = check_key(url, api_key, context)
+        except UploadError as exc:
+            notes.append(f"key check failed: {exc}")
+        else:
+            if identity.get("screenshots") is True:
+                stored = upload_images(url, api_key, images, context=context, warn=notes.append, sleep=sleep,
+                                       clock=clock)
+            elif "screenshots" not in identity:
+                notes.append("the platform is older than this collector (upgrade QEOS to see step screenshots)")
+            else:
+                notes.append("off for this project (a project owner or admin turns on Keep screenshots from "
+                             "uploads in Project Settings)")
+        say(f"screenshots: {len(stored)} stored, {len(images) - len(stored)} skipped"
+            + (f" ({'; '.join(notes)})" if notes else ""))
+    for row in results:
+        if "screenshots" in row:
+            kept = [shot for shot in row["screenshots"] if shot["sha256"] in stored]
+            if kept:
+                row["screenshots"] = kept
+            else:
+                del row["screenshots"]
 
 
 def _resend_spooled(spool_dir, endpoint, api_key, context, say: _Output, *, sleep, clock) -> None:
