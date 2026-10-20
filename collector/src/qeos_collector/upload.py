@@ -212,7 +212,8 @@ def upload_images(
 ) -> Set[str]:
     """Stores each image (sha256 -> (media type, bytes)) with HEAD, then PUT when missing, on
     /collect/blobs/{sha256} before the run (spec 2026-10-19 §5.2), and returns the sha256s QEOS holds; the caller
-    drops every other reference. Best effort: never raises, and each reason images were left out is one `warn`.
+    drops every other reference. Best effort: HTTP and network errors never raise (an unexpected error does; the
+    caller catches it), and each reason images were left out is one `warn`.
     The first request goes alone, so a platform that cannot be reached costs one request, not one per image."""
     shas = list(images)
     if len(shas) > MAX_IMAGES_PER_RUN:
@@ -245,8 +246,10 @@ def upload_images(
                 stopped.append(str(exc))
         return False
 
-    # The deadline is a wall: what has not finished by then is skipped, and nothing waits for it (the pool shuts down
-    # without waiting; a request still running ends by its own timeout, which is at most the time that was left)
+    # At the deadline this returns and what has not finished is left out. The pool shuts down without waiting, but its
+    # threads are not daemons: up to `workers` requests still running finish in the background, each bounded by its
+    # socket timeout (at most TIMEOUT_SECONDS, less when the deadline was near), and the interpreter waits for them
+    # before it exits. That timeout covers each wait for data, so a server that trickles bytes can stretch it
     pool = ThreadPoolExecutor(max_workers=workers)
     try:
         futures = {pool.submit(store, shas[0], True): shas[0]}

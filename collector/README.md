@@ -571,8 +571,12 @@ with the step they belong to, and QEOS shows them on that Gherkin line and in th
   are off, when the QEOS platform predates step screenshots, or when the key check fails, no image is sent and the
   run goes without `screenshots`.
 - **Best effort.** An image problem never fails the upload, and nothing about images (an unexpected error included)
-  stops the run from being sent. The whole image phase, the key check included, has a hard limit of 2 minutes: what
-  has not finished by then is skipped and not waited for (the run upload keeps its own 2 minutes after it). It sends
+  stops the run from being sent. The whole image phase, the key check included, has a limit of 2 minutes: the run
+  upload starts when it runs out (and keeps its own 2 minutes), and an image not stored by then is left out of the
+  run. Up to 4 image requests still running at that point finish in the background, and the collector waits for them
+  before it exits; each is bounded by its socket timeout (at most 30 s, less when the limit was near). That timeout
+  covers each wait for data, not the whole request, so a QEOS that answers very slowly can stretch a request, the key
+  check included, past it. When sizing a CI job timeout, allow about 2.5 minutes for the image phase. It sends
   up to 4 images at a time and retries 429 and 5xx answers as the run upload does. When the first request cannot
   reach QEOS at all, or QEOS refuses images (401, 403, 410), the remaining images are skipped at once. A reference
   whose image was not stored is left out of the run. One line sums it up: `screenshots: 12 stored, 0 skipped`, with
