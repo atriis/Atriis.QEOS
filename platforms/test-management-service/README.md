@@ -143,8 +143,9 @@ old imported case answers 422 "re-import the .feature files first".
 ## Gherkin import
 
 `POST /cases/import` reads `.feature` files, one case per scenario. The repository owns an imported
-case: title, steps, labels and Gherkin are read-only (422), the rest stays editable. A scenario that
-disappears from an uploaded file is archived. A confirm with `expected_plan_hash` applies exactly the
+case: title, steps, labels and Gherkin are read-only (422), the rest stays editable. An imported case
+starts as `ready` (a case created through `POST /cases` starts as `draft`); later imports never change
+its status. A scenario that disappears from an uploaded file is archived, and returns as `ready`. A confirm with `expected_plan_hash` applies exactly the
 plan that was previewed, or answers 409 `plan_changed`. See ADR-023.
 
 - `full` defaults to `false`: only the uploaded paths are compared, so the cases of a deleted or

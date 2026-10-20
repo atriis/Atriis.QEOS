@@ -152,7 +152,7 @@ def test_aggregates_for_a_mixed_group(seeded, auth):
     # Booking holds cases 4 and 5
     # Imports link themselves; unlink case 5
     seeded.patch(f"{P}/cases/4", json={"priority": "high", "status": "ready"}, headers=auth())
-    seeded.patch(f"{P}/cases/5", json={"priority": "low", "automated_test_key": None}, headers=auth())
+    seeded.patch(f"{P}/cases/5", json={"priority": "low", "automated_test_key": None, "status": "draft"}, headers=auth())
     booking = by_name(rows(seeded, auth))["Booking"]
     assert booking["linked_count"] == 1
     assert booking["top_priority"] == "high"
@@ -174,7 +174,7 @@ def test_aggregates_for_the_manual_group(seeded, auth):
 
 def test_the_filters_change_the_aggregates(seeded, auth):
     seeded.patch(f"{P}/cases/4", json={"priority": "high", "status": "ready"}, headers=auth())
-    seeded.patch(f"{P}/cases/5", json={"automated_test_key": None}, headers=auth())
+    seeded.patch(f"{P}/cases/5", json={"automated_test_key": None, "status": "draft"}, headers=auth())
     booking = by_name(rows(seeded, auth, "?status=draft"))["Booking"]
     assert booking["case_count"] == 1 and booking["linked_count"] == 0
     assert booking["top_priority"] == "medium" and booking["status_counts"] == {"draft": 1, "ready": 0, "archived": 0}
@@ -196,7 +196,7 @@ def test_aggregates_are_per_project(client, auth, project_role):
     client.patch("/api/v1/projects/2/cases/2", json={"automated_test_key": None}, headers=auth())
     item = rows(client, auth)["items"][0]
     assert (item["case_count"], item["linked_count"], item["top_priority"]) == (1, 1, "medium")
-    assert item["status_counts"] == {"draft": 1, "ready": 0, "archived": 0}
+    assert item["status_counts"] == {"draft": 0, "ready": 1, "archived": 0}  # synced cases start ready
 
 
 # --- list: search modes ----------------------------------------------------------------------------------
@@ -277,7 +277,7 @@ def test_detail_has_the_raw_content_and_the_cases_in_file_order(seeded, auth):
     assert (d["feature_name"], d["path"], d["folder"], d["content"]) == ("Z", "z.feature", "", text)
     assert d["imported_at"] is not None
     assert [(c["key"], c["title"], c["scenario_name"], c["status"], c["priority"]) for c in d["cases"]] == [
-        ("TC-9", "zed", "zed", "draft", "medium"), ("TC-8", "alpha", "alpha", "draft", "medium")]
+        ("TC-9", "zed", "zed", "ready", "medium"), ("TC-8", "alpha", "alpha", "ready", "medium")]
     assert [c["line"] for c in d["cases"]] == [3, 6]
     assert set(d["cases"][0]) == {"number", "key", "title", "scenario_name", "status", "priority",
                                   "automated_test_key", "line"}

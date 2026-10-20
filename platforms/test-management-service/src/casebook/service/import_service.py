@@ -106,7 +106,8 @@ def apply_plan(db: Session, project_id: int, user_id: int, plan: Plan,
             s = item.parsed
             row = Case(project_id=project_id, number=next_number, title=s.title, description=s.description,
                        steps=[], gherkin=s.gherkin, feature_name=s.feature_name[:500], scenario_name=s.name, scenario_line=s.line, source_path=s.path, source_key=s.source_key,
-                       priority=s.priority or "medium", created_by=user_id,
+                       # a synced case is ready to run as written; a case made in QEOS starts as draft
+                       priority=s.priority or "medium", status="ready", created_by=user_id,
                        automated_test_key=s.test_key, automated_name=s.test_name[:1500],
                        labels=[CaseLabel(label=label) for label in s.labels])
             db.add(row)
@@ -119,8 +120,8 @@ def apply_plan(db: Session, project_id: int, user_id: int, plan: Plan,
         else:  # update, move, reactivate
             _content(row, item.parsed)
             row.source_path, row.source_key = item.parsed.path, item.parsed.source_key
-            if item.action == "reactivate":
-                row.status = "draft"
+            if item.action == "reactivate":  # back in the repository: ready again, like a new synced case
+                row.status = "ready"
         row.updated_by, row.updated_at = user_id, now
     store_sources(db, project_id, plan, now)
     try:

@@ -107,3 +107,28 @@ def test_gherkin_on_a_manual_case_is_ignored_on_patch_and_refused_on_create(clie
     r = client.patch(f"{cases}/1", json={"gherkin": "Scenario: x"}, headers=auth())
     assert r.status_code == 200 and r.json()["gherkin"] is None
     assert client.get(f"{cases}/1", headers=auth()).json()["gherkin"] is None
+
+
+def test_synced_cases_start_ready_and_manual_cases_draft(client, auth, member):
+    cases = "/api/v1/projects/1/cases"
+    client.post(URL, json=body(("a.feature", FEATURE)), headers=auth())
+    client.post(cases, json={"title": "manual"}, headers=auth())
+    statuses = {c["title"]: c["status"] for c in client.get(cases, headers=auth()).json()["items"]}
+    assert statuses == {"one": "ready", "manual": "draft"}
+
+
+def test_a_status_set_by_hand_survives_the_next_sync(client, auth, member):
+    client.post(URL, json=body(("a.feature", FEATURE)), headers=auth())
+    client.patch("/api/v1/projects/1/cases/1", json={"status": "draft"}, headers=auth())
+    changed = FEATURE.replace("Given x", "Given y")
+    assert client.post(URL, json=body(("a.feature", changed)), headers=auth()).json()["summary"]["updated"] == 1
+    assert client.get("/api/v1/projects/1/cases/1", headers=auth()).json()["status"] == "draft"
+
+
+def test_a_returning_synced_case_comes_back_ready(client, auth, member):
+    other = "Feature: B\n  Scenario: two\n    Given z\n"
+    client.post(URL, json=body(("a.feature", FEATURE), ("b.feature", other)), headers=auth())
+    client.post(URL, json=body(("b.feature", other), full=True), headers=auth())
+    assert client.get("/api/v1/projects/1/cases/1", headers=auth()).json()["status"] == "archived"
+    client.post(URL, json=body(("a.feature", FEATURE), ("b.feature", other), full=True), headers=auth())
+    assert client.get("/api/v1/projects/1/cases/1", headers=auth()).json()["status"] == "ready"

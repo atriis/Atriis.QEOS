@@ -1058,8 +1058,9 @@ Cases are numbered per project: `TC-1`, `TC-2`, …
    meantime, QEOS asks you to review the new plan.
 
 The repository owns an imported case: its title, steps, labels and Gherkin are read-only in
-QEOS, while status, priority and suites stay editable. A scenario that disappears from an
-imported file is archived.
+QEOS, while status, priority and suites stay editable. A synced case starts as `ready` (a case
+made in QEOS starts as `draft`), and later syncs never change a status you set. A scenario that
+disappears from an imported file is archived; if it comes back, it returns as `ready`.
 
 **How tags become fields:**
 

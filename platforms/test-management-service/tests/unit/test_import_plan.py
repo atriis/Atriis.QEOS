@@ -24,7 +24,7 @@ def test_first_import_creates_numbered_linked_cases(db):
     plan = run(db, [(A, FEATURE)])
     assert plan.summary()["created"] == 2
     one = db.query(Case).filter(Case.title == "one").one()
-    assert (one.number, one.source_path, one.status) == (1, A, "draft")
+    assert (one.number, one.source_path, one.status) == (1, A, "ready")  # synced cases start ready
     assert one.gherkin == "Scenario: one\n  Given x"
     assert [l.label for l in one.labels] == ["smoke"]
     assert one.automated_test_key and one.automated_name == "one"
@@ -62,7 +62,7 @@ def test_a_returning_scenario_is_reactivated_with_its_number(db):
     plan = run(db, [(A, FEATURE)])
     assert ("reactivate", A, "two") in actions(plan)
     two = db.query(Case).filter(Case.title == "two").one()
-    assert (two.number, two.status) == (2, "draft")
+    assert (two.number, two.status) == (2, "ready")  # back in the repository: ready again
 
 
 def test_moving_a_file_keeps_numbers(db):

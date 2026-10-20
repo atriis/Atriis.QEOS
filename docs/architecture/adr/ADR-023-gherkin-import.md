@@ -30,7 +30,9 @@ On 2026-10-06 the user chose one endpoint for the dashboard upload now and a lat
   scenario with exactly the same Gherkin text (which includes the scenario name) appears at another
   path in the same batch, the case keeps its number and gets the new path and key. Matching is
   one-to-one; if several candidates match, none is treated as a move.
-- **Reactivation.** If the key belongs to an archived case, the case returns to `draft`, and is
+- **Status.** A case created by the import starts as `ready` (a case made in QEOS starts as
+  `draft`). Later syncs never change a status set in QEOS (amended 2026-10-20).
+- **Reactivation.** If the key belongs to an archived case, the case returns to `ready`, and is
   updated if needed. A scenario that disappears is archived, never deleted.
 - **`plan_hash`.** The import builds a plan (create, update, unchanged, move, reactivate, archive,
   skip). A dry run returns it with `plan_hash`: a sha256 over the plan's actions (action, path,
