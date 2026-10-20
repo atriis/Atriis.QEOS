@@ -1232,3 +1232,34 @@ button.switch.switch-compact { gap: var(--space-2); padding: var(--space-1) var(
 .scenario-bg-failure-line:focus-visible { outline: 2px solid var(--status-failed); outline-offset: 2px; }
 .scenario-bg-failure-line.is-skipped { color: var(--skipped-text); }
 .scenario-bg-failure-line.is-skipped:focus-visible { outline-color: var(--status-skipped); }
+
+/* Screenshot viewer (ADR-036): a modal like the palette, the steps beside one image at a time */
+.shot-backdrop { position: fixed; inset: 0; z-index: 60; background: color-mix(in srgb, var(--page) 78%, transparent); }
+.shot-viewer {
+  position: fixed; z-index: 61; inset: var(--space-6) 0; margin: 0 auto; width: min(1100px, calc(100vw - 2 * var(--space-4)));
+  display: flex; flex-direction: column; overflow: hidden;
+  background: var(--surface-1); border: 1px solid var(--border-strong); border-radius: var(--radius); box-shadow: var(--shadow-2);
+}
+.shot-head { display: flex; align-items: center; justify-content: space-between; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--border); }
+.shot-head h2 { margin: 0; font-size: 15px; }
+.shot-note { padding: var(--space-3) var(--space-4); margin: 0; }
+.shot-body { display: grid; grid-template-columns: minmax(180px, 280px) minmax(0, 1fr); flex: 1 1 auto; min-height: 0; }
+.shot-steps { list-style: none; margin: 0; padding: var(--space-1); overflow-y: auto; border-inline-end: 1px solid var(--border); }
+.shot-step { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 40px; padding: 6px var(--space-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-primary); font-weight: 400; text-align: start; }
+.shot-step:hover:not(:disabled) { background: var(--hover-strong); }
+.shot-step[aria-current="true"] { background: var(--hover-strong); box-shadow: inset 2px 0 0 var(--accent); font-weight: 600; }
+.shot-step-label { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.shot-count { flex-shrink: 0; font-size: 12px; color: var(--text-secondary); }
+.shot-stage { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.shot-frame { flex: 1 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; padding: var(--space-3); overflow: auto; background: var(--page); }
+.shot-frame img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid var(--border); }
+.shot-tools { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-top: 1px solid var(--border); }
+.shot-position { font-variant-numeric: tabular-nums; color: var(--text-secondary); font-size: 13px; }
+.shot-full { margin-inline-start: auto; display: inline-flex; align-items: center; gap: var(--space-1); }
+@media (pointer: coarse) { .shot-step { min-height: 44px; } }
+@media (max-width: 720px) {
+  .shot-viewer { inset: var(--space-4) 0; }
+  .shot-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
+  .shot-steps { max-height: 28vh; border-inline-end: 0; border-bottom: 1px solid var(--border); }
+}
+@media (prefers-reduced-motion: no-preference) { .shot-viewer { animation: palette-in 120ms ease-out; } }

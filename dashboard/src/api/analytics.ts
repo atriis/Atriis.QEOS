@@ -230,6 +230,8 @@ export interface LatestResult {
   failed_step?: { text: string; line?: number; definition?: string; pattern?: string; key?: string };
   /** Log values of this result, each pattern with its link template (ADR-032); absent from an older server. */
   values?: (LogValueGroup & { link_template: string | null })[];
+  /** Steps of this result that have screenshots, with how many each (ADR-036); absent from an older server. */
+  screenshot_steps?: { step_text: string; step_line: number | null; hook: "before" | "after" | null; count: number }[];
 }
 
 /** Each test's latest result on any branch, with the failed step; at most 500 keys per call. With `runId`, each test's
