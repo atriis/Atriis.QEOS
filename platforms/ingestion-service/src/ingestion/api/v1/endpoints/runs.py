@@ -155,7 +155,7 @@ def get_run(
     results = run_service.list_results(db, run.id, status_filter, value, pattern)
     changes = run_service.list_changes(db, run.id)
     components = run_service.list_components(db, run.id)
-    shots = screenshot_read.counts_by_result(db, [r.id for r in results])
+    shots = screenshot_read.counts_by_result(db, project_id, [r.id for r in results])
     return RunDetail(
         **RunOut.model_validate(run).model_dump(),
         **run_service.quarantine_counts(db, run, held),

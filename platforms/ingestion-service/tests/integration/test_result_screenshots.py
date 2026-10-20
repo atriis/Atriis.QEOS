@@ -132,3 +132,8 @@ def test_row_pointing_at_another_projects_blob_is_not_served(client, auth, proje
     assert client.get(f"/api/v1/projects/1/screenshots/{shot.id}", headers=auth()).status_code == 404
     listed = client.get(f"/api/v1/projects/1/runs/{run.id}/results/{result.id}/screenshots", headers=auth())
     assert listed.json() == {"screenshots": []}
+    detail = client.get(f"/api/v1/runs/{run.id}", headers=auth()).json()
+    assert [r["screenshot_count"] for r in detail["results"] if r["id"] == result.id] == [0]
+    key = result.test_key
+    latest = client.post("/api/v1/projects/1/analytics/latest-results", json={"keys": [key]}, headers=auth())
+    assert "screenshot_steps" not in latest.json()["results"][key]

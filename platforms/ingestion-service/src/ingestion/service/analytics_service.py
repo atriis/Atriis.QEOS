@@ -353,7 +353,7 @@ def latest_results(db: Session, project_id: int, keys: List[str], run_id: Option
     )
     rows = list(db.execute(select(ranked).where(ranked.c.position == 1)).mappings())
     values = log_value_service.values_by_result(db, [r["result_id"] for r in rows])
-    steps = screenshot_read.steps_by_result(db, [r["result_id"] for r in rows])
+    steps = screenshot_read.steps_by_result(db, project_id, [r["result_id"] for r in rows])
     out = {}
     for r in rows:
         entry = {"status": r["status"], "run_id": r["run_id"], "result_id": r["result_id"], "branch": r["branch"],
