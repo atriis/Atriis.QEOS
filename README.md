@@ -378,6 +378,7 @@ The design is in ADR-019.
 
 **Continuous integration** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push:
 - every service suite;
+- ingestion's PostgreSQL-only tests, against a throwaway PostgreSQL;
 - the dashboard checks;
 - container smoke tests;
 - the full-stack gateway smoke, twice: without and with the monitoring profile;

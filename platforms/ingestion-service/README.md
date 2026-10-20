@@ -601,5 +601,5 @@ The suite runs on SQLite. Two screenshot paths need a real PostgreSQL (ADR-036):
 blobs an upload links, and the savepoint that keeps a run when its screenshot links fail.
 `tests/integration/test_screenshots_postgres.py` covers them and is skipped unless `QEOS_TEST_POSTGRES_URL` is set.
 It drops and creates the ingestion tables, so it refuses any URL that is not localhost with a database name
-containing `test` or `scratch`. Its docstring has the throwaway-container commands for bash and PowerShell. CI does
-not run it yet (TODO).
+containing `test` or `scratch`. Its docstring has the throwaway-container commands for bash and PowerShell. CI runs
+it in the `ingestion-postgres` job against a `postgres:16-alpine` service, and fails the job if any test is skipped.
