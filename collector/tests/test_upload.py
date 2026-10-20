@@ -564,6 +564,59 @@ def test_budget_exhausted_drops_remaining(platform):
     assert notes == ["out of time after 0.5 s"]
 
 
+def test_a_slow_platform_cannot_hold_the_phase_past_its_budget(platform):
+    platform.blob_delay = 3.0  # every blob request outlives the budget
+    many = {hashlib.sha256(b"%d" % n).hexdigest(): ("image/png", b"%d" % n) for n in range(8)}
+    notes = []
+    started = time.monotonic()
+    assert upload_images(platform.url, KEY, many, budget_seconds=0.5, warn=notes.append) == set()
+    assert time.monotonic() - started < 1.5
+    assert notes == ["out of time after 0.5 s"]
+
+
+def test_the_whole_phase_key_check_included_keeps_to_the_budget(platform, cucumber_report, monkeypatch, capsys):
+    monkeypatch.setattr(upload, "IMAGE_BUDGET_SECONDS", 0.5)
+    platform.key_check = SCREENSHOTS_ON
+    platform.blob_delay = 3.0
+    started = time.monotonic()
+    results = upload_run(platform, cucumber_report)
+    assert time.monotonic() - started < 2.0  # the run went out right after the budget
+    assert "screenshots" not in results[0] and "screenshots" not in results[1]
+    (line,) = screenshot_lines(capsys)
+    assert "0 stored, 3 skipped" in line and "out of time" in line
+
+
+@pytest.mark.parametrize("statuses", [[429, 201], [503, 502, 201]])
+def test_a_blob_put_429_or_5xx_is_retried_within_the_budget(platform, statuses):
+    platform.put_status[SHA_A] = list(statuses)  # the fake consumes it
+    sleeps = []
+    assert upload_images(platform.url, KEY, {SHA_A: IMAGES[SHA_A]}, sleep=sleeps.append) == {SHA_A}
+    assert [r["method"] for r in platform.blob_requests] == ["HEAD"] + ["PUT"] * len(statuses)
+    assert len(sleeps) == len(statuses) - 1
+
+
+def test_a_403_on_put_stops_the_phase_and_the_run_goes_without_screenshots(platform, cucumber_report, capsys):
+    platform.key_check = SCREENSHOTS_ON  # turned off between the key check and the first PUT
+    platform.put_status.update({SHA_A: 403, SHA_B: 403, SHA_C: 403})
+    results = upload_run(platform, cucumber_report)
+    assert [r["method"] for r in platform.blob_requests] == ["HEAD", "PUT"]  # nothing more after the 403
+    assert "screenshots" not in results[0] and "screenshots" not in results[1]
+    (line,) = screenshot_lines(capsys)
+    assert "0 stored, 3 skipped" in line and "(403)" in line
+
+
+def test_an_unexpected_error_in_the_phase_never_costs_the_run(platform, cucumber_report, monkeypatch, capsys):
+    def no_threads(*args, **kwargs):
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(upload, "ThreadPoolExecutor", no_threads)
+    platform.key_check = SCREENSHOTS_ON
+    results = upload_run(platform, cucumber_report)
+    assert "screenshots" not in results[0] and "screenshots" not in results[1]
+    (line,) = screenshot_lines(capsys)
+    assert "0 stored, 3 skipped" in line and "RuntimeError: can't start new thread" in line
+
+
 def test_connection_error_skips_all_images_run_still_uploads(platform, cucumber_report, capsys):
     platform.key_check = SCREENSHOTS_ON
     platform.blob_hangup = True

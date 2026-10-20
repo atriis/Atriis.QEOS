@@ -12,6 +12,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import wait as wait_for
 from typing import Callable, Dict, Mapping, Optional, Set, Tuple
 
 from qeos_collector import __version__
@@ -159,7 +160,8 @@ def upload_part(
         sleep(wait)
 
 
-def check_key(url: str, api_key: str, context: Optional[ssl.SSLContext] = None) -> dict:
+def check_key(url: str, api_key: str, context: Optional[ssl.SSLContext] = None,
+              timeout: Optional[float] = None) -> dict:
     """GET /collect/key: proves URL, TLS and key in one request. Single attempt —
     `check` is a diagnostic, waiting through retries would hide the problem."""
     endpoint = url.strip().rstrip("/") + KEY_CHECK_PATH
@@ -169,7 +171,7 @@ def check_key(url: str, api_key: str, context: Optional[ssl.SSLContext] = None) 
         "User-Agent": f"qeos-collector/{__version__}",
     }
     try:
-        status, body, response_headers = _send(endpoint, None, headers, context)
+        status, body, response_headers = _send(endpoint, None, headers, context, timeout=timeout)
     except (OSError, http.client.HTTPException) as exc:
         if _is_tls_error(exc):
             raise UploadError(
@@ -243,10 +245,20 @@ def upload_images(
                 stopped.append(str(exc))
         return False
 
-    stored = {shas[0]} if store(shas[0], first=True) else set()
-    if len(shas) > 1 and not stopped:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            stored.update(sha for sha, ok in zip(shas[1:], pool.map(store, shas[1:])) if ok)
+    # The deadline is a wall: what has not finished by then is skipped, and nothing waits for it (the pool shuts down
+    # without waiting; a request still running ends by its own timeout, which is at most the time that was left)
+    pool = ThreadPoolExecutor(max_workers=workers)
+    try:
+        futures = {pool.submit(store, shas[0], True): shas[0]}
+        done, _ = wait_for(futures, timeout=max(0.0, deadline - clock()))
+        if done and not stopped:
+            futures.update({pool.submit(store, sha): sha for sha in shas[1:]})
+            done, _ = wait_for(futures, timeout=max(0.0, deadline - clock()))
+        stored = {futures[future] for future in done if future.result()}
+        if len(done) < len(futures) and not stopped:
+            late.set()
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
     if stopped:
         warn(stopped[0])
     if late.is_set():

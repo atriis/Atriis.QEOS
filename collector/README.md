@@ -568,15 +568,18 @@ with the step they belong to, and QEOS shows them on that Gherkin line and in th
   first step and one in an After hook to the last step that ran, with `hook` saying so.
 - **Only when QEOS takes them.** The collector asks first (the key check, `GET /api/v1/collect/key`). Screenshots are
   off by default: a project owner or admin turns on **Keep screenshots from uploads** in Project Settings. When they
-  are off, when QEOS is older than 0.11.0's screenshots, or when the key check fails, no image is sent and the run
-  goes without `screenshots`.
-- **Best effort.** An image problem never fails the upload. The image phase has its own 2 minutes (the run upload
-  keeps its own 2 minutes after it), sends up to 4 images at a time, and retries 429 and 5xx answers as the run
-  upload does. When the first request cannot reach QEOS at all, every image is skipped at once. A reference whose
-  image was not stored is left out of the run. One line sums it up: `screenshots: 12 stored, 0 skipped`, with the
-  reason in brackets when images were left out.
-- **Limits.** 5 MB per image, 50 per result and 5,000 per run; the rest are skipped with a warning. QEOS accepts
-  PNG, JPEG and WebP only.
+  are off, when the QEOS platform predates step screenshots, or when the key check fails, no image is sent and the
+  run goes without `screenshots`.
+- **Best effort.** An image problem never fails the upload, and nothing about images (an unexpected error included)
+  stops the run from being sent. The whole image phase, the key check included, has a hard limit of 2 minutes: what
+  has not finished by then is skipped and not waited for (the run upload keeps its own 2 minutes after it). It sends
+  up to 4 images at a time and retries 429 and 5xx answers as the run upload does. When the first request cannot
+  reach QEOS at all, or QEOS refuses images (401, 403, 410), the remaining images are skipped at once. A reference
+  whose image was not stored is left out of the run. One line sums it up: `screenshots: 12 stored, 0 skipped`, with
+  the reason in brackets when images were left out. Its counts are distinct images that reached this phase.
+- **Limits.** 5 MB per image and 50 per result, checked while the report is read: images over them are dropped
+  there, each kind in its own warning line, and are not in the `skipped` count. At most 5,000 distinct images per
+  run; the rest are counted as skipped. QEOS accepts PNG, JPEG and WebP only.
 - **Spool.** Parts kept with `--spool` hold the references, never the images. A part resent later does not upload
   images again; QEOS drops the references whose image it no longer has.
 - **Older platform.** A 422 naming `results.N.screenshots` (a QEOS without screenshots) or anything inside it gets

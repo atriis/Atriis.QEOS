@@ -12,8 +12,8 @@ BLOBS = "/api/v1/collect/blobs/"
 class FakePlatform:
     """Answers POSTs with scripted responses, in order, and records every request. Blob HEAD/PUT answer by sha256
     instead (they run in parallel, so no order): HEAD 200 for what is in `stored`, else 404; PUT `put_status` (201 by
-    default) and stores it on 2xx. `blob_delay` slows each blob request; `blob_hangup` drops the connection.
-    `key_check`, when set, answers GET /collect/key."""
+    default; a list answers in turn) and stores it on 2xx. `blob_delay` slows each blob request; `blob_hangup` drops
+    the connection. `key_check`, when set, answers GET /collect/key."""
 
     def __init__(self):
         self.url = ""
@@ -79,6 +79,8 @@ def platform():
                     status = 200 if sha in fake.stored else 404
                 else:
                     status = fake.put_status.get(sha, 201)
+                    if isinstance(status, list):  # answers in turn; the last one repeats
+                        status = status.pop(0) if len(status) > 1 else status[0]
                     if status in (200, 201):
                         fake.stored.add(sha)
             self.send_response(status)

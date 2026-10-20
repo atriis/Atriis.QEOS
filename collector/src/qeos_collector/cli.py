@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from typing import Callable, List, Mapping, Optional, Sequence
 
 from qeos_collector import __version__, cucumber, features, impact, run_impact
+from qeos_collector import upload as uploads
 from qeos_collector.ci import detect, sanitize_key
 from qeos_collector.codeowners import load_codeowners
 from qeos_collector.config_file import FILE_NAME, LEGACY_FILE_NAME, load_config, uses_legacy_file
@@ -603,14 +604,22 @@ def _send_screenshots(results: List[dict], url: Optional[str], api_key: str, con
     stored: set = set()
     if images and not skip:
         notes: List[str] = []
+        # One budget for the whole phase, the key check included: screenshots never hold the run up for longer
+        deadline = clock() + uploads.IMAGE_BUDGET_SECONDS
         try:
-            identity = check_key(url, api_key, context)
+            identity = check_key(url, api_key, context, timeout=min(uploads.TIMEOUT_SECONDS, deadline - clock()))
         except UploadError as exc:
             notes.append(f"key check failed: {exc}")
+        except Exception as exc:  # a bug or an odd environment must never cost the run
+            notes.append(f"unexpected error: {type(exc).__name__}: {exc}")
         else:
             if identity.get("screenshots") is True:
-                stored = upload_images(url, api_key, images, context=context, warn=notes.append, sleep=sleep,
-                                       clock=clock)
+                try:
+                    stored = upload_images(url, api_key, images, max(0.0, deadline - clock()), context=context,
+                                           warn=notes.append, sleep=sleep, clock=clock)
+                except Exception as exc:  # as above: the run goes without screenshots
+                    stored = set()
+                    notes.append(f"unexpected error: {type(exc).__name__}: {exc}")
             elif "screenshots" not in identity:
                 notes.append("the platform is older than this collector (upgrade QEOS to see step screenshots)")
             else:
