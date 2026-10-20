@@ -1,8 +1,11 @@
 import re
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
+from pydantic import (
+    AwareDatetime, BaseModel, ConfigDict, Field, PrivateAttr, StringConstraints, ValidationError, field_validator,
+    model_validator,
+)
 
 from src.ingestion.core.config import settings
 from src.ingestion.models.run import FULL_SCOPE, SCOPES, SUBSET_SCOPE
@@ -111,6 +114,9 @@ class FailedStepIn(BaseModel):
     _clean_text = field_validator("text", "definition", "pattern", mode="after")(_replace_unstorable)
 
 
+MAX_SCREENSHOT_KEYS = 5  # ScreenshotIn's fields
+
+
 class ScreenshotIn(BaseModel):
     """A step screenshot the collector already uploaded to PUT /collect/blobs/{sha256} (ADR-036): the run upload only
     refers to it. Strict, unlike failed_step: a collector that sends the field knows this shape."""
@@ -142,11 +148,33 @@ class ResultIn(BaseModel):
     failed_step: Optional[FailedStepIn] = None
     # The result's log (ADR-032, collector 0.9.0): masked and cut to 64 KB by the service, never rejected
     log: Optional[str] = None
-    # Step screenshots (ADR-036, spec 2026-10-19 §5.3): references to blobs, in the order shown
+    # Step screenshots (ADR-036, spec 2026-10-19 §5.3): references to blobs, in the order shown. A malformed entry is
+    # dropped and counted (_screenshots_invalid), never a 422: an image problem never costs the run
     screenshots: Optional[list[ScreenshotIn]] = Field(None, max_length=50)
+    _screenshots_invalid: int = PrivateAttr(0)
 
     _no_unstorable = field_validator("suite", "class_name", "name", "file", "owner", mode="before")(_reject_unstorable)
     _clean_text = field_validator("message", "details", "log", mode="after")(_replace_unstorable)
+
+    @model_validator(mode="wrap")
+    @classmethod
+    def _drop_malformed_screenshots(cls, data: Any, handler):
+        entries = data.get("screenshots") if isinstance(data, dict) else None
+        if not isinstance(entries, list) or len(entries) > 50:  # over 50 is the field's 422
+            return handler(data)
+        valid, invalid = [], 0
+        for entry in entries:
+            # Cheap shape check first: a nested bomb is never walked
+            if not isinstance(entry, dict) or len(entry) > MAX_SCREENSHOT_KEYS:
+                invalid += 1
+                continue
+            try:
+                valid.append(ScreenshotIn.model_validate(entry))
+            except ValidationError:
+                invalid += 1
+        result = handler({**data, "screenshots": valid})
+        result._screenshots_invalid = invalid
+        return result
 
     @field_validator("status")
     @classmethod
@@ -225,6 +253,9 @@ class RunReceipt(BaseModel):
     # Failing results of quarantined tests, and the failing results that count (the CI gate)
     quarantined: int = 0
     blocking: int = 0
+    # Screenshot references ingestion did not store (setting off, blob not stored, malformed): the collector may warn
+    # Only on the first upload (201): a replay (200) answers None
+    screenshots_dropped: Optional[int] = None
     commit_author: Optional[str] = None
     commit_message: Optional[str] = None
     pr_number: Optional[int] = None

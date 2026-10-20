@@ -3,7 +3,7 @@ import hashlib
 
 import pytest
 
-from src.ingestion.models import Blob, CollectionSettings, ResultScreenshot, RunResult
+from src.ingestion.models import Blob, CollectionSettings, ResultScreenshot, Run, RunResult
 from src.ingestion.models.masking_pattern import MaskingPattern
 from src.ingestion.utils.artifact_store import MemoryArtifactStore, get_artifact_store
 from tests.integration.test_collect_endpoint import URL, key_headers, upload_body
@@ -88,6 +88,97 @@ def test_step_text_masked(client, key, db):
     assert post(client, key, [shot(SHA_A, "Given CUST-123456 logs in")]).status_code == 201
     assert linked(db)[0][2] == "Given [REDACTED:customer_id] logs in"
     assert db.query(RunResult).one().redacted is True
+
+
+def test_a_malformed_screenshot_is_dropped_not_a_422(client, key, db):
+    response = post(client, key, [{"sha256": "nope", "step_text": "x"}, "junk", shot(SHA_A, "ok")])
+    assert response.status_code == 201, response.text
+    assert [row[2] for row in linked(db)] == ["ok"]
+    assert response.json()["screenshots_dropped"] == 2
+
+
+def test_positions_have_no_gaps_when_an_entry_is_dropped(client, key, db):
+    assert post(client, key, [shot("f" * 64), shot(SHA_A, "a"), shot(SHA_B, "b")]).status_code == 201
+    assert [(row[0], row[2]) for row in linked(db)] == [(0, "a"), (1, "b")]
+
+
+def test_the_receipt_counts_dropped_references(client, key, db):
+    from src.ingestion.utils import metrics
+
+    def count(reason):
+        return metrics.REGISTRY.get_sample_value("qav_ingest_screenshots_dropped_total", {"reason": reason}) or 0.0
+
+    before = count("unknown")
+    response = post(client, key, [shot("f" * 64), shot(SHA_C), shot(SHA_A)])
+    assert response.json()["screenshots_dropped"] == 2
+    assert count("unknown") == before + 2
+    db.query(CollectionSettings).update({"keep_screenshots": False})
+    db.commit()
+    off = client.post(URL, json=upload_body(results=[{"name": "u", "status": "failed", "screenshots": [shot(SHA_A)]}]),
+                      headers=key_headers(key))
+    assert off.json()["screenshots_dropped"] == 1
+
+
+def test_a_deeply_nested_entry_is_dropped_not_a_500(client, key, db):
+    deep = "x"
+    for _ in range(100):
+        deep = {"a": deep}
+    response = post(client, key, [{**shot(SHA_A), "step_text": deep}, shot(SHA_B, "ok")])
+    assert response.status_code == 201, response.text
+    assert [row[2] for row in linked(db)] == ["ok"] and response.json()["screenshots_dropped"] == 1
+
+
+def test_a_failing_screenshot_insert_keeps_the_run(client, key, db, monkeypatch):
+    from src.ingestion.service import ingest_service
+    from src.ingestion.utils import metrics
+
+    real = ingest_service._blob_ids
+
+    def gone_after_lookup(*args, **kwargs):
+        # The lookup runs as usual; the ids come back unusable (NOT NULL fails the insert, as a deleted blob's FK would)
+        return {sha: None for sha in real(*args, **kwargs)}
+
+    def count():
+        return metrics.REGISTRY.get_sample_value("qav_ingest_screenshots_dropped_total", {"reason": "gone"}) or 0.0
+
+    before = count()
+    monkeypatch.setattr(ingest_service, "_blob_ids", gone_after_lookup)
+    response = post(client, key, [shot(SHA_A)])
+    assert response.status_code == 201, response.text
+    assert linked(db) == [] and db.query(RunResult).count() == 1
+    assert db.get(Run, response.json()["id"]) is not None
+    assert response.json()["screenshots_dropped"] == 1
+    assert count() == before + 1
+
+
+def test_a_replay_does_not_report_dropped_references(client, key, db):
+    body = upload_body(results=[{"name": "t", "status": "failed", "screenshots": [shot("f" * 64)]}])
+    first = client.post(URL, json=body, headers=key_headers(key, "k2"))
+    again = client.post(URL, json=body, headers=key_headers(key, "k2"))
+    assert (first.status_code, again.status_code) == (201, 200)
+    assert first.json()["screenshots_dropped"] == 1 and again.json()["screenshots_dropped"] is None
+
+
+def test_the_request_hash_of_valid_screenshots_is_unchanged(client, key):
+    """A part spooled by an earlier build (screenshots dumped from ScreenshotIn) still replays."""
+    import hashlib
+    import json
+
+    from src.ingestion.schemas.collect import RunUpload
+    from src.ingestion.service import ingest_service
+
+    body = upload_body(results=[{"name": "t", "status": "failed", "screenshots": [shot(SHA_A, step_line=2)]}])
+    data = RunUpload.model_validate(body).model_dump(mode="json")
+    assert data["results"][0]["screenshots"] == [
+        {"sha256": SHA_A, "media_type": "image/png", "step_text": "Given a step", "step_line": 2, "hook": None}]
+    for name, default in ingest_service._LATER_RUN_FIELDS.items():
+        if data["run"].get(name, default) == default:
+            data["run"].pop(name, None)
+    for result in data["results"]:
+        result.pop("log", None)
+        result.pop("failed_step", None)
+    old = hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    assert ingest_service._request_hash(RunUpload.model_validate(body)) == old
 
 
 def test_one_query_links_all_hashes(client, key, db):

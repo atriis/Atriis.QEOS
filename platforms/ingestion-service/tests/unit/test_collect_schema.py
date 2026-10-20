@@ -173,10 +173,19 @@ def test_more_than_50_screenshots_are_rejected():
         RunUpload.model_validate(body(results=results))
 
 
+def _nested(depth):
+    value = "x"
+    for _ in range(depth):
+        value = {"a": value}
+    return value
+
+
 @pytest.mark.parametrize("shot", [
     {**SHOT, "sha256": "A" * 64}, {**SHOT, "sha256": "a" * 63}, {**SHOT, "media_type": "image/gif"},
-    {**SHOT, "step_text": "x" * 1001}, {**SHOT, "step_line": 0}, {**SHOT, "hook": "during"}, {**SHOT, "extra": 1},
+    {**SHOT, "step_text": "x" * 1001}, {**SHOT, "step_line": 0}, {**SHOT, "hook": "during"}, {**SHOT, "extra": 1}, "x",
+    {**SHOT, "step_text": _nested(100)}, {"a": 1, "b": 2, "c": 3, "d": 4, "e": 5, "f": 6},
 ])
-def test_a_bad_screenshot_is_rejected(shot):
-    with pytest.raises(ValidationError):
-        RunUpload.model_validate(body(results=[{"name": "t", "status": "failed", "screenshots": [shot]}]))
+def test_a_bad_screenshot_is_dropped_and_counted_not_rejected(shot):
+    upload = RunUpload.model_validate(body(results=[{"name": "t", "status": "failed", "screenshots": [shot, SHOT]}]))
+    result = upload.results[0]
+    assert len(result.screenshots) == 1 and result._screenshots_invalid == 1

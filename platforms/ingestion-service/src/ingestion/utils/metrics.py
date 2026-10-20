@@ -13,6 +13,10 @@ REJECTED = Counter("qav_ingest_rejected", "Uploads rejected", ["reason"], regist
 DISCARDED = Counter("qeos_runs_discarded", "Uploads accepted and not stored, by reason", ["reason"], registry=REGISTRY)
 DISCARDED.labels(reason="manual")
 DURATION = Histogram("qav_ingest_duration_seconds", "Time to handle POST /collect/runs", registry=REGISTRY)
+SCREENSHOTS_DROPPED = Counter(
+    "qav_ingest_screenshots_dropped", "Screenshot references of an upload that were not stored", ["reason"],
+    registry=REGISTRY,
+)
 REDACTIONS = Counter(
     "qav_ingest_redactions", "Results in which masking replaced a kind of secret or personal data", ["kind"],
     registry=REGISTRY,
@@ -29,5 +33,7 @@ HEARTBEAT_READ_ERRORS = Counter(
 # Pre-create each label's series so it is visible (at 0) before the first event
 for _reason in ("auth", "validation", "conflict", "pending_deletion"):
     REJECTED.labels(reason=_reason)
+for _reason in ("disabled", "unknown", "invalid", "gone"):
+    SCREENSHOTS_DROPPED.labels(reason=_reason)
 for _status in ("passed", "failed", "errored", "skipped"):
     EXECUTIONS.labels(status=_status)

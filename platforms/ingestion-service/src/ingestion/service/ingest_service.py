@@ -17,7 +17,7 @@ from src.ingestion.models.run import (
     FAILED_STEP_DEFINITION_LENGTH, FAILED_STEP_PATTERN_LENGTH, FAILED_STEP_TEXT_LENGTH, FULL_SCOPE,
 )
 from src.ingestion.models.screenshot import STEP_TEXT_LENGTH
-from src.ingestion.schemas.collect import RunUpload
+from src.ingestion.schemas.collect import RunUpload, ScreenshotIn
 from src.ingestion.service import (
     blob_service, collection_settings_service, impact_service, log_pattern_service, log_value_service,
     masking_pattern_service,
@@ -125,14 +125,16 @@ def _existing(db: Session, project_id: int, idempotency_key: str) -> Optional[Ru
 def _replay(run: Run, request_hash: str) -> tuple[Run, bool]:
     if run.request_hash != request_hash:
         raise IdempotencyConflict()
+    run.screenshots_dropped = None  # only the first upload knows; a session may still hold the first one's count
     return run, False
 
 
-def _blob_ids(db: Session, project_id: int, upload: RunUpload, store: Optional[ArtifactStore]) -> Optional[dict[str, int]]:
+def _blob_ids(db: Session, project_id: int, parsed: list[list[ScreenshotIn]], store: Optional[ArtifactStore]
+              ) -> Optional[dict[str, int]]:
     """sha256 -> blob id for every image the upload refers to, in one query. Only this project's blobs: a hash stored
     for another project is not found. None when the upload refers to none or the project does not keep screenshots:
     the references are dropped silently, an image problem never fails a run upload."""
-    hashes = {shot.sha256 for result in upload.results for shot in result.screenshots or ()}
+    hashes = {shot.sha256 for shots in parsed for shot in shots}
     if not hashes or not blob_service.screenshots_enabled(db, project_id, store):
         return None
     # FOR KEY SHARE (a no-op on SQLite): the blob cleanup job deletes with a re-checked NOT EXISTS, so a blob locked here
@@ -172,7 +174,11 @@ def ingest(
     if commit_message is not None:
         commit_message = commit_message[:COMMIT_MESSAGE_LENGTH]
     masked_kinds: Counter = Counter()
-    blob_ids = _blob_ids(db, key.project_id, upload, store)
+    parsed_shots = [result.screenshots or [] for result in upload.results]
+    shots_invalid = sum(result._screenshots_invalid for result in upload.results)
+    blob_ids = _blob_ids(db, key.project_id, parsed_shots, store)
+    shots_disabled = sum(len(shots) for shots in parsed_shots) if blob_ids is None else 0
+    shots_gone = 0
     shots_pending: list[list[dict]] = []  # per result, in row order: its screenshot rows without result_id
     shots_unknown = 0
     run = Run(
@@ -217,7 +223,7 @@ def ingest(
         db.flush()  # assigns run.id inside the transaction
 
         rows = []
-        for result in upload.results:
+        for result, references in zip(upload.results, parsed_shots):
             # Mask before truncating: a cut through a secret would leave its first half unmatched
             message, message_kinds = mask(result.message, patterns)
             details, details_kinds = mask(result.details, patterns)
@@ -228,15 +234,14 @@ def ingest(
             log, log_kinds = mask(result.log, patterns)
             kinds = message_kinds | details_kinds | step_kinds | definition_kinds | pattern_kinds
             shots = []
-            references = (result.screenshots or ()) if blob_ids is not None else ()
-            for index, shot in enumerate(references):
+            for shot in references if blob_ids is not None else ():
                 if shot.sha256 not in blob_ids:
                     shots_unknown += 1
                     continue
                 shot_text, shot_kinds = mask(shot.step_text, patterns)
                 kinds |= shot_kinds  # the step text is shown on the run page, like failed_step_text
                 shots.append({
-                    "position": index, "blob_id": blob_ids[shot.sha256],
+                    "position": len(shots), "blob_id": blob_ids[shot.sha256],
                     "step_text": shot_text[:STEP_TEXT_LENGTH], "step_line": shot.step_line, "hook": shot.hook,
                 })
             shots_pending.append(shots)
@@ -286,6 +291,7 @@ def ingest(
                     with db.begin_nested():
                         db.execute(insert(ResultScreenshot), shot_rows)
                 except IntegrityError:
+                    shots_gone = len(shot_rows)
                     logger.warning("screenshots dropped, a blob was deleted during the upload: project=%s run=%s",
                                    key.project_id, run.id)
         else:
@@ -311,6 +317,11 @@ def ingest(
         if shots_unknown:
             logger.info("upload references screenshots that are not stored for the project: project=%s run=%s dropped=%s",
                         key.project_id, run.id, shots_unknown)
+        dropped = {"disabled": shots_disabled, "unknown": shots_unknown, "invalid": shots_invalid, "gone": shots_gone}
+        for reason, count in dropped.items():
+            if count:
+                metrics.SCREENSHOTS_DROPPED.labels(reason=reason).inc(count)
+        run.screenshots_dropped = sum(dropped.values())  # not a column: the receipt reads it
         custom_names = {pattern.name for pattern in patterns}
         for kind, results in masked_kinds.items():
             # Project-chosen names would give the metric unbounded label values: one "custom" label
