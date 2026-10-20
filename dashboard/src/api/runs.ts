@@ -79,8 +79,8 @@ export interface RunResult {
   owner: string | null;
   /** Failed or errored, and the test is in quarantine: shown, not counted. */
   quarantined?: boolean;
-  /** Step screenshots stored for this result (ADR-036). */
-  screenshot_count: number;
+  /** Step screenshots stored for this result (ADR-036); absent from an older server, which reads as 0. */
+  screenshot_count?: number;
 }
 
 export interface RunComponent {

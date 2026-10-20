@@ -9,6 +9,8 @@ type Props = {
   projectId: number;
   runId: number;
   resultId: number;
+  /** The test's name, for the dialog's title. */
+  name?: string;
   /** The step the person clicked; the viewer opens on its first image (text first, then line, as the Gherkin view matches). */
   initialStep?: { text: string; line: number | null };
   open: boolean;
@@ -38,12 +40,20 @@ function groupShots(shots: Screenshot[]): Group[] {
   return groups;
 }
 
+/** The first image of the step asked for: text and line together, then the text, then the line. A step's own image
+ *  comes before a hook image placed on it; a step with only hook images opens on the first of those. */
 function startIndex(shots: Screenshot[], step?: Props["initialStep"]): number {
   if (!step) return 0;
-  const byText = shots.findIndex((s) => s.hook === null && s.step_text === step.text);
-  if (byText >= 0) return byText;
-  const byLine = step.line == null ? -1 : shots.findIndex((s) => s.hook === null && s.step_line === step.line);
-  return Math.max(0, byLine);
+  const attempts: ((s: Screenshot) => boolean)[] = [
+    (s) => s.step_text === step.text && step.line != null && s.step_line === step.line,
+    (s) => s.step_text === step.text,
+    (s) => step.line != null && s.step_line === step.line,
+  ];
+  for (const matches of attempts) {
+    const found = shots.map((s, i) => (matches(s) ? i : -1)).filter((i) => i >= 0);
+    if (found.length > 0) return found.find((i) => shots[i].hook === null) ?? found[0];
+  }
+  return 0;
 }
 
 const FOCUSABLE = "button:not(:disabled), a[href]";
@@ -55,14 +65,13 @@ export default function ScreenshotViewer(props: Props) {
   return props.open ? <Viewer {...props} /> : null;
 }
 
-function Viewer({ projectId, runId, resultId, initialStep, onClose }: Props) {
+function Viewer({ projectId, runId, resultId, name, initialStep, onClose }: Props) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const query = useQuery({
     queryKey: ["result-screenshots", projectId, runId, resultId],
     queryFn: () => getResultScreenshots(projectId, runId, resultId),
-    staleTime: Infinity,
   });
   const shots = useMemo(() => query.data?.screenshots ?? [], [query.data]);
   const groups = useMemo(() => groupShots(shots), [shots]);
@@ -117,34 +126,38 @@ function Viewer({ projectId, runId, resultId, initialStep, onClose }: Props) {
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose, step]);
 
-  // One object URL per image shown, kept while the dialog is open (paging back is free), all revoked on close
-  const urls = useRef(new Map<number, string>());
-  const [url, setUrl] = useState<string | null>(null);
+  // One object URL, for the image shown: it is revoked as soon as another image is wanted, and on close
+  const held = useRef<{ id: number; url: string } | null>(null);
+  const [shown, setShown] = useState<{ id: number; url: string } | null>(null);
   const [imageError, setImageError] = useState<unknown>(null);
   const [attempt, setAttempt] = useState(0);
   const currentId = current?.id;
   useEffect(() => {
     if (currentId === undefined) return;
     setImageError(null);
-    const cached = urls.current.get(currentId);
-    if (cached) { setUrl(cached); return; }
-    setUrl(null);
+    if (held.current && held.current.id !== currentId) {
+      URL.revokeObjectURL(held.current.url);
+      held.current = null;
+      setShown(null);
+    }
+    if (held.current) return;
     let stale = false;
     getScreenshotBlob(projectId, currentId).then(
       (blob) => {
         if (stale) return;
-        const made = URL.createObjectURL(blob);
-        urls.current.set(currentId, made);
-        setUrl(made);
+        held.current = { id: currentId, url: URL.createObjectURL(blob) };
+        setShown(held.current);
       },
       (err) => { if (!stale) setImageError(err); },
     );
     return () => { stale = true; };
   }, [projectId, currentId, attempt]);
-  useEffect(() => {
-    const map = urls.current;
-    return () => { map.forEach((u) => URL.revokeObjectURL(u)); map.clear(); };
+  useEffect(() => () => {
+    if (held.current) URL.revokeObjectURL(held.current.url);
+    held.current = null;
   }, []);
+  // Only the image that belongs to the current step: a late render never shows the last one under the new alt
+  const url = shown && shown.id === currentId ? shown.url : null;
 
   const label = current ? labelOf(current) : "";
   const position = current && group ? index - group.first + 1 : 0;
@@ -155,7 +168,7 @@ function Viewer({ projectId, runId, resultId, initialStep, onClose }: Props) {
       <div className="shot-backdrop" aria-hidden="true" onMouseDown={onClose} />
       <div ref={dialogRef} className="shot-viewer" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="shot-head">
-          <h2 id={titleId}>Screenshots</h2>
+          <h2 id={titleId}>{name ? `Screenshots — ${name}` : "Screenshots"}</h2>
           <button ref={closeRef} type="button" className="ghost" aria-label="Close screenshots" onClick={onClose}>
             <X size={16} aria-hidden="true" />
           </button>
@@ -183,11 +196,11 @@ function Viewer({ projectId, runId, resultId, initialStep, onClose }: Props) {
                 {imageError != null && <ErrorBanner error={imageError} onRetry={() => setAttempt((a) => a + 1)} />}
               </div>
               <div className="shot-tools">
-                <button type="button" aria-label="Previous screenshot" disabled={index === 0} onClick={() => step(-1)}>
+                <button type="button" aria-label="Previous screenshot" aria-disabled={index === 0} onClick={() => step(-1)}>
                   <ChevronLeft size={16} aria-hidden="true" />
                 </button>
                 <span className="shot-position" role="status" aria-live="polite">{index + 1} of {shots.length}</span>
-                <button type="button" aria-label="Next screenshot" disabled={index === shots.length - 1} onClick={() => step(1)}>
+                <button type="button" aria-label="Next screenshot" aria-disabled={index === shots.length - 1} onClick={() => step(1)}>
                   <ChevronRight size={16} aria-hidden="true" />
                 </button>
                 {url && (

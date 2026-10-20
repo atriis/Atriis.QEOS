@@ -125,3 +125,85 @@ test("a failed list shows an error", async () => {
   renderViewer();
   expect(await screen.findByRole("alert")).toBeInTheDocument();
 });
+
+function useShots(shots: object[]) {
+  server.use(http.get(LIST, () => HttpResponse.json({ screenshots: shots })));
+}
+const shot = (id: number, text: string, line: number | null, hook: "before" | "after" | null = null) =>
+  ({ id, step_text: text, step_line: line, hook, media_type: "image/png", bytes: 10 });
+
+test("a step with only a hook image opens on that image", async () => {
+  useShots([shot(1, "Given a trip", 4), shot(2, "Then it ends", 6, "after")]);
+  renderViewer({ initialStep: { text: "Then it ends", line: 6 } });
+  await screen.findByRole("img", { name: /End of scenario/ });
+  expect(imageCalls).toEqual([2]);
+});
+
+test("a step's own image comes before a hook image on it", async () => {
+  useShots([shot(1, "Then it ends", 6, "before"), shot(2, "Then it ends", 6), shot(3, "Then it ends", 6, "after")]);
+  renderViewer({ initialStep: { text: "Then it ends", line: 6 } });
+  await screen.findByRole("img", { name: /Then it ends/ });
+  expect(imageCalls).toEqual([2]);
+});
+
+test("repeated step text opens on the matching line", async () => {
+  useShots([shot(1, "And I wait", 4), shot(2, "And I wait", 9)]);
+  renderViewer({ initialStep: { text: "And I wait", line: 9 } });
+  await screen.findByRole("img");
+  expect(imageCalls).toEqual([2]);
+});
+
+test("the image paged away from is revoked, not kept until close", async () => {
+  const user = userEvent.setup();
+  renderViewer();
+  await screen.findByRole("img", { name: /Start of scenario/ });
+  await user.keyboard("{ArrowRight}");
+  await screen.findByRole("img", { name: /Given a trip/ });
+  expect(revoked).toEqual(["blob:img-1"]);
+  expect(screen.getByRole("img")).toHaveAttribute("src", "blob:img-2");
+});
+
+test("the title names the test", async () => {
+  renderViewer({ name: "Books a trip" });
+  expect(await screen.findByRole("dialog", { name: "Screenshots — Books a trip" })).toBeInTheDocument();
+});
+
+test("Tab cycles inside the dialog", async () => {
+  const user = userEvent.setup();
+  renderViewer();
+  await screen.findByRole("img");
+  const dialog = screen.getByRole("dialog");
+  const close = screen.getByRole("button", { name: "Close screenshots" });
+  expect(close).toHaveFocus();
+  for (let i = 0; i < 20; i++) {
+    await user.tab();
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+  }
+  await user.tab({ shift: true });
+  expect(dialog).toContainElement(document.activeElement as HTMLElement);
+});
+
+test("the page is inert and does not scroll while open, and focus returns to the opener", async () => {
+  const opener = document.createElement("button");
+  const page = document.createElement("div");
+  page.append(opener);
+  document.body.append(page);
+  opener.focus();
+  const { rerender } = renderViewer();
+  await screen.findByRole("img");
+  expect(page).toHaveAttribute("inert");
+  expect(document.body.style.overflow).toBe("hidden");
+  rerender(false);
+  await waitFor(() => expect(opener).toHaveFocus());
+  expect(page).not.toHaveAttribute("inert");
+  expect(document.body.style.overflow).not.toBe("hidden");
+  page.remove();
+});
+
+test("Previous is aria-disabled, not disabled, on the first image", async () => {
+  renderViewer();
+  await screen.findByRole("img");
+  const prev = screen.getByRole("button", { name: "Previous screenshot" });
+  expect(prev).toHaveAttribute("aria-disabled", "true");
+  expect(prev).not.toBeDisabled();
+});
