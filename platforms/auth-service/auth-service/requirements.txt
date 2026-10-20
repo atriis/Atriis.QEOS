@@ -1,7 +1,6 @@
 fastapi==0.143.0
 uvicorn[standard]==0.54.0
 python-multipart==0.0.32
-python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 # passlib 1.7.4 predates bcrypt 4.1+ and misreads its version, failing every hash with a
 # bogus "password cannot be longer than 72 bytes". Pin bcrypt until passlib is replaced.
