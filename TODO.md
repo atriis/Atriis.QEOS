@@ -360,6 +360,7 @@ requested ones. Each group needs its own design spec before implementation.
   - Tests to add: repository-workflow index race, rollback when the suite apply fails, another project's case number on append, a CI-target run blocking a manual suite, glob `*` across `/`, invalid matrix JSON and a missing `include`
   - Code tidy: shared case-number checks in `suite_service`, `MAX_SUITE_CASES` placement, duplicate-id check order in the parser
   - Docs: ADR-035 in the full ADR template; split this item's long done line; SETUP "own slot" qualifier when the Settings workflow is also a suite workflow
+- [ ] Test isolation: auth-service calls `load_dotenv()`, which finds the repository root `.env`, so a local `MONITORING_ENABLED=true` fails three monitoring-off tests on a developer machine (CI has no `.env`). Load only an explicit path, or clear the variable in the test fixture
 - [ ] Dynamic suites defined by a label query, e.g. `smoke AND checkout` *(suggested)*
 - [ ] TC versioning: who changed what, and when *(suggested)*
 - [x] Import existing TCs from the repo (Gherkin `.feature` files, JUnit XML) *(suggested)* (Gherkin done 2026-10-06, ADR-023; JUnit still open)
