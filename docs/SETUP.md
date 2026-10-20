@@ -686,7 +686,7 @@ are skipped with a warning.
 
 PowerShell:
 ```powershell
-pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.13.0#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.13.1#subdirectory=collector"
 $env:QEOS_URL = "https://localhost:8443"
 $env:QEOS_API_KEY = "<your key>"
 qeos-collector check "reports/**/*.xml" --ca-file $HOME\qeos-ca.crt     # verifies everything, uploads nothing
@@ -694,14 +694,14 @@ qeos-collector upload "reports/**/*.xml" --ca-file $HOME\qeos-ca.crt
 ```
 bash:
 ```bash
-pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.13.0#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.13.1#subdirectory=collector"
 export QEOS_URL=https://localhost:8443
 export QEOS_API_KEY=<your key>
 qeos-collector check "reports/**/*.xml" --ca-file ~/qeos-ca.crt
 qeos-collector upload "reports/**/*.xml" --ca-file ~/qeos-ca.crt
 ```
 
-- Pin the tag (`collector-v0.13.0`) for strict reproducibility, or use the floating `collector-v0` (the latest
+- Pin the tag (`collector-v0.13.1`) for strict reproducibility, or use the floating `collector-v0` (the latest
   0.x release; it moves on every stable release, so a new collector reaches your CI without an edit; the
   GitHub Action and the Jenkins `ref` accept it). The snippets under Settings → **Wire up your CI** and
   **Run from QEOS** use the floating tag. `--ca-file` is needed only for the local
@@ -780,7 +780,7 @@ qeos-collector impact --format json --out impact.json
    - **Variable** `QEOS_URL` = `https://qeos.example.com` (no trailing slash)
 2. After the test step (the tests must write a report), add:
    ```yaml
-   - uses: atriis/Atriis.QEOS/collector-action@collector-v0.13.0
+   - uses: atriis/Atriis.QEOS/collector-action@collector-v0.13.1
      if: always()                      # report failing builds too
      with:
        url: ${{ vars.QEOS_URL }}
@@ -803,7 +803,7 @@ qeos-collector impact --format json --out impact.json
 2. In `.gitlab-ci.yml`:
    ```yaml
    include:
-     - remote: https://raw.githubusercontent.com/atriis/Atriis.QEOS/collector-v0.13.0/templates/qeos-collector.gitlab-ci.yml
+     - remote: https://raw.githubusercontent.com/atriis/Atriis.QEOS/collector-v0.13.1/templates/qeos-collector.gitlab-ci.yml
 
    qeos-collector-upload:
      variables:
@@ -849,7 +849,7 @@ qeos-collector impact --format json --out impact.json
      always {
        withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')]) {
          withEnv(['QEOS_URL=https://qeos.example.com']) {
-           qeosCollectorUpload(patterns: 'reports/**/*.xml', ref: 'collector-v0.13.0')
+           qeosCollectorUpload(patterns: 'reports/**/*.xml', ref: 'collector-v0.13.1')
          }
        }
      }
@@ -973,7 +973,7 @@ suite still runs every time, unless you opt into running only the likely affecte
 - uses: actions/checkout@v7
   with:
     fetch-depth: 0                      # the change is scored against the pull request's base
-- uses: atriis/Atriis.QEOS/collector-action@collector-v0.13.0
+- uses: atriis/Atriis.QEOS/collector-action@collector-v0.13.1
   with:
     url: ${{ vars.QEOS_URL }}
     impact: first                       # or only: the likely affected scenarios alone
@@ -1844,7 +1844,7 @@ workflow that runs the suite (scheduled, per area, nightly…):
 ```yaml
       - name: Upload results to QEOS
         if: always() && vars.QEOS_URL != ''      # skipped cleanly where QEOS is not set up
-        uses: atriis/Atriis.QEOS/collector-action@collector-v0.13.0
+        uses: atriis/Atriis.QEOS/collector-action@collector-v0.13.1
         with:
           url: ${{ vars.QEOS_URL }}
           patterns: test-results/cucumber-report.json
@@ -1926,7 +1926,7 @@ restore it on the VM (`deploy/README.md` §7), and copy the local `TM_SECRETS_KE
   unset.
 - CI keeps working: `QAV_URL` / `QAV_API_KEY`, the `qav-collector` command, `qav_` keys, the
   `qavCollectorUpload` Jenkins step and old GitLab template variables all still work, with a
-  deprecation warning. Move to `QEOS_*` and `collector-v0.13.0` when convenient. On Azure, a
+  deprecation warning. Move to `QEOS_*` and `collector-v0.13.1` when convenient. On Azure, a
   secret still named `QAV_API_KEY` must be renamed, or mapped as `QEOS_API_KEY: $(QAV_API_KEY)`.
 - Data does not move: the volumes keep their `qa-vision_qav_*` names, pinned in the compose files. If Compose asks to
   recreate a volume, answer **N**.
@@ -1959,7 +1959,7 @@ qeos up -d --build --wait edge
   and 004 (scenario names for Play), run one **full** Gherkin import per project (dashboard
   with "This is my complete features folder", or `import-features` from CI). After new masking
   rules, run the `remask` job ([4.6](#46-masking)).
-- **Collector:** CI pins a tag (`collector-v0.13.0`). Upgrading the platform does not change it.
+- **Collector:** CI pins a tag (`collector-v0.13.1`). Upgrading the platform does not change it.
   collector 0.6.0 sends `failed_step`; it needs a platform with ingestion migration 021, so upgrade the platform first (an older platform answers 422 and the run is not stored).
   collector 0.9.1 also sends `failed_step` on a skipped scenario (the step it stopped at); any platform with migration 021 stores it, older platforms show it as nothing new.
   Move pipelines to a new tag when the release notes ask for it.
