@@ -1183,7 +1183,7 @@ picked, such as `MyRepo/tests/features/...`).
    ```
    Change the pattern and `paths:` if your features live elsewhere. Change both suite patterns to
    the one that names your suite workflows, or remove them if you have none. The action (`command:
-   import-features`, from `collector-v0.9.3`) installs the collector from its own checkout, which
+   import-features`, from `collector-v0.9.3`; `--suites` from `collector-v0.11.0`) installs the collector from its own checkout, which
    GitHub downloads with the repository's access; `pip install "qeos-collector @ git+https://…"`
    cannot, while `Atriis.QEOS` is private: the runner has no credentials for it and the step
    fails with `could not read Username for 'https://github.com'`. A **public** test repository
