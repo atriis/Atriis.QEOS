@@ -261,6 +261,12 @@ def test_a_missing_routes_table_is_reported(routes):
     assert docs.check_routes(root) == ["gateway/README.md: no Routes table"]
 
 
+def test_a_gateway_without_an_https_server_is_reported_not_crashed_on(routes):
+    root, edit = routes
+    edit("gateway/nginx.conf.template", "listen 8443 ssl;", "listen 8443;")
+    assert docs.check_routes(root) == ["gateway/nginx.conf.template: no HTTPS server block (`listen <port> ssl`)"]
+
+
 def test_the_real_repository_matches():
     assert docs.check() == []
     assert docs.check_routes() == []

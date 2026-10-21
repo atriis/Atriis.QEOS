@@ -295,6 +295,13 @@ details.
 - **Production package** (`deploy/`). A Caddy TLS edge with Let's Encrypt and
   HSTS is the only published service. Secrets are generated into a mode-600
   `.env`, and databases are backed up daily.
+- **Containers (ADR-038).** Every platform image runs as a non-root user: the five Python services (and their
+  migration and background jobs) as `qeos`, uid 10001; the gateway and dashboard, built on
+  `nginxinc/nginx-unprivileged`, as `nginx`, uid 101, listening on 8080/8443 inside the container. Each works with a
+  read-only root filesystem and only `/tmp` writable; `scripts/check_readonly_images.sh` starts every image that way.
+  The one container that runs as root is compose's one-shot `gateway-certs` job (compose only, never on Kubernetes):
+  it changes the owner of the gateway's certificate volume to uid 101, so a volume made by an older gateway stays
+  usable, and never reads or changes the key's content.
 - **Supply chain.** Dependabot updates for pip, npm and GitHub Actions. CodeQL analysis
   runs once GitHub Code Security is enabled for the repository and the repository variable
   `CODEQL_ENABLED` is `true`; until then the CodeQL workflow is skipped, not failed.

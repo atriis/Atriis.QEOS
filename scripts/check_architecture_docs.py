@@ -143,9 +143,12 @@ def service_prefixes(root: Path, services: set[str]) -> dict[str, list[str]]:
     return found
 
 
-def https_locations(conf: str) -> list[Location]:
-    """Each location of the HTTPS server block, in order; the HTTP block only redirects."""
-    start = re.search(r"listen \d+ ssl", conf).start()
+def https_locations(conf: str) -> "list[Location] | None":
+    """Each location of the HTTPS server block, in order (None without one); the HTTP block only redirects."""
+    listen = re.search(r"listen \d+ ssl", conf)
+    if not listen:
+        return None
+    start = listen.start()
     locations = []
     for m in re.finditer(r"location\s+(=|~\*?|\^~)?\s*(\S+)\s*\{", conf[start:]):
         body_start = start + m.end()
@@ -216,6 +219,8 @@ def check_routes(root: Path = ROOT) -> list[str]:
     read = lambda rel: (root / rel).read_text(encoding="utf-8")
     prefixes = service_prefixes(root, set(compose_services(read("docker-compose.yml"))))
     locations = https_locations(read("gateway/nginx.conf.template"))
+    if locations is None:
+        return ["gateway/nginx.conf.template: no HTTPS server block (`listen <port> ssl`)"]
     documented = documented_routes(read("gateway/README.md"))
     if not documented:
         return ["gateway/README.md: no Routes table"]

@@ -328,7 +328,7 @@ services:
     build: *dashboard-build
     image: qeos/dashboard:local
     restart: unless-stopped
-    # nginx:alpine has no python; busybox wget instead of the shared healthcheck
+    # nginx-unprivileged (alpine) has no python; busybox wget instead of the shared healthcheck, on 8080 (ADR-038)
     healthcheck:
       # 127.0.0.1, not localhost: busybox wget prefers ::1 and nginx listens on IPv4 only
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
