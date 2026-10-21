@@ -43,8 +43,8 @@ Goals:
 
 Non-goals (this version):
 
-- Multiple gateway replicas with shared rate limits (Redis). The gateway runs one replica; the Ingress
-  adds a coarse per-IP limit. Redis stays behind its own trigger.
+- Exact shared rate limits across gateway replicas (Redis). The gateway runs two replicas; the per-IP
+  limits that matter move to the edge (see 5.4). Redis stays behind its own trigger.
 - Moving in-API background work (notifications, impact evaluation, log scan) to a queue.
 - GitOps (Argo CD / Flux), service mesh, Vault, multi-region.
 - Migrating data from an existing install (fresh start, see section 2).
@@ -90,7 +90,11 @@ ranges); ACR attached to AKS with a retention policy for untagged images; Postgr
 container `qeos-artifacts` (no public access, soft delete on); Key Vault; a user-assigned managed identity
 per workload that needs Azure access (ingestion **and ingestion-retention**: Blob, since retention and
 purge delete artifacts; every service and the migration Job: Key Vault read). The deploy identity needs
-rights to create role assignments (AcrPull, Key Vault Secrets User, Storage Blob Data Contributor). A runbook in `deploy/azure/README.md` lists the one-time steps Bicep cannot do (DNS record,
+rights to create role assignments (AcrPull, Key Vault Secrets User, Storage Blob Data Contributor).
+
+The cluster stays patched: automatic upgrade channel `patch`, node OS image upgrades on (`NodeImage`), and a
+planned maintenance window (Sunday night) for both. An Azure budget on each resource group sends alert
+emails at 80% and 100% of a monthly amount set per environment. A runbook in `deploy/azure/README.md` lists the one-time steps Bicep cannot do (DNS record,
 Entra app redirect URIs).
 
 ### 5.2 Images and CI
@@ -104,14 +108,18 @@ Entra app redirect URIs).
   dashboard the directory that holds the runtime `config.js`. nginx images listen on unprivileged ports
   (8080/8443) inside the container.
 - Third-party images are pinned (`postgres:15.x` for Compose only; on AKS PostgreSQL is managed).
+- Every image is scanned in the build workflow (Trivy); a critical vulnerability with a fix available fails
+  the build. Microsoft Defender for Containers is on for ACR and the cluster.
 - **Dashboard runtime config**: the image serves `/config.js`, written at container start from env
   (`GOOGLE_CLIENT_ID`, `MSAL_CLIENT_ID`, `MSAL_AUTHORITY`); the app reads `window.__QEOS_CONFIG__` first
   and falls back to the `VITE_*` values, so Compose keeps working.
 
 ### 5.3 Helm chart (`deploy/helm/qeos/`)
 
-- Deployments: the five APIs, the dashboard, the gateway (1 replica), the four loop jobs (1 replica each;
-  advisory locks make more harmless).
+- Deployments: the five APIs, the dashboard and the gateway (2 replicas each, so a node upgrade or a pod
+  restart never takes QEOS offline), the four loop jobs (1 replica each; advisory locks make more
+  harmless). PodDisruptionBudgets (`minAvailable: 1`) on every 2-replica Deployment; pods spread across
+  nodes (topology spread constraints).
 - Services (ClusterIP) named like the Compose services. **nginx upstreams become templated fully
   qualified names** (`auth-service.<namespace>.svc.cluster.local:8000`, and Grafana's Service from
   kube-prometheus-stack): nginx's own `resolver` does not use the search domains in `resolv.conf`, so the
@@ -146,6 +154,11 @@ Entra app redirect URIs).
 - The gateway trusts the edge's address range in `GATEWAY_TRUSTED_PROXIES` (a value, not a fixed IP), and
   the edge preserves the client IP (`externalTrafficPolicy: Local` on its load balancer, or the add-on's
   equivalent), so real client IPs and the per-IP limits keep working.
+- **Rate limits with two gateway replicas**: nginx's limits are per pod, so with two replicas a client can
+  get up to twice today's rate. The limits that protect sign-in (`auth`, 5 r/s) and uploads (`collect`,
+  `collect_blobs`, `collect_artifacts`) are enforced at the edge per client IP where the add-on's Gateway
+  API implementation supports it; the gateway's own zones stay as a second line, halved on AKS (a chart
+  value). Exact shared limits wait for Redis.
 - `resolver` in nginx becomes a template value: `127.0.0.11` on Compose, the cluster DNS
   (`kube-dns.kube-system.svc.cluster.local`) on AKS.
 - `proxy_redirect` and the HTTP→HTTPS redirect follow `GATEWAY_PUBLIC_PORT` (443 on AKS).
@@ -255,8 +268,15 @@ Staging uses small sizes (B-series Flexible Server, small node pool) and stops o
 
 ## 6. Things to keep in mind
 
-- Rate limits stay per gateway pod; with one gateway replica this matches today. Scaling the gateway is
-  gated on Redis (TODO).
+- Rate limits stay per gateway pod; with two replicas the edge carries the important per-IP limits (5.4).
+  Exact shared limits are gated on Redis (TODO).
+
+## 6a. Open question for the user
+
+- **Domain and DNS**: which public domain QEOS uses on AKS (for example `qeos.atriis.com`) and where its DNS
+  is hosted (Azure DNS or elsewhere). It decides the certificate, the email sender domain and the Entra
+  redirect URIs. Stage 1 can start without it (staging can use the Azure-provided address), but production
+  cannot.
 - Ingestion's per-process limits (8 storage calls, 60 s pending-deletion cache) become per pod; documented.
 - The refresh cookie and Grafana cookie are same-origin; the Ingress must serve the dashboard and API on
   one host.
@@ -288,7 +308,11 @@ Staging uses small sizes (B-series Flexible Server, small node pool) and stops o
 - **Staging stops outside working hours** to save cost.
 - **Workload identity** for Blob and Key Vault (no storage keys).
 - **kube-prometheus-stack** in the cluster, not Azure managed Prometheus/Grafana.
-- **One gateway replica** on AKS until Redis-backed limits exist.
+- **Two gateway replicas** (and two of each API and the dashboard), with per-IP limits at the edge and the
+  gateway's own limits halved, until Redis-backed limits exist.
+- **Automatic patch upgrades** and node image updates in a Sunday-night maintenance window.
+- **Trivy scan** fails the build on fixable critical vulnerabilities; Defender for Containers on.
+- **Azure budget alerts** at 80% and 100% per resource group.
 - **Helm** (not Kustomize), deployed by a GitHub Actions workflow (not GitOps).
 - **Release tag `platform-v*`** builds and pushes all platform images.
 - Staging and production as the two environments.
