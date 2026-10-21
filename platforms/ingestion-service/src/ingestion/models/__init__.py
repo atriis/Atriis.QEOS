@@ -1,4 +1,5 @@
 from src.ingestion.models.api_key import ApiKey
+from src.ingestion.models.artifact import ResultArtifact
 from src.ingestion.models.collection_settings import CollectionSettings
 from src.ingestion.models.changes import RunChangedFile
 from src.ingestion.models.component import RunComponent
@@ -13,4 +14,4 @@ from src.ingestion.models.run import Run, RunResult
 from src.ingestion.models.screenshot import Blob, ResultScreenshot
 
 __all__ = ["ApiKey", "Blob", "CollectionSettings", "FlakyDaily", "FlakyRollupDay", "ImpactPair", "ImpactTestBase", "JobHeartbeat", "LogPattern", "LogValue", "MaskingPattern", "MutedTest",
-           "NotificationChannel", "ResultScreenshot", "Run", "RunChangedFile", "RunComponent", "RunImpact", "RunResult"]
+           "NotificationChannel", "ResultArtifact", "ResultScreenshot", "Run", "RunChangedFile", "RunComponent", "RunImpact", "RunResult"]

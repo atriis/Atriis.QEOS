@@ -5,7 +5,8 @@ URL = "/api/v1/projects/1/collection-settings"
 def test_defaults_without_a_row(client, auth, project_role):
     project_role(role="viewer", project_id=1)
     body = client.get(URL, headers=auth()).json()
-    assert body == {"collect_manual": True, "keep_screenshots": False, "discarded_count": 0,
+    assert body == {"collect_manual": True, "keep_screenshots": False, "keep_traces": False,
+                    "trace_days": 14, "discarded_count": 0,
                     "last_discarded_at": None, "updated_at": None, "updated_by": None}
 
 
@@ -66,3 +67,39 @@ def test_admin_sets_keep_screenshots(client, auth, project_role):
 def test_keep_screenshots_must_be_a_boolean(client, auth, project_role):
     project_role(role="owner", project_id=1)
     assert client.put(URL, json={"keep_screenshots": "yes"}, headers=auth()).status_code == 422
+
+
+def test_keep_traces_defaults_off_and_trace_days_14(client, auth, project_role):
+    project_role(role="viewer", project_id=1)
+    body = client.get(URL, headers=auth()).json()
+    assert body["keep_traces"] is False and body["trace_days"] == 14
+
+
+def test_member_cannot_set_keep_traces(client, auth, project_role):
+    project_role(role="member", project_id=1)
+    assert client.put(URL, json={"keep_traces": True}, headers=auth()).status_code == 403
+
+
+def test_admin_sets_keep_traces_and_trace_days(client, auth, project_role):
+    project_role(role="admin", project_id=1)
+    response = client.put(URL, json={"keep_traces": True, "trace_days": 30}, headers=auth(user_id=7))
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["keep_traces"] is True and body["trace_days"] == 30 and body["keep_screenshots"] is False
+    # A body without the fields leaves them alone
+    client.put(URL, json={"collect_manual": False}, headers=auth())
+    body = client.get(URL, headers=auth()).json()
+    assert body["keep_traces"] is True and body["trace_days"] == 30
+
+
+def test_trace_days_alone_is_a_valid_change(client, auth, project_role):
+    project_role(role="owner", project_id=1)
+    assert client.put(URL, json={"trace_days": 90}, headers=auth()).json()["trace_days"] == 90
+    assert client.put(URL, json={"trace_days": 1}, headers=auth()).json()["trace_days"] == 1
+
+
+def test_trace_days_outside_1_to_90_is_422(client, auth, project_role):
+    project_role(role="owner", project_id=1)
+    for days in (0, 91, -1, "7", True, 1.5):
+        assert client.put(URL, json={"trace_days": days}, headers=auth()).status_code == 422, days
+    assert client.put(URL, json={"keep_traces": "yes"}, headers=auth()).status_code == 422

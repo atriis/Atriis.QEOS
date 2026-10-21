@@ -1,10 +1,12 @@
+import asyncio
+
 import pytest
 from botocore.stub import Stubber
 
 from src.ingestion.core.config import settings
 from src.ingestion.utils import artifact_store
 from src.ingestion.utils.artifact_store import (
-    ArtifactDeleteError, ArtifactNotFound, MemoryArtifactStore, S3ArtifactStore, get_artifact_store, screenshot_key)
+    ArtifactDeleteError, ArtifactNotFound, MemoryArtifactStore, S3ArtifactStore, artifact_key, get_artifact_store, screenshot_key)
 
 
 @pytest.fixture(autouse=True)
@@ -118,3 +120,33 @@ def test_s3_delete_prefix_pages_and_counts(s3):
     stubber.add_response("delete_objects", {})
     assert store.delete_prefix("screenshots/1/") == 4
     stubber.assert_no_pending_responses()
+
+
+def test_artifact_key():
+    assert artifact_key(3, "ab" * 32) == "artifacts/3/" + "ab" * 32
+
+
+def test_memory_store_put_stream_then_open_and_get_range():
+    store = MemoryArtifactStore()
+    asyncio.run(store.put_stream("artifacts/1/a", iter([b"01", b"234", b"56789"]), "application/zip"))
+    assert store.objects["artifacts/1/a"] == (b"0123456789", "application/zip")
+    chunks, size = store.open("artifacts/1/a")
+    assert size == 10 and b"".join(chunks) == b"0123456789"
+    assert store.get_range("artifacts/1/a", 2, 5) == b"2345"  # end is inclusive, as in an HTTP Range
+
+
+def test_memory_store_put_stream_takes_an_async_iterator():
+    async def chunks():
+        yield b"ab"
+        yield b"cd"
+
+    store = MemoryArtifactStore()
+    asyncio.run(store.put_stream("artifacts/1/b", chunks(), "application/zip"))
+    assert store.get("artifacts/1/b") == b"abcd"
+
+
+def test_memory_store_open_and_range_of_a_missing_key_raise_not_found():
+    with pytest.raises(ArtifactNotFound):
+        MemoryArtifactStore().open("artifacts/1/missing")
+    with pytest.raises(ArtifactNotFound):
+        MemoryArtifactStore().get_range("artifacts/1/missing", 0, 1)

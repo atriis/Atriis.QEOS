@@ -2,13 +2,16 @@
 Only ingestion talks to it. Without all four ARTIFACTS_S3_* settings there is no store (None) and QEOS works as
 before without screenshots. get_artifact_store() takes no request, so FastAPI routes and batch jobs (retention,
 purge) call it the same way."""
+import asyncio
 import threading
 from contextlib import contextmanager
-from typing import Dict, Iterator, List, Optional, Protocol, Tuple
+from typing import AsyncIterator, Dict, Iterator, List, Optional, Protocol, Tuple, Union
 
 from src.ingestion.core.config import settings
 
 DELETE_CHUNK = 1000  # S3 delete_objects takes at most 1,000 keys
+PART_SIZE = 8 * 1024 * 1024  # multipart parts of a streamed upload (S3 wants at least 5 MB, except the last)
+READ_CHUNK = 64 * 1024
 # A slow store must not take every request thread: past this many calls at once, a request answers 503 at once
 STORE_CALLS = 8
 SLOT_WAIT_SECONDS = 2.0
@@ -47,8 +50,37 @@ def screenshot_key(project_id: int, sha256: str) -> str:
     return f"screenshots/{project_id}/{sha256}"
 
 
+def artifact_key(project_id: int, sha256: str) -> str:
+    """Traces (ADR-037), content-addressed per project like screenshots."""
+    return f"artifacts/{project_id}/{sha256}"
+
+
+Chunks = Union[AsyncIterator[bytes], Iterator[bytes]]
+
+
+async def _each(chunks: Chunks) -> AsyncIterator[bytes]:
+    if hasattr(chunks, "__aiter__"):
+        async for chunk in chunks:  # type: ignore[union-attr]
+            yield chunk
+    else:
+        for chunk in chunks:  # type: ignore[union-attr]
+            yield chunk
+
+
 class ArtifactStore(Protocol):
     def put(self, key: str, data: bytes, media_type: str) -> None: ...
+
+    async def put_stream(self, key: str, chunks: Chunks, media_type: str) -> None:
+        """Stores the chunks as one object without holding them all in memory. A failure leaves no object."""
+        ...
+
+    def open(self, key: str) -> Tuple[Iterator[bytes], int]:
+        """A streaming read and the object's size. Raises ArtifactNotFound."""
+        ...
+
+    def get_range(self, key: str, start: int, end: int) -> bytes:
+        """Bytes start..end, both inclusive (an HTTP Range). Raises ArtifactNotFound."""
+        ...
 
     def get(self, key: str) -> bytes: ...
 
@@ -74,6 +106,17 @@ class MemoryArtifactStore:
             return self.objects[key][0]
         except KeyError:
             raise ArtifactNotFound(key) from None
+
+    async def put_stream(self, key: str, chunks: Chunks, media_type: str) -> None:
+        parts = [chunk async for chunk in _each(chunks)]
+        self.objects[key] = (b"".join(parts), media_type)
+
+    def open(self, key: str) -> Tuple[Iterator[bytes], int]:
+        data = self.get(key)
+        return iter([data[start:start + READ_CHUNK] for start in range(0, len(data), READ_CHUNK)]), len(data)
+
+    def get_range(self, key: str, start: int, end: int) -> bytes:
+        return self.get(key)[start:end + 1]
 
     def delete(self, keys: List[str]) -> None:
         for key in keys:
@@ -113,6 +156,59 @@ class S3ArtifactStore:
 
         try:
             return self._client.get_object(Bucket=self._bucket, Key=key)["Body"].read()
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+                raise ArtifactNotFound(key) from exc
+            raise
+
+    async def put_stream(self, key: str, chunks: Chunks, media_type: str) -> None:
+        """Multipart upload in PART_SIZE parts; boto3 runs in a worker thread so the event loop stays free. Any
+        failure, a cancelled request included, aborts the upload so no part is left in the bucket."""
+        upload_id = (await asyncio.to_thread(
+            self._client.create_multipart_upload, Bucket=self._bucket, Key=key, ContentType=media_type))["UploadId"]
+        parts: List[dict] = []
+        buffer = bytearray()
+
+        async def send(data: bytes) -> None:
+            number = len(parts) + 1
+            response = await asyncio.to_thread(
+                self._client.upload_part, Bucket=self._bucket, Key=key, UploadId=upload_id, PartNumber=number,
+                Body=data)
+            parts.append({"ETag": response["ETag"], "PartNumber": number})
+
+        try:
+            async for chunk in _each(chunks):
+                buffer.extend(chunk)
+                while len(buffer) >= PART_SIZE:
+                    await send(bytes(buffer[:PART_SIZE]))
+                    del buffer[:PART_SIZE]
+            if buffer or not parts:  # the last part may be small; an empty object still needs one part
+                await send(bytes(buffer))
+            await asyncio.to_thread(
+                self._client.complete_multipart_upload, Bucket=self._bucket, Key=key, UploadId=upload_id,
+                MultipartUpload={"Parts": parts})
+        except BaseException:
+            await asyncio.shield(asyncio.to_thread(
+                self._client.abort_multipart_upload, Bucket=self._bucket, Key=key, UploadId=upload_id))
+            raise
+
+    def open(self, key: str) -> Tuple[Iterator[bytes], int]:
+        from botocore.exceptions import ClientError
+
+        try:
+            body = self._client.get_object(Bucket=self._bucket, Key=key)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+                raise ArtifactNotFound(key) from exc
+            raise
+        return body["Body"].iter_chunks(READ_CHUNK), int(body["ContentLength"])
+
+    def get_range(self, key: str, start: int, end: int) -> bytes:
+        from botocore.exceptions import ClientError
+
+        try:
+            return self._client.get_object(
+                Bucket=self._bucket, Key=key, Range=f"bytes={start}-{end}")["Body"].read()
         except ClientError as exc:
             if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
                 raise ArtifactNotFound(key) from exc

@@ -651,3 +651,50 @@ def test_blobs_created_at_becomes_not_null_and_old_rows_are_backfilled(tmp_path)
         command.upgrade(cfg, "head")
     finally:
         engine.dispose()
+
+
+def test_traces_migration_adds_kind_artifacts_and_settings(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'traces_027.db').as_posix()}"
+    cfg = Config()
+    cfg.set_main_option("script_location", str(SERVICE_ROOT / "alembic"))
+    cfg.set_main_option("sqlalchemy.url", url)
+    command.upgrade(cfg, "026")
+    engine = create_engine(url)
+    try:
+        with engine.begin() as conn:  # a screenshot blob from before 027
+            conn.execute(text("INSERT INTO blobs (project_id, sha256, media_type, bytes) VALUES (1, :h, 'image/png', 3)"),
+                         {"h": "a" * 64})
+            conn.execute(text("INSERT INTO collection_settings (project_id) VALUES (6)"))
+        command.upgrade(cfg, "027")
+        insp = inspect(engine)
+        assert "result_artifacts" in insp.get_table_names()
+        assert {"keep_traces", "trace_days"} <= {c["name"] for c in insp.get_columns("collection_settings")}
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT kind FROM blobs")).scalar() == "screenshot"
+            row = conn.execute(text("SELECT keep_traces, trace_days FROM collection_settings")).one()
+            assert row[0] in (False, 0) and row[1] == 14
+            conn.execute(text("INSERT INTO blobs (project_id, sha256, media_type, bytes, kind)"
+                              " VALUES (1, :h, 'application/zip', 3, 'trace')"), {"h": "b" * 64})
+        with pytest.raises(IntegrityError):  # kind is screenshot or trace
+            with engine.begin() as conn:
+                conn.execute(text("INSERT INTO blobs (project_id, sha256, media_type, bytes, kind)"
+                                  " VALUES (1, :h, 'video/mp4', 3, 'video')"), {"h": "c" * 64})
+        with pytest.raises(IntegrityError):  # trace_days is 1..90
+            with engine.begin() as conn:
+                conn.execute(text("UPDATE collection_settings SET trace_days = 91"))
+        command.downgrade(cfg, "026")
+        insp = inspect(engine)
+        assert "result_artifacts" not in insp.get_table_names()
+        assert "kind" not in {c["name"] for c in insp.get_columns("blobs")}
+        assert "keep_traces" not in {c["name"] for c in insp.get_columns("collection_settings")}
+    finally:
+        engine.dispose()
+
+
+def test_result_artifacts_kind_check_and_indexes(migrated_engine):
+    insp = inspect(migrated_engine)
+    names = {ix["name"] for ix in insp.get_indexes("result_artifacts")}
+    assert {"ix_result_artifacts_result_position", "ix_result_artifacts_blob_id"} <= names
+    with pytest.raises(IntegrityError):
+        with migrated_engine.begin() as conn:
+            conn.execute(text("INSERT INTO result_artifacts (result_id, position, blob_id, kind) VALUES (1, 0, 1, 'video')"))

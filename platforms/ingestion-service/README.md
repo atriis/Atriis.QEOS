@@ -57,9 +57,10 @@ Receives test results from CI. Design: `docs/superpowers/specs/2026-09-29-ingest
 ## Collection settings
 
 `GET /api/v1/projects/{id}/collection-settings` (any project member) returns `collect_manual` (default
-`true`; no row means the defaults), `keep_screenshots` (default `false`), `discarded_count`,
+`true`; no row means the defaults), `keep_screenshots` (default `false`), `keep_traces` (default `false`),
+`trace_days` (default `14`), `discarded_count`,
 `last_discarded_at`, `updated_at` and `updated_by`.
-`PUT` with `{"collect_manual": bool}`, `{"keep_screenshots": bool}` or both (owner or admin; other roles 403,
+`PUT` with `collect_manual`, `keep_screenshots`, `keep_traces` (booleans) or `trace_days` (an integer, 1 to 90; `422` outside it), alone or together (owner or admin; other roles 403,
 non-members 404) upserts it and returns the stored settings. A field left out keeps its stored value; a body
 with neither, or with another field, is `422`.
 
@@ -67,6 +68,12 @@ with neither, or with another field, is `422`.
 stored image per project and `sha256`, shared by every result that shows it; no cascade, a garbage collector
 deletes blobs) and `result_screenshots` (the images of one result, in `position` order, each with its step
 text, optional step line and optional `hook`; deleted with the result).
+
+`keep_traces` allows Playwright traces (ADR-037) and `trace_days` is how long they are kept. Migration 027 adds
+`blobs.kind` (`screenshot` for every existing row, or `trace`), the `result_artifacts` table (the traces of one
+result, in `position` order, each with an optional `name`; deleted with the result) and the two settings. Traces are
+stored under `artifacts/{project_id}/{sha256}`. Traces can hold cookies, tokens and personal data of test accounts
+and QEOS cannot mask them, so turn the setting on only if every project reader may see that.
 
 With `collect_manual` off, an upload whose `run.trigger` is `manual` answers
 `202 {"discarded": true, "reason": "manual runs are not collected for this project"}` and stores nothing.

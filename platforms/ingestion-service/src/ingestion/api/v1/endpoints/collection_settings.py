@@ -23,4 +23,4 @@ def put_collection_settings(
     access: ProjectAccess = Depends(require_project_role(*MANAGE_ROLES)),
 ):
     return collection_settings_service.put(db, access.project_id, payload.collect_manual, payload.keep_screenshots,
-                                         access.user_id)
+                                         access.user_id, payload.keep_traces, payload.trace_days)
