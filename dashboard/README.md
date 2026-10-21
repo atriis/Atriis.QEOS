@@ -43,8 +43,8 @@ break stops the container with an error. A missing or empty key falls back to th
 build-time value (`VITE_GOOGLE_CLIENT_ID`, `VITE_MSAL_CLIENT_ID`,
 `VITE_MSAL_AUTHORITY`), which is what compose uses (it forwards them as build
 args) and what `npm run dev` uses. The ids must match the auth-service
-configuration (`GOOGLE_CLIENT_ID`, `AZURE_ALLOWED_TENANTS`). The SPA obtains an ID token
-(Google Identity Services button / MSAL popup) and posts it to
+configuration (`GOOGLE_CLIENT_ID`, `AZURE_ALLOWED_TENANTS`). The SPA obtains an ID
+token (Google Identity Services button / MSAL popup) and posts it to
 `/api/v1/sso/{provider}`.
 
 ## Auth model

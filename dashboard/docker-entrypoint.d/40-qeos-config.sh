@@ -3,7 +3,7 @@
 # serves every environment. Empty or unset variables are left out and the build-time values apply.
 set -eu
 
-DIR=/tmp/qeos-config
+DIR="${QEOS_CONFIG_DIR:-/tmp/qeos-config}"
 OUT="$DIR/config.js"
 
 # Values go into a JS string inside a script: refuse anything that would need escaping (real ids and URLs never do)
@@ -13,7 +13,7 @@ check() {
   nl='
 '
   case "$value" in
-    *\"* | *\* | *'<'* | *'>'* | *"$nl"* | *"$(printf '\r')"*)
+    *\"* | *\\* | *'<'* | *'>'* | *"$nl"* | *"$(printf '\r')"*)
       echo "qeos-config: $name contains a double quote, backslash, angle bracket or line break; refusing to start" >&2
       exit 1
       ;;
