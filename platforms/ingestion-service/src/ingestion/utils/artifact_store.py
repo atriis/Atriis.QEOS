@@ -86,7 +86,12 @@ class ArtifactStore(Protocol):
         ...
 
     def get_range(self, key: str, start: int, end: int) -> bytes:
-        """Bytes start..end, both inclusive (an HTTP Range). Raises ArtifactNotFound."""
+        """Bytes start..end, both inclusive (an HTTP Range); an end past the object is cut to it. Raises
+        ArtifactNotFound, and ArtifactRangeError when start is at or past the end or end is before start."""
+        ...
+
+    def copy(self, src_key: str, dst_key: str) -> None:
+        """Copies one object to another key, inside the store. Raises ArtifactNotFound."""
         ...
 
     def get(self, key: str) -> bytes: ...
@@ -123,7 +128,16 @@ class MemoryArtifactStore:
         return iter([data[start:start + READ_CHUNK] for start in range(0, len(data), READ_CHUNK)]), len(data)
 
     def get_range(self, key: str, start: int, end: int) -> bytes:
-        return self.get(key)[start:end + 1]
+        data = self.get(key)
+        if start >= len(data) or end < start:
+            raise ArtifactRangeError(f"{key} bytes={start}-{end}")
+        return data[start:end + 1]
+
+    def copy(self, src_key: str, dst_key: str) -> None:
+        try:
+            self.objects[dst_key] = self.objects[src_key]
+        except KeyError:
+            raise ArtifactNotFound(src_key) from None
 
     def delete(self, keys: List[str]) -> None:
         for key in keys:
@@ -228,6 +242,18 @@ class S3ArtifactStore:
                 raise ArtifactNotFound(key) from exc
             if code == "InvalidRange" or exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode") == 416:
                 raise ArtifactRangeError(f"{key} bytes={start}-{end}") from exc
+            raise
+
+    def copy(self, src_key: str, dst_key: str) -> None:
+        """One copy_object call: enough for a trace (at most 100 MB); S3 wants a multipart copy only past 5 GB."""
+        from botocore.exceptions import ClientError
+
+        try:
+            self._client.copy_object(Bucket=self._bucket, Key=dst_key,
+                                     CopySource={"Bucket": self._bucket, "Key": src_key})
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+                raise ArtifactNotFound(src_key) from exc
             raise
 
     def delete(self, keys: List[str]) -> None:

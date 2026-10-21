@@ -163,13 +163,19 @@ details.
   For a Playwright report (collector 0.13.0), the collector reads a file the report names only when it resolves,
   symlinks followed, inside the working directory, is at most 5 MB and starts like the image type it claims, so a
   tampered report cannot make it upload another file from the CI machine.
+  A trace upload (`PUT /api/v1/collect/artifacts/{sha256}`, project API key, ADR-037) streams to a temporary object
+  while it is checked: `application/zip` only, first bytes `PK`, at most 100 MB (the declared length is
+  refused before reading, a longer stream is cut off), and a SHA-256 equal to the path. Only then is it copied to
+  `artifacts/{project_id}/{sha256}` and recorded; a rejected or interrupted upload leaves no object and no row. It
+  answers 403 when the project has traces off (the default) or QEOS has no storage configured.
   Reading: `GET /api/v1/projects/{id}/screenshots/{screenshot_id}` serves the image unmasked, read through
   ingestion-service, with a user JWT and the read roles of the project. A non-member, and an id that belongs to
   another project, both get 404. There are no presigned URLs and the bucket is never public. The response carries
   `Cache-Control: private, max-age=3600`, so a browser may keep an image for up to an hour after the user loses
   access to the project, and `X-Content-Type-Options: nosniff`.
 - **Gateway.** TLS 1.2/1.3. Per-IP rate limits: 20 requests/s on the API,
-  10/s on uploads, 50/s (burst 100, 6 MB body) on screenshot uploads, and 5/s on sign-in, registration, password and MFA
+  10/s on uploads, 50/s (burst 100, 6 MB body) on screenshot uploads, 10/s (burst 20, 101 MB body, streamed
+  unbuffered) on trace uploads, and 5/s on sign-in, registration, password and MFA
   endpoints. 10 MB body cap elsewhere. `X-Forwarded-For` is replaced, not appended, and
   `/metrics` and `/internal` are never routed.
 - **Internal APIs.** HTTP Basic with `INTERNAL_API_PASSWORD`. When it is unset

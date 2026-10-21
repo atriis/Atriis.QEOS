@@ -9,7 +9,7 @@ def test_a_valid_key_names_its_project(client, make_key):
     response = client.get(URL, headers={"Authorization": f"Bearer {key}"})
     assert response.status_code == 200, response.text
     assert response.json() == {"project_id": 7, "name": row.name, "can_read_impact": False,
-                               "screenshots": False}
+                               "screenshots": False, "artifacts": False}
 
 
 def test_an_invalid_key_is_401(client):

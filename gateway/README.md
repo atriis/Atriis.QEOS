@@ -72,6 +72,8 @@ proxies to a service with no such route, or a row here names the wrong service.
   never limited.
 - `/api/v1/collect` has its own limit instead: 10 requests/s per IP (burst 20).
 - `/api/v1/collect/blobs` (step screenshots) has a third: 50 requests/s per IP (burst 100), and bodies up to 6 MB.
+- `/api/v1/collect/artifacts` (traces) has a fourth: 10 requests/s per IP (burst 20), bodies up to 101 MB, and request
+  buffering off, so a trace streams through to ingestion instead of being written to the gateway's disk first.
 - Request bodies up to 10 MB, except the Gherkin import (`/projects/{id}/cases/import`):
   `GATEWAY_IMPORT_MAX_BODY`, default 25 MB. Upstream connect timeout 3 s, read timeout 30 s.
 - Responses are gzipped only on `/projects/{id}/analytics/report` and `/projects/{id}/case-areas`,

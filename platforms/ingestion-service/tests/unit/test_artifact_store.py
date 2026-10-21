@@ -278,3 +278,32 @@ def test_s3_get_range_past_the_end_raises_range_error(s3):
     stubber.add_client_error("get_object", service_error_code="InvalidRange", http_status_code=416)
     with pytest.raises(ArtifactRangeError):
         store.get_range("artifacts/1/a", 100, 200)
+
+
+@pytest.mark.parametrize("start,end", [(10, 12), (11, 20), (5, 4)])
+def test_memory_store_get_range_outside_the_object_raises_range_error(start, end):
+    """As S3's InvalidRange: a start at or past the end, or an end before the start."""
+    store = MemoryArtifactStore()
+    store.put("artifacts/1/a", b"0123456789", "application/zip")
+    with pytest.raises(ArtifactRangeError):
+        store.get_range("artifacts/1/a", start, end)
+    assert store.get_range("artifacts/1/a", 8, 99) == b"89"  # an end past the object is cut, as S3 does
+
+
+def test_memory_store_copy():
+    store = MemoryArtifactStore()
+    store.put("artifacts/1/incoming/x", b"zip", "application/zip")
+    store.copy("artifacts/1/incoming/x", "artifacts/1/abc")
+    assert store.objects["artifacts/1/abc"] == (b"zip", "application/zip")
+    assert "artifacts/1/incoming/x" in store.objects  # a copy, the caller deletes the source
+    with pytest.raises(ArtifactNotFound):
+        store.copy("artifacts/1/missing", "artifacts/1/def")
+
+
+def test_s3_copy_sends_source_and_destination(s3):
+    store, stubber = s3
+    stubber.add_response("copy_object", {}, {
+        "Bucket": BUCKET, "Key": "artifacts/1/abc",
+        "CopySource": {"Bucket": BUCKET, "Key": "artifacts/1/incoming/x"}})
+    store.copy("artifacts/1/incoming/x", "artifacts/1/abc")
+    stubber.assert_no_pending_responses()

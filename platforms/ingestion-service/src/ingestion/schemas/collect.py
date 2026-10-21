@@ -238,6 +238,7 @@ class KeyCheck(BaseModel):
     name: str
     can_read_impact: bool = False
     screenshots: bool = False  # step images may be uploaded: storage configured and the setting on
+    artifacts: bool = False  # traces may be uploaded (ADR-037): storage configured and keep_traces on
 
 
 class RunReceipt(BaseModel):
