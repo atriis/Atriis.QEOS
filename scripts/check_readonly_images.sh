@@ -144,6 +144,22 @@ done
 if start gateway "${PREFIX}gateway:${TAG}" "${GATEWAY_TMP[@]}"; then
   probe "gateway /health" "$id" curl -fsk https://127.0.0.1:8443/health && not_root gateway "$id"
 fi
+# The Kubernetes settings (ADR-038): TLS ends at the edge, so plain HTTP on 8080 serves every route. The cluster DNS
+# name is pointed at 127.0.0.1 here, since nginx resolves its resolver at start and there is no cluster
+GATEWAY_K8S=(--add-host kube-dns.kube-system.svc.cluster.local:127.0.0.1 -e GATEWAY_TLS=off
+  -e GATEWAY_RESOLVER=kube-dns.kube-system.svc.cluster.local -e UPSTREAM_SUFFIX=.qeos.svc.cluster.local
+  -e GATEWAY_PUBLIC_PORT=443 -e RATE_API=10r/s -e RATE_AUTH=150r/m -e RATE_COLLECT=5r/s -e RATE_COLLECT_BLOBS=25r/s
+  -e RATE_COLLECT_ARTIFACTS=5r/s)
+if out="$(docker run --rm "${READONLY[@]}" "${GATEWAY_TMP[@]}" "${GATEWAY_K8S[@]}" -e MONITORING_ENABLED=true \
+    "${PREFIX}gateway:${TAG}" nginx -t 2>&1)"; then
+  pass "gateway nginx -t (Kubernetes settings)"
+else
+  fail "gateway nginx -t (Kubernetes settings): $out"
+fi
+if start "gateway (Kubernetes settings)" "${PREFIX}gateway:${TAG}" "${GATEWAY_TMP[@]}" "${GATEWAY_K8S[@]}"; then
+  probe "gateway (Kubernetes settings) http /health" "$id" curl -fs http://127.0.0.1:8080/health \
+    && not_root "gateway (Kubernetes settings)" "$id"
+fi
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures read-only image check(s) failed"

@@ -267,6 +267,22 @@ def test_a_gateway_without_an_https_server_is_reported_not_crashed_on(routes):
     assert docs.check_routes(root) == ["gateway/nginx.conf.template: no HTTPS server block (`listen <port> ssl`)"]
 
 
+def test_the_kubernetes_template_forms_are_read_like_the_plain_ones(routes):
+    # entrypoint.sh renders the listen and the namespace suffix (ADR-038); the routes are the same
+    root, edit = routes
+    edit("gateway/nginx.conf.template", "listen 8443 ssl;", "listen ${MAIN_LISTEN};")
+    edit("gateway/nginx.conf.template", "http://project-service:8000", "http://project-service${UPSTREAM_SUFFIX}:8000")
+    assert docs.check_routes(root) == []
+    edit("gateway/nginx.conf.template", "http://auth-service:8000", "http://runs-service${UPSTREAM_SUFFIX}:8000")
+    assert "gateway: /api/v1/auth (auth-service's /auth) goes to runs-service" in docs.check_routes(root)
+
+
+def test_a_suffixed_gateway_upstream_must_be_a_compose_service(repo):
+    root, edit = repo
+    edit("gateway/nginx.conf.template", "auth-service:8000", "old-service${UPSTREAM_SUFFIX}:8000")
+    assert docs.check(root) == ["gateway proxies to 'old-service', which docker-compose.yml does not run"]
+
+
 def test_the_real_repository_matches():
     assert docs.check() == []
     assert docs.check_routes() == []

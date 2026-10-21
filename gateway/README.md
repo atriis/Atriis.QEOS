@@ -89,6 +89,7 @@ to it. On first start the entrypoint generates a self-signed certificate for `lo
 compose volume `qeos_gateway_certs` (physical name `qa-vision_qav_gateway_certs`). Use `curl -k`, or trust it once:
 `docker compose cp gateway:/etc/nginx/certs/tls.crt ./qeos-localhost.crt`.
 To use your own, put `tls.crt` and `tls.key` in that volume before starting.
+On Kubernetes TLS ends at the edge instead and the gateway serves plain HTTP on 8080 (`GATEWAY_TLS=off`, below).
 
 ## Non-root and read-only (ADR-038)
 
@@ -102,6 +103,38 @@ certificate. A certificate volume made by an older gateway belongs to root; comp
 hands it to uid 101 before the gateway starts. `bash scripts/check_readonly_images.sh` starts every platform image
 with `--read-only --tmpfs /tmp` and checks that it answers as a non-root user.
 
+## Settings for Kubernetes (ADR-038)
+
+`entrypoint.sh` renders `nginx.conf.template` and `grafana-on.conf` with these values. Every default is what compose
+has always had, and compose sets none of them: its render is the same file byte for byte
+(`scripts/tests/test_gateway_template.py` compares it with `scripts/tests/fixtures/gateway-compose.conf`). A value
+that could end an NGINX directive (a `;`, a space, a line break) stops the gateway at start with the setting's name.
+
+| Setting | Default (compose) | On AKS | What it does |
+|---|---|---|---|
+| `GATEWAY_RESOLVER` | `127.0.0.11` (Docker's DNS) | `kube-dns.kube-system.svc.cluster.local` | The DNS server that resolves the upstreams at request time |
+| `UPSTREAM_SUFFIX` | empty | `.<namespace>.svc.cluster.local` | Appended to every service name in `set $upstream http://<service>${UPSTREAM_SUFFIX}:<port>` (the dashboard and auth-service's Grafana check included) |
+| `GRAFANA_UPSTREAM` | `grafana:3000` | the Grafana service's `host:port` | Where `/grafana/` goes when monitoring is on |
+| `GATEWAY_TLS` | `on` | `off` | `off`: TLS ends at the edge. One server listens on 8080 over plain HTTP and serves every route; no 8443, no HTTP→HTTPS redirect server, no certificate generated |
+| `GATEWAY_PUBLIC_PORT` | `${GATEWAY_HTTPS_PORT}` (8443) | `443` | The port in `proxy_redirect` and in the HTTP→HTTPS redirect: the one clients reach |
+| `RATE_API` | `20r/s` | `10r/s` | The `api` zone (every `/api/v1` route, the dashboard, `/grafana/`) |
+| `RATE_AUTH` | `5r/s` | half, e.g. `150r/m` | The `auth` zone (sign-in, password and SSO endpoints) |
+| `RATE_COLLECT` | `10r/s` | `5r/s` | The `collect` zone (`/api/v1/collect`) |
+| `RATE_COLLECT_BLOBS` | `50r/s` | `25r/s` | The `collect_blobs` zone (step screenshots) |
+| `RATE_COLLECT_ARTIFACTS` | `10r/s` | `5r/s` | The `collect_artifacts` zone (traces) |
+
+Rates are NGINX's `<n>r/s` or `<n>r/m`. They are per client IP and per gateway replica, so two replicas on AKS allow
+up to twice the rate: halving them keeps the total where it is today (spec 2026-10-21, section 5.4). The edge in
+front enforces its own limits on sign-in and uploads.
+
+With `GATEWAY_TLS=off` the services are told `X-Forwarded-Proto: https`, a constant: the edge serves the public site
+over HTTPS only, so their redirects and secure cookies are built for `https`. NGINX's own `$scheme` would say
+`http` (the edge's hop inside the cluster), and a client-sent `X-Forwarded-Proto` is never believed. With TLS on, it
+stays `$scheme`, as before. Set `GATEWAY_TRUSTED_PROXIES` to the edge's range so the per-IP limits see real clients.
+
+The template marks the lines that exist only with TLS on with `${TLS_ONLY}` (empty, or `#`), and its `#%` lines are
+notes that the entrypoint drops from the render.
+
 ## Requests and logs
 
 Every response carries `X-Request-ID` (yours if you sent one); the same id is forwarded to the
@@ -112,7 +145,7 @@ request.
 ## Adding a service
 
 1. In `nginx.conf.template`, add a `location` for its path prefix with
-   `limit_req zone=api burst=40 nodelay;`, `set $upstream http://<service>:8000;` and
+   `limit_req zone=api burst=40 nodelay;`, `set $upstream http://<service>${UPSTREAM_SUFFIX}:8000;` and
    `proxy_pass $upstream;` — plus a `= /health/<name>` location. Keep the upstream in a variable:
    that is what lets the gateway find a recreated container without a restart.
 2. In the root `docker-compose.yml`, add the service, its `-migrate` job, its database to
@@ -124,6 +157,11 @@ request.
 ```bash
 docker build -t qeos/gateway:local gateway && docker run --rm qeos/gateway:local nginx -t
 docker run --rm -e MONITORING_ENABLED=true qeos/gateway:local nginx -t   # the gated /grafana/
+# The Kubernetes settings; the cluster DNS name points at 127.0.0.1, as nginx resolves it at start
+docker run --rm --add-host kube-dns.kube-system.svc.cluster.local:127.0.0.1 -e GATEWAY_TLS=off \
+  -e GATEWAY_RESOLVER=kube-dns.kube-system.svc.cluster.local -e UPSTREAM_SUFFIX=.qeos.svc.cluster.local \
+  -e GATEWAY_PUBLIC_PORT=443 qeos/gateway:local nginx -t
+python -m pytest scripts/tests/test_gateway_template.py   # the render, without Docker (needs sh and envsubst)
 export SECRET_KEY=dev        # every docker compose command needs it, not just `up`
 docker compose up -d --build --wait gateway
 bash scripts/smoke_gateway.sh

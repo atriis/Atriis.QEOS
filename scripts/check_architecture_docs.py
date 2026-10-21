@@ -51,8 +51,12 @@ def compose_services(text: str) -> dict[str, set[str]]:
     return {name: profiles for name, profiles in services.items() if name not in one_shot}
 
 
+# A proxied service's host, with or without the namespace suffix entrypoint.sh renders in on Kubernetes (ADR-038)
+UPSTREAM = r"set \$\w*upstream http://([a-z0-9-]+)(?:\$\{UPSTREAM_SUFFIX\})?:\d+"
+
+
 def gateway_upstreams(texts: list[str]) -> set[str]:
-    return {host for text in texts for host in re.findall(r"set \$\w*upstream http://([a-z0-9-]+):\d+", text)}
+    return {host for text in texts for host in re.findall(UPSTREAM, text)}
 
 
 def architecture_section(readme: str) -> str:
@@ -145,7 +149,8 @@ def service_prefixes(root: Path, services: set[str]) -> dict[str, list[str]]:
 
 def https_locations(conf: str) -> "list[Location] | None":
     """Each location of the HTTPS server block, in order (None without one); the HTTP block only redirects."""
-    listen = re.search(r"listen \d+ ssl", conf)
+    # `listen ${MAIN_LISTEN}` in the template: 8443 ssl, or 8080 with TLS ending at the edge (ADR-038)
+    listen = re.search(r"listen (\d+ ssl|\$\{MAIN_LISTEN\})", conf)
     if not listen:
         return None
     start = listen.start()
@@ -156,7 +161,7 @@ def https_locations(conf: str) -> "list[Location] | None":
         while depth:
             depth += {"{": 1, "}": -1}.get(conf[i], 0)
             i += 1
-        host = re.search(r"set \$\w*upstream http://([a-z0-9-]+):\d+", conf[body_start:i])
+        host = re.search(UPSTREAM, conf[body_start:i])
         locations.append((m.group(1) or "", m.group(2), host.group(1) if host else None))
     return locations
 
