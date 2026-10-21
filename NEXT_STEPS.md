@@ -13,4 +13,6 @@ CI, and listed shipped features as unbuilt).
 ## Step screenshots follow-ups (ADR-036, shipped 2026-10-20)
 
 - **Separate image retention.** Images follow their results' retention days. If storage grows, add a shorter retention for images only.
-- **Videos and traces.** The MinIO storage and blob endpoints are built to be reused for them.
+- **Traces.** Design ready: `docs/superpowers/specs/2026-10-21-traces-and-videos-design.md` (stage 1 download, stage 2
+  trace viewer in the browser).
+- **Videos.** Later, on top of traces: section 8 of the same design.
