@@ -15,6 +15,7 @@ spool: .qeos-spool
 fail-on-error: true
 no-changes: false
 no-screenshots: true
+no-artifacts: true
 patterns:
   - "reports/**/*.xml"
   - "cucumber.json"
@@ -34,6 +35,7 @@ def test_load_and_types(tmp_path):
     assert config["fail-on-error"] is True
     assert config["no-changes"] is False
     assert config["no-screenshots"] is True
+    assert config["no-artifacts"] is True
     assert config["patterns"] == ["reports/**/*.xml", "cucumber.json"]
     assert config["components"] == ["product-api@a1b2c3d4e5f6"]
 

@@ -162,7 +162,10 @@ details.
   images. It answers 403 when the project has screenshots off or QEOS has no storage configured.
   For a Playwright report (collector 0.13.0), the collector reads a file the report names only when it resolves,
   symlinks followed, inside the working directory, is at most 5 MB and starts like the image type it claims, so a
-  tampered report cannot make it upload another file from the CI machine.
+  tampered report cannot make it upload another file from the CI machine. Collector 0.14.0 reads a trace (a
+  Playwright zip attachment or a Cucumber trace reference) under the same rules, at most 100 MB and starting with
+  `PK\x03\x04`, streams it from disk and checks its size and SHA-256 again as it goes: a file that changed after the
+  report was read is cut off and never stored. Traces are sent only when the key check says the project keeps them.
   A trace upload (`PUT /api/v1/collect/artifacts/{sha256}`, project API key, ADR-037) streams to a temporary object
   while it is checked: `application/zip` only, first bytes `PK`, at most 100 MB (the declared length is
   refused before reading, a longer stream is cut off), and a SHA-256 equal to the path. Only then is it copied to

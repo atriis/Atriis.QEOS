@@ -1,4 +1,5 @@
-"""POST one part to /api/v1/collect/runs, retrying what is worth retrying; before it, the step screenshots."""
+"""POST one part to /api/v1/collect/runs, retrying what is worth retrying; before it, the step screenshots and the
+traces."""
 from __future__ import annotations
 
 import http.client
@@ -13,11 +14,12 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import wait as wait_for
-from typing import Callable, Dict, Mapping, Optional, Set, Tuple
+from typing import Callable, Dict, Iterable, Mapping, Optional, Set, Tuple, Union
 
 from qeos_collector import __version__
 from qeos_collector.payload import Part
 from qeos_collector.playwright_images import FileImage, image_bytes
+from qeos_collector.traces import TRACE_MEDIA_TYPE, TraceChanged, TraceFile
 
 COLLECT_PATH = "/api/v1/collect/runs"
 KEY_CHECK_PATH = "/api/v1/collect/key"
@@ -42,6 +44,14 @@ BLOBS_PATH = "/api/v1/collect/blobs/"
 MAX_IMAGES_PER_RUN = 5000
 IMAGE_BUDGET_SECONDS = 120
 IMAGE_WORKERS = 4
+# Traces (spec 2026-10-21 §4.2): after the screenshots, before the run, streamed from disk, each on its own
+ARTIFACTS_PATH = "/api/v1/collect/artifacts/"
+ARTIFACTS_FIELD = "artifacts"
+OLDER_PLATFORM_ARTIFACTS = ("the platform is older than this collector and refused the results' traces: sent again "
+                            "without them (upgrade QEOS to keep traces)")
+MAX_ARTIFACTS_PER_RUN = 500
+ARTIFACT_BUDGET_SECONDS = 300
+ARTIFACT_WORKERS = 2
 
 
 def _ignore(message: str) -> None:
@@ -216,14 +226,68 @@ def upload_images(
     drops every other reference. Best effort: HTTP and network errors never raise (an unexpected error does; the
     caller catches it), and each reason images were left out is one `warn`.
     The first request goes alone, so a platform that cannot be reached costs one request, not one per image."""
-    shas = list(images)
-    if len(shas) > MAX_IMAGES_PER_RUN:
-        warn(f"{len(shas) - MAX_IMAGES_PER_RUN} beyond {MAX_IMAGES_PER_RUN} per run")
-        shas = shas[:MAX_IMAGES_PER_RUN]
-    if not shas:
-        return set()
     prefix = base_url.strip().rstrip("/") + BLOBS_PATH
     headers = {"Authorization": f"Bearer {key}", "User-Agent": f"qeos-collector/{__version__}"}
+
+    def store(sha: str, deadline: float, first: bool) -> bool:
+        media_type, data = images[sha]
+        return _store_image(prefix + sha, headers, media_type, data, context, deadline, first=first,
+                            clock=clock, sleep=sleep, rand=rand)
+
+    return _each(list(images), MAX_IMAGES_PER_RUN, store, budget_seconds, workers, warn=warn, clock=clock)
+
+
+def upload_artifacts(
+    base_url: str,
+    key: str,
+    artifacts: Dict[str, TraceFile],
+    budget_seconds: float = ARTIFACT_BUDGET_SECONDS,
+    workers: int = ARTIFACT_WORKERS,
+    *,
+    context: Optional[ssl.SSLContext] = None,
+    warn: Callable[[str], None] = _ignore,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+    rand: Callable[[], float] = random.random,
+) -> Set[str]:
+    """Stores each trace (sha256 -> TraceFile) with HEAD, then a PUT streamed from disk when missing, on
+    /collect/artifacts/{sha256} after the screenshots and before the run (spec 2026-10-21 §4.2), and returns the
+    sha256s QEOS holds; the caller drops every other reference. Best effort and bounded like upload_images, with its
+    own budget. A file that changed since the report was read is left out (never uploaded with other bytes)."""
+    prefix = base_url.strip().rstrip("/") + ARTIFACTS_PATH
+    headers = {"Authorization": f"Bearer {key}", "User-Agent": f"qeos-collector/{__version__}"}
+    lock = threading.Lock()
+    left_out = {"changed": 0, "refused": 0}
+
+    def store(sha: str, deadline: float, first: bool) -> bool:
+        outcome = _store_artifact(prefix + sha, headers, artifacts[sha], context, deadline, first=first,
+                                  clock=clock, sleep=sleep, rand=rand)
+        if outcome is True:
+            return True
+        if outcome in left_out:
+            with lock:
+                left_out[outcome] += 1
+        return False
+
+    stored = _each(list(artifacts), MAX_ARTIFACTS_PER_RUN, store, budget_seconds, workers, warn=warn, clock=clock)
+    if left_out["changed"]:
+        warn(f"{left_out['changed']} changed since the report was read")
+    if left_out["refused"]:
+        warn(f"{left_out['refused']} refused by the platform")
+    return stored
+
+
+def _each(shas: list, most: int, store_one: Callable[[str, float, bool], bool], budget_seconds: float, workers: int,
+          *, warn: Callable[[str], None], clock: Callable[[], float]) -> Set[str]:
+    """Runs store_one(sha, deadline, first) for at most `most` of shas, `workers` at a time within the budget, and
+    returns those it stored. store_one raises _OutOfTime, or _StopImages to end the phase; each reason something was
+    left out is one `warn`. The first request goes alone, so a platform that cannot be reached costs one request, not
+    one per file."""
+    if len(shas) > most:
+        warn(f"{len(shas) - most} beyond {most} per run")
+        shas = shas[:most]
+    if not shas:
+        return set()
     # Its own budget: the run upload after it keeps its whole TIME_BUDGET_SECONDS
     deadline = clock() + budget_seconds
     lock = threading.Lock()
@@ -236,10 +300,8 @@ def upload_images(
         if clock() >= deadline:
             late.set()
             return False
-        media_type, data = images[sha]
         try:
-            return _store_image(prefix + sha, headers, media_type, data, context, deadline, first=first,
-                                clock=clock, sleep=sleep, rand=rand)
+            return store_one(sha, deadline, first)
         except _OutOfTime:
             late.set()
         except _StopImages as exc:
@@ -285,22 +347,50 @@ def _store_image(url: str, headers: Mapping[str, str], media_type: str, data: "b
                                clock, sleep, rand)
         if status in (200, 201):
             return True
+    _stop_on(status, "screenshots")
+    return False  # this image only: refused (400, 413) or out of attempts
+
+
+def _stop_on(status: int, what: str) -> None:
+    """Raises _StopImages for the answers every other file of the phase would get too."""
     if status == 401:
         raise _StopImages("the API key is invalid or revoked (401)")
     if status == 403:
-        raise _StopImages("screenshots are off for this project (403)")
+        raise _StopImages(f"{what} are off for this project (403)")
     if status == 410:
         raise _StopImages("the project is pending deletion (410)")
     if 300 <= status < 400:
         raise _StopImages(f"the platform redirected ({status})")
-    return False  # this image only: refused (400, 413) or out of attempts
 
 
-def _blob_request(url: str, method: str, data: Optional[bytes], headers: Mapping[str, str],
+def _store_artifact(url: str, headers: Mapping[str, str], trace: TraceFile, context: Optional[ssl.SSLContext],
+                    deadline: float, *, first: bool, clock: Callable[[], float], sleep: Callable[[float], None],
+                    rand: Callable[[], float]) -> "Union[bool, str]":
+    """True when QEOS holds the trace: already there (HEAD 200) or stored now (PUT 200/201); else False, "changed"
+    (the file is not the one the report named any more) or "refused" (400, 413: this trace only)."""
+    status = _blob_request(url, "HEAD", None, headers, context, deadline, first, clock, sleep, rand)
+    if status == 200:
+        return True
+    if status == 404:
+        put_headers = {**headers, "Content-Type": TRACE_MEDIA_TYPE, "Content-Length": str(trace.size)}
+        try:
+            # A fresh stream for each attempt: http.client sends it chunk by chunk under the Content-Length
+            status = _blob_request(url, "PUT", trace.chunks, put_headers, context, deadline, False,
+                                   clock, sleep, rand)
+        except TraceChanged:
+            return "changed"
+        if status in (200, 201):
+            return True
+    _stop_on(status, "traces")
+    return "refused" if status in (400, 413) else False
+
+
+def _blob_request(url: str, method: str, data: "Optional[bytes | Callable[[], Iterable[bytes]]]",
+                  headers: Mapping[str, str],
                   context: Optional[ssl.SSLContext], deadline: float, first: bool,
                   clock: Callable[[], float], sleep: Callable[[float], None], rand: Callable[[], float]) -> int:
-    """The answer's status, retrying 429, 5xx and dropped connections as upload_part does but within the image
-    phase's deadline; 0 when the attempts ran out."""
+    """The answer's status, retrying 429, 5xx and dropped connections as upload_part does but within the phase's
+    deadline; 0 when the attempts ran out. `data` may be a function returning a fresh body stream for each attempt."""
     attempt = 0
     while True:
         attempt += 1
@@ -308,7 +398,8 @@ def _blob_request(url: str, method: str, data: Optional[bytes], headers: Mapping
         if left <= 0:
             raise _OutOfTime()
         try:
-            status, _, response_headers = _send(url, data, headers, context, method=method,
+            body = data() if callable(data) else data
+            status, _, response_headers = _send(url, body, headers, context, method=method,
                                                 timeout=min(TIMEOUT_SECONDS, left))
         except (OSError, http.client.HTTPException) as exc:
             if clock() >= deadline:
@@ -337,7 +428,7 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _send(
-    endpoint: str, body: Optional[bytes], headers: Mapping[str, str], context: Optional[ssl.SSLContext],
+    endpoint: str, body: "Optional[bytes | Iterable[bytes]]", headers: Mapping[str, str], context: Optional[ssl.SSLContext],
     method: Optional[str] = None, timeout: Optional[float] = None,
 ) -> Tuple[int, bytes, Mapping[str, str]]:
     # build_opener keeps the default ProxyHandler, so HTTPS_PROXY / NO_PROXY are honoured
@@ -388,27 +479,32 @@ def _json(body: bytes) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _refused_fields(body: bytes) -> Tuple[bool, bool, bool]:
-    """(step details, log, screenshots): which of this collector's newer fields a 422 forbids (FastAPI: {"detail":
-    [{"loc": …}]})."""
+def _refused_fields(body: bytes) -> Tuple[bool, bool, bool, bool]:
+    """(step details, log, screenshots, artifacts): which of this collector's newer fields a 422 forbids (FastAPI:
+    {"detail": [{"loc": …}]})."""
     try:
         detail = json.loads(body).get("detail")
     except (ValueError, AttributeError):
-        return False, False, False
+        return False, False, False, False
     if not isinstance(detail, list):
-        return False, False, False
+        return False, False, False, False
     locs = [error["loc"] for error in detail if isinstance(error, dict) and isinstance(error.get("loc"), list)]
     step = any(loc[-2:-1] == ["failed_step"] and loc[-1] in STEP_DETAILS for loc in locs)
     log = any(len(loc) >= 3 and loc[-1] == LOG_FIELD and loc[-3] == "results" for loc in locs)
     # The field itself (an older platform) or anything inside it: a screenshot reference never costs the run
-    shots = any(SCREENSHOTS_FIELD in loc and loc.index(SCREENSHOTS_FIELD) >= 2
-                and loc[loc.index(SCREENSHOTS_FIELD) - 2] == "results" for loc in locs)
-    return step, log, shots
+    shots = _inside_result_field(locs, SCREENSHOTS_FIELD)
+    artifacts = _inside_result_field(locs, ARTIFACTS_FIELD)  # a trace reference never costs the run either
+    return step, log, shots, artifacts
+
+
+def _inside_result_field(locs: list, name: str) -> bool:
+    """True when an error is about a result's `name` field or anything inside it."""
+    return any(name in loc and loc.index(name) >= 2 and loc[loc.index(name) - 2] == "results" for loc in locs)
 
 
 def _downgrade(payload: bytes, body: bytes, warn: Callable[[str], None]) -> Optional[bytes]:
     """The payload without the newer fields the 422 names, one warning per kind; None when there is nothing to strip."""
-    step, log, shots = _refused_fields(body)
+    step, log, shots, artifacts = _refused_fields(body)
     stripped, notes = None, []
     if step:
         without = without_step_details(payload)
@@ -425,6 +521,11 @@ def _downgrade(payload: bytes, body: bytes, warn: Callable[[str], None]) -> Opti
         if without is not None:
             payload = stripped = without
             notes.append(OLDER_PLATFORM_SCREENSHOTS)
+    if artifacts:
+        without = _without_result_field(payload, ARTIFACTS_FIELD)
+        if without is not None:
+            payload = stripped = without
+            notes.append(OLDER_PLATFORM_ARTIFACTS)
     for note in notes:
         warn(note)
     return stripped

@@ -1,5 +1,6 @@
 """Playwright screenshots (spec 2026-10-20): image attachments of each attempt, read from the report (`body`) or from
-disk (`path`, only inside the working directory, real images, at most 5 MB). Videos and traces are not sent yet."""
+disk (`path`, only inside the working directory, real images, at most 5 MB). Videos are not sent yet; traces are
+test_traces.py's."""
 import base64
 import hashlib
 import json
@@ -125,7 +126,7 @@ def test_unsafe_or_unusable_attachments_are_skipped_and_counted(workdir, tmp_pat
     assert [s["sha256"] for s in parsed.results[0]["screenshots"]] == [sha(PNG)]  # only good.png
     warning = next(w for w in parsed.warnings if "Playwright" in w)
     assert "outside the working directory" in warning and "missing" in warning and "over 5 MB" in warning
-    assert "not an image" in warning and "video or trace" in warning
+    assert "not an image" in warning and "1 video (not sent yet)" in warning
 
 
 def test_relative_path_is_resolved_from_the_report_folder(workdir):

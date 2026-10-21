@@ -1,3 +1,3 @@
 """qeos-collector: uploads JUnit XML test results from CI to the QEOS platform."""
 
-__version__ = "0.13.1"
+__version__ = "0.14.0"

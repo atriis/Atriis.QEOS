@@ -13,7 +13,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Callable, List, Mapping, Optional, Sequence
 
-from qeos_collector import __version__, cucumber, features, impact, run_impact
+from qeos_collector import __version__, cucumber, features, impact, run_impact, traces
 from qeos_collector import upload as uploads
 from qeos_collector.ci import detect, sanitize_key
 from qeos_collector.codeowners import load_codeowners
@@ -25,7 +25,7 @@ from qeos_collector.payload import (
 )
 from qeos_collector.spool import spool_part, spooled_parts
 from qeos_collector.upload import (
-    ConfigError, UploadError, check_key, endpoint_for, make_context, upload_images, upload_part,
+    ConfigError, UploadError, check_key, endpoint_for, make_context, upload_artifacts, upload_images, upload_part,
 )
 
 CI_PROVIDERS = ("github_actions", "gitlab_ci", "jenkins", "azure_pipelines", "other", "local")
@@ -110,6 +110,9 @@ def _run_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--no-screenshots", action="store_true",
                         help="send no step screenshots: no image upload, no references in the run "
                              "(default: $QEOS_NO_SCREENSHOTS, or no-screenshots: true in .qeos.yml)")
+    parser.add_argument("--no-artifacts", action="store_true",
+                        help="send no Playwright traces: no trace upload, no references in the run "
+                             "(default: $QEOS_NO_ARTIFACTS, or no-artifacts: true in .qeos.yml)")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -550,6 +553,14 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
                         or file_config.get("no-screenshots") is True)
     _send_screenshots(results, None if args.dry_run else url, api_key, context, say, skip=skip_screenshots,
                       sleep=sleep, clock=clock)
+    skip_artifacts = (args.no_artifacts or env.get("QEOS_NO_ARTIFACTS", "").strip().lower() in _TRUE
+                      or file_config.get("no-artifacts") is True)
+    trace_skips: dict = {}
+    for report in parsed:
+        for reason, number in getattr(report, "artifact_skips", {}).items():
+            trace_skips[reason] = trace_skips.get(reason, 0) + number
+    _send_artifacts(results, trace_skips, None if args.dry_run else url, api_key, context, say,
+                    skip=skip_artifacts, sleep=sleep, clock=clock)
     parts = build_parts(run, results, key, changes, components)
 
     if args.dry_run:
@@ -635,6 +646,68 @@ def _send_screenshots(results: List[dict], url: Optional[str], api_key: str, con
                 row["screenshots"] = kept
             else:
                 del row["screenshots"]
+
+
+def _send_artifacts(results: List[dict], skips: dict, url: Optional[str], api_key: str, context, say: _Output, *,
+                    skip: bool, sleep, clock) -> None:
+    """Traces (spec 2026-10-21 §4.2), after the screenshots and before the run: streams the rows' trace files up, then
+    keeps only the references to traces QEOS holds. Every row loses its `_artifacts` here. `skips` counts the traces
+    left out while reading the reports, by reason. A dry run (no url) keeps the references and uploads nothing. Best
+    effort with its own budget: whatever goes wrong is one line, and the run is still sent. When traces are off (here
+    or on the platform) that line is all: no reasons per file."""
+    files: dict = {}
+    for row in results:
+        files.update(row.pop("_artifacts", None) or {})
+    left_out = sum(skips.values())
+    stored: set = set()
+    if skip:
+        if files or left_out:
+            say(f"traces: {len(files) + left_out} skipped (turned off by --no-artifacts, QEOS_NO_ARTIFACTS or "
+                "no-artifacts in .qeos.yml)")
+    elif url is None:
+        if left_out:
+            say(f"traces: {left_out} skipped ({traces.reasons(skips)})")
+        return
+    elif files or left_out:
+        notes: List[str] = []
+        on = False
+        # One budget for the whole phase, the key check included: traces never hold the run up for longer
+        deadline = clock() + uploads.ARTIFACT_BUDGET_SECONDS
+        try:
+            identity = check_key(url, api_key, context, timeout=min(uploads.TIMEOUT_SECONDS, deadline - clock()))
+        except UploadError as exc:
+            notes.append(f"key check failed: {exc}")
+        except Exception as exc:  # a bug or an odd environment must never cost the run
+            notes.append(f"unexpected error: {type(exc).__name__}: {exc}")
+        else:
+            if identity.get("artifacts") is True:
+                on = True
+                if files:
+                    upload_notes: List[str] = []
+                    try:
+                        stored = upload_artifacts(url, api_key, files, max(0.0, deadline - clock()),
+                                                  context=context, warn=upload_notes.append, sleep=sleep, clock=clock)
+                    except Exception as exc:  # as above: the run goes without traces
+                        stored = set()
+                        upload_notes.append(f"unexpected error: {type(exc).__name__}: {exc}")
+                    notes += upload_notes
+            elif "artifacts" not in identity:
+                notes.append("the platform is older than this collector (upgrade QEOS to keep traces)")
+            else:
+                notes.append("off for this project (a project owner or admin turns on Keep traces from uploads in "
+                             "Project Settings)")
+        if on and left_out:
+            notes.insert(0, traces.reasons(skips))
+        megabytes = sum(files[sha].size for sha in stored) / (1024 * 1024)
+        say(f"traces: {len(stored)} stored ({megabytes:.1f} MB), {len(files) - len(stored) + left_out} skipped"
+            + (f" ({'; '.join(notes)})" if notes else ""))
+    for row in results:
+        if "artifacts" in row:
+            kept = [artifact for artifact in row["artifacts"] if artifact["sha256"] in stored]
+            if kept:
+                row["artifacts"] = kept
+            else:
+                del row["artifacts"]
 
 
 def _resend_spooled(spool_dir, endpoint, api_key, context, say: _Output, *, sleep, clock) -> None:

@@ -165,6 +165,7 @@ variable, and both win over what is detected from the CI system.
 | `--gate` | `QEOS_GATE=1` | Exit 1 if the run has failures outside quarantine, or could not be uploaded (see below) |
 | `--spool` | `QEOS_SPOOL` | Directory keeping parts a failed upload could not deliver; the next invocation resends them first, under their original Idempotency-Key (so nothing is ever stored twice). Capped at 100 files; rejected uploads (401/409) are never spooled. Point it at a persistent runner path — a wiped workspace wipes the spool |
 | `--no-screenshots` | `QEOS_NO_SCREENSHOTS=1` | Send no step screenshots: no image upload and no references in the run (see [Step screenshots](#step-screenshots-cucumber-from-0110)) |
+| `--no-artifacts` | `QEOS_NO_ARTIFACTS=1` | Send no Playwright traces: no trace upload and no references in the run (see [Traces](#traces-from-0140)) |
 | `--dry-run` | — | Print the JSON; upload nothing |
 | — | `QEOS_ACTION_EXTRA_ARGS` | More flags as one string, split into words as a POSIX shell would (quotes group; nothing is expanded or run; a backslash escapes, so write paths with `/`). Flags only: a `--` or a word that is no flag's value is refused (exit 2), so nothing can start a test command. The variable is not passed on to the test command. The GitHub Action passes its `extra-args` this way. GitLab's `QEOS_EXTRA_ARGS` is a different variable, which the template puts on the command line |
 
@@ -480,6 +481,7 @@ ca-file: certs/internal-ca.pem
 spool: .qeos-spool
 fail-on-error: true
 no-screenshots: true   # from 0.12.0: never send step screenshots from this repository
+no-artifacts: true     # from 0.14.0: never send Playwright traces from this repository
 patterns:
   - "reports/**/*.xml"
 components:
@@ -552,7 +554,8 @@ showing up, but its failures stop counting. With `--gate`, the collector decides
 - Playwright's JSON reporter (`--reporter=json`): every retry attempt is kept as its own
   result (a flaky spec shows as fail+pass in one run), project name as suite, spec file as
   class, `timedOut` counts as failed and `interrupted` as errored. From 0.13.0 its image attachments become
-  screenshots: see [Playwright screenshots](#playwright-screenshots-from-0130).
+  screenshots: see [Playwright screenshots](#playwright-screenshots-from-0130), and from 0.14.0 its traces go up too:
+  see [Traces](#traces-from-0140).
 - Skips, with a warning, files over 50 MB, files that are not well-formed XML, and files that
   declare a DOCTYPE or entities (JUnit never needs one; refusing them blocks XML entity attacks).
 - Cuts failure messages, output and logs to 64 KB, as the platform does.
@@ -617,8 +620,8 @@ reporter: [["json", { outputFile: "results.json" }]],
 ```
 
 - **What is sent.** Image attachments (`image/png`, `image/jpeg`, `image/webp`), whether the report holds them inline
-  (`testInfo.attach(name, { body, contentType })`) or as a file path (the failure screenshot). Videos and traces are
-  not sent yet; they are counted as skipped.
+  (`testInfo.attach(name, { body, contentType })`) or as a file path (the failure screenshot). Videos are not sent
+  yet; they are counted as skipped. Traces have their own phase from 0.14.0: see [Traces](#traces-from-0140).
 - **Where they show.** The report does not say which step took an image, so each one is shown as taken at the end of
   the test, labelled with the failing step's title (or "End of test") and the attachment's name when it is not
   `screenshot`. A failed `toHaveScreenshot()` shows its images first, as "Expected", "Actual" and "Difference".
@@ -629,6 +632,52 @@ reporter: [["json", { outputFile: "results.json" }]],
   report is read and read again when it is uploaded, so a large run does not hold every image in memory; a file that
   changed in between is left out.
 
+## Traces (from 0.14.0)
+
+A failed test's Playwright trace reaches QEOS with its result, and opens there in the trace viewer.
+
+- **What is sent.** From Playwright's JSON reporter, every `application/zip` attachment with a file path (the trace,
+  whatever its name; the name is kept). From a Cucumber JSON report, a reference the scenario attached with the media
+  type `application/vnd.qeos.artifact+json` and the content `{"kind": "trace", "path": "test-results/traces/x.zip"}`;
+  it is never part of the log nor a screenshot. A `"video"` reference is skipped and counted (videos are not sent
+  yet), and so is a reference that is not that JSON. The run carries only references:
+  `artifacts: [{sha256, kind: "trace", name}]`, at most 5 per result.
+- **Only files in the checkout.** As for Playwright screenshots: a trace is read only when it resolves (symlinks
+  followed) inside the working directory, is at most 100 MB and starts like a ZIP file (`PK\x03\x04`). A relative
+  Playwright path is read from the report's folder; a relative Cucumber path from the report's folder, else from the
+  working directory. A trace is hashed while the report is read and read again, from disk, only for its upload.
+- **Upload.** After the screenshots and before the run: `HEAD /api/v1/collect/artifacts/{sha256}`, then, when QEOS
+  does not have it, a `PUT` with `Content-Type: application/zip` and `Content-Length`, streamed from the file in 1 MB
+  pieces (never the whole trace in memory). The size and hash are checked again as it streams: a file that changed
+  since the report was read is cut off before it completes and left out. Two at a time, at most 500 per run, retried
+  as screenshots are, with a limit of 5 minutes of its own, the key check included; when it runs out the rest are
+  skipped and the run goes without them. A trace problem never fails the run upload. One line sums it up:
+  `traces: 3 stored (41.2 MB), 1 skipped`, with the reasons in brackets.
+- **Only when QEOS takes them.** The key check (`GET /api/v1/collect/key`) must say `artifacts: true`. Traces are off
+  by default: a project owner or admin turns on **Keep traces from uploads** in Project Settings. When they are off,
+  when QEOS predates traces, or when the key check fails, no trace is sent and the run goes without `artifacts`; the
+  trace line then says why, with no reasons per file. QEOS refusing traces mid-way (401, 403, 410) skips the rest.
+- **Older platform.** A 422 naming `results.N.artifacts` or anything inside it gets the upload once more without any
+  result's `artifacts`, under the same Idempotency-Key, as for `screenshots`.
+- **Turning it off.** `--no-artifacts` (or `QEOS_NO_ARTIFACTS=1`, or `no-artifacts: true` in `.qeos.yml`) skips all of
+  this: no key check, no trace, no references; one line says how many were skipped.
+- **Privacy.** Traces contain page snapshots and network traffic, which can include cookies, tokens and personal data
+  of your test accounts. QEOS cannot mask them. Turn the project setting on only if every project reader may see that.
+
+With Playwright's own runner, keep the traces of failed tests:
+
+```js
+// playwright.config.ts
+use: { trace: "retain-on-failure" },
+reporter: [["json", { outputFile: "results.json" }]],
+```
+
+With cucumber-js, attach a reference in the After hook, right after `tracing.stop({ path: tracePath })`:
+
+```js
+this.attach(JSON.stringify({ kind: "trace", path: tracePath }), "application/vnd.qeos.artifact+json");
+```
+
 ## Network and security
 
 - HTTPS is required, except for `http://localhost`, `127.0.0.1` and `::1`.
@@ -637,7 +686,7 @@ reporter: [["json", { outputFile: "results.json" }]],
 - `HTTPS_PROXY` and `NO_PROXY` are honoured.
 - Redirects are not followed, so the key is never sent anywhere but `QEOS_URL`.
 - Retries: connection errors, timeouts and 5xx answers are retried after 1, 2, 4 and 8 seconds;
-  429 waits for `Retry-After` (at most 10 s). At most 5 attempts and 2 minutes per run. The one other retry is the 422 about `failed_step.definition` or `failed_step.pattern` above, sent once more without those two fields (and likewise without `log` or `screenshots`). Step screenshots retry the same way within their own 2 minutes, before the run.
+  429 waits for `Retry-After` (at most 10 s). At most 5 attempts and 2 minutes per run. The one other retry is the 422 about `failed_step.definition` or `failed_step.pattern` above, sent once more without those two fields (and likewise without `log`, `screenshots` or `artifacts`). Step screenshots retry the same way within their own 2 minutes, before the run, and traces within their own 5 minutes after them.
 - The API key is never printed.
 
 ## Develop

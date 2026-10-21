@@ -7,13 +7,15 @@ import pytest
 
 
 BLOBS = "/api/v1/collect/blobs/"
+ARTIFACTS = "/api/v1/collect/artifacts/"
 
 
 class FakePlatform:
     """Answers POSTs with scripted responses, in order, and records every request. Blob HEAD/PUT answer by sha256
     instead (they run in parallel, so no order): HEAD 200 for what is in `stored`, else 404; PUT `put_status` (201 by
     default; a list answers in turn) and stores it on 2xx. `blob_delay` slows each blob request; `blob_hangup` drops
-    the connection. `key_check`, when set, answers GET /collect/key."""
+    the connection. `key_check`, when set, answers GET /collect/key. Trace HEAD/PUT on /collect/artifacts/{sha256} are
+    answered the same way and recorded with `path`."""
 
     def __init__(self):
         self.url = ""
@@ -67,9 +69,11 @@ def platform():
             self._blob("PUT", self.rfile.read(int(self.headers.get("Content-Length", 0))))
 
         def _blob(self, method, body):
-            sha = self.path[len(BLOBS):] if self.path.startswith(BLOBS) else ""
+            prefix = next((p for p in (BLOBS, ARTIFACTS) if self.path.startswith(p)), None)
+            sha = self.path[len(prefix):] if prefix else ""
             with lock:
-                fake.blob_requests.append({"method": method, "sha": sha, "headers": self.headers, "body": body})
+                fake.blob_requests.append({"method": method, "sha": sha, "headers": self.headers, "body": body,
+                                           "path": self.path})
             time.sleep(fake.blob_delay)
             if fake.blob_hangup:
                 self.close_connection = True

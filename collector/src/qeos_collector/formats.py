@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 from typing import Iterator, Optional
 from xml.parsers import expat
 
-from qeos_collector import playwright_images
+from qeos_collector import playwright_images, traces
 from qeos_collector.junit import (
     CLASS_NAME_LENGTH, MAX_DURATION_MS, MAX_FILE_BYTES, NAME_LENGTH, SUITE_LENGTH,
     ParsedFile, _cut, _first_line, _read_xml, _Refused, _seconds, _skip, _timestamp, _walk,
@@ -177,7 +177,7 @@ def _parse_cucumber_file(path: str, parsed: ParsedFile) -> ParsedFile:
     if isinstance(data, dict) and isinstance(data.get("suites"), list) and "config" in data:
         # image attachments (spec 2026-10-20): paths resolve from the report's folder, reads stay in the working dir
         context = {"report_dir": os.path.dirname(os.path.abspath(path)), "root": os.path.realpath(os.getcwd()),
-                   "skips": {}, "read": 0}
+                   "skips": {}, "read": 0, "trace_skips": parsed.artifact_skips}
         for suite in data["suites"]:
             _playwright_suite(suite, parsed, context)
         parsed.warnings.extend(playwright_images.skip_warning(path, context["skips"], context["read"] > 0))
@@ -186,8 +186,11 @@ def _parse_cucumber_file(path: str, parsed: ParsedFile) -> ParsedFile:
     if not features:
         return _skip(parsed, "not Cucumber JSON (no features with elements)")
     skips: dict = {}
+    # trace references (spec 2026-10-21 §4.2): paths resolve from the report's folder, then the working directory
+    trace_context = {"report_dir": os.path.dirname(os.path.abspath(path)), "root": os.path.realpath(os.getcwd()),
+                     "skips": parsed.artifact_skips}
     for feature in features:
-        _cucumber_feature(feature, parsed, skips=skips)
+        _cucumber_feature(feature, parsed, skips=skips, traces_context=trace_context)
     if skips.get("large"):
         parsed.warnings.append(f"skipped {skips['large']} screenshot(s) over 5 MB in {path}")
     if skips.get("over"):
@@ -343,6 +346,28 @@ def _scenario_screenshots(element: dict, steps: list, skips: dict) -> "tuple[lis
     return screenshots, images
 
 
+def _scenario_traces(element: dict, steps: list, context: dict) -> "tuple[list, dict]":
+    """The traces the scenario's reference attachments name (application/vnd.qeos.artifact+json), from any step or
+    hook, in order: [{sha256, kind: "trace", name}] and {sha256: TraceFile}. Skips are counted into context["skips"]."""
+    before = element.get("before") if isinstance(element.get("before"), list) else []
+    after = element.get("after") if isinstance(element.get("after"), list) else []
+    found = []
+    for step in [*before, *steps, *after]:
+        if not isinstance(step, dict):
+            continue
+        for key in ("embeddings", "attachments"):
+            attachments = step.get(key)
+            for attachment in attachments if isinstance(attachments, list) else []:
+                fields = _attachment_fields(attachment)
+                if fields is None or fields[0] != traces.REFERENCE_MEDIA_TYPE:
+                    continue
+                trace = traces.reference_trace(fields[1], fields[2], context["report_dir"], context["root"],
+                                               context["skips"])
+                if trace is not None:
+                    found.append(trace)
+    return traces.references(found, context["skips"])
+
+
 def _scenario_log(element: dict, steps: list) -> Optional[str]:
     """The scenario's text attachments in order: cucumber-jvm's scenario hooks (`before`), then its steps (cucumber-js
     hook steps and Background steps included), then `after`; joined by newlines and cut to 64 KB. None without text."""
@@ -353,10 +378,11 @@ def _scenario_log(element: dict, steps: list) -> Optional[str]:
 
 
 def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] = None,
-                      skips: Optional[dict] = None) -> None:
+                      skips: Optional[dict] = None, traces_context: Optional[dict] = None) -> None:
     """The feature's scenarios (and outline rows) as results. With `lines`, each result's scenario line too (an int,
     or None), in step with parsed.results: run-impact's discovery reads a dry run through this parser, and then a
-    scenario without a name is kept too (an empty name), so that it still runs in a stage."""
+    scenario without a name is kept too (an empty name), so that it still runs in a stage. With `traces_context`
+    (report_dir, root, skips), the scenarios' trace references too."""
     suite = str(feature.get("name") or "")
     # Windows runners report "tests\features\a.feature"; the key must not depend on the OS (ADR-023)
     uri = str(feature.get("uri") or "").replace("\\", "/")
@@ -440,6 +466,11 @@ def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] =
         if screenshots:
             row["screenshots"] = screenshots
             row["_images"] = images  # private: uploaded apart, kept out of the body by payload.py
+        if traces_context is not None:
+            artifacts, files = _scenario_traces(element, steps, traces_context)
+            if artifacts:
+                row["artifacts"] = artifacts
+                row["_artifacts"] = files  # private: streamed up apart, kept out of the body by payload.py
         parsed.results.append(row)
         if lines is not None:
             line = element.get("line")
@@ -493,6 +524,11 @@ def _playwright_suite(suite: dict, parsed: ParsedFile, context: Optional[dict] =
                         context["read"] += len(screenshots)
                         row["screenshots"] = screenshots
                         row["_images"] = images  # private: uploaded apart, kept out of the body by payload.py
+                    artifacts, files = traces.attempt_traces(
+                        attempt, context["report_dir"], context["root"], context["trace_skips"])
+                    if artifacts:
+                        row["artifacts"] = artifacts
+                        row["_artifacts"] = files  # private: streamed up apart, kept out of the body by payload.py
                 parsed.results.append(row)
 
 

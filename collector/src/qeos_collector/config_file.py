@@ -18,7 +18,7 @@ FILE_NAME = ".qeos.yml"
 LEGACY_FILE_NAME = ".qav.yml"  # deprecated; read only when FILE_NAME is missing
 
 STRING_KEYS = ("url", "environment", "ca-file", "spool", "ci-provider", "branch")
-BOOL_KEYS = ("fail-on-error", "no-changes", "no-screenshots", "gate")
+BOOL_KEYS = ("fail-on-error", "no-changes", "no-screenshots", "no-artifacts", "gate")
 LIST_KEYS = ("patterns", "components", "features")
 KNOWN = (*STRING_KEYS, *BOOL_KEYS, *LIST_KEYS)
 

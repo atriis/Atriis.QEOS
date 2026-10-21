@@ -22,6 +22,7 @@ _SHA = re.compile(r"^[0-9a-fA-F]{7,40}$")
 _RUN_URL = re.compile(r"^https?://\S+$")
 MAX_COMPONENTS = 20       # mirrors the server's cap
 MAX_COMPONENT_NAME = 100
+PRIVATE_FIELDS = {"_images", "_artifacts"}
 
 
 @dataclass
@@ -125,8 +126,9 @@ def parse_components(values: Sequence[str]) -> List[dict]:
 
 def build_parts(run: dict, results: List[dict], idempotency_key: str,
                 changes: "dict | None" = None, components: "List[dict] | None" = None) -> List[Part]:
-    # "_images" is the collector's own: the bytes are uploaded apart and never part of the body
-    results = [{k: v for k, v in row.items() if k != "_images"} if "_images" in row else row for row in results]
+    # "_images" and "_artifacts" are the collector's own: the files are uploaded apart and never part of the body
+    results = [{k: v for k, v in row.items() if k not in PRIVATE_FIELDS} if PRIVATE_FIELDS & row.keys() else row
+               for row in results]
     chunks = [results[i:i + MAX_RESULTS_PER_PART] for i in range(0, len(results), MAX_RESULTS_PER_PART)]
     encoded: List[Tuple[bytes, int]] = []
     for chunk in chunks:

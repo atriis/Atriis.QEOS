@@ -4,7 +4,7 @@ Playwright's JSON reporter lists `attachments: [{name, contentType, path?, body?
 comes either inline (`body`, base64) or as a file on the CI disk (`path`). A report is only JSON, so a `path` is read
 only when it resolves (symlinks followed) inside the working directory, is a regular file of at most 5 MB, and starts
 with the magic bytes of its declared type: a careless or tampered report can never make the collector upload another
-file of the CI machine. Videos and traces are not sent yet.
+file of the CI machine. Traces are traces.py's (0.14.0); videos are not sent yet.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ REASONS = {
     "large": "over 5 MB",
     "not_image": "not an image of its declared type",
     "bad_body": "not valid base64",
-    "media": "video or trace (not sent yet)",
+    "media": "video (not sent yet)",
     "over": f"beyond {MAX_SCREENSHOTS_PER_RESULT} per result",
 }
 
@@ -158,7 +158,7 @@ def attempt_screenshots(attempt: dict, report_dir: str, root: str, skips: dict) 
         if not isinstance(attachment, dict):
             continue
         media = str(attachment.get("contentType") or "").split(";", 1)[0].strip().lower()
-        if media.startswith("video/") or media == "application/zip":
+        if media.startswith("video/"):
             skips["media"] = skips.get("media", 0) + 1
             continue
         if media not in IMAGE_MEDIA_TYPES:

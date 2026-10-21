@@ -39,6 +39,8 @@ class ParsedFile:
     warnings: List[str] = field(default_factory=list)
     skipped: bool = False
     unnamed: int = 0
+    # traces left out while reading, by reason (traces.REASONS): said once, in the upload's trace line
+    artifact_skips: dict = field(default_factory=dict)
 
 
 def parse_file(path: str) -> ParsedFile:

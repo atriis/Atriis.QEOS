@@ -664,6 +664,33 @@ def test_a_422_inside_a_screenshot_reference_also_removes_screenshots(platform):
     assert "screenshots" not in json.loads(platform.requests[1]["body"])["results"][0]
 
 
+def test_422_downgrade_removes_artifacts(platform):
+    part = Part(body=json.dumps({"run": {}, "results": [
+        {"name": "t", "status": "failed", "log": "x",
+         "screenshots": [{"sha256": SHA_A, "media_type": "image/png", "step_text": "Given a", "step_line": 3}],
+         "artifacts": [{"sha256": SHA_B, "kind": "trace", "name": "trace"}]},
+    ]}).encode(), idempotency_key="gh-1-1-traces", count=1)
+    platform.reply(422, {"detail": [{"type": "extra_forbidden", "loc": ["body", "results", 0, "artifacts"],
+                                     "msg": "Extra inputs are not permitted"}]})
+    platform.reply(201, RECEIPT)
+    warnings = []
+    assert send_step(platform, warnings, part) == (201, RECEIPT)
+    second = json.loads(platform.requests[1]["body"])["results"][0]
+    assert "artifacts" not in second and second["log"] == "x" and second["screenshots"]
+    assert platform.requests[1]["headers"]["Idempotency-Key"] == "gh-1-1-traces"
+    assert len(warnings) == 1 and "traces" in warnings[0]
+
+
+def test_a_422_inside_an_artifact_reference_also_removes_artifacts(platform):
+    part = Part(body=json.dumps({"run": {}, "results": [{"name": "t", "status": "failed", "artifacts": [
+        {"sha256": SHA_A, "kind": "video"}]}]}).encode(), idempotency_key="gh-1-1-trace-field", count=1)
+    platform.reply(422, {"detail": [{"type": "literal_error",
+                                     "loc": ["body", "results", 0, "artifacts", 0, "kind"], "msg": "bad"}]})
+    platform.reply(201, RECEIPT)
+    assert send_step(platform, [], part) == (201, RECEIPT)  # a trace never costs the run
+    assert "artifacts" not in json.loads(platform.requests[1]["body"])["results"][0]
+
+
 def test_5001st_image_skipped_with_one_warning(monkeypatch):
     calls = []
     monkeypatch.setattr(upload, "_store_image", lambda url, *args, **kwargs: calls.append(url) or True)
