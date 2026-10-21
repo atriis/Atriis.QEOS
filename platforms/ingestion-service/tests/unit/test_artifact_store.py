@@ -1,12 +1,15 @@
 import asyncio
+import io
 
 import pytest
+from botocore.exceptions import ClientError
+from botocore.response import StreamingBody
 from botocore.stub import Stubber
 
 from src.ingestion.core.config import settings
 from src.ingestion.utils import artifact_store
 from src.ingestion.utils.artifact_store import (
-    ArtifactDeleteError, ArtifactNotFound, MemoryArtifactStore, S3ArtifactStore, artifact_key, get_artifact_store, screenshot_key)
+    ArtifactDeleteError, ArtifactNotFound, ArtifactRangeError, MemoryArtifactStore, S3ArtifactStore, artifact_key, get_artifact_store, screenshot_key)
 
 
 @pytest.fixture(autouse=True)
@@ -150,3 +153,128 @@ def test_memory_store_open_and_range_of_a_missing_key_raise_not_found():
         MemoryArtifactStore().open("artifacts/1/missing")
     with pytest.raises(ArtifactNotFound):
         MemoryArtifactStore().get_range("artifacts/1/missing", 0, 1)
+
+
+# S3 streaming (ADR-037). The Stubber checks each call's parameters, so a wrong part split fails the test.
+BUCKET = "qeos-artifacts"
+
+
+def _create(stubber, key):
+    stubber.add_response("create_multipart_upload", {"UploadId": "u1"},
+                         {"Bucket": BUCKET, "Key": key, "ContentType": "application/zip"})
+
+
+def _upload(stubber, key, bodies):
+    _create(stubber, key)
+    for number, body in enumerate(bodies, 1):
+        stubber.add_response("upload_part", {"ETag": f"e{number}"},
+                             {"Bucket": BUCKET, "Key": key, "UploadId": "u1", "PartNumber": number, "Body": body})
+
+
+def _complete(stubber, key, count):
+    stubber.add_response("complete_multipart_upload", {}, {
+        "Bucket": BUCKET, "Key": key, "UploadId": "u1",
+        "MultipartUpload": {"Parts": [{"ETag": f"e{n}", "PartNumber": n} for n in range(1, count + 1)]}})
+
+
+def _abort(stubber, key):
+    stubber.add_response("abort_multipart_upload", {}, {"Bucket": BUCKET, "Key": key, "UploadId": "u1"})
+
+
+def test_s3_put_stream_splits_into_parts_and_keeps_a_short_last_part(s3, monkeypatch):
+    store, stubber = s3
+    monkeypatch.setattr(artifact_store, "PART_SIZE", 4)
+    _upload(stubber, "artifacts/1/a", [b"0123", b"4567", b"89"])
+    _complete(stubber, "artifacts/1/a", 3)
+    asyncio.run(store.put_stream("artifacts/1/a", iter([b"01", b"23456", b"789"]), "application/zip"))
+    stubber.assert_no_pending_responses()
+
+
+def test_s3_put_stream_of_an_exact_multiple_has_no_empty_trailing_part(s3, monkeypatch):
+    store, stubber = s3
+    monkeypatch.setattr(artifact_store, "PART_SIZE", 4)
+    _upload(stubber, "artifacts/1/a", [b"0123", b"4567"])
+    _complete(stubber, "artifacts/1/a", 2)
+    asyncio.run(store.put_stream("artifacts/1/a", iter([b"01234567"]), "application/zip"))
+    stubber.assert_no_pending_responses()
+
+
+def test_s3_put_stream_of_an_empty_body_sends_one_empty_part(s3):
+    store, stubber = s3
+    _upload(stubber, "artifacts/1/a", [b""])
+    _complete(stubber, "artifacts/1/a", 1)
+    asyncio.run(store.put_stream("artifacts/1/a", iter([]), "application/zip"))
+    stubber.assert_no_pending_responses()
+
+
+def test_s3_put_stream_aborts_and_reraises_when_a_part_fails(s3, monkeypatch):
+    store, stubber = s3
+    monkeypatch.setattr(artifact_store, "PART_SIZE", 4)
+    _create(stubber, "artifacts/1/a")
+    stubber.add_client_error("upload_part", service_error_code="InternalError", http_status_code=500)
+    _abort(stubber, "artifacts/1/a")
+    with pytest.raises(ClientError) as raised:
+        asyncio.run(store.put_stream("artifacts/1/a", iter([b"01234567"]), "application/zip"))
+    assert raised.value.response["Error"]["Code"] == "InternalError"
+    stubber.assert_no_pending_responses()
+
+
+def test_s3_put_stream_aborts_and_reraises_when_the_iterator_fails(s3):
+    store, stubber = s3
+
+    async def chunks():
+        yield b"01"
+        raise ValueError("client went away")
+
+    _create(stubber, "artifacts/1/a")
+    _abort(stubber, "artifacts/1/a")
+    with pytest.raises(ValueError, match="client went away"):
+        asyncio.run(store.put_stream("artifacts/1/a", chunks(), "application/zip"))
+    stubber.assert_no_pending_responses()
+
+
+def test_s3_put_stream_keeps_the_original_error_when_the_abort_fails_too(s3):
+    store, stubber = s3
+
+    async def chunks():
+        raise ValueError("original")
+        yield b""  # pragma: no cover
+
+    _create(stubber, "artifacts/1/a")
+    stubber.add_client_error("abort_multipart_upload", service_error_code="InternalError", http_status_code=500)
+    with pytest.raises(ValueError, match="original"):
+        asyncio.run(store.put_stream("artifacts/1/a", chunks(), "application/zip"))
+    stubber.assert_no_pending_responses()
+
+
+def test_s3_open_streams_the_body_and_reports_its_size(s3):
+    store, stubber = s3
+    body = StreamingBody(io.BytesIO(b"0123456789"), 10)
+    stubber.add_response("get_object", {"Body": body, "ContentLength": 10}, {"Bucket": BUCKET, "Key": "artifacts/1/a"})
+    chunks, size = store.open("artifacts/1/a")
+    assert size == 10 and b"".join(chunks) == b"0123456789"
+
+
+def test_s3_get_range_sends_an_inclusive_range(s3):
+    store, stubber = s3
+    body = StreamingBody(io.BytesIO(b"2345"), 4)
+    stubber.add_response("get_object", {"Body": body},
+                         {"Bucket": BUCKET, "Key": "artifacts/1/a", "Range": "bytes=2-5"})
+    assert store.get_range("artifacts/1/a", 2, 5) == b"2345"
+
+
+def test_s3_open_and_get_range_of_a_missing_key_raise_not_found(s3):
+    store, stubber = s3
+    stubber.add_client_error("get_object", service_error_code="NoSuchKey", http_status_code=404)
+    with pytest.raises(ArtifactNotFound):
+        store.open("artifacts/1/missing")
+    stubber.add_client_error("get_object", service_error_code="NoSuchKey", http_status_code=404)
+    with pytest.raises(ArtifactNotFound):
+        store.get_range("artifacts/1/missing", 0, 1)
+
+
+def test_s3_get_range_past_the_end_raises_range_error(s3):
+    store, stubber = s3
+    stubber.add_client_error("get_object", service_error_code="InvalidRange", http_status_code=416)
+    with pytest.raises(ArtifactRangeError):
+        store.get_range("artifacts/1/a", 100, 200)

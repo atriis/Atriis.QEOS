@@ -3,11 +3,14 @@ Only ingestion talks to it. Without all four ARTIFACTS_S3_* settings there is no
 before without screenshots. get_artifact_store() takes no request, so FastAPI routes and batch jobs (retention,
 purge) call it the same way."""
 import asyncio
+import logging
 import threading
 from contextlib import contextmanager
 from typing import AsyncIterator, Dict, Iterator, List, Optional, Protocol, Tuple, Union
 
 from src.ingestion.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 DELETE_CHUNK = 1000  # S3 delete_objects takes at most 1,000 keys
 PART_SIZE = 8 * 1024 * 1024  # multipart parts of a streamed upload (S3 wants at least 5 MB, except the last)
@@ -20,6 +23,10 @@ BUSY_RETRY_AFTER = "5"
 
 class ArtifactNotFound(Exception):
     """get() found no object under that key, in whichever store."""
+
+
+class ArtifactRangeError(Exception):
+    """get_range() asked for bytes outside the object (S3 InvalidRange, HTTP 416)."""
 
 
 class ArtifactDeleteError(Exception):
@@ -163,7 +170,10 @@ class S3ArtifactStore:
 
     async def put_stream(self, key: str, chunks: Chunks, media_type: str) -> None:
         """Multipart upload in PART_SIZE parts; boto3 runs in a worker thread so the event loop stays free. Any
-        failure, a cancelled request included, aborts the upload so no part is left in the bucket."""
+        failure, a cancelled request included, aborts the upload and re-raises the original error. A part still in
+        flight when a request is cancelled can land after the abort: a bucket lifecycle rule for incomplete
+        multipart uploads is the safety net. A sync iterator is consumed on the event loop, fine for in-memory data;
+        the caller wraps disk reads (asyncio.to_thread) so they do not block it."""
         upload_id = (await asyncio.to_thread(
             self._client.create_multipart_upload, Bucket=self._bucket, Key=key, ContentType=media_type))["UploadId"]
         parts: List[dict] = []
@@ -188,8 +198,11 @@ class S3ArtifactStore:
                 self._client.complete_multipart_upload, Bucket=self._bucket, Key=key, UploadId=upload_id,
                 MultipartUpload={"Parts": parts})
         except BaseException:
-            await asyncio.shield(asyncio.to_thread(
-                self._client.abort_multipart_upload, Bucket=self._bucket, Key=key, UploadId=upload_id))
+            try:  # a failing abort must not hide the error that caused it
+                await asyncio.shield(asyncio.to_thread(
+                    self._client.abort_multipart_upload, Bucket=self._bucket, Key=key, UploadId=upload_id))
+            except Exception:
+                logger.warning("could not abort multipart upload %s of %s", upload_id, key, exc_info=True)
             raise
 
     def open(self, key: str) -> Tuple[Iterator[bytes], int]:
@@ -210,8 +223,11 @@ class S3ArtifactStore:
             return self._client.get_object(
                 Bucket=self._bucket, Key=key, Range=f"bytes={start}-{end}")["Body"].read()
         except ClientError as exc:
-            if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
+            code = exc.response.get("Error", {}).get("Code")
+            if code in ("NoSuchKey", "404"):
                 raise ArtifactNotFound(key) from exc
+            if code == "InvalidRange" or exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode") == 416:
+                raise ArtifactRangeError(f"{key} bytes={start}-{end}") from exc
             raise
 
     def delete(self, keys: List[str]) -> None:
