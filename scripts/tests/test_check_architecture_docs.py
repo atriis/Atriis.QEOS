@@ -141,11 +141,11 @@ ROUTE_COMPOSE = """services:
     image: x
 """
 ROUTE_NGINX = """server {
-    listen 80;
+    listen 8080;
     location / { return 301 https://$host$request_uri; }
 }
 server {
-    listen 443 ssl;
+    listen 8443 ssl;
     location ~ ^/api/v1/projects/[0-9]+/(runs|analytics)(/|$) {
         set $upstream http://runs-service:8000;
         proxy_pass $upstream;
@@ -165,7 +165,7 @@ server {
     }
     location /api/ { return 404; }
     location / {
-        set $upstream http://dashboard:80;
+        set $upstream http://dashboard:8080;
         proxy_pass $upstream;
     }
 }

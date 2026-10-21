@@ -145,7 +145,7 @@ def service_prefixes(root: Path, services: set[str]) -> dict[str, list[str]]:
 
 def https_locations(conf: str) -> list[Location]:
     """Each location of the HTTPS server block, in order; the HTTP block only redirects."""
-    start = conf.index("listen 443")
+    start = re.search(r"listen \d+ ssl", conf).start()
     locations = []
     for m in re.finditer(r"location\s+(=|~\*?|\^~)?\s*(\S+)\s*\{", conf[start:]):
         body_start = start + m.end()

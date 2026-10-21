@@ -41,7 +41,8 @@ fi
 # second stack ran psql, token signing and the jobs inside the developer's running one. So the project's gateway
 # must be running and publish exactly the ports the checks use
 COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-qeos}"
-for pair in "443:$HTTPS_PORT:GATEWAY_HTTPS_PORT" "80:$HTTP_PORT:GATEWAY_HTTP_PORT"; do
+# (8443 and 8080: the gateway's ports inside the container, ADR-038)
+for pair in "8443:$HTTPS_PORT:GATEWAY_HTTPS_PORT" "8080:$HTTP_PORT:GATEWAY_HTTP_PORT"; do
   IFS=: read -r container_port expected_port port_var <<< "$pair"
   port_err="$(mktemp)"
   published="$(docker compose port gateway "$container_port" 2>"$port_err" | head -n 1)"

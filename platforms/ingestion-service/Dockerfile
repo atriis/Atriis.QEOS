@@ -18,6 +18,13 @@ COPY platforms/ingestion-service/src/ ./src/
 COPY platforms/ingestion-service/alembic/ ./alembic/
 COPY platforms/ingestion-service/alembic.ini ./alembic.ini
 
+# Non-root (ADR-038): the same uid in every QEOS image, so a Kubernetes securityContext can name it. Nothing is
+# written at runtime outside /tmp, so the root filesystem can be read-only; no bytecode cache either
+RUN groupadd --system --gid 10001 qeos \
+    && useradd --system --uid 10001 --gid qeos --no-create-home --shell /usr/sbin/nologin qeos
+ENV PYTHONDONTWRITEBYTECODE=1
+USER 10001
+
 EXPOSE 8000
 
 CMD ["uvicorn", "src.ingestion.api.main:app", "--host", "0.0.0.0", "--port", "8000"]

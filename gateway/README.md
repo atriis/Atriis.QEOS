@@ -90,6 +90,18 @@ compose volume `qeos_gateway_certs` (physical name `qa-vision_qav_gateway_certs`
 `docker compose cp gateway:/etc/nginx/certs/tls.crt ./qeos-localhost.crt`.
 To use your own, put `tls.crt` and `tls.key` in that volume before starting.
 
+## Non-root and read-only (ADR-038)
+
+The image is `nginxinc/nginx-unprivileged` and runs as `nginx` (uid 101), so inside the container it listens on
+8443 (HTTPS) and 8080 (HTTP); compose publishes those on the host ports above, and the production edge proxies to
+`https://gateway:8443`. The entrypoint renders `nginx.conf`, `grafana.conf` and `real_ip.conf` into
+`NGINX_RENDER_DIR` (default `/etc/nginx`) and keeps the certificate in `NGINX_CERT_DIR` (default
+`/etc/nginx/certs`); the pid file and NGINX's temporary files are in `/tmp`. With a read-only root filesystem
+(Kubernetes), set `NGINX_RENDER_DIR=/tmp/nginx` and an `NGINX_CERT_DIR` that is writable or holds a mounted
+certificate. A certificate volume made by an older gateway belongs to root; compose's one-shot `gateway-certs` job
+hands it to uid 101 before the gateway starts. `bash scripts/check_readonly_images.sh` starts every platform image
+with `--read-only --tmpfs /tmp` and checks that it answers as a non-root user.
+
 ## Requests and logs
 
 Every response carries `X-Request-ID` (yours if you sent one); the same id is forwarded to the

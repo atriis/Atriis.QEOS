@@ -1,8 +1,10 @@
-# QEOS gateway. Rendered by entrypoint.sh; only the HTTPS port variable is substituted.
+# QEOS gateway. Rendered by entrypoint.sh; only the variables it names are substituted.
 # Routing, limits and TLS are specified in docs/superpowers/specs/2026-09-28-api-gateway-design.md.
 
 worker_processes auto;
 error_log /dev/stderr warn;
+# Non-root with a read-only root filesystem (ADR-038): the pid and every temporary file live in /tmp
+pid /tmp/nginx.pid;
 
 events {
     worker_connections 1024;
@@ -12,6 +14,11 @@ http {
     server_tokens off;
     default_type application/json;
     client_max_body_size 10m;
+    client_body_temp_path /tmp/client_temp;
+    proxy_temp_path /tmp/proxy_temp;
+    fastcgi_temp_path /tmp/fastcgi_temp;
+    uwsgi_temp_path /tmp/uwsgi_temp;
+    scgi_temp_path /tmp/scgi_temp;
 
     # The client's X-Request-ID if it sent one, else NGINX's own
     map $http_x_request_id $req_id {
@@ -60,7 +67,7 @@ http {
     access_log /dev/stdout json;
 
     # Empty unless GATEWAY_TRUSTED_PROXIES is set (see entrypoint.sh)
-    include /etc/nginx/real_ip.conf;
+    include ${NGINX_RENDER_DIR}/real_ip.conf;
 
     # Keyed on the client address: the TCP peer, or the real client behind a trusted
     # edge proxy - never a header a client could set
@@ -92,7 +99,8 @@ http {
     proxy_redirect http://$host/ https://$host:${GATEWAY_HTTPS_PORT}/;
 
     server {
-        listen 80;
+        # Unprivileged ports inside the container (ADR-038); compose publishes them on the host ports
+        listen 8080;
         server_name _;
 
         location / {
@@ -101,11 +109,11 @@ http {
     }
 
     server {
-        listen 443 ssl;
+        listen 8443 ssl;
         server_name _;
 
-        ssl_certificate     /etc/nginx/certs/tls.crt;
-        ssl_certificate_key /etc/nginx/certs/tls.key;
+        ssl_certificate     ${NGINX_CERT_DIR}/tls.crt;
+        ssl_certificate_key ${NGINX_CERT_DIR}/tls.key;
         ssl_protocols       TLSv1.2 TLSv1.3;
         # No HSTS: on localhost with a self-signed certificate it would force HTTPS for every
         # localhost port in the browser.
@@ -347,7 +355,7 @@ http {
 
         # ---- Grafana (monitoring profile, ADR-027): grafana-on.conf or grafana-off.conf, chosen by
         # entrypoint.sh from MONITORING_ENABLED ----
-        include /etc/nginx/grafana.conf;
+        include ${NGINX_RENDER_DIR}/grafana.conf;
 
         # ---- unknown API paths ----
         # Longer prefixes and the regex locations above take every routed API path;
@@ -362,7 +370,7 @@ http {
         # The dashboard's own nginx falls unknown paths back to index.html.
         location / {
             limit_req zone=api burst=40 nodelay;
-            set $upstream http://dashboard:80;
+            set $upstream http://dashboard:8080;
             proxy_pass $upstream;
         }
     }
