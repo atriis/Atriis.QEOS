@@ -10,7 +10,7 @@ from src.ingestion.analytics.failed_steps import step_key
 from src.ingestion.analytics.flaky import FlipCount, LatestExecution, MixedCommit
 from src.ingestion.analytics.trends import RunRow, as_utc, pass_rate
 from src.ingestion.models import MutedTest, Run, RunResult
-from src.ingestion.service import log_value_service, screenshot_read
+from src.ingestion.service import artifact_read, log_value_service, screenshot_read
 
 
 def _count(*statuses: str):
@@ -354,13 +354,16 @@ def latest_results(db: Session, project_id: int, keys: List[str], run_id: Option
     rows = list(db.execute(select(ranked).where(ranked.c.position == 1)).mappings())
     values = log_value_service.values_by_result(db, [r["result_id"] for r in rows])
     steps = screenshot_read.steps_by_result(db, project_id, [r["result_id"] for r in rows])
+    traces = artifact_read.trace_counts_by_result(db, project_id, [r["result_id"] for r in rows])
     out = {}
     for r in rows:
         entry = {"status": r["status"], "run_id": r["run_id"], "result_id": r["result_id"], "branch": r["branch"],
                  "environment": r["environment"], "started_at": as_utc(r["started_at"]),
                  "message": r["message"][:MESSAGE_EXCERPT] if r["message"] is not None else None,
                  # Log values of this result (ADR-032), with each pattern's link template
-                 "values": values.get(r["result_id"], [])}
+                 "values": values.get(r["result_id"], []),
+                 # Traces stored for the result (ADR-037), 0 when none
+                 "trace_count": traces.get(r["result_id"], 0)}
         step = failed_step_of(r["status"], r["message"], r["details"], r["failed_step_text"], r["failed_step_line"],
                               r["failed_step_definition"], r["failed_step_pattern"])
         if step:

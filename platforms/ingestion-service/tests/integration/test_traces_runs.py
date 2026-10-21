@@ -330,3 +330,17 @@ def test_export_line_names_the_traces_without_bytes(client, auth, project_role, 
         {"kind": "trace", "name": "trace", "bytes": len(ZIP), "sha256": SHA},
         {"kind": "trace", "name": "retry", "bytes": 5, "sha256": SHA_B},
     ]
+
+
+def test_latest_results_carry_trace_count_in_this_project_only(client, auth, project_role, seed_run, db):
+    from tests.conftest import report_key
+
+    project_role("viewer")
+    run = seed_run(T0, results=(("a", "failed", 1), ("b", "passed", 1), ("c", "passed", 1)))
+    rows = {r.name: r for r in db.query(RunResult).filter_by(run_id=run.id)}
+    add_trace(db, rows["a"], position=0)
+    add_trace(db, rows["a"], sha=SHA_B, position=1, size=5)
+    add_trace(db, rows["c"], project_id=2, sha=SHA_OTHER, size=5)  # a blob of another project does not count
+    keys = [report_key(n) for n in "abc"]
+    got = client.post("/api/v1/projects/1/analytics/latest-results", json={"keys": keys}, headers=auth()).json()["results"]
+    assert [got[k]["trace_count"] for k in keys] == [2, 0, 0]

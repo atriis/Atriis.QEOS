@@ -180,3 +180,17 @@ test("members see the traces switch and days read-only", async () => {
   expect(await screen.findByRole("switch", { name: TRACES })).toBeDisabled();
   expect(screen.getByLabelText(/keep them for \(days\)/i)).toBeDisabled();
 });
+
+test("Enter in the days field saves it too", async () => {
+  let sent: unknown = null;
+  server.use(
+    http.get(URL, () => HttpResponse.json({ ...DEFAULTS, keep_traces: true, trace_days: 14 })),
+    http.put(URL, async ({ request }) => { sent = await request.json(); return HttpResponse.json({ ...DEFAULTS, keep_traces: true, trace_days: 7 }); }),
+  );
+  renderCard();
+  const days = await screen.findByLabelText(/keep them for \(days\)/i);
+  await waitFor(() => expect(days).toBeEnabled());
+  await userEvent.clear(days);
+  await userEvent.type(days, "7{Enter}");
+  await waitFor(() => expect(sent).toEqual({ trace_days: 7 }));
+});

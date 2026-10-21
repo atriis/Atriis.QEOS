@@ -258,4 +258,5 @@ test("no Trace button when the result has no traces or the server does not say",
   renderCase();
   await screen.findByText(/failed/i);
   expect(screen.queryByRole("button", { name: /Download trace/ })).toBeNull();
+  expect(screen.queryByText(/playwright show-trace/i)).toBeNull();
 });

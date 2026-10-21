@@ -53,3 +53,21 @@ test("the note says how to open it, when asked for", () => {
   render(<TraceButton projectId={42} runId={9} resultId={1} name="t" count={1} showNote />);
   expect(screen.getByText(/open it with npx playwright show-trace/i)).toBeInTheDocument();
 });
+
+test("while downloading it is busy and a status says so, then says it is done", async () => {
+  setAccessToken("acc");
+  stubSave();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  server.use(
+    http.get(`${P}/runs/9/results/1/artifacts`, async () => { await gate; return HttpResponse.json({ artifacts: [{ id: 5, kind: "trace", name: "a.zip", bytes: 4 }] }); }),
+    http.get(`${P}/artifacts/:id`, () => new HttpResponse("PK")),
+  );
+  render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={1} />);
+  await userEvent.click(screen.getByRole("button", { name: "Download trace for test_ok" }));
+  expect(screen.getByRole("button", { name: "Download trace for test_ok" })).toHaveAttribute("aria-busy", "true");
+  expect(screen.getByRole("status")).toHaveTextContent("Downloading trace…");
+  release();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Trace downloaded"));
+  expect(screen.getByRole("button", { name: "Download trace for test_ok" })).toHaveAttribute("aria-busy", "false");
+});

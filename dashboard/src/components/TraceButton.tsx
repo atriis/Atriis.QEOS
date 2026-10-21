@@ -21,16 +21,19 @@ export const TRACE_NOTE = "Open it with npx playwright show-trace";
 export default function TraceButton({ projectId, runId, resultId, name, count, showNote }: Props) {
   const [busy, setBusy] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [done, setDone] = useState(false);
   if ((count ?? 0) <= 0) return null;
 
   async function download() {
     setBusy(true);
     setFailed(false);
+    setDone(false);
     try {
       const { artifacts } = await listResultArtifacts(projectId, runId, resultId);
       for (const a of artifacts.filter((x) => x.kind === "trace")) {
         downloadBlob(`trace-${a.id}.zip`, await downloadArtifact(projectId, a.id));
       }
+      setDone(true);
     } catch {
       setFailed(true);
     } finally {
@@ -46,6 +49,7 @@ export default function TraceButton({ projectId, runId, resultId, name, count, s
         <span>{busy ? "Downloading…" : "Trace"}</span>
       </button>
       {showNote && <span className="muted trace-note">{TRACE_NOTE}</span>}
+      <span role="status" className="sr-only">{busy ? "Downloading trace…" : done ? "Trace downloaded" : ""}</span>
       {failed && <span role="alert" className="trace-error">The trace could not be downloaded. Try again.</span>}
     </>
   );
