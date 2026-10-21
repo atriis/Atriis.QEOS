@@ -205,3 +205,29 @@ def test_a_store_that_fails_during_the_purge_fails_the_step_and_keeps_the_rows(
     assert db.query(Blob).count() == 1  # the next pass finds them and retries
     steps = [call.request.read() for call in routes["step"].calls]
     assert b'{"step":"ingestion"}' not in steps and routes["row"].call_count == 0
+
+
+def test_purge_deletes_the_trace_objects_and_rows_too(db, session_factory, answer, add_run, services, monkeypatch):
+    from src.ingestion.jobs import purge
+    from src.ingestion.models import Blob, ResultArtifact, RunResult
+    from src.ingestion.utils.artifact_store import MemoryArtifactStore, artifact_key, screenshot_key
+
+    store = MemoryArtifactStore()
+    monkeypatch.setattr(purge, "get_artifact_store", lambda: store)
+    run_id = add_run(1, 1)
+    trace = Blob(project_id=1, sha256="a" * 64, kind="trace", media_type="application/zip", bytes=4)
+    db.add_all([trace, Blob(project_id=1, sha256="b" * 64, media_type="image/png", bytes=1)])
+    db.flush()
+    db.add(ResultArtifact(result_id=db.query(RunResult).filter_by(run_id=run_id).one().id, position=0,
+                          blob_id=trace.id, kind="trace"))
+    db.commit()
+    store.put(artifact_key(1, "a" * 64), b"PK", "application/zip")
+    store.put("artifacts/1/incoming/x", b"PK", "application/zip")
+    store.put(screenshot_key(1, "b" * 64), b"png", "image/png")
+    store.put(artifact_key(10, "c" * 64), b"PK", "application/zip")  # project 10 starts with "1" too
+    answer([gone(1, days_ago=8)])
+    services(1)
+    assert run_job(session_factory) == 0
+    db.expire_all()
+    assert set(store.objects) == {artifact_key(10, "c" * 64)}
+    assert db.query(Blob).count() == 0 and db.query(ResultArtifact).count() == 0

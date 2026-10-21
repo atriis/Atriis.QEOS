@@ -10,11 +10,13 @@ from src.ingestion.api.deps import (
 from src.ingestion.api.v1.endpoints.analytics import NO_NUL
 from src.ingestion.models.run import CI_PROVIDERS, SCOPES
 from src.ingestion.schemas.run import (
-    ChangedFileOut, ComponentOut, FailureGroupsOut, LogValueOut, ResultLogOut, ResultOut, ResultScreenshotsOut, RunComparison, RunDetail, RunOut,
-    RunSummary,
+    ChangedFileOut, ComponentOut, FailureGroupsOut, LogValueOut, ResultArtifactsOut, ResultLogOut, ResultOut,
+    ResultScreenshotsOut, RunComparison, RunDetail, RunOut, RunSummary,
 )
 from src.ingestion.schemas.impact import RunImpactOut
-from src.ingestion.service import failed_steps_service, impact_read, log_value_service, run_service, screenshot_read
+from src.ingestion.service import (
+    artifact_read, failed_steps_service, impact_read, log_value_service, run_service, screenshot_read,
+)
 
 project_router = APIRouter()  # mounted at /projects/{project_id}/runs
 router = APIRouter()          # mounted at /runs
@@ -115,6 +117,23 @@ def get_result_screenshots(
     return ResultScreenshotsOut(screenshots=screenshot_read.list_for_result(db, access.project_id, result_id))
 
 
+@project_router.get("/{run_id}/results/{result_id}/artifacts", response_model=ResultArtifactsOut)
+def get_result_artifacts(
+    run_id: int,
+    result_id: int,
+    db: Session = Depends(get_db),
+    access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
+):
+    """A result's traces in order, without the files (ADR-037); each is read from /artifacts/{id}."""
+    run = run_service.get_run(db, run_id)
+    # A run of another project is indistinguishable from a missing one
+    if run is None or run.project_id != access.project_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run not found")
+    if not run_service.result_in_run(db, run.id, result_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Result not found")
+    return ResultArtifactsOut(artifacts=artifact_read.list_for_result(db, access.project_id, result_id))
+
+
 @project_router.get("/{run_id}/impact", response_model=RunImpactOut)
 def get_run_impact(
     run_id: int,
@@ -156,13 +175,14 @@ def get_run(
     changes = run_service.list_changes(db, run.id)
     components = run_service.list_components(db, run.id)
     shots = screenshot_read.counts_by_result(db, project_id, [r.id for r in results])
+    traces = artifact_read.trace_counts_by_result(db, project_id, [r.id for r in results])
     return RunDetail(
         **RunOut.model_validate(run).model_dump(),
         **run_service.quarantine_counts(db, run, held),
         results=[
             ResultOut.model_validate(r).model_copy(
                 update={"quarantined": r.status in ("failed", "errored") and r.test_key in held,
-                        "screenshot_count": shots.get(r.id, 0)})
+                        "screenshot_count": shots.get(r.id, 0), "trace_count": traces.get(r.id, 0)})
             for r in results
         ],
         changes=[ChangedFileOut.model_validate(f) for f in changes],

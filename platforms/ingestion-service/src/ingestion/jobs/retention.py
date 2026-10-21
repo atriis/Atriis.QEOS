@@ -1,5 +1,5 @@
-"""Retention: delete runs older than each project's retention period, and empty deleted projects.
-A project on legal hold loses nothing.
+"""Retention: delete runs older than each project's retention period, traces older than its trace_days (ADR-037),
+and empty deleted projects. A project on legal hold loses nothing.
 
     python -m src.ingestion.jobs.retention [--dry-run] [--loop]
 
@@ -20,21 +20,26 @@ from typing import Callable, Iterable, Iterator, List, Optional
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import httpx
-from sqlalchemy import exists, select, text
+from sqlalchemy import and_, exists, func, select, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Query, Session, sessionmaker
 
 from src.ingestion.core.config import settings
 from src.ingestion.jobs import heartbeat
-from src.ingestion.models import ApiKey, Blob, LogValue, ResultScreenshot, Run, RunResult
-from src.ingestion.utils.artifact_store import ArtifactStore, get_artifact_store, screenshot_key
+from src.ingestion.models import ApiKey, Blob, LogValue, ResultArtifact, ResultScreenshot, Run, RunResult
+from src.ingestion.service import collection_settings_service
+from src.ingestion.utils.artifact_store import ArtifactStore, artifact_key, get_artifact_store, screenshot_key
 
 RETENTION_PATH = "/internal/v1/projects/retention"
 LOCK_ID = 7_351_001  # any fixed number; only this job takes it
 TIMEOUT_SECONDS = 10.0
 JOB = "retention"
 BLOB_GRACE_DAYS = 7  # covers a blob uploaded before its run, or a spooled part resent days later
+# A trace upload streams into artifacts/{p}/incoming/ and deletes it when done; one left behind (that delete failed)
+# is removed after a day, never sooner: an upload may still be writing it
+INCOMING_GRACE = timedelta(days=1)
+OBJECT_KEYS = {"screenshot": screenshot_key, "trace": artifact_key}  # blobs.kind -> where its bytes are stored
 
 
 class RetentionError(Exception):
@@ -143,7 +148,7 @@ def run_pass(
 ) -> dict:
     """Live projects lose runs past their retention period. A deleted project (spec 2026-10-16) keeps everything
     while it can be restored, then `purge` removes it from every service; without `purge` it is left alone."""
-    runs_deleted = projects_purged = purge_failures = projects_held = 0
+    runs_deleted = projects_purged = purge_failures = projects_held = traces_expired = 0
     for policy in policies:
         if policy.legal_hold:
             projects_held += 1
@@ -174,11 +179,13 @@ def run_pass(
         runs = db.query(Run.id).filter(
             Run.project_id == policy.project_id, Run.created_at < now - timedelta(days=policy.days))
         runs_deleted += runs.count() if dry_run else _delete_in_batches(db, runs, batch_size)
+        traces_expired += expire_traces(db, policy.project_id, now, batch_size, dry_run)
     # Only projects project-service listed, and never one on hold: an empty or partial answer deletes nothing more.
     # A dry run counts the images unreferenced now, not those this pass's run deletion would free.
     gc_projects = sorted(policy.project_id for policy in policies if not policy.legal_hold)
     blobs_deleted = (_unreferenced_blobs(db, now, gc_projects).count() if dry_run
                      else collect_unreferenced_blobs(db, store, now, batch_size, projects=gc_projects))
+    incoming_deleted = 0 if store is None else collect_incoming(store, now, gc_projects, dry_run)
     listed = {policy.project_id for policy in policies}
     known = {pid for (pid,) in db.query(Run.project_id).distinct()} | {
         pid for (pid,) in db.query(ApiKey.project_id).distinct()
@@ -188,6 +195,8 @@ def run_pass(
         "projects": len(policies),
         "runs_deleted": runs_deleted,
         "blobs_deleted": blobs_deleted,
+        "traces_expired": traces_expired,
+        "incoming_deleted": incoming_deleted,
         "projects_purged": projects_purged,
         "purge_failures": purge_failures,
         "projects_skipped": len(known - listed),
@@ -203,19 +212,62 @@ def _delete_in_batches(db: Session, runs: Query, batch_size: int) -> int:
         if not batch:
             return deleted
         # Children first, explicitly: SQLite (the tests) does not enforce ON DELETE CASCADE by default. The results'
-        # log values (ADR-032) and screenshot references (ADR-036), then the results
+        # log values (ADR-032), screenshot references (ADR-036) and trace references (ADR-037), then the results
         results = select(RunResult.id).where(RunResult.run_id.in_(batch))
         db.query(LogValue).filter(LogValue.result_id.in_(results)).delete(synchronize_session=False)
-        db.query(ResultScreenshot).filter(ResultScreenshot.result_id.in_(results)).delete(
-            synchronize_session=False)
+        for references in (ResultScreenshot, ResultArtifact):
+            db.query(references).filter(references.result_id.in_(results)).delete(synchronize_session=False)
         db.query(RunResult).filter(RunResult.run_id.in_(batch)).delete(synchronize_session=False)
         db.query(Run).filter(Run.id.in_(batch)).delete(synchronize_session=False)
         db.commit()
         deleted += len(batch)
 
 
+def expire_traces(db: Session, project_id: int, now: datetime, batch_size: int, dry_run: bool) -> int:
+    """Deletes the project's trace references (ADR-037) of runs started more than its trace_days ago (default 14),
+    in batches, and returns how many (a dry run counts them). The results stay: they keep their own retention. The
+    trace blobs left unreferenced go with the garbage collection below, after BLOB_GRACE_DAYS."""
+    days = collection_settings_service.get(db, project_id).trace_days
+    expired = (
+        select(ResultArtifact.id)
+        .join(RunResult, RunResult.id == ResultArtifact.result_id)
+        .join(Run, Run.id == RunResult.run_id)
+        .where(Run.project_id == project_id, Run.started_at < now - timedelta(days=days))
+    )
+    if dry_run:
+        return db.execute(select(func.count()).select_from(expired.subquery())).scalar_one()
+    deleted = 0
+    while True:
+        ids = db.execute(expired.order_by(ResultArtifact.id).limit(batch_size)).scalars().all()
+        if not ids:
+            db.commit()  # ends the read transaction
+            return deleted
+        db.query(ResultArtifact).filter(ResultArtifact.id.in_(ids)).delete(synchronize_session=False)
+        db.commit()
+        deleted += len(ids)
+
+
+def collect_incoming(store: ArtifactStore, now: datetime, projects: Iterable[int], dry_run: bool) -> int:
+    """Deletes the objects under artifacts/{p}/incoming/ older than INCOMING_GRACE, for `projects` only, and returns
+    how many (a dry run counts them). A store failure is logged and skips that project: orphans waste space only."""
+    deleted = 0
+    for project_id in projects:
+        try:
+            keys = store.list_older(f"artifacts/{project_id}/incoming/", now - INCOMING_GRACE)
+            if keys and not dry_run:
+                store.delete(keys)
+        except Exception as exc:
+            _log({"event": "gc_incoming_not_deleted", "project_id": project_id,
+                  "error": f"{type(exc).__name__}: {exc}"}, error=True)
+            continue
+        deleted += len(keys)
+    return deleted
+
+
 def _no_reference():
-    return ~exists().where(ResultScreenshot.blob_id == Blob.id)
+    """Neither a screenshot (ADR-036) nor a trace (ADR-037) of any result refers to the blob."""
+    return and_(~exists().where(ResultScreenshot.blob_id == Blob.id),
+                ~exists().where(ResultArtifact.blob_id == Blob.id))
 
 
 def _unreferenced_blobs(db: Session, now: datetime, projects: Optional[Iterable[int]], after_id: int = 0) -> Query:
@@ -230,7 +282,7 @@ def _delete_blobs(db: Session, ids: List[int], cutoff: datetime) -> list:
         return db.execute(
             Blob.__table__.delete()
             .where(Blob.id.in_(ids), _no_reference(), Blob.created_at < cutoff)
-            .returning(Blob.id, Blob.project_id, Blob.sha256)
+            .returning(Blob.id, Blob.project_id, Blob.sha256, Blob.kind)
         ).all()
 
 
@@ -238,8 +290,9 @@ def collect_unreferenced_blobs(
     db: Session, store: Optional[ArtifactStore], now: datetime, batch: int = 500,
     projects: Optional[Iterable[int]] = None,
 ) -> int:
-    """Deletes the images (ADR-036) that no result shows and that are older than BLOB_GRACE_DAYS, in batches, for
-    `projects` only (None: every project; an empty collection: none). Returns the rows deleted.
+    """Deletes the images (ADR-036) and traces (ADR-037) that no result refers to and that are older than
+    BLOB_GRACE_DAYS, in batches, for `projects` only (None: every project; an empty collection: none). Returns the
+    rows deleted.
 
     Rows go first and are committed, then the objects of exactly the rows deleted: a crash in between leaves an
     orphan object, which is harmless, where the other order could leave a row pointing at a missing image.
@@ -247,9 +300,9 @@ def collect_unreferenced_blobs(
 
     What protects an image that a result starts showing meanwhile: the DELETE checks "unreferenced" again, but on
     its own snapshot, so under READ COMMITTED it can miss a reference committed while it waited for ingest's lock.
-    Then the foreign key from result_screenshots refuses the delete (IntegrityError). The batch is retried one row at
-    a time, each in a savepoint, and a row that still fails is skipped and logged (`gc_blobs_skipped`): the next
-    pass sees it referenced. One contended image never stalls the batch or the pass.
+    Then the foreign key from result_screenshots or result_artifacts refuses the delete (IntegrityError). The batch is
+    retried one row at a time, each in a savepoint, and a row that still fails is skipped and logged
+    (`gc_blobs_skipped`): the next pass sees it referenced. One contended image never stalls the batch or the pass.
 
     Known limit: an image uploaded again between the row delete and the object delete loses its object, so a result
     that refers to it shows no image (the run and result are kept). Only images unreferenced for more than
@@ -277,7 +330,7 @@ def collect_unreferenced_blobs(
         deleted += len(rows)
         if store is not None and rows:
             try:
-                store.delete([screenshot_key(project_id, sha) for _, project_id, sha in rows])
+                store.delete([OBJECT_KEYS[kind](project_id, sha) for _, project_id, sha, kind in rows])
             except Exception as exc:  # the rows are gone: orphan objects waste space but break nothing
                 _log({"event": "gc_objects_not_deleted", "blobs": len(rows),
                       "error": f"{type(exc).__name__}: {exc}"}, error=True)

@@ -97,7 +97,7 @@ def test_runs_older_than_the_retention_period_are_deleted(db, session_factory, a
     assert remaining(db) == [recent]
     assert db.query(RunResult).count() == 1
     assert summary(capsys) == {"event": "retention", "projects": 1, "runs_deleted": 3, "blobs_deleted": 0,
-                               "projects_purged": 0,
+                               "traces_expired": 0, "incoming_deleted": 0, "projects_purged": 0,
                                "purge_failures": 0, "projects_skipped": 0, "projects_held": 0, "dry_run": False}
 
 
@@ -487,3 +487,156 @@ def test_gc_pages_by_id_and_a_skipped_row_does_not_stop_later_batches(db, store,
     assert retention.collect_unreferenced_blobs(db, store, NOW, batch=2, projects=[1]) == 6
     assert blob_ids(db) == [contended]
     assert len(store.objects) == 1
+
+
+# Traces (ADR-037): kept trace_days, independently of the results; unreferenced trace blobs go after 7 days
+
+@pytest.fixture
+def add_trace(db, store):
+    from src.ingestion.models import Blob, ResultArtifact
+    from src.ingestion.utils.artifact_store import artifact_key
+
+    def _add(run_id, days_old=1, project_id=1, sha="t"):
+        sha = (sha * 64)[:64]
+        blob = db.query(Blob).filter_by(project_id=project_id, sha256=sha).one_or_none()
+        if blob is None:
+            blob = Blob(project_id=project_id, sha256=sha, kind="trace", media_type="application/zip", bytes=4,
+                        created_at=NOW - timedelta(days=days_old))
+            db.add(blob)
+            db.flush()
+            store.put(artifact_key(project_id, sha), b"PK\x03\x04", "application/zip")
+        result = db.query(RunResult).filter_by(run_id=run_id).one()
+        db.add(ResultArtifact(result_id=result.id, position=0, blob_id=blob.id, kind="trace"))
+        db.commit()
+        return blob.id
+
+    return _add
+
+
+def trace_runs(db):
+    from src.ingestion.models import ResultArtifact
+
+    db.expire_all()
+    return sorted(run_id for (run_id,) in db.query(RunResult.run_id).join(
+        ResultArtifact, ResultArtifact.result_id == RunResult.id))
+
+
+def set_trace_days(db, project_id, days):
+    from src.ingestion.models import CollectionSettings
+
+    db.add(CollectionSettings(project_id=project_id, keep_traces=True, trace_days=days))
+    db.commit()
+
+
+def test_traces_go_after_trace_days_and_their_results_stay(db, session_factory, answer, add_run, add_trace, capsys):
+    """Review Focus 4: trace_days 3, results kept 90 days. The traces of runs past 3 days go, every run stays."""
+    set_trace_days(db, 1, 3)
+    old, edge, recent = add_run(1, 10), add_run(1, 4), add_run(1, 2)
+    for run_id in (old, edge, recent):
+        add_trace(run_id, sha=str(run_id))
+    answer([live(1, 90)])
+    assert run_job(session_factory) == 0
+    assert remaining(db) == sorted([old, edge, recent])
+    assert db.query(RunResult).count() == 3
+    assert trace_runs(db) == [recent]
+    assert summary(capsys)["traces_expired"] == 2
+
+
+def test_trace_days_default_to_14_without_settings(db, session_factory, answer, add_run, add_trace):
+    old, recent = add_run(1, 15), add_run(1, 13)
+    add_trace(old, sha="a")
+    add_trace(recent, sha="b")
+    answer([live(1, 90)])
+    assert run_job(session_factory) == 0
+    assert trace_runs(db) == [recent]
+
+
+def test_trace_days_are_per_project(db, session_factory, answer, add_run, add_trace):
+    set_trace_days(db, 1, 3)
+    set_trace_days(db, 2, 30)
+    one, two = add_run(1, 10), add_run(2, 10)
+    add_trace(one, sha="a")
+    add_trace(two, project_id=2, sha="b")
+    answer([live(1, 90), live(2, 90)])
+    assert run_job(session_factory) == 0
+    assert trace_runs(db) == [two]
+
+
+def test_traces_of_a_project_on_legal_hold_or_unlisted_stay(db, session_factory, answer, add_run, add_trace):
+    set_trace_days(db, 1, 1)
+    set_trace_days(db, 2, 1)
+    held_run, unlisted = add_run(1, 10), add_run(2, 10)
+    add_trace(held_run, sha="a")
+    add_trace(unlisted, project_id=2, sha="b")
+    answer([held(live(1, 90))])
+    assert run_job(session_factory) == 0
+    assert trace_runs(db) == sorted([held_run, unlisted])
+
+
+def test_dry_run_counts_expired_traces_and_deletes_none(db, session_factory, answer, add_run, add_trace, capsys):
+    set_trace_days(db, 1, 3)
+    run_id = add_run(1, 10)
+    add_trace(run_id)
+    answer([live(1, 90)])
+    assert run_job(session_factory, "--dry-run") == 0
+    assert trace_runs(db) == [run_id]
+    assert summary(capsys)["traces_expired"] == 1
+
+
+def test_trace_rows_go_with_their_results(db, session_factory, answer, add_run, add_trace):
+    from src.ingestion.models import ResultArtifact
+
+    run_id = add_run(1, 40)
+    add_trace(run_id)
+    answer([live(1, 30)])
+    assert run_job(session_factory) == 0
+    db.expire_all()
+    assert remaining(db) == [] and db.query(ResultArtifact).count() == 0
+
+
+def test_gc_deletes_an_unreferenced_trace_after_7_days_and_its_object(db, session_factory, answer, add_run,
+                                                                     add_trace, store):
+    from src.ingestion.utils.artifact_store import artifact_key
+
+    set_trace_days(db, 1, 3)
+    old = add_trace(add_run(1, 10), days_old=10, sha="a")
+    young = add_trace(add_run(1, 5), days_old=5, sha="b")  # expires now, but uploaded 5 days ago
+    kept = add_trace(add_run(1, 1), days_old=30, sha="c")  # old blob, still referenced by a recent result
+    answer([live(1, 90)])
+    assert run_job(session_factory) == 0
+    assert blob_ids(db) == sorted([young, kept])
+    assert set(store.objects) == {artifact_key(1, "b" * 64), artifact_key(1, "c" * 64)}
+    assert old not in blob_ids(db)
+
+
+def test_gc_deletes_both_kinds_with_their_own_keys(db, store, add_blob, add_run, add_trace):
+    from src.ingestion.models import ResultArtifact
+
+    add_blob(9, sha="a")
+    add_trace(add_run(1, 1), days_old=9, sha="b")
+    db.query(ResultArtifact).delete()
+    db.commit()
+    assert retention.collect_unreferenced_blobs(db, store, NOW, projects=[1]) == 2
+    assert blob_ids(db) == [] and store.objects == {}
+
+
+def test_gc_deletes_incoming_objects_older_than_a_day_only(db, session_factory, answer, store):
+    old, fresh, other = "artifacts/1/incoming/old", "artifacts/1/incoming/fresh", "artifacts/2/incoming/old"
+    for key in (old, fresh, other):
+        store.put(key, b"PK", "application/zip")
+    store.modified[old] = NOW - timedelta(days=1, minutes=1)
+    store.modified[fresh] = NOW - timedelta(hours=23)  # an upload may still be streaming into it
+    store.modified[other] = NOW - timedelta(days=5)
+    answer([live(1, 90)])  # project 2 is not listed: never touched
+    assert run_job(session_factory) == 0
+    assert set(store.objects) == {fresh, other}
+
+
+def test_gc_of_incoming_objects_survives_a_store_failure(db, session_factory, answer, store, capsys):
+    def broken(prefix, older_than):
+        raise RuntimeError("storage is down")
+
+    store.list_older = broken
+    answer([live(1, 90)])
+    assert run_job(session_factory) == 0
+    assert "gc_incoming_not_deleted" in capsys.readouterr().err

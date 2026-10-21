@@ -1,23 +1,29 @@
-"""Traces, uploaded by the collector before the run that refers to them (ADR-037). Project API key auth, as
-/collect/blobs. The body is streamed to the store, never held whole: up to 100 MB per trace."""
+"""Traces (ADR-037). Upload: the collector sends them before the run that refers to them, project API key auth as
+/collect/blobs, the body streamed to the store, never held whole (up to 100 MB per trace). Download: JWT and the
+read roles, as the run reads, streamed too, with one byte range at a time for the trace viewer."""
 import asyncio
 import logging
 import re
-from typing import Optional
+from typing import Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from starlette.requests import ClientDisconnect
 
-from src.ingestion.api.deps import get_db
+from src.ingestion.api.deps import READ_ROLES, ProjectAccess, get_db, require_project_role
 from src.ingestion.api.key_auth import get_api_key
 from src.ingestion.models import ApiKey
-from src.ingestion.service import artifact_service
-from src.ingestion.utils.artifact_store import ArtifactStore, get_artifact_store
+from src.ingestion.service import artifact_read, artifact_service
+from src.ingestion.utils.artifact_store import (
+    BUSY_RETRY_AFTER, ArtifactNotFound, ArtifactRangeError, ArtifactStore, ArtifactStoreBusy, artifact_key,
+    get_artifact_store, store_slot,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter()  # mounted at /collect/artifacts
+project_router = APIRouter()  # mounted at /projects/{project_id}/artifacts
 SHA256 = re.compile(r"[0-9a-f]{64}")
 TRACES_OFF = {
     "code": "traces_off",
@@ -103,3 +109,99 @@ async def put_artifact(
     if not created:
         response.status_code = status.HTTP_200_OK
     return {"sha256": sha256}
+
+
+# ---- download ----
+
+SINGLE_RANGE = re.compile(r"bytes=([0-9]*)-([0-9]*)")
+MAX_RANGE_HEADER = 64  # two 20-digit numbers fit; a longer header is not a range this endpoint serves
+
+
+class Unsatisfiable(Exception):
+    """The range starts at or past the end of the file: 416."""
+
+
+def byte_range(header: Optional[str], size: int) -> Optional[Tuple[int, int]]:
+    """(start, end), both inclusive, of one `bytes=` range of a file of `size` bytes; None for the whole file.
+    Several ranges, another unit or an unreadable header get the whole file (RFC 9110 lets a server ignore Range);
+    an end past the file is cut to it. Raises Unsatisfiable for a start at or past the end or an empty suffix."""
+    if header is None or len(header) > MAX_RANGE_HEADER:
+        return None
+    match = SINGLE_RANGE.fullmatch(header.strip())
+    if match is None:
+        return None
+    first, last = match.groups()
+    if not first:
+        if not last:
+            return None
+        suffix = int(last)  # bytes=-N: the last N bytes
+        if suffix == 0:
+            raise Unsatisfiable()
+        return max(0, size - suffix), size - 1
+    start = int(first)
+    end = int(last) if last else size - 1
+    if last and end < start:
+        return None  # an invalid range is ignored
+    if start >= size:
+        raise Unsatisfiable()
+    return start, min(end, size - 1)
+
+
+def _busy() -> HTTPException:
+    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Artifact storage busy",
+                         headers={"Retry-After": BUSY_RETRY_AFTER})
+
+
+@project_router.get("/{artifact_id}", response_class=StreamingResponse, responses={
+    200: {"content": {"application/zip": {}}}, 206: {"description": "One byte range"},
+    416: {"description": "The range starts past the end of the file"},
+})
+def download_artifact(
+    artifact_id: int,
+    range_header: Optional[str] = Header(None, alias="range"),
+    db: Session = Depends(get_db),
+    access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
+    store: Optional[ArtifactStore] = Depends(get_artifact_store),
+):
+    """The trace file, streamed: never read whole into memory. The id resolves through its result and run to the
+    project, so another project's id is a 404. Sync endpoint: the queries and the store call run in the threadpool,
+    and the body is sent chunk by chunk afterwards."""
+    found = artifact_read.find_file(db, access.project_id, artifact_id)
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
+    if store is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="No artifact storage")
+    sha256, media_type, size = found
+    db.close()  # no pooled connection held while the store answers, nor while the body streams
+    headers = {
+        "Content-Disposition": f'attachment; filename="trace-{artifact_id}.zip"',
+        "Accept-Ranges": "bytes",
+        # Traces can hold cookies and tokens of test accounts: no copy kept by a browser or a proxy
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+    unsatisfiable = Response(status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
+                             headers={**headers, "Content-Range": f"bytes */{size}"})
+    try:
+        wanted = byte_range(range_header, size)
+    except Unsatisfiable:
+        return unsatisfiable
+    key = artifact_key(access.project_id, sha256)
+    try:
+        with store_slot():
+            if wanted is None:
+                chunks, length = store.open(key)
+            else:
+                chunks, length = store.open_range(key, *wanted), wanted[1] - wanted[0] + 1
+    except ArtifactNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
+    except ArtifactRangeError:  # the stored object is shorter than its row says
+        return unsatisfiable
+    except ArtifactStoreBusy:
+        raise _busy()
+    headers["Content-Length"] = str(length)
+    if wanted is None:
+        return StreamingResponse(chunks, media_type=media_type, headers=headers)
+    headers["Content-Range"] = f"bytes {wanted[0]}-{wanted[1]}/{size}"
+    return StreamingResponse(chunks, status_code=status.HTTP_206_PARTIAL_CONTENT, media_type=media_type,
+                             headers=headers)

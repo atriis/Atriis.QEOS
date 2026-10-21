@@ -23,6 +23,9 @@ api_router.include_router(
 )
 api_router.include_router(blobs.router, prefix="/collect/blobs", tags=["collect"])
 api_router.include_router(artifacts.router, prefix="/collect/artifacts", tags=["collect"])
+api_router.include_router(
+    artifacts.project_router, prefix="/projects/{project_id}/artifacts", tags=["artifacts"]
+)
 api_router.include_router(collect.router, prefix="/collect", tags=["collect"])
 api_router.include_router(
     collection_settings.router, prefix="/projects/{project_id}/collection-settings", tags=["collection"]

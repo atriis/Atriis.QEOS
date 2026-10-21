@@ -1,4 +1,4 @@
-"""Artifact storage for screenshots (ADR-036): an S3-compatible bucket, MinIO in the compose files.
+"""Artifact storage for screenshots (ADR-036) and traces (ADR-037): an S3-compatible bucket, MinIO in the compose files.
 Only ingestion talks to it. Without all four ARTIFACTS_S3_* settings there is no store (None) and QEOS works as
 before without screenshots. get_artifact_store() takes no request, so FastAPI routes and batch jobs (retention,
 purge) call it the same way."""
@@ -6,6 +6,7 @@ import asyncio
 import logging
 import threading
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from typing import AsyncIterator, Dict, Iterator, List, Optional, Protocol, Tuple, Union
 
 from src.ingestion.core.config import settings
@@ -92,6 +93,15 @@ class ArtifactStore(Protocol):
         ArtifactNotFound, and ArtifactRangeError when start is at or past the end or end is before start."""
         ...
 
+    def open_range(self, key: str, start: int, end: int) -> Iterator[bytes]:
+        """get_range() as a streaming read: a range of a 100 MB trace is never held whole. Same errors, raised at
+        the call, before the first chunk."""
+        ...
+
+    def list_older(self, prefix: str, older_than: datetime) -> List[str]:
+        """Keys under prefix last written before older_than (S3 LastModified)."""
+        ...
+
     def copy(self, src_key: str, dst_key: str) -> None:
         """Copies one object to another key, inside the store. Raises ArtifactNotFound."""
         ...
@@ -111,39 +121,62 @@ class MemoryArtifactStore:
 
     def __init__(self) -> None:
         self.objects: Dict[str, Tuple[bytes, str]] = {}
+        self.modified: Dict[str, datetime] = {}  # each key's last write, as S3's LastModified; tests may set it
+
+    def _write(self, key: str, value: Tuple[bytes, str]) -> None:
+        self.objects[key] = value
+        self.modified[key] = datetime.now(timezone.utc)
 
     def put(self, key: str, data: bytes, media_type: str) -> None:
-        self.objects[key] = (data, media_type)
+        self._write(key, (data, media_type))
 
-    def get(self, key: str) -> bytes:
+    def _data(self, key: str) -> bytes:
         try:
             return self.objects[key][0]
         except KeyError:
             raise ArtifactNotFound(key) from None
 
-    async def put_stream(self, key: str, chunks: Chunks, media_type: str) -> None:
-        parts = [chunk async for chunk in _each(chunks)]
-        self.objects[key] = (b"".join(parts), media_type)
-
-    def open(self, key: str) -> Tuple[Iterator[bytes], int]:
-        data = self.get(key)
-        return iter([data[start:start + READ_CHUNK] for start in range(0, len(data), READ_CHUNK)]), len(data)
-
-    def get_range(self, key: str, start: int, end: int) -> bytes:
-        data = self.get(key)
+    def _slice(self, key: str, start: int, end: int) -> bytes:
+        data = self._data(key)
         if start >= len(data) or end < start:
             raise ArtifactRangeError(f"{key} bytes={start}-{end}")
         return data[start:end + 1]
 
+    @staticmethod
+    def _chunks(data: bytes) -> Iterator[bytes]:
+        return iter([data[at:at + READ_CHUNK] for at in range(0, len(data), READ_CHUNK)])
+
+    def get(self, key: str) -> bytes:
+        return self._data(key)
+
+    async def put_stream(self, key: str, chunks: Chunks, media_type: str) -> None:
+        parts = [chunk async for chunk in _each(chunks)]
+        self._write(key, (b"".join(parts), media_type))
+
+    def open(self, key: str) -> Tuple[Iterator[bytes], int]:
+        data = self._data(key)
+        return self._chunks(data), len(data)
+
+    def get_range(self, key: str, start: int, end: int) -> bytes:
+        return self._slice(key, start, end)
+
+    def open_range(self, key: str, start: int, end: int) -> Iterator[bytes]:
+        return self._chunks(self._slice(key, start, end))
+
+    def list_older(self, prefix: str, older_than: datetime) -> List[str]:
+        # A key a test wrote into `objects` directly has no time: never old enough
+        return [key for key in self.objects
+                if key.startswith(prefix) and key in self.modified and self.modified[key] < older_than]
+
     def copy(self, src_key: str, dst_key: str) -> None:
-        try:
-            self.objects[dst_key] = self.objects[src_key]
-        except KeyError:
-            raise ArtifactNotFound(src_key) from None
+        if src_key not in self.objects:
+            raise ArtifactNotFound(src_key)
+        self._write(dst_key, self.objects[src_key])
 
     def delete(self, keys: List[str]) -> None:
         for key in keys:
             self.objects.pop(key, None)
+            self.modified.pop(key, None)
 
     def delete_prefix(self, prefix: str) -> int:
         doomed = [key for key in self.objects if key.startswith(prefix)]
@@ -237,12 +270,11 @@ class S3ArtifactStore:
             raise
         return body["Body"].iter_chunks(READ_CHUNK), int(body["ContentLength"])
 
-    def get_range(self, key: str, start: int, end: int) -> bytes:
+    def _ranged_body(self, key: str, start: int, end: int):
         from botocore.exceptions import ClientError
 
         try:
-            return self._client.get_object(
-                Bucket=self._bucket, Key=key, Range=f"bytes={start}-{end}")["Body"].read()
+            return self._client.get_object(Bucket=self._bucket, Key=key, Range=f"bytes={start}-{end}")["Body"]
         except ClientError as exc:
             code = exc.response.get("Error", {}).get("Code")
             if code in ("NoSuchKey", "404"):
@@ -250,6 +282,17 @@ class S3ArtifactStore:
             if code == "InvalidRange" or exc.response.get("ResponseMetadata", {}).get("HTTPStatusCode") == 416:
                 raise ArtifactRangeError(f"{key} bytes={start}-{end}") from exc
             raise
+
+    def get_range(self, key: str, start: int, end: int) -> bytes:
+        return self._ranged_body(key, start, end).read()
+
+    def open_range(self, key: str, start: int, end: int) -> Iterator[bytes]:
+        return self._ranged_body(key, start, end).iter_chunks(READ_CHUNK)
+
+    def list_older(self, prefix: str, older_than: datetime) -> List[str]:
+        pages = self._client.get_paginator("list_objects_v2").paginate(Bucket=self._bucket, Prefix=prefix)
+        return [item["Key"] for page in pages for item in page.get("Contents", [])
+                if item["LastModified"] < older_than]
 
     def copy(self, src_key: str, dst_key: str) -> None:
         """One copy_object call: enough for a trace (at most 100 MB); S3 wants a multipart copy only past 5 GB. Its

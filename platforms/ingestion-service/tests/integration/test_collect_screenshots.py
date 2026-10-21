@@ -177,6 +177,7 @@ def test_the_request_hash_of_valid_screenshots_is_unchanged(client, key):
     for result in data["results"]:
         result.pop("log", None)
         result.pop("failed_step", None)
+        result.pop("artifacts", None)  # dumps before migration 027 had no artifacts key
     old = hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     assert ingest_service._request_hash(RunUpload.model_validate(body)) == old
 

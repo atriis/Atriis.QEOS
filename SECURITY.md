@@ -173,6 +173,11 @@ details.
   another project, both get 404. There are no presigned URLs and the bucket is never public. The response carries
   `Cache-Control: private, max-age=3600`, so a browser may keep an image for up to an hour after the user loses
   access to the project, and `X-Content-Type-Options: nosniff`.
+  A trace is read the same way (`GET /api/v1/projects/{id}/artifacts/{artifact_id}`, user JWT, read roles, 404 for
+  a non-member or another project's id), streamed as a download (`attachment`) with
+  `Cache-Control: private, no-store`, because a trace can hold cookies and tokens of test accounts. A trace
+  reference is kept the project's `trace_days` (1 to 90, default 14), whatever the results' retention, and the file
+  goes 7 days after nothing refers to it; the export names traces but never carries the files.
 - **Gateway.** TLS 1.2/1.3. Per-IP rate limits: 20 requests/s on the API,
   10/s on uploads, 50/s (burst 100, 6 MB body) on screenshot uploads, 10/s (burst 20, 101 MB body, streamed
   unbuffered) on trace uploads, and 5/s on sign-in, registration, password and MFA

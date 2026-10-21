@@ -315,3 +315,71 @@ def test_s3_copy_uses_a_longer_read_timeout():
     store = S3ArtifactStore("http://minio:9000", "qeos-artifacts", "key", "secret")
     assert store._client.meta.config.read_timeout == 10
     assert store._copy_client.meta.config.read_timeout == artifact_store.COPY_READ_TIMEOUT == 60
+
+
+# Streamed ranges and listing by age (ADR-037): the trace download and the clean-up of incoming objects
+
+def test_memory_store_open_range_streams_an_inclusive_range():
+    store = MemoryArtifactStore()
+    store.put("artifacts/1/a", b"0123456789", "application/zip")
+    assert b"".join(store.open_range("artifacts/1/a", 2, 5)) == b"2345"
+    assert b"".join(store.open_range("artifacts/1/a", 8, 99)) == b"89"
+    with pytest.raises(ArtifactRangeError):
+        store.open_range("artifacts/1/a", 10, 12)
+    with pytest.raises(ArtifactNotFound):
+        store.open_range("artifacts/1/missing", 0, 1)
+
+
+def test_s3_open_range_streams_an_inclusive_range(s3):
+    store, stubber = s3
+    body = StreamingBody(io.BytesIO(b"2345"), 4)
+    stubber.add_response("get_object", {"Body": body},
+                         {"Bucket": BUCKET, "Key": "artifacts/1/a", "Range": "bytes=2-5"})
+    assert b"".join(store.open_range("artifacts/1/a", 2, 5)) == b"2345"
+
+
+def test_s3_open_range_errors(s3):
+    store, stubber = s3
+    stubber.add_client_error("get_object", service_error_code="InvalidRange", http_status_code=416)
+    with pytest.raises(ArtifactRangeError):
+        store.open_range("artifacts/1/a", 100, 200)
+    stubber.add_client_error("get_object", service_error_code="NoSuchKey", http_status_code=404)
+    with pytest.raises(ArtifactNotFound):
+        store.open_range("artifacts/1/missing", 0, 1)
+
+
+def test_memory_store_list_older_uses_the_time_each_object_was_written():
+    from datetime import datetime, timedelta, timezone
+
+    store = MemoryArtifactStore()
+    now = datetime.now(timezone.utc)
+    for key in ("artifacts/1/incoming/old", "artifacts/1/incoming/new", "artifacts/10/incoming/old"):
+        store.put(key, b"PK", "application/zip")
+    store.modified["artifacts/1/incoming/old"] = now - timedelta(days=2)
+    store.modified["artifacts/10/incoming/old"] = now - timedelta(days=2)
+    assert store.list_older("artifacts/1/incoming/", now - timedelta(days=1)) == ["artifacts/1/incoming/old"]
+    # every write records its time: put_stream and copy too
+    asyncio.run(store.put_stream("artifacts/1/incoming/s", iter([b"PK"]), "application/zip"))
+    store.copy("artifacts/1/incoming/s", "artifacts/1/incoming/c")
+    assert store.list_older("artifacts/1/incoming/", now + timedelta(seconds=60)) == [
+        "artifacts/1/incoming/old", "artifacts/1/incoming/new", "artifacts/1/incoming/s", "artifacts/1/incoming/c"]
+    store.delete(["artifacts/1/incoming/old"])
+    assert "artifacts/1/incoming/old" not in store.modified
+
+
+def test_s3_list_older_pages_and_filters_by_last_modified(s3):
+    from datetime import datetime, timedelta, timezone
+
+    store, stubber = s3
+    cutoff = datetime(2026, 10, 20, tzinfo=timezone.utc)
+    old, new = cutoff - timedelta(hours=1), cutoff + timedelta(hours=1)
+    stubber.add_response("list_objects_v2", {
+        "IsTruncated": True, "NextContinuationToken": "t",
+        "Contents": [{"Key": "artifacts/1/incoming/a", "LastModified": old},
+                     {"Key": "artifacts/1/incoming/b", "LastModified": new}]},
+        {"Bucket": BUCKET, "Prefix": "artifacts/1/incoming/"})
+    stubber.add_response("list_objects_v2", {
+        "IsTruncated": False, "Contents": [{"Key": "artifacts/1/incoming/c", "LastModified": old}]},
+        {"Bucket": BUCKET, "Prefix": "artifacts/1/incoming/", "ContinuationToken": "t"})
+    assert store.list_older("artifacts/1/incoming/", cutoff) == ["artifacts/1/incoming/a", "artifacts/1/incoming/c"]
+    stubber.assert_no_pending_responses()

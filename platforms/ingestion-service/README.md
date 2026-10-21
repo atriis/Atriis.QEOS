@@ -105,6 +105,7 @@ can sync cases without a user login. See ADR-024.
 - A result may carry `failed_step` `{"text": 1-1000 characters, "line": 1-1,000,000, "definition": 1-500, "pattern": 1-1000}` (the Gherkin step that failed, sent by collector 0.6.0 and later; `definition` and `pattern` from 0.8.0; from 0.9.1 also on a skipped result, the step the scenario stopped at). They are stored in `failed_step_text`, `failed_step_line` (migration 021), `failed_step_definition` and `failed_step_pattern` (migration 022), the text fields after masking. Out-of-range values are `422`; unknown fields inside `failed_step` are ignored (a newer collector's additions never cost the upload); omitting it is fine.
 - A result may carry `log` (a string: the scenario's text attachments or the test case's `system-out`, sent by collector 0.9.0). It is masked, cut to 64 KB and stored in `test_results.log` (migration 023); it is never rejected for its size and never returned by the run endpoints.
 - A result may carry `screenshots` (at most 50, in the order shown; collector 0.11 and later, ADR-036): `[{"sha256": 64 lowercase hex, "media_type": "image/png"|"image/jpeg"|"image/webp", "step_text": up to 1000 characters, "step_line": 1-1,000,000, "hook": "before"|"after"}]`, with `step_line` and `hook` optional. The upload only refers to images the collector already stored with `PUT /api/v1/collect/blobs/{sha256}`; ingestion links each reference to the project's blob and stores a `result_screenshots` row with its `position` (its place among the stored screenshots, in the order sent). The `step_text` is masked like the failed step's text (and counts toward the result's `redacted`), and `remask` masks it again. More than 50 screenshots on one result is `422`; a malformed entry (bad hash, unknown field, unsupported `media_type`, ...) is dropped, never a `422`. A reference is dropped silently, never failing the upload, when the project's `keep_screenshots` setting is off, no artifact storage is configured, or the hash is not stored for the uploading key's project (another project's blob never links); the drops are counted in `qav_ingest_screenshots_dropped_total{reason}` (`disabled`, `unknown`, `invalid`, `gone`) and the run receipt carries the total as `screenshots_dropped`, on the first upload (201) only (a replay answers `null`); the unknown hashes are also logged (INFO, with the count), and a failing insert (`gone`) as a warning. `position` is the index among the stored screenshots, without gaps (not the index in the list as sent). The links are written in a savepoint: a failing insert drops the screenshots and keeps the run.
+- A result may carry `artifacts` (at most 5; collector 0.14.0 and later, ADR-037): `[{"sha256": 64 lowercase hex, "kind": "trace", "name": up to 200 characters}]`, `name` optional. The upload only refers to traces the collector already stored with `PUT /api/v1/collect/artifacts/{sha256}`; ingestion links each reference to the project's blob of kind `trace` and stores a `result_artifacts` row with its `position` (without gaps, in the order sent). More than 5 is `422`; a malformed entry (bad hash, a kind other than `trace`, a name over 200 characters, ...) is dropped, never a `422`; unknown fields inside an entry are ignored. A reference is dropped silently, never failing the upload, when `keep_traces` is off, no artifact storage is configured, or the hash is not a trace stored for the uploading key's project (another project's blob, or a screenshot, never links); the drops are logged (INFO, with the count). Likewise a screenshot reference links only a blob of kind `screenshot`. The links are written in a savepoint, as for screenshots.
 - `status`: `passed`, `failed`, `skipped`, `errored` (`error` is accepted as `errored`).
 - `finished_at` may be at most 1 hour ahead of the server clock.
 - Through the gateway, uploads are limited to 10 per second per IP (burst 20).
@@ -228,12 +229,16 @@ service runs it with `--loop`):
   `PROJECT_SERVICE_INTERNAL_URL` (`http://ingestion-service:<password>@project-service:8000`;
   percent-encode special characters).
 - Deletes runs uploaded (`created_at`) more than that many days ago. A run's results go with their logs, log
-  values and screenshot references (`result_screenshots`).
-- Then a **garbage pass** deletes the screenshot images (ADR-036) that no result shows any more and that are
-  older than 7 days (the 7 days cover an image uploaded before its run, or a part resent days later): the `blobs`
-  rows first, committed, then their objects in storage. "Unreferenced" is checked again inside the `DELETE`, but on its
+  values, screenshot references (`result_screenshots`) and trace references (`result_artifacts`).
+- Deletes the trace references (`result_artifacts`, ADR-037) of runs started (`started_at`) more than the project's
+  `trace_days` ago (default 14 without a settings row). The results stay: they keep their own retention, so with
+  `trace_days` 3 and results kept 90 days, a run of last week still shows its results but no trace. The summary
+  counts `traces_expired` (`--dry-run` counts them without deleting).
+- Then a **garbage pass** deletes the screenshot images (ADR-036) and traces (ADR-037) that no result refers to any
+  more and that are older than 7 days (the 7 days cover an image uploaded before its run, or a part resent days later): the `blobs`
+  rows first, committed, then their objects in storage (`screenshots/…` or `artifacts/…` by the blob's kind). "Unreferenced" is checked again inside the `DELETE`, but on its
   own snapshot, so a reference committed while ingest held its lock can be missed; the foreign key from
-  `result_screenshots` then refuses that delete, the batch is retried one image at a time, and an image that still
+  `result_screenshots` or `result_artifacts` then refuses that delete, the batch is retried one image at a time, and an image that still
   fails is skipped and logged (`gc_blobs_skipped`) until the next pass. A store that refuses to delete is logged
   (`gc_objects_not_deleted`) and leaves an orphan object, never a row pointing at a missing image. Without artifact
   storage only the rows go. Only projects that project-service listed are touched, and never one on legal hold: an
@@ -241,12 +246,17 @@ service runs it with `--loop`):
   `blobs_deleted`; `--dry-run` counts the images unreferenced now, not those the pass would free by deleting runs.
   Known limit: an image uploaded again between the row delete and the object delete loses its object (the run and
   result are kept, the image is missing); only images unreferenced for more than 7 days are exposed.
+- It also deletes the objects under `artifacts/{project_id}/incoming/` last written more than 1 day ago: a trace
+  upload streams there and deletes its temporary object when done, so one left behind is an orphan of a failed delete.
+  A younger one is never touched (an upload may still be writing it). Same projects as the garbage pass; a store
+  failure is logged (`gc_incoming_not_deleted`) and does not fail the pass. The summary counts `incoming_deleted`.
 - A **deleted** project (ADR-034) keeps everything, keys included, for `PROJECT_DELETE_GRACE_DAYS` (default 7):
   it can still be restored as it was. After that the pass purges it in every service, each step recorded in
   project-service (`POST /internal/v1/projects/{id}/purge-state`) so a failed pass resumes: `started` (refused for
   a live project, and it blocks any later restore), test-management (`DELETE /internal/v1/projects/{id}` with
   the credentials in `TEST_MANAGEMENT_INTERNAL_URL`), ingestion (runs, results, log values and patterns, every
-  screenshot object under `screenshots/{project_id}/` and the project's `blobs` rows, masking
+  screenshot object under `screenshots/{project_id}/`, every trace object under `artifacts/{project_id}/`
+  (temporary uploads included) and the project's `blobs` rows, masking
   patterns, API keys, settings, channels, muted tests, rollups, impact data), then the project row
   (`DELETE /internal/v1/projects/{id}` on project-service). One JSON line per project: `project_purged` with its
   steps, `purge_skipped` (restored meanwhile, or `TEST_MANAGEMENT_INTERNAL_URL` unset) or `purge_failed`. A
@@ -320,7 +330,7 @@ labelled so it is never read as a full verdict:
 `GET /api/v1/projects/{id}/export` (owners and admins) streams everything stored for a project
 as NDJSON (`application/x-ndjson`, `attachment`): an `export` header line (`format: 1`), then each
 run (`type: run`, with its `changed_files` and `components`) followed by its results
-(`type: result`, with `failed_step_text`, `failed_step_line`, `failed_step_definition` and `failed_step_pattern`). Each result line carries its `log` and `log_values` (`[{"pattern", "value"}]`). A result with screenshots also carries `screenshots` (`[{"step_text", "step_line", "hook", "media_type", "bytes", "sha256"}]`, in position order; omitted when it has none). **The screenshot images are not exported, only these references**, and they are deleted with the project. The format stays `1`: the field is additive and the export has no version rule beyond that number. Text is exported as stored, masked. For a legal request, or before deleting
+(`type: result`, with `failed_step_text`, `failed_step_line`, `failed_step_definition` and `failed_step_pattern`). Each result line carries its `log` and `log_values` (`[{"pattern", "value"}]`). A result with screenshots also carries `screenshots` (`[{"step_text", "step_line", "hook", "media_type", "bytes", "sha256"}]`, in position order; omitted when it has none). **The screenshot images are not exported, only these references**, and they are deleted with the project. A result with traces carries `artifacts` (`[{"kind", "name", "bytes", "sha256"}]`, in position order; omitted when it has none); the trace files are not exported either (ADR-037). The format stays `1`: the field is additive and the export has no version rule beyond that number. Text is exported as stored, masked. For a legal request, or before deleting
 a project. The dashboard's Settings → Data has a download button.
 - `RETENTION_INTERVAL_HOURS` (default 24) between passes with `--loop`; `RETENTION_BATCH_SIZE`
   (default 500) runs per transaction, and images per batch of the garbage pass. One pass at a time (PostgreSQL advisory lock).
@@ -538,6 +548,8 @@ long as a nightly pass); run it once, off hours.
 | `POST /api/v1/projects/{id}/analytics/impact` | Body `{"changed_paths": [...], "branch": "main" or null}`: the upload's scoring for any change, as of now, reading only the change's unit hashes. 1 to 5,000 paths of 1 to 1,000 characters, no NUL, branch at most 255, no other field; else 422. It has the same one total 2 s budget as at upload (each PostgreSQL statement capped at the time left); running out answers 503 `{"code": "impact_timeout", "message": ...}` |
 | `GET /api/v1/projects/{id}/runs/{run_id}/results/{result_id}/screenshots` | `{"screenshots": [{id, step_text, step_line, hook, media_type, bytes}]}` in position order (ADR-036); empty when the result has none. 404 for a run of another project or a result of another run |
 | `GET /api/v1/projects/{id}/screenshots/{screenshot_id}` | The image bytes, read from artifact storage by ingestion (at most 5 MB, held in memory; storage stays private, no presigned URLs): `Content-Type` of the stored image, `Cache-Control: private, max-age=3600`, `X-Content-Type-Options: nosniff`. 404 for an id of another project or an object missing from storage; 503 when no artifact storage is configured, or with `Retry-After: 5` when 8 storage calls are already in flight. `GET /api/v1/runs/{run_id}` also carries `screenshot_count` on each result (0 when none) |
+| `GET /api/v1/projects/{id}/runs/{run_id}/results/{result_id}/artifacts` | `{"artifacts": [{id, kind, name, bytes}]}` in position order (ADR-037); empty when the result has none. 404 for a run of another project or a result of another run. `GET /api/v1/runs/{run_id}` also carries `trace_count` on each result (0 when none) |
+| `GET /api/v1/projects/{id}/artifacts/{artifact_id}` | The trace file, streamed from artifact storage (never read whole into memory): `Content-Type: application/zip`, `Content-Disposition: attachment; filename="trace-{id}.zip"`, `Accept-Ranges: bytes`, `Content-Length`, `Cache-Control: private, no-store`, `X-Content-Type-Options: nosniff`. One `Range: bytes=start-end`, `bytes=start-` or `bytes=-suffix` answers 206 with `Content-Range` (an end past the file is cut to it); a range starting at or past the end, or `bytes=-0`, answers 416 with `Content-Range: bytes */{size}`; several ranges or an unreadable header get the whole file (200). Read roles, as the run reads. 404 for an id of another project, a non-member or an object missing from storage; 503 when no artifact storage is configured, or with `Retry-After: 5` when 8 storage calls are already in flight |
 | `GET /api/v1/collect/key` (project API key) | Proves the key works, for `qeos-collector check`: `{"project_id", "name", "can_read_impact", "screenshots", "artifacts"}`, so a collector can tell before `impact` whether the key may read test suggestions, and whether to upload step screenshots (`screenshots` is true when artifact storage is configured and the project setting is on) and traces (`artifacts` is true when artifact storage is configured and `keep_traces` is on). Uploads and stores nothing |
 | `HEAD /api/v1/collect/blobs/{sha256}` (project API key) | 200 when this project already stores that image, else 404 (also for a malformed hash). For the collector, which asks before uploading |
 | `PUT /api/v1/collect/blobs/{sha256}` (project API key) | Stores a step screenshot, the raw bytes with `Content-Type` `image/png`, `image/jpeg` or `image/webp`. 201 new, 200 already stored; 400 when the type is not one of the three, the first bytes are not that image, or the body's SHA-256 is not the path; 413 over 5 MB; 403 when the project's `keep_screenshots` setting is off or no artifact storage is configured; 410 for a project pending deletion; 503 with `Retry-After: 5` when 8 storage calls are already in flight (the collector skips that image, never the run). No database connection is held while the body arrives or while storage answers (a 10 s read timeout), so a slow MinIO cannot take the connections that run uploads use. Content-addressed per project (`screenshots/{project_id}/{sha256}`), so the same image is stored once |
@@ -584,10 +596,10 @@ scoring missed its budget (p95 249 ms): reading the pairs of a change's units wa
   so a project-service outage never stops uploads. Key management and reads need
   project-service (503 if it is down).
 
-- Artifact storage for screenshots (ADR-036): `src/ingestion/utils/artifact_store.py`, an S3-compatible bucket
+- Artifact storage for screenshots (ADR-036) and traces (ADR-037): `src/ingestion/utils/artifact_store.py`, an S3-compatible bucket
   (MinIO in the compose files, private, not published). Set `ARTIFACTS_S3_ENDPOINT`, `ARTIFACTS_S3_BUCKET`,
   `ARTIFACTS_S3_ACCESS_KEY` and `ARTIFACTS_S3_SECRET_KEY` together; if any is unset there is no store and QEOS works
-  without screenshots. Objects are keyed `screenshots/{project_id}/{sha256}`. The MinIO volume is copied by
+  without screenshots or traces. Objects are keyed `screenshots/{project_id}/{sha256}` and `artifacts/{project_id}/{sha256}`. The MinIO volume is copied by
   `deploy/backup.sh`; see deploy/README.md section 7.
 
 ## Known limitations

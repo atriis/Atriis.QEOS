@@ -106,6 +106,7 @@ class ResultOut(BaseModel):
     owner: Optional[str] = None
     quarantined: bool = False  # failed or errored, and the test is in quarantine
     screenshot_count: int = 0  # step screenshots of the result (ADR-036)
+    trace_count: int = 0  # traces of the result (ADR-037)
 
 
 class LogValueOut(BaseModel):
@@ -133,6 +134,18 @@ class ScreenshotOut(BaseModel):
 
 class ResultScreenshotsOut(BaseModel):
     screenshots: list[ScreenshotOut] = []
+
+
+class ArtifactOut(BaseModel):
+    """A trace of a result (ADR-037), without its bytes: they are read from /projects/{p}/artifacts/{id}."""
+    id: int
+    kind: str
+    name: Optional[str] = None
+    bytes: int
+
+
+class ResultArtifactsOut(BaseModel):
+    artifacts: list[ArtifactOut] = []
 
 
 class ChangedFileOut(BaseModel):

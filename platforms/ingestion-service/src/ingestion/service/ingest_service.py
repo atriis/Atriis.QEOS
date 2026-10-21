@@ -12,14 +12,16 @@ from sqlalchemy.orm import Session
 
 from qeos_shared.keys import test_key
 from src.ingestion.core.config import settings
-from src.ingestion.models import ApiKey, Blob, LogValue, ResultScreenshot, Run, RunChangedFile, RunComponent, RunResult
+from src.ingestion.models import (
+    ApiKey, Blob, LogValue, ResultArtifact, ResultScreenshot, Run, RunChangedFile, RunComponent, RunResult,
+)
 from src.ingestion.models.run import (
     FAILED_STEP_DEFINITION_LENGTH, FAILED_STEP_PATTERN_LENGTH, FAILED_STEP_TEXT_LENGTH, FULL_SCOPE,
 )
 from src.ingestion.models.screenshot import STEP_TEXT_LENGTH
-from src.ingestion.schemas.collect import RunUpload, ScreenshotIn
+from src.ingestion.schemas.collect import ArtifactIn, RunUpload, ScreenshotIn
 from src.ingestion.service import (
-    blob_service, collection_settings_service, impact_service, log_pattern_service, log_value_service,
+    artifact_service, blob_service, collection_settings_service, impact_service, log_pattern_service, log_value_service,
     masking_pattern_service,
 )
 from src.ingestion.utils import custom_masking, metrics
@@ -81,13 +83,12 @@ def _request_hash(upload: RunUpload) -> str:
     for name, default in _LATER_RUN_FIELDS.items():
         if data["run"].get(name, default) == default:
             data["run"].pop(name, None)
-    # Result fields added by migrations 021, 022 and 023, and screenshots (025): absent from the hash while null, for
-    # the same reason
+    # Result fields added by migrations 021, 022 and 023, screenshots (025) and artifacts (027): absent from the hash
+    # while null, for the same reason
     for result in data["results"]:
-        if result.get("log") is None:
-            result.pop("log", None)
-        if result.get("screenshots") is None:
-            result.pop("screenshots", None)
+        for name in ("log", "screenshots", "artifacts"):
+            if result.get(name) is None:
+                result.pop(name, None)
         step = result.get("failed_step")
         if step is None:
             result.pop("failed_step", None)
@@ -137,9 +138,26 @@ def _blob_ids(db: Session, project_id: int, parsed: list[list[ScreenshotIn]], st
     hashes = {shot.sha256 for shots in parsed for shot in shots}
     if not hashes or not blob_service.screenshots_enabled(db, project_id, store):
         return None
-    # FOR KEY SHARE (a no-op on SQLite): the blob cleanup job deletes with a re-checked NOT EXISTS, so a blob locked here
-    # and then referenced by this upload survives, and the insert below cannot fail on a blob deleted under it
-    rows = (db.query(Blob.sha256, Blob.id).filter(Blob.project_id == project_id, Blob.sha256.in_(hashes))
+    return _locked_blobs(db, project_id, hashes, "screenshot")
+
+
+def _trace_ids(db: Session, project_id: int, parsed: list[list[ArtifactIn]], store: Optional[ArtifactStore]
+               ) -> Optional[dict[str, int]]:
+    """As _blob_ids for traces (ADR-037): None when the upload refers to none or the project does not keep traces,
+    and only this project's blobs of kind trace are found."""
+    hashes = {artifact.sha256 for artifacts in parsed for artifact in artifacts}
+    if not hashes or not artifact_service.traces_enabled(db, project_id, store):
+        return None
+    return _locked_blobs(db, project_id, hashes, "trace")
+
+
+def _locked_blobs(db: Session, project_id: int, hashes: set[str], kind: str) -> dict[str, int]:
+    """sha256 -> blob id of the project's blobs of that kind. A hash of the other kind is not found: a trace is never
+    shown as an image, nor an image offered as a trace.
+    FOR KEY SHARE (a no-op on SQLite): the blob cleanup job deletes with a re-checked NOT EXISTS, so a blob locked here
+    and then referenced by this upload survives, and the insert below cannot fail on a blob deleted under it."""
+    rows = (db.query(Blob.sha256, Blob.id)
+            .filter(Blob.project_id == project_id, Blob.kind == kind, Blob.sha256.in_(hashes))
             .with_for_update(key_share=True, read=True).all())
     return {sha: blob_id for sha, blob_id in rows}
 
@@ -181,6 +199,12 @@ def ingest(
     shots_gone = 0
     shots_pending: list[list[dict]] = []  # per result, in row order: its screenshot rows without result_id
     shots_unknown = 0
+    parsed_traces = [result.artifacts or [] for result in upload.results]
+    trace_ids = _trace_ids(db, key.project_id, parsed_traces, store)
+    traces_pending: list[list[dict]] = []  # per result, in row order: its artifact rows without result_id
+    traces_dropped = sum(result._artifacts_invalid for result in upload.results)
+    if trace_ids is None:
+        traces_dropped += sum(len(traces) for traces in parsed_traces)
     run = Run(
         project_id=key.project_id,
         api_key_id=key.id,
@@ -223,7 +247,7 @@ def ingest(
         db.flush()  # assigns run.id inside the transaction
 
         rows = []
-        for result, references in zip(upload.results, parsed_shots):
+        for result, references, trace_refs in zip(upload.results, parsed_shots, parsed_traces):
             # Mask before truncating: a cut through a secret would leave its first half unmatched
             message, message_kinds = mask(result.message, patterns)
             details, details_kinds = mask(result.details, patterns)
@@ -245,6 +269,14 @@ def ingest(
                     "step_text": shot_text[:STEP_TEXT_LENGTH], "step_line": shot.step_line, "hook": shot.hook,
                 })
             shots_pending.append(shots)
+            traces = []
+            for artifact in trace_refs if trace_ids is not None else ():
+                if artifact.sha256 not in trace_ids:
+                    traces_dropped += 1
+                    continue
+                traces.append({"position": len(traces), "blob_id": trace_ids[artifact.sha256],
+                               "kind": artifact.kind, "name": artifact.name})
+            traces_pending.append(traces)
             # The log counts in the redactions metric; `redacted` stays about the text the run page shows
             masked_kinds.update(kinds | log_kinds)
             message, cut_message = truncate_utf8(message, settings.MAX_TEXT_BYTES)
@@ -272,9 +304,9 @@ def ingest(
                 "log": log,
             })
         scan_logs = bool(log_patterns) and any(row["log"] for row in rows)
-        if scan_logs or any(shots_pending):
-            # Log values and screenshots need each result's id: one executemany with RETURNING, in the order the rows
-            # were sent (ADR-032, ADR-036)
+        if scan_logs or any(shots_pending) or any(traces_pending):
+            # Log values, screenshots and traces need each result's id: one executemany with RETURNING, in the order
+            # the rows were sent (ADR-032, ADR-036, ADR-037)
             result_ids = db.execute(
                 insert(RunResult).returning(RunResult.id, sort_by_parameter_order=True), rows
             ).scalars().all()
@@ -293,6 +325,17 @@ def ingest(
                 except IntegrityError:
                     shots_gone = len(shot_rows)
                     logger.warning("screenshots dropped, a blob was deleted during the upload: project=%s run=%s",
+                                   key.project_id, run.id)
+            trace_rows = [{"result_id": result_id, **trace}
+                          for result_id, traces in zip(result_ids, traces_pending) for trace in traces]
+            if trace_rows:
+                # As for screenshots: a trace problem drops the traces, never the run
+                try:
+                    with db.begin_nested():
+                        db.execute(insert(ResultArtifact), trace_rows)
+                except IntegrityError:
+                    traces_dropped += len(trace_rows)
+                    logger.warning("traces dropped, a blob was deleted during the upload: project=%s run=%s",
                                    key.project_id, run.id)
         else:
             db.execute(insert(RunResult), rows)  # one executemany, not 20,000 ORM objects
@@ -322,6 +365,9 @@ def ingest(
             if count:
                 metrics.SCREENSHOTS_DROPPED.labels(reason=reason).inc(count)
         run.screenshots_dropped = sum(dropped.values())  # not a column: the receipt reads it
+        if traces_dropped:
+            logger.info("upload references traces that were not stored: project=%s run=%s dropped=%s",
+                        key.project_id, run.id, traces_dropped)
         custom_names = {pattern.name for pattern in patterns}
         for kind, results in masked_kinds.items():
             # Project-chosen names would give the metric unbounded label values: one "custom" label

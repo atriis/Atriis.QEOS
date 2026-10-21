@@ -18,13 +18,14 @@ PER_PROJECT = (ApiKey, CollectionSettings, FlakyDaily, FlakyRollupDay, ImpactPai
 
 
 def purge_ingestion(db: Session, project_id: int, batch_size: int = 500) -> int:
-    """Every run (results, log values, screenshot references, children), the project's screenshot objects and every
-    per-project row of ingestion. Returns runs deleted."""
+    """Every run (results, log values, screenshot and trace references, children), the project's screenshot and trace
+    objects (incoming uploads included) and every per-project row of ingestion. Returns runs deleted."""
     runs = _delete_in_batches(db, db.query(Run.id).filter(Run.project_id == project_id), batch_size)
     store = get_artifact_store()
     if store is not None:
         # The trailing slash: "screenshots/1" would also match project 10. A failure fails the step; the next pass retries
         store.delete_prefix(f"screenshots/{project_id}/")
+        store.delete_prefix(f"artifacts/{project_id}/")
     patterns = select(LogPattern.id).where(LogPattern.project_id == project_id)
     db.query(LogValue).filter(LogValue.pattern_id.in_(patterns)).delete(synchronize_session=False)
     db.query(LogPattern).filter(LogPattern.project_id == project_id).delete(synchronize_session=False)

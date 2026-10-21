@@ -132,6 +132,37 @@ class ScreenshotIn(BaseModel):
     _clean_text = field_validator("step_text", mode="after")(_replace_unstorable)
 
 
+MAX_ARTIFACT_KEYS = 4  # ArtifactIn's fields, and one a newer collector may add
+MAX_ARTIFACTS_PER_RESULT = 5
+
+
+class ArtifactIn(BaseModel):
+    """A trace the collector already uploaded to PUT /collect/artifacts/{sha256} (ADR-037): the run upload only refers
+    to it. Unknown fields are ignored, so a field a newer collector adds (a media type) never drops the trace."""
+    model_config = ConfigDict(extra="ignore")
+
+    sha256: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+    kind: Literal["trace"]
+    name: Optional[Annotated[str, StringConstraints(max_length=200)]] = None
+
+    _clean_text = field_validator("name", mode="after")(_replace_unstorable)
+
+
+def _valid_entries(entries: list, model: type[BaseModel], max_keys: int) -> tuple[list, int]:
+    """The entries that validate, and how many did not. A malformed reference never costs the run."""
+    valid, invalid = [], 0
+    for entry in entries:
+        # Cheap shape check first: a nested bomb is never walked
+        if not isinstance(entry, dict) or len(entry) > max_keys:
+            invalid += 1
+            continue
+        try:
+            valid.append(model.model_validate(entry))
+        except ValidationError:
+            invalid += 1
+    return valid, invalid
+
+
 class ResultIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -152,28 +183,28 @@ class ResultIn(BaseModel):
     # dropped and counted (_screenshots_invalid), never a 422: an image problem never costs the run
     screenshots: Optional[list[ScreenshotIn]] = Field(None, max_length=50)
     _screenshots_invalid: int = PrivateAttr(0)
+    # Traces (ADR-037, spec 2026-10-21 §4.1): references to trace blobs, in order. A malformed entry is dropped like a
+    # screenshot's; more than 5 is a 422 (the collector never sends more)
+    artifacts: Optional[list[ArtifactIn]] = Field(None, max_length=MAX_ARTIFACTS_PER_RESULT)
+    _artifacts_invalid: int = PrivateAttr(0)
 
     _no_unstorable = field_validator("suite", "class_name", "name", "file", "owner", mode="before")(_reject_unstorable)
     _clean_text = field_validator("message", "details", "log", mode="after")(_replace_unstorable)
 
     @model_validator(mode="wrap")
     @classmethod
-    def _drop_malformed_screenshots(cls, data: Any, handler):
-        entries = data.get("screenshots") if isinstance(data, dict) else None
-        if not isinstance(entries, list) or len(entries) > 50:  # over 50 is the field's 422
+    def _drop_malformed_references(cls, data: Any, handler):
+        if not isinstance(data, dict):
             return handler(data)
-        valid, invalid = [], 0
-        for entry in entries:
-            # Cheap shape check first: a nested bomb is never walked
-            if not isinstance(entry, dict) or len(entry) > MAX_SCREENSHOT_KEYS:
-                invalid += 1
-                continue
-            try:
-                valid.append(ScreenshotIn.model_validate(entry))
-            except ValidationError:
-                invalid += 1
-        result = handler({**data, "screenshots": valid})
-        result._screenshots_invalid = invalid
+        shots, artifacts = data.get("screenshots"), data.get("artifacts")
+        cleaned, shots_invalid, artifacts_invalid = dict(data), 0, 0
+        if isinstance(shots, list) and len(shots) <= 50:  # over 50 is the field's 422
+            cleaned["screenshots"], shots_invalid = _valid_entries(shots, ScreenshotIn, MAX_SCREENSHOT_KEYS)
+        if isinstance(artifacts, list) and len(artifacts) <= MAX_ARTIFACTS_PER_RESULT:  # over 5: the field's 422
+            cleaned["artifacts"], artifacts_invalid = _valid_entries(artifacts, ArtifactIn, MAX_ARTIFACT_KEYS)
+        result = handler(cleaned)
+        result._screenshots_invalid = shots_invalid
+        result._artifacts_invalid = artifacts_invalid
         return result
 
     @field_validator("status")

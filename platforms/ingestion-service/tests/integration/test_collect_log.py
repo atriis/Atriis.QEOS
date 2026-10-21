@@ -82,6 +82,7 @@ def test_an_upload_hashed_before_migration_023_still_replays(client, make_key):
     for result in data["results"]:
         result.pop("log", None)
         result.pop("screenshots", None)  # nor screenshots (migration 025)
+        result.pop("artifacts", None)  # nor artifacts (migration 027)
         if result.get("failed_step") is None:
             result.pop("failed_step", None)
     for name, default in ingest_service._LATER_RUN_FIELDS.items():
