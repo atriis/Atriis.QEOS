@@ -226,8 +226,11 @@ service runs it with `--loop`):
 
 - Gets every project's `result_retention_days` from project-service's
   `GET /internal/v1/projects/retention`, with the HTTP Basic credentials in
-  `PROJECT_SERVICE_INTERNAL_URL` (`http://ingestion-service:<password>@project-service:8000`;
-  percent-encode special characters).
+  `PROJECT_SERVICE_INTERNAL_URL`. Two forms are accepted, for this setting and `TEST_MANAGEMENT_INTERNAL_URL`:
+  `http://ingestion-service:<password>@project-service:8000` (percent-encode special characters), or the URL
+  without credentials (`http://project-service:8000`), which uses user `ingestion-service` and the password in
+  `INTERNAL_API_PASSWORD`. The second keeps the password out of a ConfigMap on Kubernetes (it comes from Key
+  Vault) and needs no encoding. Credentials in the URL win; neither form given is an error.
 - Deletes runs uploaded (`created_at`) more than that many days ago. A run's results go with their logs, log
   values, screenshot references (`result_screenshots`) and trace references (`result_artifacts`).
 - Deletes the trace references (`result_artifacts`, ADR-037) of runs started (`started_at`) more than the project's

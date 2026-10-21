@@ -28,7 +28,8 @@ def _refresh() -> None:
 
     fresh: Optional[FrozenSet[int]] = None
     try:
-        endpoint = retention.parse_internal_url(settings.PROJECT_SERVICE_INTERNAL_URL)
+        endpoint = retention.parse_internal_url(
+            settings.PROJECT_SERVICE_INTERNAL_URL, password=settings.INTERNAL_API_PASSWORD)
         policies = retention.fetch_policies(endpoint, timeout=TIMEOUT_SECONDS)
         fresh = frozenset(p.project_id for p in policies if p.deleted)
     except retention.RetentionError:

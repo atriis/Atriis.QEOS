@@ -4,7 +4,7 @@ and empty deleted projects. A project on legal hold loses nothing.
     python -m src.ingestion.jobs.retention [--dry-run] [--loop]
 
 Retention periods come from project-service's internal endpoint, called with the HTTP Basic
-credentials in PROJECT_SERVICE_INTERNAL_URL. A pass that cannot get a trustworthy answer deletes
+credentials in PROJECT_SERVICE_INTERNAL_URL (or its user and INTERNAL_API_PASSWORD). A pass that cannot get a trustworthy answer deletes
 nothing, and projects missing from the answer are never touched, so a bug or an empty list can
 never wipe data.
 """
@@ -66,22 +66,32 @@ class Endpoint:
     base: str = ""  # without credentials nor the feed path: other internal routes hang off it
 
 
-def parse_internal_url(value: str, name: str = "PROJECT_SERVICE_INTERNAL_URL") -> Endpoint:
-    problem = RetentionError(f"{name} must look like http://user:password@host:port")
+def parse_internal_url(value: str, name: str = "PROJECT_SERVICE_INTERNAL_URL", password: str = "",
+                       username: str = "ingestion-service") -> Endpoint:
+    """http://user:password@host:port, or http://host:port with the password given (INTERNAL_API_PASSWORD, from a
+    secret store on Kubernetes) and the default user. Credentials in the URL win."""
+    problem = RetentionError(f"{name} must look like http://user:password@host:port, "
+                             "or http://host:port with INTERNAL_API_PASSWORD set")
     try:
         parts = urlsplit(value.strip())
-        username, password, hostname = parts.username, parts.password, parts.hostname
+        url_user, url_password, hostname = parts.username, parts.password, parts.hostname
     except ValueError:
         raise problem from None
-    if parts.scheme not in ("http", "https") or not hostname or not username or not password:
+    if parts.scheme not in ("http", "https") or not hostname:
+        raise problem
+    if url_user and url_password:
+        user, secret, shown = unquote(url_user), unquote(url_password), url_user
+    elif not url_user and not url_password and password:
+        user, secret, shown = username, password, username  # as given, never quoted into a URL
+    else:
         raise problem
     host = parts.netloc.rpartition("@")[2]
     path = parts.path.rstrip("/")
     return Endpoint(
         url=urlunsplit((parts.scheme, host, path + RETENTION_PATH, "", "")),
-        username=unquote(username),
-        password=unquote(password),
-        display=urlunsplit((parts.scheme, f"{username}:***@{host}", path, "", "")),
+        username=user,
+        password=secret,
+        display=urlunsplit((parts.scheme, f"{shown}:***@{host}", path, "", "")),
         base=urlunsplit((parts.scheme, host, path, "", "")),
     )
 
@@ -359,13 +369,14 @@ def _log(record: dict, error: bool = False) -> None:
 
 def run_once(*, dry_run: bool, now: Callable[[], datetime], session_factory: sessionmaker, lock_engine: Engine) -> bool:
     try:
-        endpoint = parse_internal_url(settings.PROJECT_SERVICE_INTERNAL_URL)
+        endpoint = parse_internal_url(settings.PROJECT_SERVICE_INTERNAL_URL, password=settings.INTERNAL_API_PASSWORD)
         with _advisory_lock(lock_engine) as acquired:
             if not acquired:
                 _log({"event": "retention_skipped", "reason": "another pass is already running"})
                 return True  # the copy holding the lock writes the heartbeat
             policies = fetch_policies(endpoint)
-            tm = (parse_internal_url(settings.TEST_MANAGEMENT_INTERNAL_URL, name="TEST_MANAGEMENT_INTERNAL_URL")
+            tm = (parse_internal_url(settings.TEST_MANAGEMENT_INTERNAL_URL, name="TEST_MANAGEMENT_INTERNAL_URL",
+                                  password=settings.INTERNAL_API_PASSWORD)
                   if settings.TEST_MANAGEMENT_INTERNAL_URL else None)
             with session_factory() as db:
                 purge = None

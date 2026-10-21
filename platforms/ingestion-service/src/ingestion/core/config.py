@@ -20,14 +20,16 @@ class Settings(BaseServiceSettings):
 
     # The retention job (src/ingestion/jobs/retention.py). project-service's internal API with
     # HTTP Basic credentials in the URL: http://user:password@host:port (percent-encode special
-    # characters in the password)
+    # characters in the password), or http://host:port with the password in INTERNAL_API_PASSWORD (user
+    # "ingestion-service"): on Kubernetes the password comes from Key Vault, not a ConfigMap
     PROJECT_SERVICE_INTERNAL_URL: str = ""
+    INTERNAL_API_PASSWORD: str = ""
     RETENTION_INTERVAL_HOURS: float = 24.0
     RETENTION_BATCH_SIZE: int = 500
     # A deleted project's runs are kept this long after the deletion (it can still be undone)
     # A deleted project waits this long, restorable, before the retention job purges it everywhere (spec 2026-10-16)
     PROJECT_DELETE_GRACE_DAYS: int = 7
-    # test-management's internal API for that purge, with HTTP Basic credentials: http://user:password@host:port.
+    # test-management's internal API for that purge, with HTTP Basic credentials: http://user:password@host:port, or without them (INTERNAL_API_PASSWORD).
     # Unset: deleted projects are never purged (the purge needs every service), and each pass says so
     TEST_MANAGEMENT_INTERNAL_URL: str = ""
     # The log-value re-scan (ADR-032): results per committed batch, and whether a scan queued when the service
