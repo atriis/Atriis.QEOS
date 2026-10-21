@@ -420,3 +420,15 @@ test("on a failed line with screenshots, Tab goes line, camera, then the tip; Sh
   await userEvent.tab({ shift: true });
   expect(document.activeElement).toBe(camera);
 });
+
+test("a scenario card shows a Trace button naming its case, only when the result has traces", async () => {
+  server.use(
+    http.post(`${P}/analytics/latest-results`, () => HttpResponse.json({ results: {
+      [KEY]: result("passed", { result_id: 77, trace_count: 2 }),
+    } })),
+  );
+  renderAt();
+  const cards = await screen.findAllByRole("article");
+  expect(await within(cards[0]).findByRole("button", { name: "Download trace for TC-12" })).toBeInTheDocument();
+  expect(within(cards[1]).queryByRole("button", { name: /Download trace/ })).toBeNull();
+});

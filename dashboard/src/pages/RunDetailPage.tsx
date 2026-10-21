@@ -11,6 +11,7 @@ import FilterBar from "../components/FilterBar";
 import ImpactCard from "../components/ImpactCard";
 import LogPanel from "../components/LogPanel";
 import Message from "../components/Message";
+import TraceButton, { TRACE_NOTE } from "../components/TraceButton";
 import ScreenshotButton, { useScreenshotViewer } from "../components/ScreenshotButton";
 import StatusDot from "../components/StatusDot";
 import StatusPill from "../components/StatusPill";
@@ -250,12 +251,14 @@ export default function RunDetailPage() {
                             <ScreenshotButton kind="count" name={r.name} count={r.screenshot_count!}
                               onOpen={() => shotViewer.open({ projectId: Number(projectId), runId: run.id, resultId: r.id, name: r.name })} />
                           )}
+                          <TraceButton projectId={Number(projectId)} runId={run.id} resultId={r.id} name={r.name} count={r.trace_count} />
                         </div>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              {shown.some((r) => (r.trace_count ?? 0) > 0) && <p className="muted trace-note">{TRACE_NOTE}</p>}
               {ordered.length > PAGE && (
                 <div className="pager">
                   <span className="muted">{`Rows ${start + 1}–${start + shown.length} of ${ordered.length}`}</span>

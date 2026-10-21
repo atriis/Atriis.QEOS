@@ -113,3 +113,70 @@ test("members see the screenshots switch read-only", async () => {
   expect(toggle).toBeDisabled();
   expect(toggle).toHaveAccessibleDescription(/only owners and admins/i);
 });
+
+const TRACES = /keep traces from uploads/i;
+const WARNING = "Traces contain page snapshots and network traffic, which can include cookies, tokens and personal data of your test accounts. QEOS cannot mask them. Turn this on only if every project reader may see that.";
+
+test("keeping traces is off by default, with the exact warning and 14 days", async () => {
+  server.use(http.get(URL, () => HttpResponse.json(DEFAULTS)));
+  renderCard();
+  expect(await screen.findByRole("switch", { name: TRACES })).toHaveAttribute("aria-checked", "false");
+  expect(screen.getByText(WARNING)).toBeInTheDocument();
+  expect(screen.getByLabelText(/keep them for \(days\)/i)).toHaveValue(14);
+});
+
+test("an admin turns traces on: only that field is sent", async () => {
+  let sent: unknown = null;
+  server.use(
+    http.get(URL, () => HttpResponse.json(DEFAULTS)),
+    http.put(URL, async ({ request }) => {
+      sent = await request.json();
+      return HttpResponse.json({ ...DEFAULTS, keep_traces: true, trace_days: 14 });
+    }),
+  );
+  renderCard();
+  await userEvent.click(await screen.findByRole("switch", { name: TRACES }));
+  expect(sent).toEqual({ keep_traces: true });
+  expect(await screen.findByRole("switch", { name: TRACES })).toHaveAttribute("aria-checked", "true");
+});
+
+test("changing the days saves trace_days on leaving the field", async () => {
+  let sent: unknown = null;
+  server.use(
+    http.get(URL, () => HttpResponse.json({ ...DEFAULTS, keep_traces: true, trace_days: 14 })),
+    http.put(URL, async ({ request }) => {
+      sent = await request.json();
+      return HttpResponse.json({ ...DEFAULTS, keep_traces: true, trace_days: 30 });
+    }),
+  );
+  renderCard();
+  const days = await screen.findByLabelText(/keep them for \(days\)/i);
+  await waitFor(() => expect(days).toBeEnabled());
+  await userEvent.clear(days);
+  await userEvent.type(days, "30");
+  await userEvent.tab();
+  await waitFor(() => expect(sent).toEqual({ trace_days: 30 }));
+});
+
+test("days outside 1-90 are not sent and say why", async () => {
+  let puts = 0;
+  server.use(
+    http.get(URL, () => HttpResponse.json({ ...DEFAULTS, keep_traces: true, trace_days: 14 })),
+    http.put(URL, () => { puts++; return HttpResponse.json(DEFAULTS); }),
+  );
+  renderCard();
+  const days = await screen.findByLabelText(/keep them for \(days\)/i);
+  await waitFor(() => expect(days).toBeEnabled());
+  await userEvent.clear(days);
+  await userEvent.type(days, "91");
+  await userEvent.tab();
+  expect(await screen.findByText(/between 1 and 90/i)).toBeInTheDocument();
+  expect(puts).toBe(0);
+});
+
+test("members see the traces switch and days read-only", async () => {
+  server.use(http.get(URL, () => HttpResponse.json({ ...DEFAULTS, keep_traces: true, trace_days: 20 })));
+  renderCard(false);
+  expect(await screen.findByRole("switch", { name: TRACES })).toBeDisabled();
+  expect(screen.getByLabelText(/keep them for \(days\)/i)).toBeDisabled();
+});

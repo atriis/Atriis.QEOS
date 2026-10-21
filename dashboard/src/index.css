@@ -1270,6 +1270,11 @@ button.switch.switch-compact { gap: var(--space-2); padding: var(--space-1) var(
 button.shot-button { gap: var(--space-1); min-width: 24px; min-height: 24px; padding: 2px 6px; justify-content: center; font-family: var(--font-sans); font-size: 12px; line-height: 1; color: var(--text-secondary); }
 button.shot-button:hover:not(:disabled) { color: var(--text-primary); }
 button.shot-button-step { background: transparent; border-color: transparent; padding: 2px 4px; }
+button.trace-button { gap: var(--space-1); }
+.trace-note { font-size: 12px; }
+.trace-error { color: var(--danger-text); font-size: 13px; }
+.field-inline { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.field-inline input { width: 6ch; }
 .shot-button-count { font-variant-numeric: tabular-nums; font-weight: 600; }
 @media (pointer: coarse) { button.shot-button { min-width: 44px; min-height: 44px; } }
 .gherkin:not(.numbered) .gk-note { display: inline-flex; vertical-align: middle; margin-inline-start: var(--space-2); user-select: none; }

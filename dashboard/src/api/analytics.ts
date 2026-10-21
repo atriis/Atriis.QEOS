@@ -231,6 +231,8 @@ export interface LatestResult {
   /** Log values of this result, each pattern with its link template (ADR-032); absent from an older server. */
   values?: (LogValueGroup & { link_template: string | null })[];
   /** Steps of this result that have screenshots, with how many each (ADR-036); absent from an older server. */
+  /** Traces stored for this result (ADR-037); absent from an older server, which reads as 0. */
+  trace_count?: number;
   screenshot_steps?: { step_text: string; step_line: number | null; hook: "before" | "after" | null; count: number }[];
 }
 

@@ -444,3 +444,16 @@ test("a result with screenshots shows a camera count beside its log; one without
   await userEvent.click(button);
   expect(await screen.findByRole("dialog", { name: /Screenshots — test_ok/ })).toBeInTheDocument();
 });
+
+test("a result with traces has a Trace button and a note; one without has none", async () => {
+  server.use(http.get("/api/v1/runs/61", () => HttpResponse.json(detail([
+    { ...result, trace_count: 1 },
+    { ...result, id: 2, test_key: "tests/a.py::TestLogin::test_no", name: "test_no", trace_count: 0 },
+    { ...result, id: 3, test_key: "tests/a.py::TestLogin::test_old", name: "test_old" },
+  ]))));
+  renderDetail();
+  expect(await screen.findByRole("button", { name: "Download trace for test_ok" })).toHaveTextContent("Trace");
+  expect(screen.queryByRole("button", { name: /Download trace for test_no/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Download trace for test_old/ })).toBeNull();
+  expect(screen.getByText(/open it with npx playwright show-trace/i)).toBeInTheDocument();
+});

@@ -13,6 +13,7 @@ import FailedStepTip from "../components/FailedStepTip";
 import { type StepSpread, useStepSpread } from "../lib/failedSteps";
 import GherkinBlock, { toneOf } from "../components/GherkinBlock";
 import LastResultPill from "../components/LastResultPill";
+import TraceButton from "../components/TraceButton";
 import LogValuesLine from "../components/LogValuesLine";
 import RunContextNote from "../components/RunContextNote";
 import PageHeader from "../components/PageHeader";
@@ -218,6 +219,7 @@ export default function FeaturePage() {
                 {c.automated_test_key != null && latest.isSuccess && (runId != null && !result
                   ? <span className="badge badge-muted">Not in run #{runId}</span>
                   : <LastResultPill result={result} />)}
+                {result?.result_id != null && <TraceButton projectId={id} runId={result.run_id} resultId={result.result_id} name={c.key} count={result.trace_count} />}
                 {shots && shots.unplaced > 0 && <ScreenshotButton kind="link" name={c.key} count={shots.unplaced} onOpen={() => shotViewer.open(shots.of)} />}
                 {lastRuns(c.automated_test_key, { hideEmpty: latest.isSuccess, href: caseAsOfRun(id, c.number) })}
               </div>

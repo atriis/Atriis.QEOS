@@ -6,6 +6,7 @@ import { Case, CaseInput, PRIORITIES, Priority, STATUSES, CaseStatus, Step, crea
 import { getHistory, getLatestResults, getTests } from "../api/analytics";
 import FailedStepTip from "../components/FailedStepTip";
 import LastResultPill from "../components/LastResultPill";
+import TraceButton from "../components/TraceButton";
 import LogValuesLine from "../components/LogValuesLine";
 import RunContextNote from "../components/RunContextNote";
 import { useStepSpread } from "../lib/failedSteps";
@@ -284,6 +285,7 @@ function CaseEditor() {
   const resultLine = key != null && latest.isSuccess && (runId == null || result != null) && (
     <div className="result-line">
       <LastResultPill result={result} />
+      {shotOf && <TraceButton projectId={id} runId={shotOf.runId} resultId={shotOf.resultId} name={c!.key} count={result?.trace_count} showNote />}
       {shotOf && shots && shots.unplaced > 0 && <ScreenshotButton kind="link" count={shots.unplaced} onOpen={() => shotViewer.open(shotOf)} />}
     </div>
   );
