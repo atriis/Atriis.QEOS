@@ -188,8 +188,11 @@ details.
   access log nor the gateway's shows it (`/api/v1/artifact-links/***`). A link is valid 60 seconds, for one artifact
   and one user, and only from the client address that asked for it (the address the gateway saw). Within the 60 s
   the viewer may make several GET and Range requests; after it, from another address, or for an unknown token or a
-  deleted artifact, the answer is the same 404. The gateway checks no credential on `/api/v1/artifact-links/`
-  (the link is it) and limits it as the API. The retention job deletes expired links.
+  deleted artifact, the answer is the same 404. The user's access is checked when the link is created; membership
+  is not checked again during the 60 s. Each use logs one audit line (user id, artifact id, client address), never
+  the token. The gateway checks no credential on `/api/v1/artifact-links/` (the link is it), limits it as the API,
+  keeps its error log to critical messages (which would otherwise print the token) and streams trace bytes without
+  buffering them to disk. Creating a link deletes the expired ones, and so does the retention job.
 - **Gateway.** TLS 1.2/1.3. Per-IP rate limits: 20 requests/s on the API,
   10/s on uploads, 50/s (burst 100, 6 MB body) on screenshot uploads, 10/s (burst 20, 101 MB body, streamed
   unbuffered) on trace uploads, and 5/s on sign-in, registration, password and MFA

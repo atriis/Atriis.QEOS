@@ -264,5 +264,23 @@ def test_the_access_log_never_shows_a_link_token(tmp_path):
     lines = active(nginx_conf)
     assert "'\"uri\":\"$log_uri\",'" in lines
     assert "'\"uri\":\"$request_uri\",'" not in lines
-    mapping = location_block(nginx_conf, "map $request_uri $log_uri {")
-    assert mapping[1:] == ['"~^/api/v1/artifact-links/" "/api/v1/artifact-links/***";', "default $request_uri;", "}"]
+    # Keyed on the decoded, normalised $uri, so a percent-encoded or doubled-slash form of the path is masked too
+    mapping = location_block(nginx_conf, "map $uri $log_uri {")
+    assert mapping[1:] == ['"~*^/api/v1/artifact-links(/|$)" "/api/v1/artifact-links/***";', "default $request_uri;",
+                           "}"]
+
+
+def test_artifact_links_keep_the_token_out_of_the_error_log_and_off_the_disk(tmp_path):
+    nginx_conf, _ = ok(tmp_path)
+    block = location_block(nginx_conf, "location /api/v1/artifact-links {")
+    assert "limit_req_log_level info;" in block
+    assert "error_log /dev/stderr crit;" in block
+    assert "proxy_buffering off;" in block
+
+
+def test_trace_downloads_are_not_buffered_to_disk(tmp_path):
+    nginx_conf, _ = ok(tmp_path)
+    block = location_block(nginx_conf, "location ~ ^/api/v1/projects/[0-9]+/artifacts(/|$) {")
+    assert "proxy_buffering off;" in block and "proxy_read_timeout 120s;" in block
+    assert "limit_req zone=api burst=40 nodelay;" in block
+    assert "set $upstream http://ingestion-service:8000;" in block

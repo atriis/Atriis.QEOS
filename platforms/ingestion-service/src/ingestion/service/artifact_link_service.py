@@ -20,6 +20,7 @@ TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
 
 
 class LinkedFile(NamedTuple):
+    user_id: int
     project_id: int
     artifact_id: int
     sha256: str
@@ -45,9 +46,12 @@ def _hash(token: str) -> str:
 
 
 def create(db: Session, artifact_id: int, user_id: int, ip: str) -> Tuple[str, datetime]:
-    """A new link; returns the token (never stored, never logged) and when it expires."""
+    """A new link; returns the token (never stored, never logged) and when it expires. The expired links go first
+    (an indexed delete), so they do not pile up between retention passes."""
+    now = utcnow()
+    db.query(ArtifactLink).filter(ArtifactLink.expires_at <= now).delete(synchronize_session=False)
     token = secrets.token_urlsafe(32)
-    expires_at = utcnow() + timedelta(seconds=LINK_SECONDS)
+    expires_at = now + timedelta(seconds=LINK_SECONDS)
     db.add(ArtifactLink(token_sha256=_hash(token), artifact_id=artifact_id, user_id=user_id, client_ip=ip,
                         expires_at=expires_at))
     db.commit()
@@ -65,7 +69,7 @@ def resolve(db: Session, token: str, ip: str) -> Optional[LinkedFile]:
     if not TOKEN.fullmatch(token) or not ip:
         return None
     row = db.execute(
-        select(ArtifactLink.expires_at, ArtifactLink.client_ip, Blob.project_id, ArtifactLink.artifact_id,
+        select(ArtifactLink.expires_at, ArtifactLink.client_ip, ArtifactLink.user_id, Blob.project_id, ArtifactLink.artifact_id,
                Blob.sha256, Blob.media_type, Blob.bytes)
         .join(ResultArtifact, ResultArtifact.id == ArtifactLink.artifact_id)
         .join(Blob, Blob.id == ResultArtifact.blob_id)
@@ -76,7 +80,7 @@ def resolve(db: Session, token: str, ip: str) -> Optional[LinkedFile]:
     ).one_or_none()
     if row is None or utcnow() >= _aware(row.expires_at) or row.client_ip != ip:
         return None
-    return LinkedFile(row.project_id, row.artifact_id, row.sha256, row.media_type, row.bytes)
+    return LinkedFile(row.user_id, row.project_id, row.artifact_id, row.sha256, row.media_type, row.bytes)
 
 
 def delete_expired(db: Session, now: datetime, dry_run: bool) -> int:

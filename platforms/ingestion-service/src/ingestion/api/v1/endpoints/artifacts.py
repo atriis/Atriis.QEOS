@@ -266,6 +266,9 @@ def follow_link(
     db.close()  # no pooled connection held while the store answers, nor while the body streams
     if found is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=LINK_NOT_FOUND)
+    # The audit trail of each use: who the link was made for, what and from where. Never the token
+    logger.info("artifact link used: user_id=%s artifact_id=%s ip=%s", found.user_id, found.artifact_id,
+                artifact_link_service.client_ip(request))
     if store is None:
         raise _no_store()
     if request.method == "HEAD":

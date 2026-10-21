@@ -213,3 +213,26 @@ def test_delete_expired_removes_only_expired_links(client, auth, trace_row, cloc
     assert artifact_link_service.delete_expired(db, now, dry_run=False) == 1
     db.expire_all()
     assert db.query(ArtifactLink).count() == 1
+
+
+def test_creating_a_link_deletes_the_expired_ones(client, auth, trace_row, clock, db):
+    token_of(make_link(client, auth, trace_row.id))
+    clock["at"] = T0 + timedelta(seconds=30)
+    live = token_of(make_link(client, auth, trace_row.id))
+    clock["at"] = T0 + timedelta(seconds=61)  # the first has expired, the second has not
+    newest = token_of(make_link(client, auth, trace_row.id))
+    db.expire_all()
+    hashes = {link.token_sha256 for link in db.query(ArtifactLink)}
+    assert hashes == {hashlib.sha256(t.encode("ascii")).hexdigest() for t in (live, newest)}
+
+
+def test_each_use_is_audited_without_the_token(client, auth, trace_row, clock, caplog):
+    artifact_id = trace_row.id  # read before the requests: the endpoint closes the shared session
+    token = token_of(make_link(client, auth, artifact_id, user_id=7))
+    with caplog.at_level(logging.INFO, logger="src.ingestion.api.v1.endpoints.artifacts"):
+        assert fetch(client, token).status_code == 200
+        assert fetch(client, token, method="HEAD").status_code == 200
+        assert fetch(client, token, ip=OTHER_IP).status_code == 404
+    used = [r.getMessage() for r in caplog.records if "artifact link used" in r.getMessage()]
+    assert used == [f"artifact link used: user_id=7 artifact_id={artifact_id} ip={IP}"] * 2
+    assert not any(token in r.getMessage() for r in caplog.records)

@@ -56,8 +56,9 @@ http {
     }
 
     # The path as logged: a one-time link of the trace viewer (ADR-037) carries its token in the path, never logged
-    map $request_uri $log_uri {
-        "~^/api/v1/artifact-links/" "/api/v1/artifact-links/***";
+    # Keyed on $uri (decoded, slashes merged): the form the location matches, so an encoded path is masked too
+    map $uri $log_uri {
+        "~*^/api/v1/artifact-links(/|$)" "/api/v1/artifact-links/***";
         default $request_uri;
     }
 
@@ -234,17 +235,31 @@ ${TLS_ONLY}        ssl_protocols       TLSv1.2 TLSv1.3;
             proxy_pass $upstream;
         }
 
+        # Trace downloads and link requests (ADR-037): up to 100 MB streamed straight through, never written to the
+        # gateway's temporary files, with the 120 s read timeout of trace uploads. Before the next regex location
+        location ~ ^/api/v1/projects/[0-9]+/artifacts(/|$) {
+            limit_req zone=api burst=40 nodelay;
+            proxy_buffering off;
+            proxy_read_timeout 120s;
+            set $upstream http://ingestion-service${UPSTREAM_SUFFIX}:8000;
+            proxy_pass $upstream;
+        }
         # A regex location wins over prefix locations, so this takes /api/v1/projects/{id}/api-keys,
-        # /runs, /analytics, /masking-patterns, /log-patterns, /export and /notification-channels and /collection-settings and /screenshots and /artifacts away from project-service's /api/v1/projects prefix below.
-        location ~ ^/api/v1/projects/[0-9]+/(api-keys|runs|analytics|masking-patterns|log-patterns|export|notification-channels|collection-settings|screenshots|artifacts)(/|$) {
+        # /runs, /analytics, /masking-patterns, /log-patterns, /export and /notification-channels and /collection-settings and /screenshots away from project-service's /api/v1/projects prefix below.
+        location ~ ^/api/v1/projects/[0-9]+/(api-keys|runs|analytics|masking-patterns|log-patterns|export|notification-channels|collection-settings|screenshots)(/|$) {
             limit_req zone=api burst=40 nodelay;
             set $upstream http://ingestion-service${UPSTREAM_SUFFIX}:8000;
             proxy_pass $upstream;
         }
         # One-time links of the trace viewer (ADR-037): no Bearer token, the link itself is the credential, checked
-        # by ingestion (60 s, the address that asked). Streamed like a trace upload, with its 120 s read timeout
+        # by ingestion (60 s, the address that asked). Streamed like a download (unbuffered, 120 s read timeout).
+        # The error log would print the request line, token included: here it keeps only critical messages, and
+        # rate-limit refusals (429) are logged at info, below that
         location /api/v1/artifact-links {
             limit_req zone=api burst=40 nodelay;
+            limit_req_log_level info;
+            error_log /dev/stderr crit;
+            proxy_buffering off;
             proxy_read_timeout 120s;
             set $upstream http://ingestion-service${UPSTREAM_SUFFIX}:8000;
             proxy_pass $upstream;
