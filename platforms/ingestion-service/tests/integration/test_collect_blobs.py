@@ -177,3 +177,11 @@ def test_put_503_with_retry_after_when_the_store_is_busy(client, store, headers,
     assert response.status_code == 503
     assert response.headers["retry-after"] == artifact_store.BUSY_RETRY_AFTER
     assert db.query(Blob).count() == 0 and store.objects == {}
+
+
+def test_a_hash_with_a_trailing_newline_is_404_and_touches_nothing(client, store, headers, db):
+    """Python's `$` matches before a final newline: the check must not let "<sha>\n" through."""
+    path = url(PNG) + "%0A"
+    assert client.head(path, headers=headers).status_code == 404
+    assert put(client, headers, path=path).status_code == 404
+    assert db.query(Blob).count() == 0 and store.objects == {}

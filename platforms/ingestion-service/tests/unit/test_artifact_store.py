@@ -300,10 +300,18 @@ def test_memory_store_copy():
         store.copy("artifacts/1/missing", "artifacts/1/def")
 
 
-def test_s3_copy_sends_source_and_destination(s3):
-    store, stubber = s3
-    stubber.add_response("copy_object", {}, {
-        "Bucket": BUCKET, "Key": "artifacts/1/abc",
-        "CopySource": {"Bucket": BUCKET, "Key": "artifacts/1/incoming/x"}})
-    store.copy("artifacts/1/incoming/x", "artifacts/1/abc")
-    stubber.assert_no_pending_responses()
+def test_s3_copy_sends_source_and_destination():
+    store = S3ArtifactStore("http://minio:9000", BUCKET, "key", "secret")
+    with Stubber(store._copy_client) as stubber:
+        stubber.add_response("copy_object", {}, {
+            "Bucket": BUCKET, "Key": "artifacts/1/abc",
+            "CopySource": {"Bucket": BUCKET, "Key": "artifacts/1/incoming/x"}})
+        store.copy("artifacts/1/incoming/x", "artifacts/1/abc")
+        stubber.assert_no_pending_responses()
+
+
+def test_s3_copy_uses_a_longer_read_timeout():
+    """A 100 MB server-side copy answers only when done: the client-wide 10 s read timeout is too short for it."""
+    store = S3ArtifactStore("http://minio:9000", "qeos-artifacts", "key", "secret")
+    assert store._client.meta.config.read_timeout == 10
+    assert store._copy_client.meta.config.read_timeout == artifact_store.COPY_READ_TIMEOUT == 60

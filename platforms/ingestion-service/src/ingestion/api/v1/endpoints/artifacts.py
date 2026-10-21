@@ -18,7 +18,7 @@ from src.ingestion.utils.artifact_store import ArtifactStore, get_artifact_store
 
 logger = logging.getLogger(__name__)
 router = APIRouter()  # mounted at /collect/artifacts
-SHA256 = re.compile(r"^[0-9a-f]{64}$")
+SHA256 = re.compile(r"[0-9a-f]{64}")
 TRACES_OFF = {
     "code": "traces_off",
     "message": "Traces are not enabled for this project, or this QEOS has no artifact storage.",
@@ -26,7 +26,7 @@ TRACES_OFF = {
 
 
 def _checked_hash(sha256: str) -> str:
-    if not SHA256.match(sha256):
+    if not SHA256.fullmatch(sha256):  # not match() with "$", which lets a trailing "\n" through
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     return sha256
 

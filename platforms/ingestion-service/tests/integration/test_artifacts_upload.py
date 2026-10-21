@@ -122,25 +122,12 @@ def test_a_body_shorter_than_declared_is_400_and_nothing_left(client, store, hea
     assert nothing_left(store, db)
 
 
-def test_a_stream_that_fails_midway_leaves_nothing(client, store, headers, db):
-    def body():
-        yield ZIP[:100]
-        raise ConnectionResetError("client went away")
-
-    with pytest.raises(ConnectionResetError):
-        client.put(url(ZIP), content=body(), headers={**headers, "Content-Type": "application/zip"})
-    assert nothing_left(store, db)
-
-
-def test_a_client_disconnect_midway_leaves_nothing(client, store, headers, db):
-    """What a server sees when the client drops the connection: an http.disconnect message mid-body."""
+def _drive(headers, receive):
+    """Calls the app directly with this receive, so the server side sees the partial body (a TestClient body
+    generator that raises can fail in the client before the server reads anything). Returns the sent messages."""
     from src.ingestion.api.main import app
 
-    messages = [{"type": "http.request", "body": ZIP[:100], "more_body": True}, {"type": "http.disconnect"}]
     sent = []
-
-    async def receive():
-        return messages.pop(0) if messages else {"type": "http.disconnect"}
 
     async def send(message):
         sent.append(message)
@@ -153,7 +140,33 @@ def test_a_client_disconnect_midway_leaves_nothing(client, store, headers, db):
         "client": ("testclient", 50000), "server": ("testserver", 80),
     }
     asyncio.run(app(scope, receive, send))
-    assert sent[0]["status"] == 400
+    return sent
+
+
+def test_a_client_disconnect_midway_leaves_nothing(client, store, headers, db):
+    """What a server sees when the client drops the connection: an http.disconnect message mid-body."""
+    messages = [{"type": "http.request", "body": ZIP[:100], "more_body": True}, {"type": "http.disconnect"}]
+
+    async def receive():
+        return messages.pop(0) if messages else {"type": "http.disconnect"}
+
+    assert _drive(headers, receive)[0]["status"] == 400
+    assert nothing_left(store, db)
+
+
+def test_a_receive_that_fails_midway_leaves_nothing(client, store, headers, db):
+    """The server reads part of the body, then the transport fails: the error propagates, nothing is kept."""
+    reads = []
+
+    async def receive():
+        reads.append(True)
+        if len(reads) == 1:
+            return {"type": "http.request", "body": ZIP[:100], "more_body": True}
+        raise ConnectionResetError("client went away")
+
+    with pytest.raises(ConnectionResetError):
+        _drive(headers, receive)
+    assert len(reads) == 2  # the partial body reached the server before the failure
     assert nothing_left(store, db)
 
 
@@ -287,3 +300,11 @@ def test_key_check_reports_artifacts(client, make_key, db):
     assert client.get(KEY_URL, headers=auth).json()["artifacts"] is True
     app.dependency_overrides[get_artifact_store] = lambda: None
     assert client.get(KEY_URL, headers=auth).json()["artifacts"] is False  # switch on, no store
+
+
+def test_a_hash_with_a_trailing_newline_is_404_and_touches_nothing(client, store, headers, db):
+    """Python's `$` matches before a final newline: the check must not let "<sha>\n" through."""
+    path = url(ZIP) + "%0A"
+    assert client.head(path, headers=headers).status_code == 404
+    assert client.put(path, content=ZIP, headers={**headers, "Content-Type": "application/zip"}).status_code == 404
+    assert nothing_left(store, db)

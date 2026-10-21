@@ -75,7 +75,9 @@ proxies to a service with no such route, or a row here names the wrong service.
 - `/api/v1/collect/artifacts` (traces) has a fourth: 10 requests/s per IP (burst 20), bodies up to 101 MB, and request
   buffering off, so a trace streams through to ingestion instead of being written to the gateway's disk first.
 - Request bodies up to 10 MB, except the Gherkin import (`/projects/{id}/cases/import`):
-  `GATEWAY_IMPORT_MAX_BODY`, default 25 MB. Upstream connect timeout 3 s, read timeout 30 s.
+  `GATEWAY_IMPORT_MAX_BODY`, default 25 MB. Upstream connect timeout 3 s, read timeout 30 s, except trace uploads
+  (`/api/v1/collect/artifacts`): upstream read and send timeouts 120 s and a 60 s client body timeout, since
+  ingestion still stores and copies up to 100 MB after the last byte arrives.
 - Responses are gzipped only on `/projects/{id}/analytics/report` and `/projects/{id}/case-areas`,
   never server-wide (compressing responses that carry secrets opens BREACH).
 - NGINX's own errors (404, 413, 429, 502, 504) are JSON; the services' errors pass through.

@@ -17,7 +17,7 @@ from src.ingestion.utils.artifact_store import (
 )
 
 router = APIRouter()  # mounted at /collect/blobs
-SHA256 = re.compile(r"^[0-9a-f]{64}$")
+SHA256 = re.compile(r"[0-9a-f]{64}")
 SCREENSHOTS_OFF = {
     "code": "screenshots_off",
     "message": "Step screenshots are not enabled for this project, or this QEOS has no artifact storage.",
@@ -26,7 +26,7 @@ TOO_LARGE = "Image over 5 MB"
 
 
 def _checked_hash(sha256: str) -> str:
-    if not SHA256.match(sha256):
+    if not SHA256.fullmatch(sha256):  # not match() with "$", which lets a trailing "\n" through
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     return sha256
 

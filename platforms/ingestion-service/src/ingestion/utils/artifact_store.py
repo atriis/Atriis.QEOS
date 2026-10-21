@@ -19,6 +19,8 @@ READ_CHUNK = 64 * 1024
 STORE_CALLS = 8
 SLOT_WAIT_SECONDS = 2.0
 BUSY_RETRY_AFTER = "5"
+# A server-side copy answers only when it is done: a 100 MB trace needs more than the 10 s read timeout
+COPY_READ_TIMEOUT = 60
 
 
 class ArtifactNotFound(Exception):
@@ -155,19 +157,24 @@ class S3ArtifactStore:
         from botocore.config import Config
 
         self._bucket = bucket
-        self._client = boto3.client(
-            "s3",
-            endpoint_url=endpoint,
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
-            region_name="us-east-1",  # MinIO ignores it; boto3 wants one
-            # MinIO is addressed by host and port, not by a bucket subdomain
-            config=Config(
-                s3={"addressing_style": "path"},
-                # A MinIO that is down must fail an upload or a read in seconds, not hold its thread for minutes
-                connect_timeout=5, read_timeout=10, retries={"max_attempts": 2, "mode": "standard"},
-            ),
-        )
+
+        def client(read_timeout: int):
+            return boto3.client(
+                "s3",
+                endpoint_url=endpoint,
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+                region_name="us-east-1",  # MinIO ignores it; boto3 wants one
+                # MinIO is addressed by host and port, not by a bucket subdomain
+                config=Config(
+                    s3={"addressing_style": "path"},
+                    # A MinIO that is down must fail an upload or a read in seconds, not hold its thread for minutes
+                    connect_timeout=5, read_timeout=read_timeout, retries={"max_attempts": 2, "mode": "standard"},
+                ),
+            )
+
+        self._client = client(10)
+        self._copy_client = client(COPY_READ_TIMEOUT)
 
     def put(self, key: str, data: bytes, media_type: str) -> None:
         self._client.put_object(Bucket=self._bucket, Key=key, Body=data, ContentType=media_type)
@@ -245,12 +252,13 @@ class S3ArtifactStore:
             raise
 
     def copy(self, src_key: str, dst_key: str) -> None:
-        """One copy_object call: enough for a trace (at most 100 MB); S3 wants a multipart copy only past 5 GB."""
+        """One copy_object call: enough for a trace (at most 100 MB); S3 wants a multipart copy only past 5 GB. Its
+        own client, with COPY_READ_TIMEOUT."""
         from botocore.exceptions import ClientError
 
         try:
-            self._client.copy_object(Bucket=self._bucket, Key=dst_key,
-                                     CopySource={"Bucket": self._bucket, "Key": src_key})
+            self._copy_client.copy_object(Bucket=self._bucket, Key=dst_key,
+                                          CopySource={"Bucket": self._bucket, "Key": src_key})
         except ClientError as exc:
             if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
                 raise ArtifactNotFound(src_key) from exc
