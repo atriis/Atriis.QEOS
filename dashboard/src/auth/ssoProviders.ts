@@ -2,17 +2,14 @@
    boundary. A provider without a configured client id is simply disabled;
    the backend would answer 503 for it anyway. */
 
-const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "";
-const MSAL_CLIENT_ID = import.meta.env.VITE_MSAL_CLIENT_ID ?? "";
-const MSAL_AUTHORITY =
-  import.meta.env.VITE_MSAL_AUTHORITY ?? "https://login.microsoftonline.com/organizations";
+import { runtimeConfig } from "../config/runtime";
 
 export function googleEnabled(): boolean {
-  return GOOGLE_CLIENT_ID !== "";
+  return runtimeConfig().googleClientId !== "";
 }
 
 export function microsoftEnabled(): boolean {
-  return MSAL_CLIENT_ID !== "";
+  return runtimeConfig().msalClientId !== "";
 }
 
 interface GoogleAccountsId {
@@ -53,7 +50,7 @@ export async function initGoogleButton(
 ): Promise<void> {
   const gis = await loadGis();
   gis.initialize({
-    client_id: GOOGLE_CLIENT_ID,
+    client_id: runtimeConfig().googleClientId,
     callback: (response) => onCredential(response.credential),
   });
   // Google draws the button at a fixed pixel width (200-400): the card's, so it does not overflow a phone
@@ -65,10 +62,11 @@ export async function initGoogleButton(
     lazy-imported so the login page does not carry it until used. */
 export async function getMicrosoftCredential(): Promise<string> {
   const { PublicClientApplication } = await import("@azure/msal-browser");
+  const { msalClientId, msalAuthority } = runtimeConfig();
   const app = new PublicClientApplication({
     auth: {
-      clientId: MSAL_CLIENT_ID,
-      authority: MSAL_AUTHORITY,
+      clientId: msalClientId,
+      authority: msalAuthority,
       redirectUri: window.location.origin,
     },
   });

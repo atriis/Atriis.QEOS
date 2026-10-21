@@ -178,9 +178,9 @@ bash deploy/init-env.sh localhost you@example.com
 | `PROJECT_DELETE_GRACE_DAYS` | `7` | Days a deleted project stays restorable before the retention job purges it everywhere ([4.7](#47-retention-legal-hold-and-export)). Compose also sets `TEST_MANAGEMENT_INTERNAL_URL` for that purge from `INTERNAL_API_PASSWORD`. |
 | `IMPORT_MAX_TOTAL_BYTES` | `10485760` | Gherkin import: all content in one request. |
 | `GATEWAY_IMPORT_MAX_BODY` | `25m` | Gateway body cap on the import path. Keep it about 2.5× `IMPORT_MAX_TOTAL_BYTES`. |
-| `VITE_GOOGLE_CLIENT_ID` | empty | Shows the Google button. Baked in at build time. See [3.8](#38-single-sign-on-google-and-microsoft). |
-| `VITE_MSAL_CLIENT_ID` | empty | Shows the Microsoft button. Baked in at build time. |
-| `VITE_MSAL_AUTHORITY` | `https://login.microsoftonline.com/organizations` | MSAL authority. |
+| `VITE_GOOGLE_CLIENT_ID` | empty | Shows the Google button. Baked in at build time, as the fallback; at runtime the dashboard container's `GOOGLE_CLIENT_ID` wins. See [3.8](#38-single-sign-on-google-and-microsoft). |
+| `VITE_MSAL_CLIENT_ID` | empty | Shows the Microsoft button. Baked in at build time, as the fallback; at runtime the container's `MSAL_CLIENT_ID` wins. |
+| `VITE_MSAL_AUTHORITY` | `https://login.microsoftonline.com/organizations` | MSAL authority. Build-time fallback; at runtime the container's `MSAL_AUTHORITY` wins. |
 | `COMPOSE_PROFILES` | empty | `monitoring` starts Prometheus, Alertmanager, Grafana and the exporters ([7.4](#74-monitoring-optional)). |
 | `MONITORING_ENABLED` | `false` | The QEOS sign-in to Grafana: when true, the gateway opens `/grafana/` to active superusers (checked by auth-service on every request); otherwise `/grafana/` is a 404. Superusers open it from the dashboard's **Monitoring** item. |
 | `GRAFANA_ADMIN_PASSWORD`, `MONITORING_DB_PASSWORD` | empty | Required with monitoring: Grafana's admin login (read on its first start only), and the password of PostgreSQL role `qeos_monitor`. |
@@ -515,6 +515,8 @@ In production, add it explicitly:
    GOOGLE_CLIENT_ID=1234-abc.apps.googleusercontent.com
    ```
 3. Rebuild the dashboard and recreate auth-service: `docker compose up -d --build --wait gateway`.
+   (A dashboard container started with `GOOGLE_CLIENT_ID`, `MSAL_CLIENT_ID` or `MSAL_AUTHORITY` in its own
+   environment, as on Kubernetes, reads those at start instead; they win over the baked-in `VITE_*` values.)
 
 **Microsoft (Entra ID)**
 

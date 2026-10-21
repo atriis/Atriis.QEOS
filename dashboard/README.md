@@ -32,11 +32,18 @@ know.
 
 ## SSO buttons
 
-Google and Microsoft sign-in render only when their client ids are baked at
-build time (`VITE_GOOGLE_CLIENT_ID`, `VITE_MSAL_CLIENT_ID`, optional
-`VITE_MSAL_AUTHORITY`, default `organizations`). They must match the
-auth-service configuration (`GOOGLE_CLIENT_ID`, `AZURE_ALLOWED_TENANTS`);
-the compose file forwards them as build args. The SPA obtains an ID token
+Google and Microsoft sign-in render only when their client ids are set. At
+runtime the container environment wins: `GOOGLE_CLIENT_ID`, `MSAL_CLIENT_ID`
+and optional `MSAL_AUTHORITY` (default `organizations`). At start,
+`docker-entrypoint.d/40-qeos-config.sh` writes them to `/tmp/qeos-config/config.js`
+(`window.__QEOS_CONFIG__`, served by nginx with `Cache-Control: no-store`, so the
+root filesystem stays read-only), and `src/config/runtime.ts` reads it, so one
+image serves every environment. A value containing `"`, `\`, `<`, `>` or a line
+break stops the container with an error. A missing or empty key falls back to the
+build-time value (`VITE_GOOGLE_CLIENT_ID`, `VITE_MSAL_CLIENT_ID`,
+`VITE_MSAL_AUTHORITY`), which is what compose uses (it forwards them as build
+args) and what `npm run dev` uses. The ids must match the auth-service
+configuration (`GOOGLE_CLIENT_ID`, `AZURE_ALLOWED_TENANTS`). The SPA obtains an ID token
 (Google Identity Services button / MSAL popup) and posts it to
 `/api/v1/sso/{provider}`.
 

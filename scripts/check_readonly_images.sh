@@ -123,6 +123,12 @@ fi
 # 127.0.0.1: busybox wget prefers ::1, and nginx listens on IPv4 only
 if start dashboard "${PREFIX}dashboard:${TAG}"; then
   probe "dashboard /" "$id" wget -q -O /dev/null http://127.0.0.1:8080/ && not_root dashboard "$id"
+  # The sign-in settings are written to /tmp at start and served uncached
+  if docker exec "$id" wget -q -O - http://127.0.0.1:8080/config.js 2>/dev/null | grep -q 'window.__QEOS_CONFIG__'; then
+    pass "dashboard /config.js is served"
+  else
+    fail "dashboard /config.js does not define window.__QEOS_CONFIG__"
+  fi
 fi
 
 # The gateway renders its configuration and certificate into /tmp, as on Kubernetes
