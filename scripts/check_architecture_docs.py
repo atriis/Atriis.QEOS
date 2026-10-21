@@ -55,7 +55,12 @@ def compose_services(text: str) -> dict[str, set[str]]:
 UPSTREAM = r"set \$\w*upstream http://([a-z0-9-]+)(?:\$\{UPSTREAM_SUFFIX\})?:\d+"
 
 
-def gateway_upstreams(texts: list[str]) -> set[str]:
+def gateway_upstreams(texts: list[str], entrypoint: str = "") -> set[str]:
+    """Every proxied host. A whole-host setting such as `http://${GRAFANA_UPSTREAM}` is read as its default in
+    entrypoint.sh (`: "${GRAFANA_UPSTREAM:=grafana${UPSTREAM_SUFFIX}:3000}"`)."""
+    defaults = dict(re.findall(r'^: "\$\{(\w+):=(.*)\}"$', entrypoint, re.MULTILINE))
+    expand = lambda m: defaults.get(m.group(1), m.group(0)) if m.group(1) != "UPSTREAM_SUFFIX" else m.group(0)
+    texts = [re.sub(r"(?<=http://)\$\{(\w+)\}", expand, text) for text in texts]
     return {host for text in texts for host in re.findall(UPSTREAM, text)}
 
 
@@ -86,7 +91,9 @@ def check(root: Path = ROOT) -> list[str]:
 
     stack = compose_services(read("docker-compose.yml"))
     prod = compose_services(read("deploy/docker-compose.prod.yml"))
-    upstreams = gateway_upstreams([read(f"gateway/{p.name}") for p in sorted((root / "gateway").glob("*.conf*"))])
+    entrypoint = root / "gateway" / "entrypoint.sh"
+    upstreams = gateway_upstreams([read(f"gateway/{p.name}") for p in sorted((root / "gateway").glob("*.conf*"))],
+                                  entrypoint.read_text(encoding="utf-8") if entrypoint.exists() else "")
     section = architecture_section(read("README.md"))
     diagram, table = diagram_of(section), table_of(section)
     table_text = "\n".join(" | ".join(r) for r in table)

@@ -149,7 +149,7 @@ fi
 GATEWAY_K8S=(--add-host kube-dns.kube-system.svc.cluster.local:127.0.0.1 -e GATEWAY_TLS=off
   -e GATEWAY_RESOLVER=kube-dns.kube-system.svc.cluster.local -e UPSTREAM_SUFFIX=.qeos.svc.cluster.local
   -e GATEWAY_PUBLIC_PORT=443 -e RATE_API=10r/s -e RATE_AUTH=150r/m -e RATE_COLLECT=5r/s -e RATE_COLLECT_BLOBS=25r/s
-  -e RATE_COLLECT_ARTIFACTS=5r/s)
+  -e RATE_COLLECT_ARTIFACTS=5r/s -e GATEWAY_TRUSTED_PROXIES=10.224.0.0/16)
 if out="$(docker run --rm "${READONLY[@]}" "${GATEWAY_TMP[@]}" "${GATEWAY_K8S[@]}" -e MONITORING_ENABLED=true \
     "${PREFIX}gateway:${TAG}" nginx -t 2>&1)"; then
   pass "gateway nginx -t (Kubernetes settings)"

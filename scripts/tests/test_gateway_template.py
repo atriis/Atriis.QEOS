@@ -16,9 +16,25 @@ ROOT = Path(__file__).resolve().parents[2]
 GATEWAY = ROOT / "gateway"
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
-pytestmark = pytest.mark.skipif(
-    not (shutil.which("sh") and shutil.which("envsubst")), reason="needs sh and envsubst (gettext)"
-)
+
+
+def without_tools(env=os.environ, which=shutil.which) -> "str | None":
+    """What to do without sh or envsubst: skip on a workstation, fail in CI (CI=true on GitHub), where a skip would
+    silently switch off the byte-identity guard. None when both are there."""
+    if which("sh") and which("envsubst"):
+        return None
+    return "fail" if env.get("CI") else "skip"
+
+
+@pytest.fixture(autouse=True)
+def tools(request):
+    if request.function.__name__.startswith("test_tools_"):
+        return  # the tests of without_tools itself need neither
+    outcome = without_tools()
+    if outcome == "fail":
+        pytest.fail("needs sh and envsubst (gettext): install gettext-base in CI")
+    if outcome == "skip":
+        pytest.skip("needs sh and envsubst (gettext)")
 
 KUBERNETES = {
     "UPSTREAM_SUFFIX": ".qeos.svc.cluster.local",
@@ -101,6 +117,14 @@ def test_compose_upstreams_have_no_suffix(tmp_path):
     assert hosts and all("." not in host for host in hosts), hosts
 
 
+def test_tools_missing_fail_in_ci_and_skip_elsewhere():
+    found = lambda name: "/usr/bin/" + name
+    missing = lambda name: None if name == "envsubst" else "/usr/bin/" + name
+    assert without_tools({"CI": "true"}, found) is None
+    assert without_tools({"CI": "true"}, missing) == "fail"
+    assert without_tools({}, missing) == "skip"
+
+
 # ---- Kubernetes ----
 
 @pytest.fixture
@@ -160,6 +184,41 @@ def test_public_port_defaults_to_the_https_port(tmp_path):
     nginx_conf, _ = ok(tmp_path, GATEWAY_HTTPS_PORT="9443")
     assert "proxy_redirect http://$host/ https://$host:9443/;" in nginx_conf
     assert "return 301 https://$host:9443$request_uri;" in nginx_conf
+
+
+def test_grafana_follows_the_suffix_unless_set(tmp_path):
+    _, grafana_conf = ok(tmp_path, MONITORING_ENABLED="true", UPSTREAM_SUFFIX=".qeos.svc.cluster.local")
+    assert "set $grafana_upstream http://grafana.qeos.svc.cluster.local:3000;" in grafana_conf
+
+
+# ---- Trusted proxies (the edge) ----
+
+def test_trusted_proxies_become_real_ip_directives(tmp_path):
+    result = render(tmp_path, GATEWAY_TRUSTED_PROXIES="10.224.0.0/16 192.0.2.7 fd00:10::/64 ::1")
+    assert result.returncode == 0, result.stderr
+    assert rendered(tmp_path, "real_ip.conf").splitlines() == [
+        "set_real_ip_from 10.224.0.0/16;", "set_real_ip_from 192.0.2.7;", "set_real_ip_from fd00:10::/64;",
+        "set_real_ip_from ::1;", "real_ip_header X-Forwarded-For;", "real_ip_recursive on;"]
+
+
+@pytest.mark.parametrize("value", ["10.0.0.0/8;deny", "edge.example.com", "10.0.0.0/8 *", "10.0.0.0/8\nallow all"])
+def test_trusted_proxies_other_than_addresses_stop_the_gateway(tmp_path, value):
+    result = render(tmp_path, GATEWAY_TRUSTED_PROXIES=value)
+    assert result.returncode != 0
+    assert "GATEWAY_TRUSTED_PROXIES" in result.stderr
+
+
+def test_tls_off_without_trusted_proxies_warns_of_one_shared_bucket(tmp_path):
+    result = render(tmp_path, GATEWAY_TLS="off")
+    assert result.returncode == 0, result.stderr
+    assert "WARNING" in result.stderr and "GATEWAY_TRUSTED_PROXIES" in result.stderr
+
+
+@pytest.mark.parametrize("env", [{"GATEWAY_TLS": "off", "GATEWAY_TRUSTED_PROXIES": "10.224.0.0/16"}, {}])
+def test_no_warning_with_trusted_proxies_or_tls_on(tmp_path, env):
+    result = render(tmp_path, **env)
+    assert result.returncode == 0, result.stderr
+    assert "WARNING" not in result.stderr
 
 
 # ---- Refused values ----

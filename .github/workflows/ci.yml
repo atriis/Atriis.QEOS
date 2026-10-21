@@ -446,7 +446,7 @@ jobs:
           docker run --rm --read-only --tmpfs /tmp --add-host kube-dns.kube-system.svc.cluster.local:127.0.0.1 \
             -e NGINX_RENDER_DIR=/tmp/nginx -e NGINX_CERT_DIR=/tmp/certs -e MONITORING_ENABLED=true \
             -e GATEWAY_TLS=off -e GATEWAY_RESOLVER=kube-dns.kube-system.svc.cluster.local \
-            -e UPSTREAM_SUFFIX=.qeos.svc.cluster.local -e GATEWAY_PUBLIC_PORT=443 \
+            -e UPSTREAM_SUFFIX=.qeos.svc.cluster.local -e GATEWAY_PUBLIC_PORT=443 -e GATEWAY_TRUSTED_PROXIES=10.224.0.0/16 \
             -e GRAFANA_UPSTREAM=grafana.qeos.svc.cluster.local:3000 -e RATE_API=10r/s -e RATE_AUTH=150r/m \
             -e RATE_COLLECT=5r/s -e RATE_COLLECT_BLOBS=25r/s -e RATE_COLLECT_ARTIFACTS=5r/s \
             qeos/gateway:ci nginx -t

@@ -114,7 +114,7 @@ that could end an NGINX directive (a `;`, a space, a line break) stops the gatew
 |---|---|---|---|
 | `GATEWAY_RESOLVER` | `127.0.0.11` (Docker's DNS) | `kube-dns.kube-system.svc.cluster.local` | The DNS server that resolves the upstreams at request time |
 | `UPSTREAM_SUFFIX` | empty | `.<namespace>.svc.cluster.local` | Appended to every service name in `set $upstream http://<service>${UPSTREAM_SUFFIX}:<port>` (the dashboard and auth-service's Grafana check included) |
-| `GRAFANA_UPSTREAM` | `grafana:3000` | the Grafana service's `host:port` | Where `/grafana/` goes when monitoring is on |
+| `GRAFANA_UPSTREAM` | `grafana${UPSTREAM_SUFFIX}:3000` (`grafana:3000`) | the default, unless Grafana runs in another namespace | Where `/grafana/` goes when monitoring is on |
 | `GATEWAY_TLS` | `on` | `off` | `off`: TLS ends at the edge. One server listens on 8080 over plain HTTP and serves every route; no 8443, no HTTP→HTTPS redirect server, no certificate generated |
 | `GATEWAY_PUBLIC_PORT` | `${GATEWAY_HTTPS_PORT}` (8443) | `443` | The port in `proxy_redirect` and in the HTTP→HTTPS redirect: the one clients reach |
 | `RATE_API` | `20r/s` | `10r/s` | The `api` zone (every `/api/v1` route, the dashboard, `/grafana/`) |
@@ -130,7 +130,13 @@ front enforces its own limits on sign-in and uploads.
 With `GATEWAY_TLS=off` the services are told `X-Forwarded-Proto: https`, a constant: the edge serves the public site
 over HTTPS only, so their redirects and secure cookies are built for `https`. NGINX's own `$scheme` would say
 `http` (the edge's hop inside the cluster), and a client-sent `X-Forwarded-Proto` is never believed. With TLS on, it
-stays `$scheme`, as before. Set `GATEWAY_TRUSTED_PROXIES` to the edge's range so the per-IP limits see real clients.
+stays `$scheme`, as before. This relies on the edge being the only way in: on AKS the gateway's Service stays
+ClusterIP, with a NetworkPolicy that admits only the edge, since any plain-HTTP caller that reached the gateway
+directly would be presented to the services as `https`.
+
+Set `GATEWAY_TRUSTED_PROXIES` to the edge's range so the per-IP limits see real clients: with `GATEWAY_TLS=off` and no
+trusted proxies, the gateway logs a warning at start, because every client then shares the edge's bucket. Each entry
+must be an IPv4 or IPv6 address or CIDR; anything else stops the gateway at start.
 
 The template marks the lines that exist only with TLS on with `${TLS_ONLY}` (empty, or `#`), and its `#%` lines are
 notes that the entrypoint drops from the render.

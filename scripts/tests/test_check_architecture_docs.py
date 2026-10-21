@@ -277,6 +277,15 @@ def test_the_kubernetes_template_forms_are_read_like_the_plain_ones(routes):
     assert "gateway: /api/v1/auth (auth-service's /auth) goes to runs-service" in docs.check_routes(root)
 
 
+def test_a_host_setting_is_read_as_its_entrypoint_default(repo):
+    root, edit = repo
+    edit("gateway/nginx.conf.template", "http://auth-service:8000", "http://${GRAFANA_UPSTREAM}")
+    (root / "gateway/entrypoint.sh").write_text(': "${UPSTREAM_SUFFIX:=}"\n'
+                                                ': "${GRAFANA_UPSTREAM:=grafana${UPSTREAM_SUFFIX}:3000}"\n',
+                                                encoding="utf-8")
+    assert docs.check(root) == ["gateway proxies to 'grafana', which docker-compose.yml does not run"]
+
+
 def test_a_suffixed_gateway_upstream_must_be_a_compose_service(repo):
     root, edit = repo
     edit("gateway/nginx.conf.template", "auth-service:8000", "old-service${UPSTREAM_SUFFIX}:8000")

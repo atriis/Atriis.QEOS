@@ -18,7 +18,8 @@ set -eu
 : "${GATEWAY_RESOLVER:=127.0.0.11}"
 # Appended to every service name: the namespace's ".<ns>.svc.cluster.local" on Kubernetes
 : "${UPSTREAM_SUFFIX:=}"
-: "${GRAFANA_UPSTREAM:=grafana:3000}"
+# Grafana's host:port; by default the grafana service with the same suffix (nginx's resolver ignores search domains)
+: "${GRAFANA_UPSTREAM:=grafana${UPSTREAM_SUFFIX}:3000}"
 # off: TLS ends at the edge in front of the gateway, which then serves everything over HTTP on 8080
 : "${GATEWAY_TLS:=on}"
 # The port clients reach: redirects are built from it (443 behind the edge)
@@ -51,6 +52,19 @@ valid "$UPSTREAM_SUFFIX" '(\.[A-Za-z0-9-]+)*' \
   || refuse UPSTREAM_SUFFIX "empty or a domain suffix starting with a dot" "$UPSTREAM_SUFFIX"
 valid "$GATEWAY_RESOLVER" '[A-Za-z0-9.:-]+' || refuse GATEWAY_RESOLVER "a host name or address" "$GATEWAY_RESOLVER"
 valid "$GRAFANA_UPSTREAM" '[A-Za-z0-9.-]+:[0-9]+' || refuse GRAFANA_UPSTREAM "host:port" "$GRAFANA_UPSTREAM"
+# Each GATEWAY_TRUSTED_PROXIES entry becomes a set_real_ip_from directive (below): an IPv4 or IPv6 address or CIDR
+: "${GATEWAY_TRUSTED_PROXIES:=}"
+set -f
+for cidr in $GATEWAY_TRUSTED_PROXIES; do
+  valid "$cidr" '([0-9]{1,3}\.){3}[0-9]{1,3}(/[0-9]{1,2})?|[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(/[0-9]{1,3})?' \
+    || refuse GATEWAY_TRUSTED_PROXIES "space-separated IPv4 or IPv6 addresses or CIDRs" "$cidr"
+done
+set +f
+# Behind the edge without trusted proxies, every request comes from the edge's address: one rate-limit bucket for all
+if [ "$GATEWAY_TLS" = off ] && [ -z "$GATEWAY_TRUSTED_PROXIES" ]; then
+  echo "qeos-gateway: WARNING: GATEWAY_TLS=off and GATEWAY_TRUSTED_PROXIES is empty: every client shares the edge's" \
+    "rate-limit bucket. Set GATEWAY_TRUSTED_PROXIES to the edge's address range" >&2
+fi
 
 # Derived from GATEWAY_TLS, never set by hand. TLS_ONLY starts each line that only exists with TLS on: empty, or a
 # "#" that comments the line out. FORWARDED_PROTO is the scheme the services are told: with TLS off, nginx's own
@@ -93,13 +107,15 @@ esac
 # (space-separated CIDRs) names the proxies whose X-Forwarded-For is believed; nginx
 # then takes the right-most address no trusted proxy added - the real client - so a
 # client-supplied header can never pick its own bucket. Unset: the TCP peer, as before.
-: "${GATEWAY_TRUSTED_PROXIES:=}"
+# Each entry was checked above
 REAL_IP="$NGINX_RENDER_DIR/real_ip.conf"
 : > "$REAL_IP"
 if [ -n "$GATEWAY_TRUSTED_PROXIES" ]; then
+  set -f
   for cidr in $GATEWAY_TRUSTED_PROXIES; do
     echo "set_real_ip_from $cidr;" >> "$REAL_IP"
   done
+  set +f
   echo "real_ip_header X-Forwarded-For;" >> "$REAL_IP"
   echo "real_ip_recursive on;" >> "$REAL_IP"
 fi
