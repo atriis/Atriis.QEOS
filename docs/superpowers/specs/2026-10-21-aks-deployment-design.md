@@ -48,6 +48,9 @@ Non-goals (this version):
 - Moving in-API background work (notifications, impact evaluation, log scan) to a queue.
 - GitOps (Argo CD / Flux), service mesh, Vault, multi-region.
 - Migrating data from an existing install (fresh start, see section 2).
+- Password-less database sign-in (Microsoft Entra authentication on Flexible Server with workload
+  identity). It removes database passwords but needs token refresh in every service; recorded in
+  NEXT_STEPS for a later stage.
 - Azure Managed Grafana / Azure Monitor managed Prometheus (see 5.7 for why).
 
 Anti-goals:
@@ -202,6 +205,54 @@ Entra app redirect URIs).
   the deploy step (fetched at run time and added temporarily), or a self-hosted runner in the VNet is used
   if the platform team requires it.
 
+### 5.9 Email
+
+AKS has no mail server, and without one verification and invitation links appear only in the auth-service
+log (which nobody reads on AKS; this already broke an invite on the local stack). The AKS install sends
+mail through **Azure Communication Services Email** (or another SMTP relay) using the existing `SMTP_*`
+settings; the credentials are in Key Vault. Bicep creates the Communication Services resource and its
+email domain; the runbook covers the sender domain's DNS records. Staging may use the Azure-managed sender
+domain.
+
+### 5.10 Testing the chart before Azure
+
+A CI job installs the Helm chart into a throwaway kind cluster with in-cluster PostgreSQL and MinIO (values
+file `values-ci.yaml`, `ARTIFACTS_BACKEND=s3`), waits for the migration hook and all pods, and runs
+`scripts/smoke_gateway.sh` against it through a port-forward. `helm lint` and `helm template` with each
+values file run too. Chart, migration-hook and nginx-upstream mistakes then fail CI on every push, before
+anything reaches AKS.
+
+### 5.11 Delivery in stages
+
+Each stage is usable on its own:
+
+1. **Staging that works**: images to ACR (5.2), the Helm chart with migrations (5.3), the edge and TLS
+   (5.4), Flexible Server and Azure Blob (5.5), secrets from Key Vault (5.6), email (5.9), the kind CI job
+   (5.10), and deploys to staging (5.8). The Azure Blob store is built **after the traces/videos work
+   (ADR-037) has landed in `artifact_store.py`**, so it covers screenshots, traces and videos at once.
+2. **Hardening and monitoring**: NetworkPolicies, read-only root filesystems everywhere, kube-prometheus-stack
+   with QEOS's rules and dashboards, the Grafana proxy sidecar (5.7), Container Insights.
+3. **Production**: the production cluster, the approval-gated deploy, the recovery targets checked by a
+   restore drill (5.12), and the CI switch-over (5.13).
+
+### 5.12 Recovery targets
+
+Production targets: at most **5 minutes** of data loss (Flexible Server point-in-time restore) and **1 hour**
+to restore service. Before production goes live, staging proves both: a point-in-time restore of the
+database into a new server and a Blob restore (soft delete / versioning), timed and written up in the
+runbook.
+
+### 5.13 Switching CI over (fresh start)
+
+A short checklist in the runbook: create the organization and project on AKS; create new project API keys;
+set `QEOS_URL` and `QEOS_API_KEY` in the OBT repository (and any other CI); run the test-case import and
+repository-suite sync; invite people. Results then flow to AKS from the next CI run.
+
+### 5.14 Staging cost
+
+Staging uses small sizes (B-series Flexible Server, small node pool) and stops outside working hours
+(scheduled `az aks stop` / `az aks start`, Flexible Server stop/start). Production stays on.
+
 ## 6. Things to keep in mind
 
 - Rate limits stay per gateway pod; with one gateway replica this matches today. Scaling the gateway is
@@ -232,6 +283,9 @@ Entra app redirect URIs).
 - **Migrations stay backward compatible for one release** (rolling updates, no outage) rather than
   `Recreate` with a short outage.
 - **Images for every master commit** in ACR (staging), with an ACR retention policy for untagged images.
+- **Azure Communication Services Email** for mail on AKS.
+- **Recovery targets** of 5 minutes data loss and 1 hour to restore (adjust if the business needs differ).
+- **Staging stops outside working hours** to save cost.
 - **Workload identity** for Blob and Key Vault (no storage keys).
 - **kube-prometheus-stack** in the cluster, not Azure managed Prometheus/Grafana.
 - **One gateway replica** on AKS until Redis-backed limits exist.

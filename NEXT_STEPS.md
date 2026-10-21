@@ -10,6 +10,12 @@ CI, and listed shipped features as unbuilt).
 - **Current vs target architecture**: ARCHITECTURE_BLUEPRINT_V1_0.md Implementation Status banner.
 - **Current-state spec**: TECHNICAL_SPECIFICATION.md.
 
+## AKS follow-ups (design 2026-10-21, ADR-038 to write)
+
+- Password-less database sign-in on AKS: Microsoft Entra authentication on PostgreSQL Flexible Server with
+  workload identity, so no service holds a database password. Needs token refresh in every service's
+  SQLAlchemy engine. Out of the first AKS stages by design (docs/superpowers/specs/2026-10-21-aks-deployment-design.md).
+
 ## Step screenshots follow-ups (ADR-036, shipped 2026-10-20)
 
 - **Separate image retention.** Images follow their results' retention days. If storage grows, add a shorter retention for images only.
