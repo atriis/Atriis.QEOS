@@ -1,6 +1,6 @@
 # Running QEOS on Azure Kubernetes Service (AKS)
 
-Date: 2026-10-21 · Status: for approval (builder check done) · Decision record to write: ADR-038
+Date: 2026-10-21 · Status: approved 2026-10-21 (domain still open; not needed for Stage 1) · Decision record to write: ADR-038
 
 ## 1. Intent
 
