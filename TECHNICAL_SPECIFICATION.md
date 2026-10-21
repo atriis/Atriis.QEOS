@@ -153,7 +153,8 @@ a stale one is a 409 carrying the stored row; layouts are validated against
   stored in `test_results.log`, migration 023; left out of the request hash while null).
 - **Collection settings**: `GET/PUT /projects/{id}/collection-settings` (`collect_manual`, default
   true; `discarded_count` and `last_discarded_at`; members read, owners and admins write), table
-  `collection_settings` (ADR-030).
+  `collection_settings` (ADR-030). It also carries `keep_screenshots` (ADR-036), `keep_traces` (off by default) and
+  `trace_days` (1-90, default 14; ADR-037).
 - **Masking**: built-in rules (authorization headers, cookies, URL and CLI
   passwords, JWTs, vendor tokens, private keys, key=value secrets, emails, card
   numbers) plus up to 20 per-project patterns on RE2 (`/masking-patterns`, with

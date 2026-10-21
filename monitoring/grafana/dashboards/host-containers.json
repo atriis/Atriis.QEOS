@@ -41,7 +41,7 @@
      "datasource": {"type": "prometheus", "uid": "prometheus"},
      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
      "targets": [{"refId": "A", "expr": "sum by (container_label_com_docker_compose_service) (changes(container_start_time_seconds{name!=\"\"}[1h]))", "legendFormat": "{{container_label_com_docker_compose_service}}"}]},
-    {"id": 8, "type": "timeseries", "title": "Screenshot storage used", "description": "Bytes in MinIO (ADR-036). MinIO counts them in a background scan, so the line moves every few minutes and is empty until the first scan ends", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+    {"id": 8, "type": "timeseries", "title": "Artifact storage used", "description": "Bytes in MinIO (screenshots and traces, ADR-036 and ADR-037). MinIO counts them in a background scan, so the line moves every few minutes and is empty until the first scan ends", "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
      "datasource": {"type": "prometheus", "uid": "prometheus"},
      "fieldConfig": {"defaults": {"unit": "bytes", "min": 0}, "overrides": []},
      "targets": [{"refId": "A", "expr": "max(minio_cluster_usage_total_bytes)", "legendFormat": "used"}]},

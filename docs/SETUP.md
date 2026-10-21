@@ -41,6 +41,7 @@ instead.
    - [4.9 Security operations](#49-security-operations)
    - [4.10 Log values](#410-log-values)
    - [4.11 Step screenshots](#411-step-screenshots)
+   - [4.12 Traces](#412-traces)
 5. [Wiring a real test repository end to end](#5-wiring-a-real-test-repository-end-to-end)
 6. [Production](#6-production)
 7. [Upgrades and maintenance](#7-upgrades-and-maintenance)
@@ -1820,6 +1821,36 @@ data export carries references only, not the images.
 
 **Verify (4.11):** after a run with the toggle on, the collector prints `screenshots: N stored, 0 skipped`, and the
 case page shows the camera on the step.
+
+### 4.12 Traces
+
+A failed Playwright test can send its trace (the ZIP with page snapshots, network calls and the action list) to QEOS.
+A **Trace** button then appears on a run's results and on a case's or scenario's latest result, and downloads
+`trace-<id>.zip`. Open it with `npx playwright show-trace trace-<id>.zip`. This needs QEOS with ADR-037 and collector
+0.14.0. The viewer in the browser is not built yet, and videos are not sent.
+
+**Privacy first.** A trace holds page snapshots and network traffic, which can include cookies, tokens and personal
+data of your test accounts. QEOS cannot mask it. Traces are **off by default**, per project, with their own switch.
+Turn it on only if every project reader may see that (see SECURITY.md).
+
+**Setup:**
+
+1. **Storage.** The same MinIO as 4.11; nothing more to configure.
+2. **Project switch.** Owner or admin: Project Settings, **Keep traces from uploads**, on, and **Keep them for N days**
+   (1 to 90, default 14). Turning it off later does not delete stored traces; they age out.
+3. **Tests.** With Playwright's own JSON reporter, set `trace: "retain-on-failure"` (or `on-first-retry`); the zip
+   attachments are found and sent. With cucumber-js, take the trace in an `After` hook and attach a reference
+   (`templates/github/cucumber-trace-hook.js`):
+   `this.attach(JSON.stringify({ kind: "trace", path: tracePath }), "application/vnd.qeos.artifact+json");`
+4. **Collector.** Nothing to add: it asks QEOS first (`artifacts: true|false` in the key check). `--no-artifacts`
+   (or `QEOS_NO_ARTIFACTS=1`, or `no-artifacts: true` in `.qeos.yml`) skips traces for a run or a repository.
+
+Limits: 100 MB per trace, 5 per result, 500 per run, 300 seconds for the upload phase, 2 at a time. A trace is kept
+`trace_days` after the run started; one no result refers to is deleted after 7 days. The data export names traces but
+does not carry the files.
+
+**Verify (4.12):** after a failed run with the switch on, the collector prints the traces it stored, and the Trace
+button downloads a ZIP that `npx playwright show-trace` opens.
 
 ---
 
