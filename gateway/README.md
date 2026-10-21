@@ -10,7 +10,7 @@ Design: `docs/superpowers/specs/2026-09-28-api-gateway-design.md`.
 | `/api/v1/organizations/{id}/projects…` | project-service |
 | `/api/v1/projects/{id}/cases…`, `…/case-labels…`, `…/case-folders…`, `…/case-features…`, `…/case-areas`, `…/features…`, `…/suites…`, `…/ci-target…`, `…/run-requests…` | test-management-service |
 | `/api/v1/projects/{id}/api-keys…`, `…/runs…`, `…/analytics…`, `…/masking-patterns…`, `…/log-patterns…`, `…/export`, `…/notification-channels…`, `…/collection-settings`, `…/screenshots…`, `…/artifacts…` | ingestion-service |
-| `/api/v1/runs…`, `/api/v1/collect…` | ingestion-service |
+| `/api/v1/runs…`, `/api/v1/collect…`, `/api/v1/artifact-links/…` | ingestion-service |
 | `/api/v1/projects…` | project-service |
 | `/api/v1/organizations…`, `/api/v1/invitations…` | organization-service |
 | `/api/v1/auth…`, `/api/v1/users…`, `/api/v1/sso…` | auth-service |
@@ -77,7 +77,9 @@ proxies to a service with no such route, or a row here names the wrong service.
 - Request bodies up to 10 MB, except the Gherkin import (`/projects/{id}/cases/import`):
   `GATEWAY_IMPORT_MAX_BODY`, default 25 MB. Upstream connect timeout 3 s, read timeout 30 s, except trace uploads
   (`/api/v1/collect/artifacts`): upstream read and send timeouts 120 s and a 60 s client body timeout, since
-  ingestion still stores and copies up to 100 MB after the last byte arrives.
+  ingestion still stores and copies up to 100 MB after the last byte arrives. The trace viewer's one-time links
+  (`/api/v1/artifact-links/…`, ADR-037) also get a 120 s read timeout. They are in the `api` zone (20/s, burst 40),
+  and the gateway checks no credential on them: the link is the credential, and ingestion checks it.
 - Responses are gzipped only on `/projects/{id}/analytics/report` and `/projects/{id}/case-areas`,
   never server-wide (compressing responses that carry secrets opens BREACH).
 - NGINX's own errors (404, 413, 429, 502, 504) are JSON; the services' errors pass through.
@@ -146,7 +148,7 @@ notes that the entrypoint drops from the render.
 Every response carries `X-Request-ID` (yours if you sent one); the same id is forwarded to the
 service. `X-Forwarded-For` is replaced with the connecting address, never appended to, so a client
 cannot choose its own rate-limit bucket. `docker compose logs gateway` shows one JSON line per
-request.
+request. A one-time link's path carries its token, so it is logged as `/api/v1/artifact-links/***`.
 
 ## Adding a service
 

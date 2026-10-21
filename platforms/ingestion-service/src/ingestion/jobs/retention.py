@@ -28,7 +28,7 @@ from sqlalchemy.orm import Query, Session, sessionmaker
 from src.ingestion.core.config import settings
 from src.ingestion.jobs import heartbeat
 from src.ingestion.models import ApiKey, Blob, LogValue, ResultArtifact, ResultScreenshot, Run, RunResult
-from src.ingestion.service import collection_settings_service
+from src.ingestion.service import artifact_link_service, collection_settings_service
 from src.ingestion.utils.artifact_store import ArtifactStore, artifact_key, get_artifact_store, screenshot_key
 
 RETENTION_PATH = "/internal/v1/projects/retention"
@@ -196,6 +196,8 @@ def run_pass(
     blobs_deleted = (_unreferenced_blobs(db, now, gc_projects).count() if dry_run
                      else collect_unreferenced_blobs(db, store, now, batch_size, projects=gc_projects))
     incoming_deleted = 0 if store is None else collect_incoming(store, now, gc_projects, dry_run)
+    # One-time links (ADR-037) live 60 s and belong to no retention policy: the expired ones go, whatever the answer
+    links_deleted = artifact_link_service.delete_expired(db, now, dry_run)
     listed = {policy.project_id for policy in policies}
     known = {pid for (pid,) in db.query(Run.project_id).distinct()} | {
         pid for (pid,) in db.query(ApiKey.project_id).distinct()
@@ -207,6 +209,7 @@ def run_pass(
         "blobs_deleted": blobs_deleted,
         "traces_expired": traces_expired,
         "incoming_deleted": incoming_deleted,
+        "links_deleted": links_deleted,
         "projects_purged": projects_purged,
         "purge_failures": purge_failures,
         "projects_skipped": len(known - listed),

@@ -1,3 +1,4 @@
+import logging
 import threading
 from contextlib import asynccontextmanager
 
@@ -37,6 +38,23 @@ if settings.BACKEND_CORS_ORIGINS:
     )
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+
+class _HideLinkTokens(logging.Filter):
+    """uvicorn's access log names each request's path: a one-time link's (ADR-037) carries its token, which is
+    never logged. The gateway's log hides it the same way."""
+
+    PREFIX = f"{settings.API_V1_STR}/artifact-links/"
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) > 2 and isinstance(args[2], str) and args[2].startswith(self.PREFIX):
+            record.args = (*args[:2], self.PREFIX + "***", *args[3:])
+        return True
+
+
+ACCESS_LOG_FILTER = _HideLinkTokens()
+logging.getLogger("uvicorn.access").addFilter(ACCESS_LOG_FILTER)
 
 # Ingestion's own registry, so the qav_* metrics keep their names on the same page (spec §3)
 install_metrics(app, service="ingestion", registry=metrics.REGISTRY)

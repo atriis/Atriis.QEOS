@@ -97,8 +97,9 @@ def test_runs_older_than_the_retention_period_are_deleted(db, session_factory, a
     assert remaining(db) == [recent]
     assert db.query(RunResult).count() == 1
     assert summary(capsys) == {"event": "retention", "projects": 1, "runs_deleted": 3, "blobs_deleted": 0,
-                               "traces_expired": 0, "incoming_deleted": 0, "projects_purged": 0,
-                               "purge_failures": 0, "projects_skipped": 0, "projects_held": 0, "dry_run": False}
+                               "traces_expired": 0, "incoming_deleted": 0, "links_deleted": 0,
+                               "projects_purged": 0, "purge_failures": 0, "projects_skipped": 0, "projects_held": 0,
+                               "dry_run": False}
 
 
 def test_without_test_management_a_deleted_project_is_left_alone(db, session_factory, answer, add_run, make_key,
@@ -640,3 +641,25 @@ def test_gc_of_incoming_objects_survives_a_store_failure(db, session_factory, an
     answer([live(1, 90)])
     assert run_job(session_factory) == 0
     assert "gc_incoming_not_deleted" in capsys.readouterr().err
+
+
+# One-time links (ADR-037): valid 60 s; the pass deletes the expired ones, whatever the policies say
+
+def test_expired_artifact_links_are_deleted(db, session_factory, answer, add_run, add_trace, capsys):
+    from src.ingestion.models import ArtifactLink, ResultArtifact
+
+    add_trace(add_run(1, 1))
+    artifact_id = db.query(ResultArtifact.id).scalar()
+    for name, expires in (("old", NOW - timedelta(days=2)), ("just", NOW - timedelta(seconds=1)),
+                          ("live", NOW + timedelta(seconds=30))):
+        db.add(ArtifactLink(token_sha256=(name * 64)[:64], artifact_id=artifact_id, user_id=1, client_ip="1.2.3.4",
+                            expires_at=expires))
+    db.commit()
+    answer([])  # an empty answer touches no project, and still clears the expired links
+    assert run_job(session_factory, "--dry-run") == 0
+    assert summary(capsys)["links_deleted"] == 2
+    assert db.query(ArtifactLink).count() == 3
+    assert run_job(session_factory) == 0
+    assert summary(capsys)["links_deleted"] == 2
+    db.expire_all()
+    assert [link.token_sha256[:4] for link in db.query(ArtifactLink)] == ["live"]

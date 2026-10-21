@@ -238,3 +238,31 @@ def test_bad_values_stop_the_gateway_naming_the_setting(tmp_path, name, value):
     result = render(tmp_path, **{name: value})
     assert result.returncode != 0
     assert name in result.stderr
+
+
+# ---- One-time links of the trace viewer (ADR-037) ----
+
+def location_block(conf: str, opening: str) -> list[str]:
+    """The active lines of one location block, from its opening line to its closing brace."""
+    lines = active(conf)
+    start = lines.index(opening)
+    return lines[start:lines.index("}", start) + 1]
+
+
+def test_artifact_links_go_to_ingestion_with_the_download_timeout(tmp_path):
+    nginx_conf, _ = ok(tmp_path)
+    block = location_block(nginx_conf, "location /api/v1/artifact-links {")
+    assert "limit_req zone=api burst=40 nodelay;" in block
+    assert "proxy_read_timeout 120s;" in block
+    assert "set $upstream http://ingestion-service:8000;" in block and "proxy_pass $upstream;" in block
+    # No credential at the gateway: the link is it, checked by ingestion
+    assert not [line for line in block if "auth" in line or "Authorization" in line]
+
+
+def test_the_access_log_never_shows_a_link_token(tmp_path):
+    nginx_conf, _ = ok(tmp_path)
+    lines = active(nginx_conf)
+    assert "'\"uri\":\"$log_uri\",'" in lines
+    assert "'\"uri\":\"$request_uri\",'" not in lines
+    mapping = location_block(nginx_conf, "map $request_uri $log_uri {")
+    assert mapping[1:] == ['"~^/api/v1/artifact-links/" "/api/v1/artifact-links/***";', "default $request_uri;", "}"]

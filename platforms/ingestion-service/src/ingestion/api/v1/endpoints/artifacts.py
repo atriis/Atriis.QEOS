@@ -1,6 +1,7 @@
 """Traces (ADR-037). Upload: the collector sends them before the run that refers to them, project API key auth as
 /collect/blobs, the body streamed to the store, never held whole (up to 100 MB per trace). Download: JWT and the
-read roles, as the run reads, streamed too, with one byte range at a time for the trace viewer."""
+read roles, as the run reads, streamed too, one byte range at a time if asked. The trace viewer, which cannot send the
+Bearer token, reads the same way through a one-time link."""
 import asyncio
 import logging
 import re
@@ -14,8 +15,9 @@ from starlette.requests import ClientDisconnect
 
 from src.ingestion.api.deps import READ_ROLES, ProjectAccess, get_db, require_project_role
 from src.ingestion.api.key_auth import get_api_key
+from src.ingestion.core.config import settings
 from src.ingestion.models import ApiKey
-from src.ingestion.service import artifact_read, artifact_service
+from src.ingestion.service import artifact_link_service, artifact_read, artifact_service
 from src.ingestion.utils.artifact_store import (
     BUSY_RETRY_AFTER, ArtifactNotFound, ArtifactRangeError, ArtifactStore, ArtifactStoreBusy, artifact_key,
     get_artifact_store, store_slot,
@@ -152,10 +154,60 @@ def _busy() -> HTTPException:
                          headers={"Retry-After": BUSY_RETRY_AFTER})
 
 
-@project_router.get("/{artifact_id}", response_class=StreamingResponse, responses={
+def _file_headers(artifact_id: int) -> dict:
+    return {
+        "Content-Disposition": f'attachment; filename="trace-{artifact_id}.zip"',
+        "Accept-Ranges": "bytes",
+        # Traces can hold cookies and tokens of test accounts: no copy kept by a browser or a proxy
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+    }
+
+
+def _serve_file(store: ArtifactStore, project_id: int, artifact_id: int, sha256: str, media_type: str, size: int,
+                range_header: Optional[str], not_found: str) -> Response:
+    """The stored file, streamed (never read whole into memory): the whole of it, or one byte range (206), or 416.
+    For the download and the one-time links alike; `not_found` is the detail of the 404 for an object missing from
+    storage. Call it with no database connection held: the store answers and the body streams afterwards."""
+    headers = _file_headers(artifact_id)
+    unsatisfiable = Response(status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
+                             headers={**headers, "Content-Range": f"bytes */{size}"})
+    try:
+        wanted = byte_range(range_header, size)
+    except Unsatisfiable:
+        return unsatisfiable
+    key = artifact_key(project_id, sha256)
+    try:
+        with store_slot():
+            if wanted is None:
+                chunks, length = store.open(key)
+            else:
+                chunks, length = store.open_range(key, *wanted), wanted[1] - wanted[0] + 1
+    except ArtifactNotFound:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=not_found)
+    except ArtifactRangeError:  # the stored object is shorter than its row says
+        return unsatisfiable
+    except ArtifactStoreBusy:
+        raise _busy()
+    headers["Content-Length"] = str(length)
+    if wanted is None:
+        return StreamingResponse(chunks, media_type=media_type, headers=headers)
+    headers["Content-Range"] = f"bytes {wanted[0]}-{wanted[1]}/{size}"
+    return StreamingResponse(chunks, status_code=status.HTTP_206_PARTIAL_CONTENT, media_type=media_type,
+                             headers=headers)
+
+
+def _no_store() -> HTTPException:
+    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="No artifact storage")
+
+
+FILE_RESPONSES = {
     200: {"content": {"application/zip": {}}}, 206: {"description": "One byte range"},
     416: {"description": "The range starts past the end of the file"},
-})
+}
+
+
+@project_router.get("/{artifact_id}", response_class=StreamingResponse, responses=FILE_RESPONSES)
 def download_artifact(
     artifact_id: int,
     range_header: Optional[str] = Header(None, alias="range"),
@@ -170,38 +222,54 @@ def download_artifact(
     if found is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
     if store is None:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="No artifact storage")
+        raise _no_store()
     sha256, media_type, size = found
     db.close()  # no pooled connection held while the store answers, nor while the body streams
-    headers = {
-        "Content-Disposition": f'attachment; filename="trace-{artifact_id}.zip"',
-        "Accept-Ranges": "bytes",
-        # Traces can hold cookies and tokens of test accounts: no copy kept by a browser or a proxy
-        "Cache-Control": "private, no-store",
-        "X-Content-Type-Options": "nosniff",
-    }
-    unsatisfiable = Response(status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
-                             headers={**headers, "Content-Range": f"bytes */{size}"})
-    try:
-        wanted = byte_range(range_header, size)
-    except Unsatisfiable:
-        return unsatisfiable
-    key = artifact_key(access.project_id, sha256)
-    try:
-        with store_slot():
-            if wanted is None:
-                chunks, length = store.open(key)
-            else:
-                chunks, length = store.open_range(key, *wanted), wanted[1] - wanted[0] + 1
-    except ArtifactNotFound:
+    return _serve_file(store, access.project_id, artifact_id, sha256, media_type, size, range_header,
+                       "Artifact not found")
+
+
+# ---- one-time links for the trace viewer ----
+
+link_router = APIRouter()  # mounted at /artifact-links: no Bearer token, the link is the credential
+LINK_NOT_FOUND = "Not found"  # one detail for every refusal: unknown, expired, another address, artifact gone
+
+
+@project_router.post("/{artifact_id}/link", status_code=status.HTTP_201_CREATED)
+def create_link(
+    artifact_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    access: ProjectAccess = Depends(require_project_role(*READ_ROLES)),
+):
+    """A one-time URL for the self-hosted trace viewer, which cannot send the Bearer token: valid 60 s, for this
+    artifact, this user and the address asking. The token is in this answer only; the database keeps its SHA-256."""
+    if artifact_read.find_file(db, access.project_id, artifact_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artifact not found")
-    except ArtifactRangeError:  # the stored object is shorter than its row says
-        return unsatisfiable
-    except ArtifactStoreBusy:
-        raise _busy()
-    headers["Content-Length"] = str(length)
-    if wanted is None:
-        return StreamingResponse(chunks, media_type=media_type, headers=headers)
-    headers["Content-Range"] = f"bytes {wanted[0]}-{wanted[1]}/{size}"
-    return StreamingResponse(chunks, status_code=status.HTTP_206_PARTIAL_CONTENT, media_type=media_type,
-                             headers=headers)
+    token, expires_at = artifact_link_service.create(
+        db, artifact_id, access.user_id, artifact_link_service.client_ip(request))
+    return {"url": f"{settings.API_V1_STR}/artifact-links/{token}", "expires_at": expires_at.isoformat()}
+
+
+@link_router.api_route("/{token}", methods=["GET", "HEAD"], response_class=StreamingResponse,
+                       responses=FILE_RESPONSES)
+def follow_link(
+    token: str,
+    request: Request,
+    range_header: Optional[str] = Header(None, alias="range"),
+    db: Session = Depends(get_db),
+    store: Optional[ArtifactStore] = Depends(get_artifact_store),
+):
+    """The linked trace, as the download serves it (whole or one range), while the link lives and from its address;
+    otherwise 404, the same for every case. HEAD answers the headers of the whole file without reading storage."""
+    found = artifact_link_service.resolve(db, token, artifact_link_service.client_ip(request))
+    db.close()  # no pooled connection held while the store answers, nor while the body streams
+    if found is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=LINK_NOT_FOUND)
+    if store is None:
+        raise _no_store()
+    if request.method == "HEAD":
+        headers = {**_file_headers(found.artifact_id), "Content-Length": str(found.size)}
+        return Response(status_code=status.HTTP_200_OK, media_type=found.media_type, headers=headers)
+    return _serve_file(store, found.project_id, found.artifact_id, found.sha256, found.media_type, found.size,
+                       range_header, LINK_NOT_FOUND)

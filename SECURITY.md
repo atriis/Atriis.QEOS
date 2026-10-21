@@ -182,6 +182,14 @@ details.
   `Cache-Control: private, no-store`, because a trace can hold cookies and tokens of test accounts. A trace
   reference is kept the project's `trace_days` (1 to 90, default 14), whatever the results' retention, and the file
   goes 7 days after nothing refers to it; the export names traces but never carries the files.
+  The trace viewer is self-hosted and cannot send the Bearer token, so it reads a trace through a one-time link
+  (`POST /api/v1/projects/{id}/artifacts/{artifact_id}/link`, user JWT, read roles, 404 for a non-member). The token
+  is 32 random bytes; only its SHA-256 is stored, the plain token is in that answer alone, and neither ingestion's
+  access log nor the gateway's shows it (`/api/v1/artifact-links/***`). A link is valid 60 seconds, for one artifact
+  and one user, and only from the client address that asked for it (the address the gateway saw). Within the 60 s
+  the viewer may make several GET and Range requests; after it, from another address, or for an unknown token or a
+  deleted artifact, the answer is the same 404. The gateway checks no credential on `/api/v1/artifact-links/`
+  (the link is it) and limits it as the API. The retention job deletes expired links.
 - **Gateway.** TLS 1.2/1.3. Per-IP rate limits: 20 requests/s on the API,
   10/s on uploads, 50/s (burst 100, 6 MB body) on screenshot uploads, 10/s (burst 20, 101 MB body, streamed
   unbuffered) on trace uploads, and 5/s on sign-in, registration, password and MFA
