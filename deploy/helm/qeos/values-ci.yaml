@@ -1,0 +1,55 @@
+# kind in CI (Task 6): images loaded into the cluster as qeos/<service>:local, an in-cluster PostgreSQL and MinIO, and
+# the secrets in an existing Secret qeos-secrets that the CI job creates from ciSecrets below.
+
+image:
+  registry: ""
+  tag: local
+  # Loaded with `kind load docker-image`; never pulled
+  pullPolicy: Never
+
+# The smoke test reaches the gateway through `kubectl port-forward`; links in emails are never followed in CI
+publicUrl: https://localhost
+
+secrets:
+  source: kubernetes
+  name: qeos-secrets
+
+postgres:
+  host: postgres
+  adminUser: postgres
+  # The in-cluster server has no TLS
+  sslmode: disable
+
+artifacts:
+  backend: s3
+  s3:
+    endpoint: http://minio:9000
+
+gateway:
+  # Placeholder: kind's pod range. On AKS this is the edge's range
+  trustedProxies: 10.244.0.0/16
+
+# kind's default network plugin does not enforce NetworkPolicies
+networkPolicy:
+  enabled: false
+
+migrate:
+  activeDeadlineSeconds: 300
+
+ci:
+  backing: true
+
+# Dummy values for the qeos-secrets Secret the CI job creates (one key each, e.g. with
+# `kubectl create secret generic qeos-secrets --from-literal=<key>=<value>`). No template reads this map:
+# tests/render_test.sh checks that none of these strings appears in any rendered manifest (Review Focus 3).
+ciSecrets:
+  secret-key: ci-dummy-secret-key-4b7e1c9a
+  internal-api-password: ci-dummy-internal-api-2d8f6a31
+  postgres-admin-password: ci-dummy-pg-admin-91c3e5d7
+  auth-db-password: ci-dummy-auth-db-5e0a2b84
+  organization-db-password: ci-dummy-organization-db-73f1c6e9
+  project-db-password: ci-dummy-project-db-a84d0f12
+  ingestion-db-password: ci-dummy-ingestion-db-0c5b9e37
+  testmgmt-db-password: ci-dummy-testmgmt-db-e6127ad5
+  artifacts-s3-access-key: ci-dummy-minio-user-3a9c
+  artifacts-s3-secret-key: ci-dummy-minio-secret-8f2e4d61

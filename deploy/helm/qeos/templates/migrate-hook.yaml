@@ -1,0 +1,151 @@
+{{- /* The migration hook (spec 5.3): before every install and upgrade, one Job creates the databases and roles (db-init)
+and runs each service's `alembic upgrade head` in order, one init container each. If it fails, the release fails and the
+old pods keep serving. Hooks run before the chart's own resources exist, so its ServiceAccount, SecretProviderClass and
+scripts are hooks too, at a lower weight, and the Job reads the passwords as files from the mounted volume */ -}}
+{{- $keyvault := eq .Values.secrets.source "keyvault" }}
+{{- $hookKeys := list "postgres-admin-password" "secret-key" }}
+{{- range $name := .Values.migrate.order }}
+{{- $hookKeys = append $hookKeys (printf "%s-db-password" (required (printf "services.%s.database is required" $name) (get $.Values.services $name).database)) }}
+{{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: qeos-migrate
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "qeos-migrate" "component" "migrate") | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+    {{- if $keyvault }}
+    azure.workload.identity/client-id: {{ required "keyvault.clientIds.migrate is required with secrets.source keyvault" .Values.keyvault.clientIds.migrate | quote }}
+    {{- end }}
+automountServiceAccountToken: false
+{{- if $keyvault }}
+---
+# Files only: no synced Secret, which would exist only while some pod mounts the volume
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: qeos-migrate
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "qeos-migrate" "component" "migrate") | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  provider: azure
+  parameters:
+    {{- include "qeos.keyvaultParameters" (dict "ctx" $ "identity" "migrate" "keys" $hookKeys) | nindent 4 }}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qeos-migrate-scripts
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "qeos-migrate" "component" "migrate") | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "-10"
+    helm.sh/hook-delete-policy: before-hook-creation
+data:
+  db-init.sh: |
+    {{- .Files.Get "files/db-init.sh" | nindent 4 }}
+  migrate.sh: |
+    {{- .Files.Get "files/migrate.sh" | nindent 4 }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: qeos-migrate
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "qeos-migrate" "component" "migrate") | nindent 4 }}
+  annotations:
+    helm.sh/hook: pre-install,pre-upgrade
+    helm.sh/hook-weight: "0"
+    # A failed Job stays for `kubectl logs` until the next release replaces it
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: {{ .Values.migrate.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.migrate.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "qeos.labels" (dict "ctx" $ "name" "qeos-migrate" "component" "migrate") | nindent 8 }}
+        {{- if $keyvault }}
+        azure.workload.identity/use: "true"
+        {{- end }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: qeos-migrate
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "qeos.podSecurity" (dict "uid" 10001) | nindent 8 }}
+      initContainers:
+        - name: db-init
+          image: {{ .Values.postgres.clientImage }}
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "/opt/qeos/scripts/db-init.sh"]
+          env:
+            - name: PGHOST
+              value: {{ required "postgres.host is required" .Values.postgres.host | quote }}
+            - name: PGUSER
+              value: {{ .Values.postgres.adminUser | quote }}
+            - name: PGSSLMODE
+              value: {{ .Values.postgres.sslmode | quote }}
+            - name: DATABASES
+              value: {{ include "qeos.migrateDatabases" $ | quote }}
+          securityContext:
+            # The postgres image's own user
+            runAsUser: 999
+            runAsGroup: 999
+            {{- include "qeos.containerSecurity" $ | nindent 12 }}
+          volumeMounts:
+            {{- include "qeos.migrateMounts" $ | nindent 12 }}
+        {{- range $name := .Values.migrate.order }}
+        {{- $svc := get $.Values.services $name }}
+        - name: {{ $name }}
+          image: {{ include "qeos.image" (dict "ctx" $ "image" (default $name $svc.image) "tag" $.Values.migrate.imageTag) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: ["sh", "/opt/qeos/scripts/migrate.sh", {{ $svc.database | quote }}]
+          env:
+            - name: POSTGRES_SERVER
+              value: {{ $.Values.postgres.host | quote }}
+            - name: PGSSLMODE
+              value: {{ $.Values.postgres.sslmode | quote }}
+          securityContext:
+            {{- include "qeos.containerSecurity" $ | nindent 12 }}
+          volumeMounts:
+            {{- include "qeos.migrateMounts" $ | nindent 12 }}
+        {{- end }}
+      containers:
+        - name: done
+          image: {{ .Values.postgres.clientImage }}
+          imagePullPolicy: IfNotPresent
+          command: ["echo", "qeos-migrate: every database is at its head"]
+          securityContext:
+            runAsUser: 999
+            runAsGroup: 999
+            {{- include "qeos.containerSecurity" $ | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: scripts
+          configMap:
+            name: qeos-migrate-scripts
+        - name: secrets
+          {{- if $keyvault }}
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes:
+              secretProviderClass: qeos-migrate
+          {{- else }}
+          secret:
+            secretName: {{ .Values.secrets.name }}
+          {{- end }}

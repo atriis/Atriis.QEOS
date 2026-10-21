@@ -1,0 +1,25 @@
+{{- /* Each workload's non-secret settings (qeos.env); secrets reach the pods only as secretKeyRefs */ -}}
+{{- range $name, $svc := .Values.services }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ printf "qeos-%s-env" $name }}
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" $svc.kind) | nindent 4 }}
+data:
+  {{- range $var, $value := include "qeos.env" (dict "ctx" $ "name" $name "svc" $svc) | fromJson }}
+  {{ $var }}: {{ $value | quote }}
+  {{- end }}
+{{- end }}
+---
+# The APIs' init container (files/wait-for-schema.sh)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qeos-scripts
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "qeos-scripts" "component" "api") | nindent 4 }}
+data:
+  wait-for-schema.sh: |
+    {{- .Files.Get "files/wait-for-schema.sh" | nindent 4 }}

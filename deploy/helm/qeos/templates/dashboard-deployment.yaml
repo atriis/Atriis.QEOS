@@ -1,0 +1,70 @@
+{{- /* The dashboard: nginx-unprivileged (uid 101) on 8080; sign-in settings written to /tmp/qeos-config/config.js at start */ -}}
+{{- range $name, $svc := .Values.services }}
+{{- if eq $svc.kind "dashboard" }}
+{{- $ctx := dict "ctx" $ "name" $name "svc" $svc "uid" 101 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" "dashboard") | nindent 4 }}
+spec:
+  replicas: {{ $svc.replicas }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "qeos.selector" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" "dashboard") | nindent 8 }}
+      annotations:
+        checksum/env: {{ include "qeos.env" $ctx | sha256sum }}
+    spec:
+      {{- include "qeos.podCommon" $ctx | nindent 6 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "qeos.image" (dict "ctx" $ "image" (default $name $svc.image)) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: {{ printf "qeos-%s-env" $name }}
+          # /health is answered by the SPA fallback (index.html): it proves nginx serves the build
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 4
+          {{- include "qeos.lifecycle" $ctx | nindent 10 }}
+          securityContext:
+            {{- include "qeos.containerSecurity" $ctx | nindent 12 }}
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          volumeMounts:
+            # The pid, nginx's temporary files and config.js (QEOS_CONFIG_DIR) all live in /tmp
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: nginx-cache
+          emptyDir:
+            sizeLimit: 64Mi
+{{- end }}
+{{- end }}

@@ -1,0 +1,93 @@
+{{- /* The gateway: nginx-unprivileged (uid 101), plain HTTP on 8080 behind the edge, which ends TLS (spec 5.4). It renders
+its configuration into /tmp/nginx (NGINX_RENDER_DIR); the pid and temporary files are in /tmp too */ -}}
+{{- range $name, $svc := .Values.services }}
+{{- if eq $svc.kind "gateway" }}
+{{- $ctx := dict "ctx" $ "name" $name "svc" $svc "uid" 101 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" "gateway") | nindent 4 }}
+spec:
+  replicas: {{ $svc.replicas }}
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "qeos.selector" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" "gateway") | nindent 8 }}
+      annotations:
+        checksum/env: {{ include "qeos.env" $ctx | sha256sum }}
+    spec:
+      {{- include "qeos.podCommon" $ctx | nindent 6 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ include "qeos.image" (dict "ctx" $ "image" (default $name $svc.image)) }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: {{ printf "qeos-%s-env" $name }}
+          # The gateway's own /health: nginx answers it without any upstream
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 4
+          {{- include "qeos.lifecycle" $ctx | nindent 10 }}
+          securityContext:
+            {{- include "qeos.containerSecurity" $ctx | nindent 12 }}
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: nginx-cache
+              mountPath: /var/cache/nginx
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: nginx-cache
+          emptyDir:
+            sizeLimit: 64Mi
+{{- end }}
+{{- end }}
+{{- if .Values.networkPolicy.enabled }}
+---
+# Only the edge reaches the gateway (spec 5.3). The rest of the namespace's policies come in Stage 2
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-ingress
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "gateway" "component" "gateway") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "qeos.selector" (dict "ctx" $ "name" "gateway") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ required "edge.namespace is required" .Values.edge.namespace }}
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- end }}

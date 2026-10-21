@@ -1,0 +1,32 @@
+# AKS staging (ADR-038). The values Bicep outputs arrive with --set from the deploy workflow (Task 10): image.registry,
+# image.tag, keyvault.name, keyvault.tenantId, keyvault.clientIds.*, postgres.host, artifacts.azure.accountUrl.
+# Task 10 adds publicUrl (the Azure-provided address), the edge and the SMTP host.
+
+# Placeholder until Task 10 sets the Azure-provided address; .invalid never resolves
+publicUrl: https://qeos-staging.invalid
+
+secrets:
+  source: keyvault
+
+keyvault:
+  # Optional keys staging's vault does not hold yet
+  absent:
+    - tm-secrets-key
+
+postgres:
+  adminUser: qeosadmin
+  sslmode: require
+
+artifacts:
+  backend: azure
+
+gateway:
+  # The edge's pods (Application Routing) are in the cluster's pod range: Azure CNI Overlay's default, which Bicep
+  # (Task 9) keeps. Change both together
+  trustedProxies: 10.244.0.0/16
+
+edge:
+  namespace: app-routing-system
+
+networkPolicy:
+  enabled: true

@@ -1,0 +1,7 @@
+apiVersion: v2
+name: qeos
+description: The QEOS platform on Kubernetes (ADR-038) - five APIs, the dashboard, the gateway, the loop jobs and the migration hook
+type: application
+# The chart's own version; the images' version is image.tag
+version: 0.1.0
+appVersion: "0.4.0"

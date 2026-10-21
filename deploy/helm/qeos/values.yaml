@@ -1,0 +1,351 @@
+# QEOS on Kubernetes (ADR-038). Defaults only: no environment, hostname or secret lives here. Each environment adds its
+# own file (values-ci.yaml for kind in CI, values-staging.yaml for AKS staging) and the deploy workflow passes what Bicep
+# outputs with --set. deploy/helm/README.md describes every value.
+
+image:
+  # Empty: qeos/<service>:<tag> (what kind loads); on AKS the ACR login server, e.g. <acr>.azurecr.io
+  registry: ""
+  # Required: the git SHA (or platform-v* version) the images were built from. Also reported as QEOS_COMMIT
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Required: the address users and collectors reach, https://<host> with no path. BASE_URL and DASHBOARD_URL follow it
+publicUrl: ""
+
+# Appended to every service name the gateway proxies to (UPSTREAM_SUFFIX) and to the internal URLs. Empty: the release
+# namespace's ".<namespace>.svc.cluster.local" (nginx's resolver does not use the search domains)
+namespaceSuffix: ""
+
+# QEOS_VERSION in build_info; empty: the chart's appVersion
+version: ""
+
+secrets:
+  # keyvault: Key Vault through the Secrets Store CSI driver, synced into one Secret per workload identity
+  # kubernetes: an existing Secret (name below) holding every key, created outside the chart (kind in CI)
+  source: keyvault
+  name: qeos-secrets
+  # Keys a pod may start without (their setting then stays empty)
+  optional:
+    - tm-secrets-key
+    - smtp-user
+    - smtp-password
+
+keyvault:
+  name: ""
+  tenantId: ""
+  # Client ids of the user-assigned managed identities (Bicep output workloadIdentityClientIds). Each one has a
+  # federated credential for its ServiceAccount, qeos-<workload>
+  clientIds:
+    services: ""
+    ingestion: ""
+    ingestion-retention: ""
+    migrate: ""
+  # Optional keys (secrets.optional) that the vault does not hold: left out of the SecretProviderClasses, whose mount
+  # would otherwise fail
+  absent: []
+
+postgres:
+  # Required: the server's host name (Flexible Server: <name>.postgres.database.azure.com)
+  host: ""
+  # The admin login, used only by the migration hook (db-init); its password is the key postgres-admin-password
+  adminUser: qeosadmin
+  # libpq's PGSSLMODE for every connection; Flexible Server requires TLS
+  sslmode: require
+  # psql for db-init (\getenv needs psql 15 or newer)
+  clientImage: postgres:15.13
+
+artifacts:
+  # s3 (MinIO or any S3 API, keys artifacts-s3-access-key and artifacts-s3-secret-key) or azure (Blob, workload identity)
+  backend: s3
+  s3:
+    endpoint: ""
+    bucket: qeos-artifacts
+  azure:
+    accountUrl: ""
+    container: qeos-artifacts
+
+# Outgoing email, non-secret part; the user and password are the keys smtp-user and smtp-password. Empty host: no email
+smtp:
+  host: ""
+  port: 587
+  tls: true
+  fromEmail: ""
+  fromName: QEOS
+
+# Grafana behind the gateway and the Monitoring item (ADR-027): Stage 2 on Kubernetes
+monitoring:
+  enabled: false
+
+gateway:
+  # Required: the edge's address range (space-separated CIDRs); the gateway believes X-Forwarded-For from it only
+  trustedProxies: ""
+  # Per client IP and per gateway pod: half of Compose's, since two pods serve (Global Constraints)
+  rates:
+    auth: 3r/s
+    api: 10r/s
+    collect: 5r/s
+    collectBlobs: 25r/s
+    collectArtifacts: 5r/s
+  importMaxBody: 25m
+
+# The namespace of the edge in front of the gateway (AKS Application Routing); the only one the gateway accepts
+edge:
+  namespace: app-routing-system
+
+networkPolicy:
+  enabled: true
+
+migrate:
+  # The order the hook Job runs each service's migrations in, after db-init
+  order:
+    - auth-service
+    - organization-service
+    - project-service
+    - ingestion-service
+    - test-management-service
+  # Empty: image.tag. CI sets a missing tag to prove a failed migration leaves the release as it was
+  imageTag: ""
+  # A migration that runs longer fails the release
+  activeDeadlineSeconds: 900
+  backoffLimit: 0
+
+# In-cluster PostgreSQL and MinIO for kind (values-ci.yaml); never on AKS
+ci:
+  backing: false
+  postgresImage: postgres:15.13
+  # The same image and digest as docker-compose.yml
+  minioImage: cgr.dev/chainguard/minio@sha256:709099319add48dfb44aa596a7070d3ddd8dd04d7ae881765719aec29df9e510
+
+# Starting requests and limits per workload: estimates, not yet measured on a running cluster (deploy/helm/README.md)
+apiResources: &apiResources
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+loopResources: &loopResources
+  requests:
+    cpu: 50m
+    memory: 192Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+nginxResources: &nginxResources
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 500m
+    memory: 128Mi
+
+# Every workload, named as in docker-compose.yml (the Kubernetes Service names equal the Compose names). Fields:
+#   kind        api | loop | dashboard | gateway: the template that renders it
+#   image       qeos/<image> (default: the key)
+#   database    <database>_db, reached as role <database>_app with the key <database>-db-password
+#   appDir      the image's service directory (alembic.ini), for the API's wait-for-schema init container
+#   identity    the workload identity (keyvault.clientIds) and so the Secret its secretEnv reads
+#   secretEnv   env var -> secret key (Key Vault secret name)
+#   urls        env var -> service: http://<service><suffix>:8000
+#   publicUrlEnv env vars set to publicUrl
+#   smtp, artifacts, monitoring   add the SMTP, artifact storage or MONITORING_ENABLED settings
+#   env         plain settings, last (they win)
+services:
+  auth-service:
+    kind: api
+    database: auth
+    appDir: /app/platforms/auth-service/auth-service
+    identity: services
+    replicas: 2
+    resources: *apiResources
+    smtp: true
+    monitoring: true
+    publicUrlEnv: [BASE_URL]
+    urls:
+      ORGANIZATION_SERVICE_URL: organization-service
+    secretEnv:
+      SECRET_KEY: secret-key
+      INTERNAL_API_PASSWORD: internal-api-password
+      ORGANIZATION_INTERNAL_API_PASSWORD: internal-api-password
+      SMTP_USER: smtp-user
+      SMTP_PASSWORD: smtp-password
+    env:
+      AZURE_CLIENT_ID: ""
+      AZURE_TENANT_ID: ""
+      AZURE_ALLOWED_TENANTS: ""
+      AUTH_SSO_ONLY: "false"
+      AUTH_SSO_PROVIDERS: microsoft
+
+  organization-service:
+    kind: api
+    database: organization
+    appDir: /app/platforms/organization-service
+    identity: services
+    replicas: 2
+    resources: *apiResources
+    urls:
+      AUTH_SERVICE_URL: auth-service
+    secretEnv:
+      SECRET_KEY: secret-key
+      INTERNAL_API_PASSWORD: internal-api-password
+    env: {}
+
+  project-service:
+    kind: api
+    database: project
+    appDir: /app/platforms/project-service
+    identity: services
+    replicas: 2
+    resources: *apiResources
+    urls:
+      ORGANIZATION_SERVICE_URL: organization-service
+    secretEnv:
+      SECRET_KEY: secret-key
+      INTERNAL_API_PASSWORD: internal-api-password
+    env:
+      PROJECT_DELETE_GRACE_DAYS: "7"
+
+  ingestion-service:
+    kind: api
+    database: ingestion
+    appDir: /app/platforms/ingestion-service
+    identity: ingestion
+    replicas: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 384Mi
+      limits:
+        cpu: "1"
+        memory: 1Gi
+    smtp: true
+    artifacts: true
+    publicUrlEnv: [DASHBOARD_URL]
+    urls:
+      PROJECT_SERVICE_URL: project-service
+      PROJECT_SERVICE_INTERNAL_URL: project-service
+    secretEnv:
+      SECRET_KEY: secret-key
+      INTERNAL_API_PASSWORD: internal-api-password
+      SMTP_USER: smtp-user
+      SMTP_PASSWORD: smtp-password
+    env: {}
+
+  test-management-service:
+    kind: api
+    database: testmgmt
+    appDir: /app/platforms/test-management-service
+    identity: services
+    replicas: 2
+    resources: *apiResources
+    urls:
+      PROJECT_SERVICE_URL: project-service
+    secretEnv:
+      SECRET_KEY: secret-key
+      INTERNAL_API_PASSWORD: internal-api-password
+      TM_SECRETS_KEY: tm-secrets-key
+    env:
+      IMPORT_MAX_FILES: "2000"
+      IMPORT_MAX_FILE_BYTES: "262144"
+      IMPORT_MAX_TOTAL_BYTES: "10485760"
+
+  # The loop jobs run the ingestion image; PostgreSQL advisory locks make a second copy harmless
+  ingestion-retention:
+    kind: loop
+    image: ingestion-service
+    command: ["python", "-m", "src.ingestion.jobs.retention", "--loop"]
+    database: ingestion
+    identity: ingestion-retention
+    replicas: 1
+    resources: *loopResources
+    smtp: true
+    artifacts: true
+    publicUrlEnv: [DASHBOARD_URL]
+    urls:
+      PROJECT_SERVICE_URL: project-service
+      PROJECT_SERVICE_INTERNAL_URL: project-service
+      TEST_MANAGEMENT_INTERNAL_URL: test-management-service
+    secretEnv:
+      SECRET_KEY: secret-key
+      INTERNAL_API_PASSWORD: internal-api-password
+      SMTP_USER: smtp-user
+      SMTP_PASSWORD: smtp-password
+    env:
+      PROJECT_DELETE_GRACE_DAYS: "7"
+
+  analytics-rollup:
+    kind: loop
+    image: ingestion-service
+    command: ["python", "-m", "src.ingestion.jobs.rollup", "--loop"]
+    database: ingestion
+    identity: services
+    replicas: 1
+    resources: *loopResources
+    smtp: true
+    publicUrlEnv: [DASHBOARD_URL]
+    urls:
+      PROJECT_SERVICE_URL: project-service
+      PROJECT_SERVICE_INTERNAL_URL: project-service
+    secretEnv:
+      SECRET_KEY: secret-key
+      INTERNAL_API_PASSWORD: internal-api-password
+      SMTP_USER: smtp-user
+      SMTP_PASSWORD: smtp-password
+    env: {}
+
+  impact-rollup:
+    kind: loop
+    image: ingestion-service
+    command: ["python", "-m", "src.ingestion.jobs.impact_rollup", "--loop"]
+    database: ingestion
+    identity: services
+    replicas: 1
+    resources: *loopResources
+    smtp: true
+    publicUrlEnv: [DASHBOARD_URL]
+    urls:
+      PROJECT_SERVICE_URL: project-service
+      PROJECT_SERVICE_INTERNAL_URL: project-service
+    secretEnv:
+      SECRET_KEY: secret-key
+      INTERNAL_API_PASSWORD: internal-api-password
+      SMTP_USER: smtp-user
+      SMTP_PASSWORD: smtp-password
+    env: {}
+
+  weekly-summary:
+    kind: loop
+    image: ingestion-service
+    command: ["python", "-m", "src.ingestion.jobs.weekly_summary", "--loop"]
+    database: ingestion
+    identity: services
+    replicas: 1
+    resources: *loopResources
+    smtp: true
+    publicUrlEnv: [DASHBOARD_URL]
+    urls:
+      PROJECT_SERVICE_URL: project-service
+      PROJECT_SERVICE_INTERNAL_URL: project-service
+    secretEnv:
+      SECRET_KEY: secret-key
+      INTERNAL_API_PASSWORD: internal-api-password
+      SMTP_USER: smtp-user
+      SMTP_PASSWORD: smtp-password
+    env: {}
+
+  dashboard:
+    kind: dashboard
+    replicas: 2
+    resources: *nginxResources
+    # Written to /config.js at start (dashboard/README.md); empty keeps the values built into the image
+    env:
+      GOOGLE_CLIENT_ID: ""
+      MSAL_CLIENT_ID: ""
+      MSAL_AUTHORITY: ""
+
+  gateway:
+    kind: gateway
+    replicas: 2
+    resources: *nginxResources
+    monitoring: true
+    env: {}

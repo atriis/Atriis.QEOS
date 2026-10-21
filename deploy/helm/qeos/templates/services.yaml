@@ -1,0 +1,20 @@
+{{- /* ClusterIP Services named like the Compose services: the gateway and the APIs reach each other by these names */ -}}
+{{- range $name, $svc := .Values.services }}
+{{- if has $svc.kind (list "api" "dashboard" "gateway") }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" $svc.kind) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "qeos.selector" (dict "ctx" $ "name" $name) | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ if eq $svc.kind "api" }}8000{{ else }}8080{{ end }}
+      targetPort: http
+{{- end }}
+{{- end }}

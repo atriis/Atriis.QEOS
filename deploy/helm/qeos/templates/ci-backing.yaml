@@ -1,0 +1,232 @@
+{{- /* kind in CI only (ci.backing): an in-cluster PostgreSQL and MinIO in place of Flexible Server and Blob. They must exist
+before the migration hook, which runs before the chart's own resources, so they are pre-install hooks themselves at a
+lower weight (-20; the bucket Job -15). Created once per release, never touched by an upgrade, and left behind by
+`helm uninstall` (CI deletes the cluster). Data lives in emptyDirs: a restarted pod starts empty */ -}}
+{{- if .Values.ci.backing }}
+{{- $secret := .Values.secrets.name }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels:
+    {{- include "qeos.ciLabels" (dict "ctx" $ "name" "postgres") | nindent 4 }}
+  annotations:
+    {{- include "qeos.ciHook" (dict "weight" -20) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "qeos.selector" (dict "ctx" $ "name" "postgres") | nindent 4 }}
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  labels:
+    {{- include "qeos.ciLabels" (dict "ctx" $ "name" "postgres") | nindent 4 }}
+  annotations:
+    {{- include "qeos.ciHook" (dict "weight" -20) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "qeos.selector" (dict "ctx" $ "name" "postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "qeos.ciLabels" (dict "ctx" $ "name" "postgres") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "qeos.podSecurity" (dict "uid" 999) | nindent 8 }}
+      containers:
+        - name: postgres
+          image: {{ .Values.ci.postgresImage }}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.adminUser | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: postgres-admin-password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-h", "127.0.0.1", "-U", {{ .Values.postgres.adminUser | quote }}]
+            periodSeconds: 3
+          securityContext:
+            {{- include "qeos.containerSecurity" $ | nindent 12 }}
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: run
+              mountPath: /var/run/postgresql
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: run
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  labels:
+    {{- include "qeos.ciLabels" (dict "ctx" $ "name" "minio") | nindent 4 }}
+  annotations:
+    {{- include "qeos.ciHook" (dict "weight" -20) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "qeos.selector" (dict "ctx" $ "name" "minio") | nindent 4 }}
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: s3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  labels:
+    {{- include "qeos.ciLabels" (dict "ctx" $ "name" "minio") | nindent 4 }}
+  annotations:
+    {{- include "qeos.ciHook" (dict "weight" -20) | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "qeos.selector" (dict "ctx" $ "name" "minio") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "qeos.ciLabels" (dict "ctx" $ "name" "minio") | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "qeos.podSecurity" (dict "uid" 65532) | nindent 8 }}
+      containers:
+        - name: minio
+          image: {{ .Values.ci.minioImage }}
+          imagePullPolicy: IfNotPresent
+          # The image's entrypoint is minio; certificates would otherwise go under $HOME on the read-only root
+          args: ["server", "/data", "--certs-dir", "/tmp/certs"]
+          ports:
+            - name: s3
+              containerPort: 9000
+          env:
+            - name: HOME
+              value: /tmp
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: artifacts-s3-access-key
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: artifacts-s3-secret-key
+          readinessProbe:
+            httpGet:
+              path: /minio/health/ready
+              port: s3
+            periodSeconds: 3
+          securityContext:
+            {{- include "qeos.containerSecurity" $ | nindent 12 }}
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+---
+# The private bucket, as compose's minio-init. The image has no shell to wait in: the Job's retries wait for MinIO
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-init
+  labels:
+    {{- include "qeos.ciLabels" (dict "ctx" $ "name" "minio-init") | nindent 4 }}
+  annotations:
+    {{- include "qeos.ciHook" (dict "weight" -15) | nindent 4 }}
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 10
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        {{- include "qeos.ciLabels" (dict "ctx" $ "name" "minio-init") | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        {{- include "qeos.podSecurity" (dict "uid" 65532) | nindent 8 }}
+      containers:
+        - name: minio-init
+          image: {{ .Values.ci.minioImage }}
+          imagePullPolicy: IfNotPresent
+          command: ["mc", "mb", "--ignore-existing", "local/{{ .Values.artifacts.s3.bucket }}"]
+          env:
+            - name: MC_CONFIG_DIR
+              value: /tmp/mc
+            - name: ARTIFACTS_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: artifacts-s3-access-key
+            - name: ARTIFACTS_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secret }}
+                  key: artifacts-s3-secret-key
+            # Kubernetes expands $(VAR) from the two above when the container starts; the manifest holds no key
+            - name: MC_HOST_local
+              value: "http://$(ARTIFACTS_S3_ACCESS_KEY):$(ARTIFACTS_S3_SECRET_KEY)@minio:9000"
+          securityContext:
+            {{- include "qeos.containerSecurity" $ | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+{{- end }}
