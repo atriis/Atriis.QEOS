@@ -12,13 +12,17 @@ use it.
 | `values-staging.yaml` | AKS staging | Key Vault secrets, Azure Blob, the NetworkPolicy; Bicep's outputs come with `--set` |
 
 ```bash
-# Render and check (needs helm 3 and yq v4; no cluster)
+# Render and check (needs helm 3 and yq v4; no cluster), and db-init's secret handling (stub psql)
 bash deploy/helm/qeos/tests/render_test.sh
+bash deploy/helm/qeos/tests/db_init_test.sh
 
 # kind (Task 6 does this in CI): create the Secret, then install
 kubectl create namespace qeos
 kubectl -n qeos create secret generic qeos-secrets $(yq '.ciSecrets | to_entries | .[] | "--from-literal=" + .key + "=" + .value' deploy/helm/qeos/values-ci.yaml)
 helm install qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-ci.yaml --wait --timeout 10m
+
+# AKS: --timeout must exceed migrate.activeDeadlineSeconds (900 s), or Helm, not the Job, cuts a slow migration short
+helm upgrade --install qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-staging.yaml --set ... --atomic --wait --timeout 20m
 ```
 
 ## What it creates
@@ -33,7 +37,11 @@ helm install qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-ci.yaml --
 - One **ConfigMap** per workload, `qeos-<service>-env`, with its non-secret settings; secrets reach the pods only as
   `secretKeyRef`s (below). A change to the settings rolls the pods (`checksum/env` annotation).
 - **ServiceAccounts** `qeos-services`, `qeos-ingestion`, `qeos-ingestion-retention` (and the hook's `qeos-migrate`):
-  with Key Vault each carries its managed identity's client id (workload identity).
+  with Key Vault each carries its managed identity's client id (workload identity). Only the pods that call Azure with
+  the SDK (`azureSdk: true`: ingestion and retention, for Blob) carry the label `azure.workload.identity/use`. The
+  webhook it triggers injects `AZURE_CLIENT_ID` and `AZURE_TENANT_ID` into every container's env, where they would
+  override auth-service's settings of the same name (its Entra sign-in app). The Key Vault CSI driver needs no label:
+  it gets the ServiceAccount's token itself.
 - The **NetworkPolicy** `gateway-ingress` (when `networkPolicy.enabled`): the gateway's pods accept traffic only from
   the edge's namespace, `edge.namespace` (Application Routing: `app-routing-system`). The other policies of spec 5.3
   come in Stage 2. It is off in `values-ci.yaml`: kind's default network plugin does not enforce policies.
@@ -46,8 +54,8 @@ renders its configuration into `/tmp/nginx` (`NGINX_RENDER_DIR`); its pid and te
 token and no service-link variables (`enableServiceLinks: false`: a Service named `postgres` would otherwise inject
 `POSTGRES_*` variables next to the settings of the same prefix).
 
-Probes: readiness and liveness on `/health` (the APIs' own; the gateway answers it itself; the dashboard serves it
-from its SPA fallback). Loop jobs listen on no port and have none. `terminationGracePeriodSeconds: 30` and a `preStop`
+Probes: readiness and liveness on `/health` (the APIs' own; the gateway answers it itself). The dashboard is ready on
+`/config.js`, which exists only once its start-up script ran, and alive on `/health` (its SPA fallback). Loop jobs listen on no port and have none. `terminationGracePeriodSeconds: 30` and a `preStop`
 sleep of 5 s let in-flight requests and in-API background tasks finish while the endpoints drop the pod.
 
 ## Values
@@ -81,7 +89,8 @@ sleep of 5 s let in-flight requests and in-API background tasks finish while the
 | `networkPolicy.enabled` | `true` | renders `gateway-ingress` |
 | `migrate.order` | the five APIs | the hook's migration order, after db-init |
 | `migrate.imageTag` | `""` | the migration images' tag; empty: `image.tag` |
-| `migrate.activeDeadlineSeconds`, `.backoffLimit` | `900`, `0` | a longer or failed migration fails the release |
+| `migrate.activeDeadlineSeconds`, `.backoffLimit` | `900`, `0` | a longer or failed migration fails the release; Helm's `--timeout` must be longer (20m) |
+| `migrate.resources` | 50m/128Mi, limit 500m/512Mi | each hook container |
 | `ci.backing` | `false` | in-cluster PostgreSQL and MinIO (kind only) |
 | `services.<name>.replicas`, `.resources`, `.env` | see `values.yaml` | per workload; `env` holds plain settings and wins over the chart's |
 
@@ -113,11 +122,11 @@ through `secretKeyRef`s only; the hook reads them as files.
 
 - **`secrets.source: kubernetes`** (kind): one existing Secret, `qeos-secrets`, holds every key. The chart never
   creates it.
-- **`secrets.source: keyvault`** (AKS): one SecretProviderClass per workload identity (`qeos-services`,
-  `qeos-ingestion`, `qeos-ingestion-retention`) lists the keys its workloads read and syncs them into the Secret
-  `qeos-secrets-<identity>`. The CSI driver syncs only while a pod mounts the volume, so each such pod mounts it at
-  `/mnt/secrets-store`. A key the vault lacks makes the mount fail: list optional keys it does not hold in
-  `keyvault.absent`.
+- **`secrets.source: keyvault`** (AKS): one SecretProviderClass per workload, `qeos-<workload>`, lists only the keys
+  that workload reads (its own database password, never another service's) and syncs them into the Secret
+  `qeos-secrets-<workload>`. Workloads sharing an identity share its client id. The CSI driver syncs only while a pod
+  mounts the volume, so each such pod mounts it at `/mnt/secrets-store`. A key the vault lacks makes the mount fail:
+  list optional keys it does not hold in `keyvault.absent`.
 
 Database settings go in as `POSTGRES_SERVER`, `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD` (the settings'
 components path, which URL-escapes the password, so a generated password may hold any character) plus libpq's
@@ -128,23 +137,29 @@ components path, which URL-escapes the password, so a generated password may hol
 Before every install and upgrade, Helm runs the Job `qeos-migrate` (`pre-install,pre-upgrade`, weight 0). Hooks run
 before the chart's own resources exist, so what the Job needs is a hook too, at weight -10: its ServiceAccount
 `qeos-migrate`, its SecretProviderClass `qeos-migrate` (Key Vault: files only, nothing synced), and the ConfigMap
-`qeos-migrate-scripts`. The Job mounts the secrets as files at `/mnt/secrets` (the CSI volume, or the `qeos-secrets`
-Secret on kind) and runs, one init container each, in order:
+`qeos-migrate-scripts`. The Job reads the secrets as files in `/mnt/secrets` (from the CSI volume, or the
+`qeos-secrets` Secret on kind). Each container mounts only the files it needs: the admin password reaches db-init
+alone, and each migration sees its own role's password and `secret-key`. One init container each, in order:
 
 1. `db-init` (`files/db-init.sh`, in `postgres.clientImage`, as the admin login): creates each database and its login
    role `<db>_app` if missing, sets the role's password from `<db>-db-password`, makes the role the owner of its own
    database and revokes `CONNECT` from everyone else. Idempotent; it works with Flexible Server's admin, which is not a
-   superuser.
+   superuser. It checks every password first: a missing or blank one stops it before any role is changed (an empty
+   password would clear the role's and lock out its running pods). `tests/db_init_test.sh` covers this.
 2. Each service in `migrate.order` (`files/migrate.sh <db>`, in the service's own image): `alembic upgrade head` as
    `<db>_app`.
 
-If any step fails or the Job runs past `migrate.activeDeadlineSeconds`, Helm marks the release failed and applies none
+If any step fails or the Job runs past `migrate.activeDeadlineSeconds` (keep Helm's `--timeout` longer: 20m for
+900 s), Helm marks the release failed and applies none
 of the new Deployments: the old pods keep serving. A failed Job is kept for `kubectl logs` until the next release
 replaces it; a successful one is deleted.
 
 Each API also has an init container, `wait-for-schema` (`files/wait-for-schema.sh`), that waits up to 300 s for its
 database to be at the image's alembic head, so a pod never serves an unmigrated schema. A database already ahead of
-the image (an older pod restarting after a newer release migrated) is accepted, by the rule below.
+the image (an older pod restarting after a newer release migrated) is accepted, by the rule below. It recognises
+"ahead" by alembic's "Can't locate revision", so it cannot tell a newer release from a divergent one: a database
+migrated by a hotfix branch whose revision this image lacks also passes. A hotfix migration must therefore land on
+master too, in the same revision chain.
 
 On kind, `ci.backing` adds PostgreSQL and MinIO as `pre-install` hooks at weight -20 (and the bucket Job at -15), so
 they exist before the migration hook. They are created once per release, untouched by upgrades, and left behind by

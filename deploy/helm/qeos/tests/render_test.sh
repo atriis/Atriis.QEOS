@@ -23,7 +23,13 @@ STAGING_SET=(
   --set keyvault.clientIds.migrate=44444444-4444-4444-4444-444444444444
   --set postgres.host=pg-placeholder.postgres.database.azure.com
   --set artifacts.azure.accountUrl=https://placeholder.blob.core.windows.net
+  # auth-service's Entra app: must reach the pod as given, never replaced by a managed identity's id
+  --set services.auth-service.env.AZURE_CLIENT_ID=entra-app-from-values
 )
+# Compose settings the chart replaces on purpose: DATABASE_URL by POSTGRES_* (the password URL-escaped by the settings),
+# GATEWAY_HTTPS_PORT by GATEWAY_PUBLIC_PORT (TLS ends at the edge). Anything else Compose sets must be set here too
+COMPOSE_ONLY="DATABASE_URL GATEWAY_HTTPS_PORT"
+COMPOSE="$CHART/../../../docker-compose.yml"
 
 # ---- lint and render ----
 if helm lint "$CHART" -f "$CHART/values-ci.yaml" >"$OUT/lint-ci.txt" 2>&1; then
@@ -123,9 +129,46 @@ for env in ci staging; do
         or (.spec.template.spec.containers[0].lifecycle.preStop.exec.command | join(" ")) != "sleep 5")
     | .metadata.name] | join(" ")')"
   [ -z "$bad" ] && pass "$env: grace period 30 s, preStop sleep 5 and hostname spread everywhere" || fail "$env: missing on: $bad"
-  for name in $APIS $WEB; do
+  for name in $APIS gateway; do
     p="$(q "$f" "select(.kind == \"Deployment\" and .metadata.name == \"$name\") | .spec.template.spec.containers[0] | .readinessProbe.httpGet.path + \" \" + .livenessProbe.httpGet.path")"
     [ "$p" = "/health /health" ] && pass "$env: $name probes /health" || fail "$env: $name probes '$p'"
+  done
+  # Ready only once the start-up script has written config.js
+  p="$(q "$f" 'select(.kind == "Deployment" and .metadata.name == "dashboard") | .spec.template.spec.containers[0] | .readinessProbe.httpGet.path + " " + .livenessProbe.httpGet.path')"
+  [ "$p" = "/config.js /health" ] && pass "$env: dashboard is ready on /config.js, alive on /health" || fail "$env: dashboard probes '$p'"
+
+  # ---- requests and limits on every container, the hook's included ----
+  bad="$(q "$f" '[select(.kind == "Deployment" or .kind == "Job") | .spec.template.spec as $s
+    | (($s.containers // []) + ($s.initContainers // []))[]
+    | select(.resources.requests.memory == null or .resources.limits.memory == null or .resources.requests.cpu == null)
+    | .name] | join(" ")')"
+  [ -z "$bad" ] && pass "$env: every container has requests and limits" || fail "$env: containers without resources: $bad"
+
+  # ---- the workload identity webhook's label: only where the Azure SDK runs, never next to AZURE_* settings ----
+  labelled="$(q "$f" '[select(.kind == "Deployment" or .kind == "Job")
+    | select(.spec.template.metadata.labels["azure.workload.identity/use"] == "true") | .metadata.name] | sort | join(" ")')"
+  [ "$labelled" = "ingestion-retention ingestion-service" ] && pass "$env: only ingestion and retention carry the workload identity label" \
+    || fail "$env: pods with the workload identity label: '$labelled'"
+  for name in $labelled; do
+    clash="$(q "$f" "[(select(.kind == \"ConfigMap\" and .metadata.name == \"qeos-$name-env\") | .data | keys | .[]),
+      (select(.kind == \"Deployment\" and .metadata.name == \"$name\") | .spec.template.spec.containers[].env[].name)]
+      | map(select(test(\"^AZURE_\"))) | join(\" \")")"
+    [ -z "$clash" ] && pass "$env: $name sets no AZURE_* the webhook would override" || fail "$env: $name sets $clash next to the webhook"
+  done
+  n="$(q "$f" '[select(.kind == "Deployment" and .metadata.name == "auth-service") | .spec.template.spec.containers[].env[] | select(.name | test("^AZURE_"))] | length')"
+  [ "$n" = 0 ] && pass "$env: auth-service's AZURE_* come from its ConfigMap only" || fail "$env: auth-service has $n AZURE_* env entries"
+
+  # ---- the hook: each container sees only its own secret files ----
+  mounts() { q "$f" "select(.kind == \"Job\" and .metadata.name == \"qeos-migrate\") | .spec.template.spec.initContainers[] | select(.name == \"$1\")
+    | [.volumeMounts[] | select(.name == \"secrets\") | .mountPath] | sort | join(\" \")"; }
+  want="/mnt/secrets/auth-db-password /mnt/secrets/ingestion-db-password /mnt/secrets/organization-db-password /mnt/secrets/postgres-admin-password /mnt/secrets/project-db-password /mnt/secrets/testmgmt-db-password"
+  [ "$(mounts db-init)" = "$want" ] && pass "$env: db-init sees the admin and role passwords only" || fail "$env: db-init mounts '$(mounts db-init)'"
+  for pair in auth-service:auth organization-service:organization project-service:project ingestion-service:ingestion \
+      test-management-service:testmgmt; do
+    IFS=: read -r name db <<< "$pair"
+    want="$(printf '/mnt/secrets/%s\n' "$db-db-password" secret-key | sort | xargs)"
+    [ "$(mounts "$name")" = "$want" ] \
+      && pass "$env: hook's $name sees its own role's password and SECRET_KEY only" || fail "$env: hook's $name mounts '$(mounts "$name")'"
   done
 
   # ---- the gateway's Kubernetes settings ----
@@ -158,6 +201,38 @@ for env in ci staging; do
   [ -z "$bad" ] && pass "$env: no ConfigMap carries a secret-looking key" || fail "$env: ConfigMap keys: $bad"
   bad="$(q "$f" '[.. | select(has("name") and has("value")) | select(.name | test("PASSWORD|SECRET|_KEY$")) | .name] | join(" ")')"
   [ -z "$bad" ] && pass "$env: no env var with a secret-looking name has a literal value" || fail "$env: literal env: $bad"
+done
+
+# ---- every setting Compose gives a service, the chart gives it too (CI: the S3 backend, as Compose) ----
+n="$(yq 'explode(.) | .services["auth-service"].environment | keys | length' "$COMPOSE" | tr -d '\r')"
+[ "${n:-0}" -gt 10 ] || fail "docker-compose.yml was not read ($COMPOSE)"
+for name in $APIS $WEB $LOOPS; do
+  compose="$(yq "explode(.) | .services[\"$name\"].environment // {} | keys | .[]" "$COMPOSE" | tr -d '\r')"
+  chart="$(q "$OUT/ci.yaml" "(select(.kind == \"ConfigMap\" and .metadata.name == \"qeos-$name-env\") | .data | keys | .[]),
+    (select(.kind == \"Deployment\" and .metadata.name == \"$name\") | .spec.template.spec.containers[0].env[]?.name)" | tr -d '\r')"
+  missing=""
+  for key in $compose; do
+    case " $COMPOSE_ONLY " in *" $key "*) continue ;; esac
+    printf '%s\n' "$chart" | grep -qx -- "$key" || missing="$missing $key"
+  done
+  [ -z "$missing" ] && pass "ci: $name has every Compose setting" || fail "ci: $name lacks Compose's$missing"
+done
+
+# ---- Key Vault: one SecretProviderClass per workload, with only its own keys ----
+st="$OUT/staging.yaml"
+v="$(q "$st" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-auth-service-env") | .data.AZURE_CLIENT_ID')"
+[ "$v" = entra-app-from-values ] && pass "staging: auth-service's AZURE_CLIENT_ID is the value given" || fail "staging: auth AZURE_CLIENT_ID is '$v'"
+for name in $APIS $LOOPS; do
+  user="$(q "$st" "select(.kind == \"ConfigMap\" and .metadata.name == \"qeos-$name-env\") | .data.POSTGRES_USER")"
+  db="${user%_app}"
+  dbkeys="$(q "$st" "[select(.kind == \"SecretProviderClass\" and .metadata.name == \"qeos-$name\") | .spec.secretObjects[0].data[].key
+    | select(test(\"-db-password$\") or . == \"postgres-admin-password\")] | join(\" \")")"
+  [ "$dbkeys" = "$db-db-password" ] && pass "staging: qeos-$name holds its own database password only" \
+    || fail "staging: qeos-$name holds '$dbkeys', want $db-db-password"
+  vol="$(q "$st" "select(.kind == \"Deployment\" and .metadata.name == \"$name\") | .spec.template.spec.volumes[] | select(.csi) | .csi.volumeAttributes.secretProviderClass")"
+  refs="$(q "$st" "[select(.kind == \"Deployment\" and .metadata.name == \"$name\") | .spec.template.spec.containers[].env[].valueFrom.secretKeyRef.name] | unique | join(\" \")")"
+  [ "$vol|$refs" = "qeos-$name|qeos-secrets-$name" ] && pass "staging: $name mounts qeos-$name and reads qeos-secrets-$name" \
+    || fail "staging: $name mounts '$vol' and reads '$refs'"
 done
 
 # ---- environment-specific choices ----

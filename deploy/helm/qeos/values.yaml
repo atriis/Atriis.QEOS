@@ -20,7 +20,8 @@ namespaceSuffix: ""
 version: ""
 
 secrets:
-  # keyvault: Key Vault through the Secrets Store CSI driver, synced into one Secret per workload identity
+  # keyvault: Key Vault through the Secrets Store CSI driver: one SecretProviderClass per workload, holding only the keys
+  # it reads, synced into its own Secret qeos-secrets-<workload>
   # kubernetes: an existing Secret (name below) holding every key, created outside the chart (kind in CI)
   source: keyvault
   name: qeos-secrets
@@ -34,7 +35,7 @@ keyvault:
   name: ""
   tenantId: ""
   # Client ids of the user-assigned managed identities (Bicep output workloadIdentityClientIds). Each one has a
-  # federated credential for its ServiceAccount, qeos-<workload>
+  # federated credential for its ServiceAccount, qeos-<identity>; per-workload SecretProviderClasses share them
   clientIds:
     services: ""
     ingestion: ""
@@ -108,6 +109,14 @@ migrate:
   # A migration that runs longer fails the release
   activeDeadlineSeconds: 900
   backoffLimit: 0
+  # Each hook container (db-init, every migration)
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 # In-cluster PostgreSQL and MinIO for kind (values-ci.yaml); never on AKS
 ci:
@@ -144,7 +153,9 @@ nginxResources: &nginxResources
 #   image       qeos/<image> (default: the key)
 #   database    <database>_db, reached as role <database>_app with the key <database>-db-password
 #   appDir      the image's service directory (alembic.ini), for the API's wait-for-schema init container
-#   identity    the workload identity (keyvault.clientIds) and so the Secret its secretEnv reads
+#   identity    the workload identity (keyvault.clientIds): its ServiceAccount, qeos-<identity>
+#   azureSdk    the pod calls Azure with the SDK (Blob): it gets the workload identity webhook's label, which injects
+#               AZURE_CLIENT_ID / AZURE_TENANT_ID. Never on auth-service, whose AZURE_* are its Entra sign-in app
 #   secretEnv   env var -> secret key (Key Vault secret name)
 #   urls        env var -> service: http://<service><suffix>:8000
 #   publicUrlEnv env vars set to publicUrl
@@ -210,6 +221,7 @@ services:
     database: ingestion
     appDir: /app/platforms/ingestion-service
     identity: ingestion
+    azureSdk: true
     replicas: 2
     resources:
       requests:
@@ -256,6 +268,7 @@ services:
     command: ["python", "-m", "src.ingestion.jobs.retention", "--loop"]
     database: ingestion
     identity: ingestion-retention
+    azureSdk: true
     replicas: 1
     resources: *loopResources
     smtp: true

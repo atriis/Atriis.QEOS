@@ -43,12 +43,12 @@ app.kubernetes.io/instance: {{ .ctx.Release.Name }}
 {{- eq .Values.secrets.source "keyvault" -}}
 {{- end -}}
 
-{{/* The Secret a workload's secretKeyRefs read: the CI Secret, or the one its identity's SecretProviderClass syncs */}}
+{{/* The Secret a workload's secretKeyRefs read: the CI Secret, or the one its own SecretProviderClass syncs */}}
 {{- define "qeos.secretName" -}}
 {{- if eq .ctx.Values.secrets.source "kubernetes" -}}
 {{- .ctx.Values.secrets.name -}}
 {{- else -}}
-{{- printf "qeos-secrets-%s" .identity -}}
+{{- printf "qeos-secrets-%s" .name -}}
 {{- end -}}
 {{- end -}}
 
@@ -71,7 +71,7 @@ app.kubernetes.io/instance: {{ .ctx.Release.Name }}
 {{/* qeos.secretEnv (dict "ctx" $ "svc" $svc) -- the env entries, each a secretKeyRef (never a value) */}}
 {{- define "qeos.secretEnv" -}}
 {{- $ctx := .ctx -}}
-{{- $secret := include "qeos.secretName" (dict "ctx" $ctx "identity" .svc.identity) -}}
+{{- $secret := include "qeos.secretName" (dict "ctx" $ctx "name" .name) -}}
 {{- $refs := include "qeos.secretRefs" . | fromJson -}}
 {{- range $env := keys $refs | sortAlpha }}
 - name: {{ $env }}
@@ -196,14 +196,17 @@ lifecycle:
       command: ["sleep", "5"]
 {{- end -}}
 
-{{/* qeos.identityPod (dict "ctx" $ "svc" $svc) -- pod metadata labels for Azure workload identity */}}
+{{/* qeos.identityLabels (dict "svc" $svc) -- the workload identity webhook's label, only on pods that call Azure with
+the SDK (azureSdk: ingestion and retention, for Blob). The webhook injects AZURE_CLIENT_ID and AZURE_TENANT_ID into
+every container's env, where they would override settings of the same name (auth-service's Entra app). The Key Vault
+CSI driver needs no label: it gets the ServiceAccount's token through the CSIDriver's tokenRequests */}}
 {{- define "qeos.identityLabels" -}}
-{{- if eq .ctx.Values.secrets.source "keyvault" }}
+{{- if .svc.azureSdk }}
 azure.workload.identity/use: "true"
 {{- end }}
 {{- end -}}
 
-{{/* The CSI volume that makes the driver sync the identity's Secret (keyvault only) */}}
+{{/* The CSI volume that makes the driver sync the workload's Secret (keyvault only), holding only its own keys */}}
 {{- define "qeos.secretsVolume" -}}
 {{- if eq .ctx.Values.secrets.source "keyvault" }}
 - name: secrets-store
@@ -211,7 +214,7 @@ azure.workload.identity/use: "true"
     driver: secrets-store.csi.k8s.io
     readOnly: true
     volumeAttributes:
-      secretProviderClass: {{ printf "qeos-%s" .svc.identity }}
+      secretProviderClass: {{ printf "qeos-%s" .name }}
 {{- end }}
 {{- end -}}
 
@@ -223,7 +226,8 @@ azure.workload.identity/use: "true"
 {{- end }}
 {{- end -}}
 
-{{/* A SecretProviderClass's Azure parameters: the identity's client id and the Key Vault keys it reads */}}
+{{/* A SecretProviderClass's Azure parameters: the identity's client id (several classes may share one) and the Key
+Vault keys this class reads */}}
 {{- define "qeos.keyvaultParameters" -}}
 usePodIdentity: "false"
 clientID: {{ required (printf "keyvault.clientIds.%s is required with secrets.source keyvault" .identity) (get .ctx.Values.keyvault.clientIds .identity) | quote }}
@@ -247,15 +251,19 @@ objects: |
 {{- join " " $dbs -}}
 {{- end -}}
 
+{{/* qeos.migrateMounts (dict "keys" (list ...)) -- each listed secret as one file in /mnt/secrets, nothing else of the volume */}}
 {{- define "qeos.migrateMounts" -}}
 - name: tmp
   mountPath: /tmp
 - name: scripts
   mountPath: /opt/qeos/scripts
   readOnly: true
+{{- range $key := .keys }}
 - name: secrets
-  mountPath: /mnt/secrets
+  mountPath: {{ printf "/mnt/secrets/%s" $key }}
+  subPath: {{ $key }}
   readOnly: true
+{{- end }}
 {{- end -}}
 
 {{/* The CI backing services (ci-backing.yaml): their own part-of, so the platform's checks leave them out */}}

@@ -9,11 +9,19 @@ set -eu
 SECRETS_DIR="${SECRETS_DIR:-/mnt/secrets}"
 DATABASES="${DATABASES:-auth organization project ingestion testmgmt}"
 
+# secret KEY -- the key's file content; exits (naming the key) when the file is missing or blank
 secret() {
-  [ -s "$SECRETS_DIR/$1" ] || { echo "db-init: no secret $1 in $SECRETS_DIR" >&2; exit 1; }
+  if [ ! -s "$SECRETS_DIR/$1" ] || [ -z "$(tr -d '[:space:]' < "$SECRETS_DIR/$1")" ]; then
+    echo "db-init: no secret $1 in $SECRETS_DIR" >&2
+    exit 1
+  fi
   cat "$SECRETS_DIR/$1"
 }
 PGPASSWORD="$(secret postgres-admin-password)"
+# Every role's password must be there before any role is touched: a missing one changes nothing
+for db in $DATABASES; do
+  secret "$db-db-password" >/dev/null
+done
 export PGPASSWORD
 export PGDATABASE=postgres
 
@@ -29,9 +37,14 @@ until pg_isready -q; do
 done
 
 for db in $DATABASES; do
+  # On a line of its own: as a prefix of the psql command below, a failing `secret` would not stop the script, and an
+  # empty password would clear the role's (locking out its running pods on an upgrade)
+  ROLE_PASSWORD="$(secret "$db-db-password")"
+  [ -n "$ROLE_PASSWORD" ] || { echo "db-init: secret $db-db-password is empty" >&2; exit 1; }
+  export ROLE_PASSWORD
   # The password goes in as a psql variable read from the environment (\getenv), quoted as a literal by :'pw', so
   # it is on no command line and never spliced into the SQL text
-  ROLE_PASSWORD="$(secret "$db-db-password")" psql -v ON_ERROR_STOP=1 -q -v role="${db}_app" -v db="${db}_db" <<'SQL'
+  psql -v ON_ERROR_STOP=1 -q -v role="${db}_app" -v db="${db}_db" <<'SQL'
 \getenv pw ROLE_PASSWORD
 SELECT format('CREATE ROLE %I LOGIN', :'role') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'role')\gexec
 -- a server running with log_statement=ddl or all would log this password; the default is none

@@ -33,10 +33,11 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ printf "qeos-%s-env" $name }}
-          # /health is answered by the SPA fallback (index.html): it proves nginx serves the build
+          # Ready once the start-up script has written config.js (docker-entrypoint.d/40-qeos-config.sh) and nginx serves
+          # it; liveness only needs nginx, which answers /health from the SPA fallback (index.html)
           readinessProbe:
             httpGet:
-              path: /health
+              path: /config.js
               port: http
             periodSeconds: 10
             timeoutSeconds: 3

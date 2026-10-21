@@ -1,7 +1,9 @@
 {{- /* The migration hook (spec 5.3): before every install and upgrade, one Job creates the databases and roles (db-init)
 and runs each service's `alembic upgrade head` in order, one init container each. If it fails, the release fails and the
 old pods keep serving. Hooks run before the chart's own resources exist, so its ServiceAccount, SecretProviderClass and
-scripts are hooks too, at a lower weight, and the Job reads the passwords as files from the mounted volume */ -}}
+scripts are hooks too, at a lower weight, and the Job reads the passwords as files from the mounted volume. Each
+container mounts only the files it needs (subPath): the admin password reaches db-init alone, and each migration sees
+its own role's password and SECRET_KEY */ -}}
 {{- $keyvault := eq .Values.secrets.source "keyvault" }}
 {{- $hookKeys := list "postgres-admin-password" "secret-key" }}
 {{- range $name := .Values.migrate.order }}
@@ -75,9 +77,6 @@ spec:
     metadata:
       labels:
         {{- include "qeos.labels" (dict "ctx" $ "name" "qeos-migrate" "component" "migrate") | nindent 8 }}
-        {{- if $keyvault }}
-        azure.workload.identity/use: "true"
-        {{- end }}
     spec:
       restartPolicy: Never
       serviceAccountName: qeos-migrate
@@ -104,8 +103,11 @@ spec:
             runAsUser: 999
             runAsGroup: 999
             {{- include "qeos.containerSecurity" $ | nindent 12 }}
+          resources:
+            {{- toYaml .Values.migrate.resources | nindent 12 }}
           volumeMounts:
-            {{- include "qeos.migrateMounts" $ | nindent 12 }}
+            # The admin password and every role's password (it sets them); no migration container sees these
+            {{- include "qeos.migrateMounts" (dict "keys" (without $hookKeys "secret-key")) | nindent 12 }}
         {{- range $name := .Values.migrate.order }}
         {{- $svc := get $.Values.services $name }}
         - name: {{ $name }}
@@ -119,8 +121,11 @@ spec:
               value: {{ $.Values.postgres.sslmode | quote }}
           securityContext:
             {{- include "qeos.containerSecurity" $ | nindent 12 }}
+          resources:
+            {{- toYaml $.Values.migrate.resources | nindent 12 }}
           volumeMounts:
-            {{- include "qeos.migrateMounts" $ | nindent 12 }}
+            # Its own role's password and SECRET_KEY only
+            {{- include "qeos.migrateMounts" (dict "keys" (list (printf "%s-db-password" $svc.database) "secret-key")) | nindent 12 }}
         {{- end }}
       containers:
         - name: done
@@ -131,6 +136,13 @@ spec:
             runAsUser: 999
             runAsGroup: 999
             {{- include "qeos.containerSecurity" $ | nindent 12 }}
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 32Mi
       volumes:
         - name: tmp
           emptyDir:
