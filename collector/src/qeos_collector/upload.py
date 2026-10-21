@@ -14,12 +14,12 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import wait as wait_for
-from typing import Callable, Dict, Iterable, Mapping, Optional, Set, Tuple, Union
+from typing import Callable, Dict, Iterable, List, Mapping, Optional, Set, Tuple, Union
 
 from qeos_collector import __version__
 from qeos_collector.payload import Part
 from qeos_collector.playwright_images import FileImage, image_bytes
-from qeos_collector.traces import TRACE_MEDIA_TYPE, TraceChanged, TraceFile
+from qeos_collector.traces import TRACE_MEDIA_TYPE, TraceChanged, TraceFile, TraceTimeout
 
 COLLECT_PATH = "/api/v1/collect/runs"
 KEY_CHECK_PATH = "/api/v1/collect/key"
@@ -204,8 +204,9 @@ class _OutOfTime(Exception):
     """The image phase's budget ran out."""
 
 
-class _StopImages(Exception):
-    """Every other image would get the same answer (unreachable, no access, screenshots off): stop the phase."""
+class _StopPhase(Exception):
+    """Every other file would get the same answer (unreachable, no access, screenshots or traces off): stop the
+    phase."""
 
 
 def upload_images(
@@ -240,7 +241,7 @@ def upload_images(
 def upload_artifacts(
     base_url: str,
     key: str,
-    artifacts: Dict[str, TraceFile],
+    artifacts: List[TraceFile],
     budget_seconds: float = ARTIFACT_BUDGET_SECONDS,
     workers: int = ARTIFACT_WORKERS,
     *,
@@ -250,37 +251,45 @@ def upload_artifacts(
     sleep: Callable[[float], None] = time.sleep,
     rand: Callable[[], float] = random.random,
 ) -> Set[str]:
-    """Stores each trace (sha256 -> TraceFile) with HEAD, then a PUT streamed from disk when missing, on
-    /collect/artifacts/{sha256} after the screenshots and before the run (spec 2026-10-21 §4.2), and returns the
-    sha256s QEOS holds; the caller drops every other reference. Best effort and bounded like upload_images, with its
-    own budget. A file that changed since the report was read is left out (never uploaded with other bytes)."""
+    """Hashes each trace (one TraceFile per resolved path), then stores it with HEAD, and a PUT streamed from disk
+    when missing, on /collect/artifacts/{sha256}, after the screenshots and before the run (spec 2026-10-21 §4.2).
+    Returns the sha256s QEOS holds; each TraceFile hashed carries its sha256 and size, and the caller drops every
+    other reference. Hashing counts against the budget and the per-run cap. Best effort and bounded like
+    upload_images, with its own budget, which also cuts off a PUT still streaming. A file that changed since the
+    report was read is left out (never uploaded with other bytes)."""
     prefix = base_url.strip().rstrip("/") + ARTIFACTS_PATH
     headers = {"Authorization": f"Bearer {key}", "User-Agent": f"qeos-collector/{__version__}"}
     lock = threading.Lock()
     left_out = {"changed": 0, "refused": 0}
+    by_path = {trace.path: trace for trace in artifacts}
+    held: Set[str] = set()
 
-    def store(sha: str, deadline: float, first: bool) -> bool:
-        outcome = _store_artifact(prefix + sha, headers, artifacts[sha], context, deadline, first=first,
+    def store(path: str, deadline: float, first: bool) -> bool:
+        trace = by_path[path]
+        outcome = _store_artifact(prefix, headers, trace, context, deadline, first=first,
                                   clock=clock, sleep=sleep, rand=rand)
         if outcome is True:
+            with lock:
+                held.add(trace.sha256)
             return True
         if outcome in left_out:
             with lock:
                 left_out[outcome] += 1
         return False
 
-    stored = _each(list(artifacts), MAX_ARTIFACTS_PER_RUN, store, budget_seconds, workers, warn=warn, clock=clock)
+    _each(list(by_path), MAX_ARTIFACTS_PER_RUN, store, budget_seconds, workers, warn=warn, clock=clock)
     if left_out["changed"]:
         warn(f"{left_out['changed']} changed since the report was read")
     if left_out["refused"]:
         warn(f"{left_out['refused']} refused by the platform")
-    return stored
+    with lock:
+        return set(held)
 
 
 def _each(shas: list, most: int, store_one: Callable[[str, float, bool], bool], budget_seconds: float, workers: int,
           *, warn: Callable[[str], None], clock: Callable[[], float]) -> Set[str]:
     """Runs store_one(sha, deadline, first) for at most `most` of shas, `workers` at a time within the budget, and
-    returns those it stored. store_one raises _OutOfTime, or _StopImages to end the phase; each reason something was
+    returns those it stored. store_one raises _OutOfTime, or _StopPhase to end the phase; each reason something was
     left out is one `warn`. The first request goes alone, so a platform that cannot be reached costs one request, not
     one per file."""
     if len(shas) > most:
@@ -304,7 +313,7 @@ def _each(shas: list, most: int, store_one: Callable[[str, float, bool], bool], 
             return store_one(sha, deadline, first)
         except _OutOfTime:
             late.set()
-        except _StopImages as exc:
+        except _StopPhase as exc:
             with lock:
                 stopped.append(str(exc))
         return False
@@ -352,22 +361,31 @@ def _store_image(url: str, headers: Mapping[str, str], media_type: str, data: "b
 
 
 def _stop_on(status: int, what: str) -> None:
-    """Raises _StopImages for the answers every other file of the phase would get too."""
+    """Raises _StopPhase for the answers every other file of the phase would get too."""
     if status == 401:
-        raise _StopImages("the API key is invalid or revoked (401)")
+        raise _StopPhase("the API key is invalid or revoked (401)")
     if status == 403:
-        raise _StopImages(f"{what} are off for this project (403)")
+        raise _StopPhase(f"{what} are off for this project (403)")
     if status == 410:
-        raise _StopImages("the project is pending deletion (410)")
+        raise _StopPhase("the project is pending deletion (410)")
     if 300 <= status < 400:
-        raise _StopImages(f"the platform redirected ({status})")
+        raise _StopPhase(f"the platform redirected ({status})")
 
 
-def _store_artifact(url: str, headers: Mapping[str, str], trace: TraceFile, context: Optional[ssl.SSLContext],
+def _store_artifact(prefix: str, headers: Mapping[str, str], trace: TraceFile, context: Optional[ssl.SSLContext],
                     deadline: float, *, first: bool, clock: Callable[[], float], sleep: Callable[[float], None],
                     rand: Callable[[], float]) -> "Union[bool, str]":
-    """True when QEOS holds the trace: already there (HEAD 200) or stored now (PUT 200/201); else False, "changed"
-    (the file is not the one the report named any more) or "refused" (400, 413: this trace only)."""
+    """Hashes the trace, then True when QEOS holds it: already there (HEAD 200) or stored now (PUT 200/201); else
+    False, "changed" (the file is not the one the report named any more) or "refused" (400, 413, or a connection the
+    platform dropped while the body was sent, twice: this trace only). Raises _OutOfTime at the deadline, also in the
+    middle of hashing or streaming."""
+    try:
+        sha = trace.digest(deadline, clock)
+    except TraceTimeout:
+        raise _OutOfTime() from None
+    except TraceChanged:
+        return "changed"
+    url = prefix + sha
     status = _blob_request(url, "HEAD", None, headers, context, deadline, first, clock, sleep, rand)
     if status == 200:
         return True
@@ -375,12 +393,16 @@ def _store_artifact(url: str, headers: Mapping[str, str], trace: TraceFile, cont
         put_headers = {**headers, "Content-Type": TRACE_MEDIA_TYPE, "Content-Length": str(trace.size)}
         try:
             # A fresh stream for each attempt: http.client sends it chunk by chunk under the Content-Length
-            status = _blob_request(url, "PUT", trace.chunks, put_headers, context, deadline, False,
-                                   clock, sleep, rand)
+            status = _blob_request(url, "PUT", lambda: trace.chunks(deadline, clock), put_headers, context, deadline,
+                                   False, clock, sleep, rand, stream=True)
         except TraceChanged:
             return "changed"
+        except TraceTimeout:
+            raise _OutOfTime() from None
         if status in (200, 201):
             return True
+        if status == _DROPPED:
+            return "refused"
     _stop_on(status, "traces")
     return "refused" if status in (400, 413) else False
 
@@ -388,10 +410,14 @@ def _store_artifact(url: str, headers: Mapping[str, str], trace: TraceFile, cont
 def _blob_request(url: str, method: str, data: "Optional[bytes | Callable[[], Iterable[bytes]]]",
                   headers: Mapping[str, str],
                   context: Optional[ssl.SSLContext], deadline: float, first: bool,
-                  clock: Callable[[], float], sleep: Callable[[float], None], rand: Callable[[], float]) -> int:
+                  clock: Callable[[], float], sleep: Callable[[float], None], rand: Callable[[], float],
+                  stream: bool = False) -> int:
     """The answer's status, retrying 429, 5xx and dropped connections as upload_part does but within the phase's
-    deadline; 0 when the attempts ran out. `data` may be a function returning a fresh body stream for each attempt."""
+    deadline; 0 when the attempts ran out. `data` may be a function returning a fresh body stream for each attempt.
+    For a streamed body, a connection reset or broken while sending (a platform refusing a large body early) is
+    tried once more, then answered _DROPPED: the trace is not streamed again and again."""
     attempt = 0
+    dropped = 0
     while True:
         attempt += 1
         left = deadline - clock()
@@ -405,7 +431,11 @@ def _blob_request(url: str, method: str, data: "Optional[bytes | Callable[[], It
             if clock() >= deadline:
                 raise _OutOfTime() from None
             if first or _is_tls_error(exc):
-                raise _StopImages(f"cannot reach the platform ({_reason(exc)})") from None
+                raise _StopPhase(f"cannot reach the platform ({_reason(exc)})") from None
+            if stream and _is_dropped(exc):
+                dropped += 1
+                if dropped >= 2:
+                    return _DROPPED
             wait = _backoff(attempt, rand)
         else:
             if status == 429:
@@ -419,6 +449,15 @@ def _blob_request(url: str, method: str, data: "Optional[bytes | Callable[[], It
         if clock() + wait > deadline:
             raise _OutOfTime()
         sleep(wait)
+
+
+_DROPPED = -1  # _blob_request: the platform dropped a streamed upload twice
+
+
+def _is_dropped(exc: BaseException) -> bool:
+    """A connection the other side reset or closed while the body was being sent."""
+    reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    return isinstance(reason, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError))
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):

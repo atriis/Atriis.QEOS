@@ -111,7 +111,7 @@ def _run_options(parser: argparse.ArgumentParser) -> None:
                         help="send no step screenshots: no image upload, no references in the run "
                              "(default: $QEOS_NO_SCREENSHOTS, or no-screenshots: true in .qeos.yml)")
     parser.add_argument("--no-artifacts", action="store_true",
-                        help="send no Playwright traces: no trace upload, no references in the run "
+                        help="send no traces: no trace upload, no references in the run "
                              "(default: $QEOS_NO_ARTIFACTS, or no-artifacts: true in .qeos.yml)")
 
 
@@ -414,7 +414,7 @@ def _check(args, env: Mapping[str, str], api_key: str, say: _Output) -> int:
         files = _expand(args.patterns)
         if not files:
             raise ConfigError(f"no file matched {' '.join(args.patterns)}")
-        parsed = [parse_file(path) for path in files]
+        parsed = [parse_file(path, read_traces=False) for path in files]
         for report in parsed:
             for warning in report.warnings:
                 say(warning)
@@ -463,6 +463,8 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
     if trigger is not None and trigger not in TRIGGERS:
         raise ConfigError(f"--trigger / QEOS_TRIGGER must be one of {', '.join(TRIGGERS)}, got {trigger!r}")
 
+    # Known before the reports are read: with traces turned off, a report's traces are only counted, never opened
+    skip_artifacts = traces.turned_off(args.no_artifacts, env, file_config)
     if reports is not None:  # run-impact's stage reports
         parsed = list(reports)
     else:
@@ -472,7 +474,7 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
         files = _expand(patterns)
         if not files:
             raise ConfigError(f"no file matched {' '.join(patterns)}")
-        parsed = [parse_file(path) for path in files]
+        parsed = [parse_file(path, read_traces=not skip_artifacts) for path in files]
     for report in parsed:
         for warning in report.warnings:
             say(warning)
@@ -553,8 +555,6 @@ def _upload(args, env: Mapping[str, str], api_key: str, say: _Output, *, now, sl
                         or file_config.get("no-screenshots") is True)
     _send_screenshots(results, None if args.dry_run else url, api_key, context, say, skip=skip_screenshots,
                       sleep=sleep, clock=clock)
-    skip_artifacts = (args.no_artifacts or env.get("QEOS_NO_ARTIFACTS", "").strip().lower() in _TRUE
-                      or file_config.get("no-artifacts") is True)
     trace_skips: dict = {}
     for report in parsed:
         for reason, number in getattr(report, "artifact_skips", {}).items():
@@ -650,24 +650,35 @@ def _send_screenshots(results: List[dict], url: Optional[str], api_key: str, con
 
 def _send_artifacts(results: List[dict], skips: dict, url: Optional[str], api_key: str, context, say: _Output, *,
                     skip: bool, sleep, clock) -> None:
-    """Traces (spec 2026-10-21 §4.2), after the screenshots and before the run: streams the rows' trace files up, then
-    keeps only the references to traces QEOS holds. Every row loses its `_artifacts` here. `skips` counts the traces
-    left out while reading the reports, by reason. A dry run (no url) keeps the references and uploads nothing. Best
-    effort with its own budget: whatever goes wrong is one line, and the run is still sent. When traces are off (here
-    or on the platform) that line is all: no reasons per file."""
-    files: dict = {}
+    """Traces (spec 2026-10-21 §4.2), after the screenshots and before the run. The rows' `_artifacts` (TraceFiles
+    checked but not hashed while the reports were read) are hashed and streamed up only when the key check says the
+    project keeps traces; each row then gets `artifacts: [{sha256, kind: "trace", name}]` for the traces QEOS holds.
+    Every row loses its `_artifacts` here. `skips` counts the traces left out while reading the reports, by reason. A
+    dry run (no url) hashes them and keeps every reference, uploading nothing. Best effort with its own budget:
+    whatever goes wrong is one line, and the run is still sent. When traces are off (here or on the platform) that
+    line is all: no reasons per file."""
+    row_traces: list = []
+    files: dict = {}  # one TraceFile per resolved path, across the run
     for row in results:
-        files.update(row.pop("_artifacts", None) or {})
+        found = row.pop("_artifacts", None) or []
+        paths = [files.setdefault(trace.path, trace).path for trace in found]
+        if paths:
+            row_traces.append((row, paths))
     left_out = sum(skips.values())
-    stored: set = set()
+    held: set = set()
     if skip:
         if files or left_out:
             say(f"traces: {len(files) + left_out} skipped (turned off by --no-artifacts, QEOS_NO_ARTIFACTS or "
                 "no-artifacts in .qeos.yml)")
-    elif url is None:
-        if left_out:
-            say(f"traces: {left_out} skipped ({traces.reasons(skips)})")
         return
+    if url is None:
+        for trace in files.values():
+            try:
+                held.add(trace.digest())
+            except traces.TraceChanged:
+                skips["missing"] = skips.get("missing", 0) + 1
+        if sum(skips.values()):
+            say(f"traces: {sum(skips.values())} skipped ({traces.reasons(skips)})")
     elif files or left_out:
         notes: List[str] = []
         on = False
@@ -685,10 +696,10 @@ def _send_artifacts(results: List[dict], skips: dict, url: Optional[str], api_ke
                 if files:
                     upload_notes: List[str] = []
                     try:
-                        stored = upload_artifacts(url, api_key, files, max(0.0, deadline - clock()),
-                                                  context=context, warn=upload_notes.append, sleep=sleep, clock=clock)
+                        held = upload_artifacts(url, api_key, list(files.values()), max(0.0, deadline - clock()),
+                                                context=context, warn=upload_notes.append, sleep=sleep, clock=clock)
                     except Exception as exc:  # as above: the run goes without traces
-                        stored = set()
+                        held = set()
                         upload_notes.append(f"unexpected error: {type(exc).__name__}: {exc}")
                     notes += upload_notes
             elif "artifacts" not in identity:
@@ -698,16 +709,21 @@ def _send_artifacts(results: List[dict], skips: dict, url: Optional[str], api_ke
                              "Project Settings)")
         if on and left_out:
             notes.insert(0, traces.reasons(skips))
-        megabytes = sum(files[sha].size for sha in stored) / (1024 * 1024)
+        stored = [trace for trace in files.values() if trace.sha256 is not None and trace.sha256 in held]
+        megabytes = sum({trace.sha256: trace.size for trace in stored}.values()) / (1024 * 1024)
         say(f"traces: {len(stored)} stored ({megabytes:.1f} MB), {len(files) - len(stored) + left_out} skipped"
             + (f" ({'; '.join(notes)})" if notes else ""))
-    for row in results:
-        if "artifacts" in row:
-            kept = [artifact for artifact in row["artifacts"] if artifact["sha256"] in stored]
-            if kept:
-                row["artifacts"] = kept
-            else:
-                del row["artifacts"]
+    for row, paths in row_traces:
+        kept: list = []
+        for path in paths:
+            trace = files[path]
+            if trace.sha256 is None or trace.sha256 not in held:
+                continue
+            if any(artifact["sha256"] == trace.sha256 for artifact in kept):
+                continue  # two files with the same bytes: one reference
+            kept.append({"sha256": trace.sha256, "kind": "trace", "name": trace.name})
+        if kept:
+            row["artifacts"] = kept
 
 
 def _resend_spooled(spool_dir, endpoint, api_key, context, say: _Output, *, sleep, clock) -> None:

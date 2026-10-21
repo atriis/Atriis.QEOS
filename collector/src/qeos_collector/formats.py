@@ -26,13 +26,15 @@ _TRX_DURATION = re.compile(r"^(\d+):(\d\d):(\d\d(?:\.\d+)?)$")
 _ROOTS = "<testsuites>, <testsuite>, <TestRun> (TRX), <test-run> (NUnit 3), <assemblies> (xUnit.net) or <testng-results>"
 
 
-def parse_file(path: str) -> ParsedFile:
+def parse_file(path: str, read_traces: bool = True) -> ParsedFile:
+    """The results of one report. With read_traces False (traces turned off) the traces a report names are only
+    counted, never opened."""
     parsed = ParsedFile(path=path)
     try:
         if os.path.getsize(path) > MAX_FILE_BYTES:
             return _skip(parsed, "larger than 50 MB")
         if _looks_like_json(path):
-            return _parse_cucumber_file(path, parsed)
+            return _parse_cucumber_file(path, parsed, read_traces)
         root = _read_xml(path)
     except _Refused as exc:
         return _skip(parsed, str(exc))
@@ -168,7 +170,7 @@ def _looks_like_json(path: str) -> bool:
     return head.startswith((b"[", b"{"))
 
 
-def _parse_cucumber_file(path: str, parsed: ParsedFile) -> ParsedFile:
+def _parse_cucumber_file(path: str, parsed: ParsedFile, read_traces: bool = True) -> ParsedFile:
     try:
         with open(path, "rb") as fh:
             data = json.load(fh)
@@ -177,7 +179,8 @@ def _parse_cucumber_file(path: str, parsed: ParsedFile) -> ParsedFile:
     if isinstance(data, dict) and isinstance(data.get("suites"), list) and "config" in data:
         # image attachments (spec 2026-10-20): paths resolve from the report's folder, reads stay in the working dir
         context = {"report_dir": os.path.dirname(os.path.abspath(path)), "root": os.path.realpath(os.getcwd()),
-                   "skips": {}, "read": 0, "trace_skips": parsed.artifact_skips}
+                   "skips": {}, "read": 0, "trace_skips": parsed.artifact_skips,
+                   "read_traces": read_traces}
         for suite in data["suites"]:
             _playwright_suite(suite, parsed, context)
         parsed.warnings.extend(playwright_images.skip_warning(path, context["skips"], context["read"] > 0))
@@ -188,7 +191,7 @@ def _parse_cucumber_file(path: str, parsed: ParsedFile) -> ParsedFile:
     skips: dict = {}
     # trace references (spec 2026-10-21 §4.2): paths resolve from the report's folder, then the working directory
     trace_context = {"report_dir": os.path.dirname(os.path.abspath(path)), "root": os.path.realpath(os.getcwd()),
-                     "skips": parsed.artifact_skips}
+                     "skips": parsed.artifact_skips, "read": read_traces}
     for feature in features:
         _cucumber_feature(feature, parsed, skips=skips, traces_context=trace_context)
     if skips.get("large"):
@@ -346,12 +349,13 @@ def _scenario_screenshots(element: dict, steps: list, skips: dict) -> "tuple[lis
     return screenshots, images
 
 
-def _scenario_traces(element: dict, steps: list, context: dict) -> "tuple[list, dict]":
+def _scenario_traces(element: dict, steps: list, context: dict) -> list:
     """The traces the scenario's reference attachments name (application/vnd.qeos.artifact+json), from any step or
-    hook, in order: [{sha256, kind: "trace", name}] and {sha256: TraceFile}. Skips are counted into context["skips"]."""
+    hook, in order, as TraceFiles (not hashed yet; see traces.checked). A relative path is looked up from the report's
+    folder, then from the working directory (where the test run wrote it). Skips are counted into context["skips"]."""
     before = element.get("before") if isinstance(element.get("before"), list) else []
     after = element.get("after") if isinstance(element.get("after"), list) else []
-    found = []
+    candidates = []
     for step in [*before, *steps, *after]:
         if not isinstance(step, dict):
             continue
@@ -361,11 +365,10 @@ def _scenario_traces(element: dict, steps: list, context: dict) -> "tuple[list, 
                 fields = _attachment_fields(attachment)
                 if fields is None or fields[0] != traces.REFERENCE_MEDIA_TYPE:
                     continue
-                trace = traces.reference_trace(fields[1], fields[2], context["report_dir"], context["root"],
-                                               context["skips"])
-                if trace is not None:
-                    found.append(trace)
-    return traces.references(found, context["skips"])
+                named = traces.reference_path(fields[1], fields[2], context["skips"])
+                if named is not None:
+                    candidates.append((named[0], [context["report_dir"], context["root"]], named[1]))
+    return traces.checked(candidates, context["root"], context["skips"], context["read"])
 
 
 def _scenario_log(element: dict, steps: list) -> Optional[str]:
@@ -382,7 +385,7 @@ def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] =
     """The feature's scenarios (and outline rows) as results. With `lines`, each result's scenario line too (an int,
     or None), in step with parsed.results: run-impact's discovery reads a dry run through this parser, and then a
     scenario without a name is kept too (an empty name), so that it still runs in a stage. With `traces_context`
-    (report_dir, root, skips), the scenarios' trace references too."""
+    (report_dir, root, skips, read), the scenarios' trace references too."""
     suite = str(feature.get("name") or "")
     # Windows runners report "tests\features\a.feature"; the key must not depend on the OS (ADR-023)
     uri = str(feature.get("uri") or "").replace("\\", "/")
@@ -467,10 +470,10 @@ def _cucumber_feature(feature: dict, parsed: ParsedFile, lines: Optional[list] =
             row["screenshots"] = screenshots
             row["_images"] = images  # private: uploaded apart, kept out of the body by payload.py
         if traces_context is not None:
-            artifacts, files = _scenario_traces(element, steps, traces_context)
-            if artifacts:
-                row["artifacts"] = artifacts
-                row["_artifacts"] = files  # private: streamed up apart, kept out of the body by payload.py
+            found = _scenario_traces(element, steps, traces_context)
+            if found:
+                # private: hashed and streamed up apart; cli turns the stored ones into `artifacts`
+                row["_artifacts"] = found
         parsed.results.append(row)
         if lines is not None:
             line = element.get("line")
@@ -524,11 +527,11 @@ def _playwright_suite(suite: dict, parsed: ParsedFile, context: Optional[dict] =
                         context["read"] += len(screenshots)
                         row["screenshots"] = screenshots
                         row["_images"] = images  # private: uploaded apart, kept out of the body by payload.py
-                    artifacts, files = traces.attempt_traces(
-                        attempt, context["report_dir"], context["root"], context["trace_skips"])
-                    if artifacts:
-                        row["artifacts"] = artifacts
-                        row["_artifacts"] = files  # private: streamed up apart, kept out of the body by payload.py
+                    found = traces.attempt_traces(attempt, context["report_dir"], context["root"],
+                                                  context["trace_skips"], context["read_traces"])
+                    if found:
+                        # private: hashed and streamed up apart; cli turns the stored ones into `artifacts`
+                        row["_artifacts"] = found
                 parsed.results.append(row)
 
 

@@ -766,8 +766,8 @@ def test_a_playwright_file_that_changed_before_upload_is_left_out(platform, tmp_
         encoding="utf-8")
     real_parse = cli_module.parse_file
 
-    def parse_then_change(path):
-        parsed = real_parse(path)
+    def parse_then_change(path, **kwargs):
+        parsed = real_parse(path, **kwargs)
         shot.write_bytes(IMG_B)  # the file changes between reading the report and uploading
         return parsed
 

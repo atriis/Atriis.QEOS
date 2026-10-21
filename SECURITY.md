@@ -164,8 +164,9 @@ details.
   symlinks followed, inside the working directory, is at most 5 MB and starts like the image type it claims, so a
   tampered report cannot make it upload another file from the CI machine. Collector 0.14.0 reads a trace (a
   Playwright zip attachment or a Cucumber trace reference) under the same rules, at most 100 MB and starting with
-  `PK\x03\x04`, streams it from disk and checks its size and SHA-256 again as it goes: a file that changed after the
-  report was read is cut off and never stored. Traces are sent only when the key check says the project keeps them.
+  `PK\x03\x04`. Only when the key check says the project keeps traces does it hash a trace and stream it from disk,
+  checking its size and SHA-256 again as it goes, and its path must still resolve to the same file inside the
+  working directory: a file that changed or was replaced after the report was read is cut off and never stored.
   A trace upload (`PUT /api/v1/collect/artifacts/{sha256}`, project API key, ADR-037) streams to a temporary object
   while it is checked: `application/zip` only, first bytes `PK`, at most 100 MB (the declared length is
   refused before reading, a longer stream is cut off), and a SHA-256 equal to the path. Only then is it copied to

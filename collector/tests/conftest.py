@@ -27,6 +27,7 @@ class FakePlatform:
         self.blob_hangup = False
         self.blob_requests = []
         self.key_check = None
+        self.put_read_delay = 0.0  # a slow reader: seconds between 64 KB reads of a PUT body
 
     def reply(self, status, body=None, headers=None, delay=0.0):
         self.responses.append((status, {} if body is None else body, headers or {}, delay))
@@ -66,7 +67,18 @@ def platform():
             self._blob("HEAD", b"")
 
         def do_PUT(self):
-            self._blob("PUT", self.rfile.read(int(self.headers.get("Content-Length", 0))))
+            length = int(self.headers.get("Content-Length", 0))
+            if not fake.put_read_delay:
+                self._blob("PUT", self.rfile.read(length))
+                return
+            body = b""
+            while len(body) < length:
+                time.sleep(fake.put_read_delay)
+                piece = self.rfile.read(min(64 * 1024, length - len(body)))
+                if not piece:  # the client gave up
+                    break
+                body += piece
+            self._blob("PUT", body)
 
         def _blob(self, method, body):
             prefix = next((p for p in (BLOBS, ARTIFACTS) if self.path.startswith(p)), None)

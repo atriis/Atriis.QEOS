@@ -23,7 +23,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Mapping, Optional, Sequence, Tuple
 
-from qeos_collector import cucumber, impact, summary
+from qeos_collector import cucumber, impact, summary, traces
+from qeos_collector.config_file import load_config
 from qeos_collector.formats import parse_file
 from qeos_collector.junit import ParsedFile
 from qeos_collector.payload import SCOPES
@@ -128,9 +129,10 @@ class _Cucumber:
     """The dry runs and stages of one invocation, their files in one working directory."""
 
     def __init__(self, flavour: str, workdir: Path, cwd: str, runner: Callable[[Sequence[str]], int],
-                 clock: Callable[[], float], say: Callable[[str], None]):
+                 clock: Callable[[], float], say: Callable[[str], None], read_traces: bool = True):
         self.flavour, self.workdir, self.cwd = flavour, workdir, cwd
         self.runner, self.clock, self.say = runner, clock, say
+        self.read_traces = read_traces  # False with traces turned off: a stage report's traces are only counted
 
     def _rerun(self, label: str, scenarios: Sequence[cucumber.Scenario]) -> str:
         if not scenarios:  # an empty rerun file is "everything" to some runners
@@ -163,7 +165,8 @@ class _Cucumber:
                  + ("the command as given" if scenarios is None else f"{len(scenarios)} scenario(s)"))
         started = self.clock()
         code = self.runner(argv)
-        return Stage(name, code, max(0.0, self.clock() - started), parse_file(str(report)))
+        return Stage(name, code, max(0.0, self.clock() - started),
+                     parse_file(str(report), read_traces=self.read_traces))
 
 
 def _command(args) -> List[str]:
@@ -326,6 +329,16 @@ def _workdir(cwd: str, say: Callable[[str], None]) -> Path:
     return workdir
 
 
+def _traces_off(args, env: Mapping[str, str], cwd: str) -> bool:
+    """--no-artifacts, QEOS_NO_ARTIFACTS or no-artifacts in .qeos.yml (a .qeos.yml that cannot be read is reported by
+    the upload)."""
+    try:
+        file_config = load_config(cwd)
+    except ConfigError:
+        file_config = {}
+    return traces.turned_off(getattr(args, "no_artifacts", False), env, file_config)
+
+
 def run(args, env: Mapping[str, str], api_key: str, say: Callable[[str], None], cwd: str, *, upload: Upload,
         judge: Callable[[dict], int], gate: bool, fail_on_error: bool, clock: Callable[[], float],
         runner: Callable[[Sequence[str]], int] = run_command, setup_problem: Optional[str] = None) -> int:
@@ -359,7 +372,7 @@ def run(args, env: Mapping[str, str], api_key: str, say: Callable[[str], None], 
     try:
         if Path(cwd, cucumber.WORKDIR) not in workdir.parents:
             check_paths(flavour, command, str(workdir))  # a temporary directory: its path reaches cmd.exe too
-        steps = _Cucumber(flavour, workdir, cwd, runner, clock, say)
+        steps = _Cucumber(flavour, workdir, cwd, runner, clock, say, read_traces=not _traces_off(args, env, cwd))
         stages, scope, stopped, missing = _run_stages(args, say, command, flavour, cwd, found, steps)
         if not stages:  # --suggested-only --no-fallback: nothing ran, nothing to upload
             return found.code if found.code != impact.SUGGESTED else impact.NOTHING

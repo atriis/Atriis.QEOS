@@ -165,7 +165,7 @@ variable, and both win over what is detected from the CI system.
 | `--gate` | `QEOS_GATE=1` | Exit 1 if the run has failures outside quarantine, or could not be uploaded (see below) |
 | `--spool` | `QEOS_SPOOL` | Directory keeping parts a failed upload could not deliver; the next invocation resends them first, under their original Idempotency-Key (so nothing is ever stored twice). Capped at 100 files; rejected uploads (401/409) are never spooled. Point it at a persistent runner path — a wiped workspace wipes the spool |
 | `--no-screenshots` | `QEOS_NO_SCREENSHOTS=1` | Send no step screenshots: no image upload and no references in the run (see [Step screenshots](#step-screenshots-cucumber-from-0110)) |
-| `--no-artifacts` | `QEOS_NO_ARTIFACTS=1` | Send no Playwright traces: no trace upload and no references in the run (see [Traces](#traces-from-0140)) |
+| `--no-artifacts` | `QEOS_NO_ARTIFACTS=1` | Send no traces: no trace upload and no references in the run (see [Traces](#traces-from-0140)) |
 | `--dry-run` | — | Print the JSON; upload nothing |
 | — | `QEOS_ACTION_EXTRA_ARGS` | More flags as one string, split into words as a POSIX shell would (quotes group; nothing is expanded or run; a backslash escapes, so write paths with `/`). Flags only: a `--` or a word that is no flag's value is refused (exit 2), so nothing can start a test command. The variable is not passed on to the test command. The GitHub Action passes its `extra-args` this way. GitLab's `QEOS_EXTRA_ARGS` is a different variable, which the template puts on the command line |
 
@@ -481,7 +481,7 @@ ca-file: certs/internal-ca.pem
 spool: .qeos-spool
 fail-on-error: true
 no-screenshots: true   # from 0.12.0: never send step screenshots from this repository
-no-artifacts: true     # from 0.14.0: never send Playwright traces from this repository
+no-artifacts: true     # from 0.14.0: never send traces from this repository
 patterns:
   - "reports/**/*.xml"
 components:
@@ -645,13 +645,15 @@ A failed test's Playwright trace reaches QEOS with its result, and opens there i
 - **Only files in the checkout.** As for Playwright screenshots: a trace is read only when it resolves (symlinks
   followed) inside the working directory, is at most 100 MB and starts like a ZIP file (`PK\x03\x04`). A relative
   Playwright path is read from the report's folder; a relative Cucumber path from the report's folder, else from the
-  working directory. A trace is hashed while the report is read and read again, from disk, only for its upload.
-- **Upload.** After the screenshots and before the run: `HEAD /api/v1/collect/artifacts/{sha256}`, then, when QEOS
-  does not have it, a `PUT` with `Content-Type: application/zip` and `Content-Length`, streamed from the file in 1 MB
+  working directory. Reading the report only checks this (a stat and four bytes); the 5 per result are picked
+  before any file is read.
+- **Upload.** After the screenshots and before the run, and only when the key check said yes: each trace is hashed
+  from disk, then `HEAD /api/v1/collect/artifacts/{sha256}`, then, when QEOS does not have it, a `PUT` with `Content-Type: application/zip` and `Content-Length`, streamed from the file in 1 MB
   pieces (never the whole trace in memory). The size and hash are checked again as it streams: a file that changed
   since the report was read is cut off before it completes and left out. Two at a time, at most 500 per run, retried
-  as screenshots are, with a limit of 5 minutes of its own, the key check included; when it runs out the rest are
-  skipped and the run goes without them. A trace problem never fails the run upload. One line sums it up:
+  as screenshots are (a platform that drops the connection while a trace is sent gets it once more, then that trace is
+  left out), with a limit of 5 minutes of its own, the key check and hashing included; it also stops a trace still
+  streaming. When it runs out the rest are skipped and the run goes without them. A trace problem never fails the run upload. One line sums it up:
   `traces: 3 stored (41.2 MB), 1 skipped`, with the reasons in brackets.
 - **Only when QEOS takes them.** The key check (`GET /api/v1/collect/key`) must say `artifacts: true`. Traces are off
   by default: a project owner or admin turns on **Keep traces from uploads** in Project Settings. When they are off,
@@ -660,7 +662,7 @@ A failed test's Playwright trace reaches QEOS with its result, and opens there i
 - **Older platform.** A 422 naming `results.N.artifacts` or anything inside it gets the upload once more without any
   result's `artifacts`, under the same Idempotency-Key, as for `screenshots`.
 - **Turning it off.** `--no-artifacts` (or `QEOS_NO_ARTIFACTS=1`, or `no-artifacts: true` in `.qeos.yml`) skips all of
-  this: no key check, no trace, no references; one line says how many were skipped.
+  this: no trace file is opened, no key check, no references; one line says how many were skipped.
 - **Privacy.** Traces contain page snapshots and network traffic, which can include cookies, tokens and personal data
   of your test accounts. QEOS cannot mask them. Turn the project setting on only if every project reader may see that.
 
