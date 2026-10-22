@@ -143,7 +143,7 @@ sleep of 5 s let in-flight requests and in-API background tasks finish while the
 | `artifacts.backend` | `s3` | `s3` or `azure` (`ARTIFACTS_BACKEND`) |
 | `artifacts.s3.endpoint`, `.bucket` | `""`, `qeos-artifacts` | `ARTIFACTS_S3_*`; the keys are secrets |
 | `artifacts.azure.accountUrl`, `.container` | `""`, `qeos-artifacts` | `ARTIFACTS_AZURE_*` (workload identity, no key) |
-| `smtp.host`, `.port`, `.tls`, `.fromEmail`, `.fromName` | empty host: no email | the non-secret SMTP settings; with Key Vault, `SMTP_HOST` stays empty while `smtp-user` or `smtp-password` is in `keyvault.absent` (a server that wants a sign-in would refuse every message, and the links would be neither sent nor logged) |
+| `smtp.host`, `.port`, `.tls`, `.fromEmail`, `.fromName` | empty host: no email | the non-secret SMTP settings; with Key Vault, `SMTP_HOST` stays empty while `smtp-user` or `smtp-password` is in `keyvault.absent` (a server that wants a sign-in would refuse every message, and the links would be neither sent nor logged). `smtp.requireLogin` (default `true`, `SMTP_REQUIRE_LOGIN`): the services themselves treat empty SMTP credentials as no email and log the links |
 | `monitoring.enabled` | `false` | `MONITORING_ENABLED` for auth and the gateway; Grafana comes in Stage 2 |
 | `gateway.trustedProxies` | required | the edge's address range (`GATEWAY_TRUSTED_PROXIES`); real client IPs and per-IP limits depend on it |
 | `gateway.rates.*` | `auth 3r/s`, `api 10r/s`, `collect 5r/s`, `collectBlobs 25r/s`, `collectArtifacts 5r/s` | `RATE_*`, per pod: half of Compose's, as two pods serve |

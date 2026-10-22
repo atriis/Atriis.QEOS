@@ -171,6 +171,7 @@ bash deploy/init-env.sh localhost you@example.com
 | `SMTP_HOST` | empty | Outgoing mail server. Empty means no email is sent: auth logs its links, and email notification channels record "SMTP is not configured". See [3.2](#32-email-smtp). |
 | `SMTP_PORT` | `587` | |
 | `SMTP_TLS` | `true` | STARTTLS. Use `false` for a relay without it. Implicit TLS (port 465) is not supported. |
+| `SMTP_REQUIRE_LOGIN` | `false` | `true` for a server that takes signed-in mail only: then an empty `SMTP_USER` or `SMTP_PASSWORD` counts as no email (auth logs its links) instead of every message being refused. |
 | `SMTP_USER`, `SMTP_PASSWORD` | empty | Login is used only when both are set. |
 | `EMAILS_FROM_EMAIL` | empty (falls back to `no-reply@example.com`) | Sender address. |
 | `EMAILS_FROM_NAME` | `QEOS` | Sender name. |

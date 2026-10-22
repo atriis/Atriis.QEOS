@@ -35,6 +35,10 @@ class BaseServiceSettings(BaseSettings):
     SMTP_HOST: str = ""
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
+    # True for a server that only takes signed-in mail (Azure Communication Services): without SMTP_USER and
+    # SMTP_PASSWORD it would refuse every message, so mail counts as not configured. False (Compose's Mailpit and
+    # other relays that need no sign-in): the credentials are optional
+    SMTP_REQUIRE_LOGIN: bool = False
     EMAILS_FROM_EMAIL: str = ""
     EMAILS_FROM_NAME: str = ""
 

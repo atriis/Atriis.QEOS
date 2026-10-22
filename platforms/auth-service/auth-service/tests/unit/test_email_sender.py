@@ -18,6 +18,34 @@ def test_logs_the_link_when_smtp_is_not_configured(caplog, monkeypatch):
     assert all(r.levelno >= logging.WARNING for r in caplog.records)
 
 
+def test_logs_the_link_when_the_server_requires_login_and_credentials_are_missing(caplog, monkeypatch):
+    # Azure Communication Services with smtp-user/smtp-password not yet in Key Vault: sending would be refused
+    monkeypatch.setattr(settings, "SMTP_HOST", "smtp.azurecomm.net")
+    monkeypatch.setattr(settings, "SMTP_REQUIRE_LOGIN", True)
+    monkeypatch.setattr(settings, "SMTP_USER", "")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "")
+    with patch("qeos_shared.mail.smtplib.SMTP") as mock_smtp, caplog.at_level(logging.INFO):
+        EmailSender.send_password_reset_email("person@example.com", "http://example.com/reset?token=abc", 30)
+    mock_smtp.assert_not_called()
+    assert "http://example.com/reset?token=abc" in caplog.text
+    assert "SMTP credentials missing" in caplog.text
+    assert all(r.levelno >= logging.WARNING for r in caplog.records)
+
+
+def test_sends_without_login_when_the_server_does_not_require_it(monkeypatch):
+    # Compose's Mailpit: a host, no credentials, SMTP_REQUIRE_LOGIN off
+    monkeypatch.setattr(settings, "SMTP_HOST", "mailpit")
+    monkeypatch.setattr(settings, "SMTP_REQUIRE_LOGIN", False)
+    monkeypatch.setattr(settings, "SMTP_USER", "")
+    monkeypatch.setattr(settings, "SMTP_PASSWORD", "")
+    mock_server = MagicMock()
+    mock_server.__enter__.return_value = mock_server
+    with patch("qeos_shared.mail.smtplib.SMTP", return_value=mock_server):
+        EmailSender.send_verification_email("person@example.com", "http://example.com/verify?token=abc")
+    mock_server.login.assert_not_called()
+    mock_server.send_message.assert_called_once()
+
+
 def test_sends_via_smtp_when_configured(monkeypatch):
     monkeypatch.setattr(settings, "SMTP_HOST", "smtp.example.com")
     monkeypatch.setattr(settings, "SMTP_PORT", 587)

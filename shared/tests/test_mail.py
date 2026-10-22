@@ -43,6 +43,18 @@ def test_without_a_host_it_refuses_instead_of_pretending():
         send_mail(settings, ["a@example.com"], "S", "B")
 
 
+@pytest.mark.parametrize("user, password", [("", ""), ("user", ""), ("", "pass")])
+def test_a_server_that_requires_login_without_credentials_is_not_configured(user, password):
+    settings = smtp_settings(SMTP_REQUIRE_LOGIN=True, SMTP_USER=user, SMTP_PASSWORD=password)
+    assert mail_configured(settings) is False
+    with pytest.raises(MailNotConfigured):
+        send_mail(settings, ["a@example.com"], "S", "B")
+
+
+def test_a_server_that_requires_login_with_credentials_is_configured():
+    assert mail_configured(smtp_settings(SMTP_REQUIRE_LOGIN=True)) is True
+
+
 def test_header_injection_through_the_subject_is_impossible():
     server = MagicMock()
     server.__enter__.return_value = server

@@ -72,6 +72,9 @@ smtp:
   tls: true
   fromEmail: ""
   fromName: QEOS
+  # SMTP_REQUIRE_LOGIN: the server takes signed-in mail only (Azure Communication Services), so without smtp-user and
+  # smtp-password the services log the links instead of sending them (qeos_shared.mail)
+  requireLogin: true
 
 # Grafana behind the gateway and the Monitoring item (ADR-027): Stage 2 on Kubernetes
 monitoring:

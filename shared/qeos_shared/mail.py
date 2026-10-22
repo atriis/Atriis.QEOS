@@ -9,11 +9,16 @@ TIMEOUT_SECONDS = 10.0
 
 
 class MailNotConfigured(Exception):
-    """SMTP_HOST is empty: there is no server to send through."""
+    """SMTP_HOST is empty, or the server needs a sign-in and the credentials are missing: nothing can be sent."""
 
 
 def mail_configured(settings) -> bool:
-    return bool(settings.SMTP_HOST)
+    return bool(settings.SMTP_HOST) and not missing_login(settings)
+
+
+def missing_login(settings) -> bool:
+    """The server takes signed-in mail only (SMTP_REQUIRE_LOGIN) and SMTP_USER or SMTP_PASSWORD is empty."""
+    return bool(getattr(settings, "SMTP_REQUIRE_LOGIN", False)) and not (settings.SMTP_USER and settings.SMTP_PASSWORD)
 
 
 def _single_line(text: str) -> str:

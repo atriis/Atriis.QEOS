@@ -130,6 +130,7 @@ logged. So while Key Vault lacks smtp-user or smtp-password (keyvault.absent), S
 {{- $_ := set $env "SMTP_HOST" $smtpHost -}}
 {{- $_ := set $env "SMTP_PORT" (toString $ctx.Values.smtp.port) -}}
 {{- $_ := set $env "SMTP_TLS" (toString $ctx.Values.smtp.tls) -}}
+{{- $_ := set $env "SMTP_REQUIRE_LOGIN" (toString $ctx.Values.smtp.requireLogin) -}}
 {{- $_ := set $env "EMAILS_FROM_EMAIL" $ctx.Values.smtp.fromEmail -}}
 {{- $_ := set $env "EMAILS_FROM_NAME" $ctx.Values.smtp.fromName -}}
 {{- end -}}

@@ -300,6 +300,10 @@ for env in ci staging; do
   [ -z "$bad" ] && pass "$env: only namespaced kinds, none with a namespace of its own" || fail "$env: cluster-scoped or foreign: $bad"
 done
 smtp() { q "$OUT/$1.yaml" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-auth-service-env") | .data.SMTP_HOST + " " + .data.SMTP_PORT + " " + .data.SMTP_TLS'; }
+# Belt and braces with the empty SMTP_HOST above: the services themselves log the links when a server that wants a
+# sign-in has no credentials (qeos_shared.mail)
+login="$(q "$OUT/staging-email.yaml" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-auth-service-env") | .data.SMTP_REQUIRE_LOGIN')"
+[ "$login" = true ] && pass "staging: SMTP_REQUIRE_LOGIN is on (no sending without the SMTP credentials)"   || fail "staging: SMTP_REQUIRE_LOGIN is '$login'"
 [ "$(smtp staging)" = " 587 true" ] && pass "staging: no SMTP_HOST while the vault lacks the SMTP credentials (links logged)" \
   || fail "staging: SMTP settings are '$(smtp staging)'"
 [ "$(smtp staging-email)" = "smtp.azurecomm.net 587 true" ] && pass "staging: Communication Services SMTP once the credentials exist" \

@@ -4,11 +4,13 @@ SMTP_HOST and friends already existed in config.py, unread. Unlike Google SSO (w
 closed with 503 when unconfigured -- verifying without an audience would be a worse hole
 than refusing), this cannot fail closed: every development and test environment lacking a
 real SMTP server would be unable to register at all, which is unacceptable for a control
-this central. When SMTP_HOST is empty (the default), the link is logged instead of sent.
+this central. When SMTP_HOST is empty (the default), or the server needs a sign-in
+(SMTP_REQUIRE_LOGIN) and SMTP_USER or SMTP_PASSWORD is empty, the link is logged instead of sent:
+such a server would refuse the message, and the link would be neither sent nor logged.
 """
 import logging
 
-from qeos_shared.mail import mail_configured, send_mail
+from qeos_shared.mail import mail_configured, missing_login, send_mail
 
 from src.auth.config import settings
 
@@ -20,7 +22,8 @@ def _deliver(to_email: str, subject: str, body: str, kind: str, link: str) -> No
         # WARNING, not INFO: the root logger defaults to WARNING, so an INFO
         # line never reaches the container log — and this link is the only
         # way to finish the flow on a deployment without SMTP
-        logger.warning("%s for %s (SMTP not configured, logging instead): %s", kind, to_email, link)
+        reason = "SMTP credentials missing" if settings.SMTP_HOST and missing_login(settings) else "SMTP not configured"
+        logger.warning("%s for %s (%s, logging instead): %s", kind, to_email, reason, link)
         return
     send_mail(settings, [to_email], subject, body)
 
