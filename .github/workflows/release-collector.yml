@@ -18,11 +18,15 @@ permissions:
 jobs:
   test:
     name: Tests (Python ${{ matrix.python }})
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
         python: ["3.9", "3.12"]
+        include:
+          # ubuntu-latest is 26.04, which has no Python 3.9; drop this pin when 3.9 support is dropped
+          - python: "3.9"
+            os: ubuntu-24.04
     defaults:
       run:
         working-directory: collector

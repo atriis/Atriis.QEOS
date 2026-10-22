@@ -147,6 +147,8 @@
 - [x] Dashboard (2026-10-12): the Collection card in Project Settings (switch, discard count)
 - [x] Docs (2026-10-12): SETUP 4.1.8a and troubleshooting, collector and ingestion READMEs, PRODUCT, README
 
+- [ ] Python 3.9 has been end-of-life since October 2025; the CI jobs that test it are pinned to ubuntu-24.04 (ubuntu-latest is 26.04, which has no 3.9) until 3.9 support is dropped, then remove the pin in ci.yml and release-collector.yml
+
 ### Collector — nice to have
 Distribution
 - [~] Publish to PyPI: workflow ready (trusted publishing, gated on repo variable PYPI_PUBLISH=true); needs the one-off publisher config on pypi.org (project qeos-collector, repo atriis/Atriis.QEOS, workflow release-collector.yml, environment pypi)
