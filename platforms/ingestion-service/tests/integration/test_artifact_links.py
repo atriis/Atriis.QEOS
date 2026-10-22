@@ -247,3 +247,12 @@ def test_links_read_the_database_clock_not_the_replicas(db):
     now = artifact_link_service.db_now(db)
     assert now.tzinfo is not None
     assert before <= now <= datetime.now(timezone.utc) + timedelta(seconds=5)
+
+
+def test_postgresql_reads_the_wall_clock_not_the_transaction_start():
+    """now() on PostgreSQL is fixed at the transaction's start: a link checked late in a long transaction would live
+    past its 60 s. clock_timestamp() is the time of the call."""
+    from sqlalchemy.dialects import postgresql
+
+    assert "clock_timestamp()" in str(artifact_link_service.db_clock("postgresql").compile(dialect=postgresql.dialect()))
+    assert "clock_timestamp" not in str(artifact_link_service.db_clock("sqlite"))

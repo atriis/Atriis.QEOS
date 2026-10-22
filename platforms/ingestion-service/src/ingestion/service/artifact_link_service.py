@@ -28,10 +28,16 @@ class LinkedFile(NamedTuple):
     size: int
 
 
+def db_clock(dialect: str):
+    """The database's current time. PostgreSQL's now() is the transaction's start, fixed for as long as it lasts, so
+    the wall clock there; SQLite (the tests) has only CURRENT_TIMESTAMP, which is read per statement."""
+    return func.clock_timestamp() if dialect == "postgresql" else func.now()
+
+
 def db_now(db: Session) -> datetime:
     """The database's clock. A link is created by one replica and followed through another; reading both times from
     the one database keeps their 60 s the same whatever the replicas' own clocks say."""
-    return _aware(db.execute(select(func.now())).scalar_one())
+    return _aware(db.execute(select(db_clock(db.get_bind().dialect.name))).scalar_one())
 
 
 def client_ip(request: Request) -> str:

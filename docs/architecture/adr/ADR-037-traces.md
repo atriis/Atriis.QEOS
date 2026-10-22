@@ -54,6 +54,6 @@ which expire and need a GitHub sign-in. ADR-036 put MinIO behind ingestion for s
 - The VM backup of the MinIO volume now holds traces too.
 - No trace leaves the platform. The viewer runs on the dashboard's origin, so bumping `playwright-core` is
   deliberate and checked by opening a real trace.
-- A link's create and check both read the database's clock (`now()`), so replicas with skewed clocks agree on its
-  60 s (2026-10-22).
+- A link's create and check both read the database's clock (`clock_timestamp()` on PostgreSQL, whose `now()` is
+  fixed at the transaction's start), so replicas with skewed clocks agree on its 60 s (2026-10-22).
 - Follow-ups: open more than the first trace.
