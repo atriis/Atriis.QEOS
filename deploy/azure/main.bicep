@@ -64,8 +64,6 @@ param postgresAdminPassword string
 @allowed(['Standard_LRS', 'Standard_ZRS', 'Standard_GRS'])
 param storageSku string = 'Standard_LRS'
 
-param keyVaultPurgeProtection bool = true
-
 param emailDataLocation string = 'Europe'
 
 @description('The ACS SMTP Entra application\'s client id (README, one-time steps). Empty: no SMTP username yet.')
@@ -73,6 +71,9 @@ param smtpAppClientId string = ''
 
 @description('That application\'s service principal object id. Empty: no send role yet.')
 param smtpAppPrincipalId string = ''
+
+@description('True once init-secrets.sh has created the secrets it generates (README, section 3.1): only then can each identity be given read access to each one.')
+param generatedSecretsExist bool = false
 
 @description('The monthly budget of the resource group, in the billing currency.')
 param monthlyBudget int
@@ -99,6 +100,31 @@ var artifactWriters = [
   'ingestion'
   'ingestion-retention'
 ]
+
+// Who reads each Key Vault secret: the identities whose SecretProviderClasses list it (the chart's per-workload key
+// lists, plus the migration hook's). Key Vault Secrets User is granted per secret, never on the whole vault.
+// scripts/tests/test_azure_bicep.py keeps this map equal to the chart's
+var secretReaders = {
+  'postgres-admin-password': ['migrate']
+  'secret-key': ['services', 'ingestion', 'ingestion-retention', 'migrate']
+  'internal-api-password': ['services', 'ingestion', 'ingestion-retention']
+  'auth-db-password': ['services', 'migrate']
+  'organization-db-password': ['services', 'migrate']
+  'project-db-password': ['services', 'migrate']
+  'testmgmt-db-password': ['services', 'migrate']
+  'ingestion-db-password': ['services', 'ingestion', 'ingestion-retention', 'migrate']
+  'smtp-user': ['services', 'ingestion', 'ingestion-retention']
+  'smtp-password': ['services', 'ingestion', 'ingestion-retention']
+}
+
+// A role on a secret needs the secret: Bicep's own now, init-secrets.sh's once they exist, SMTP's once the SMTP
+// application is set up (smtp-password is written before that redeploy, README section 4.1)
+var smtpSecrets = ['smtp-user', 'smtp-password']
+var grantedSecrets = filter(
+  objectKeys(secretReaders),
+  secret => secret == 'postgres-admin-password' || (contains(smtpSecrets, secret) ? !empty(smtpAppClientId) : generatedSecretsExist)
+)
+var secretGrants = flatten(map(grantedSecrets, secret => map(secretReaders[secret], identity => { secret: secret, identity: identity })))
 
 // The chart's artifacts.azure.container
 var artifactsContainer = 'qeos-artifacts'
@@ -146,6 +172,8 @@ module aks 'modules/aks.bicep' = {
     userNodeMinCount: userNodeMinCount
     userNodeMaxCount: userNodeMaxCount
     deployPrincipalId: deployPrincipalId
+    namespace: namespace
+    edgeDnsLabel: '${prefix}-${take(suffix, 6)}'
   }
   // The node subnet must exist: the module takes it by name
   dependsOn: [network]
@@ -229,8 +257,8 @@ module keyvault 'modules/keyvault.bicep' = {
     operatorIpRanges: operatorIpRanges
     readerNames: workloadIdentities
     readerPrincipalIds: identities.outputs.principalIds
+    secretGrants: secretGrants
     operatorPrincipalId: operatorPrincipalId
-    purgeProtection: keyVaultPurgeProtection
     postgresAdminPassword: postgresAdminPassword
     smtpUsername: smtpUsername
   }
@@ -259,3 +287,6 @@ output workloadIdentityClientIds object = toObject(
   i => identities.outputs.clientIds[i]
 )
 output communicationEmailSender string = email.outputs.sender
+// The edge's address (a static public IP with a DNS label, kept across cluster stops and rebuilds): the chart's
+// publicUrl is https://<stagingHostname>
+output stagingHostname string = aks.outputs.edgeHostname

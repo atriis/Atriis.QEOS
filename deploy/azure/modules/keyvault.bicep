@@ -1,5 +1,5 @@
-// Key Vault in RBAC mode (spec 5.6): every workload identity reads secrets (Key Vault Secrets User) through the Secrets
-// Store CSI driver. Bicep writes the secrets it knows (the PostgreSQL admin password, the SMTP username); the runbook's
+// Key Vault in RBAC mode (spec 5.6): each workload identity reads, through the Secrets Store CSI driver, only the
+// secrets its SecretProviderClasses list (Key Vault Secrets User on each secret, not on the vault). Bicep writes the secrets it knows (the PostgreSQL admin password, the SMTP username); the runbook's
 // init-secrets.sh generates the rest once. The data plane is open only to the AKS node subnet and the operators' ranges.
 
 param location string
@@ -14,15 +14,15 @@ param nodesSubnetId string
 @description('Operators\' public IPv4 addresses or CIDR ranges, for init-secrets.sh and az keyvault.')
 param operatorIpRanges string[] = []
 
-@description('The identities that read secrets (identities.bicep), by name and principal id, in the same order.')
+@description('The workload identities (identities.bicep), by name and principal id, in the same order.')
 param readerNames string[]
 param readerPrincipalIds string[]
 
+@description('{secret, identity} pairs: the identity reads that secret. Every secret named must exist.')
+param secretGrants array
+
 @description('An operator (user or group object id) who manages secrets. Empty: none.')
 param operatorPrincipalId string = ''
-
-@description('Purge protection cannot be turned off again once on.')
-param purgeProtection bool = true
 
 @secure()
 param postgresAdminPassword string
@@ -46,7 +46,8 @@ resource vault 'Microsoft.KeyVault/vaults@2026-05-15' = {
     enableRbacAuthorization: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 90
-    enablePurgeProtection: purgeProtection ? true : null
+    // Once on, it cannot be turned off: a deleted vault or secret stays recoverable for 90 days (README, section 9)
+    enablePurgeProtection: true
     publicNetworkAccess: 'Enabled'
     networkAcls: {
       defaultAction: 'Deny'
@@ -80,15 +81,24 @@ resource smtpUser 'Microsoft.KeyVault/vaults/secrets@2026-05-15' = if (!empty(sm
   }
 }
 
+resource grantedSecrets 'Microsoft.KeyVault/vaults/secrets@2026-05-15' existing = [
+  for grant in secretGrants: {
+    parent: vault
+    name: grant.secret
+  }
+]
+
 resource readers 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
-  for (reader, i) in readerNames: {
-    name: guid(vault.id, reader, secretsUser)
-    scope: vault
+  for (grant, i) in secretGrants: {
+    name: guid(vault.id, grant.secret, grant.identity, secretsUser)
+    scope: grantedSecrets[i]
     properties: {
       roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', secretsUser)
-      principalId: readerPrincipalIds[i]
+      principalId: readerPrincipalIds[indexOf(readerNames, grant.identity)]
       principalType: 'ServicePrincipal'
     }
+    // The secrets Bicep writes exist before their roles
+    dependsOn: [postgresAdmin, smtpUser]
   }
 ]
 

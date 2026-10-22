@@ -60,22 +60,43 @@ def chart_identities() -> set[str]:
     return identities | {"migrate"}
 
 
-def chart_secret_keys() -> set[str]:
-    """The Key Vault keys staging's SecretProviderClasses read (secretproviderclass.yaml, migrate-hook.yaml)."""
-    keys: set[str] = set()
+def chart_keys_by_identity() -> dict[str, set[str]]:
+    """identity -> the Key Vault keys staging's SecretProviderClasses of its workloads read (secretproviderclass.yaml,
+    one per workload, and the migration hook's qeos-migrate, migrate-hook.yaml)."""
+    absent = set(staging("keyvault", "absent") or [])
+    by_identity: dict[str, set[str]] = {}
     for svc in VALUES["services"].values():
-        keys.update((svc.get("secretEnv") or {}).values())
+        if not svc.get("identity"):
+            continue
+        keys = set((svc.get("secretEnv") or {}).values())
         if svc.get("database"):
             keys.add(f"{svc['database']}-db-password")
         if svc.get("artifacts") and staging("artifacts", "backend") == "s3":
             keys.update({"artifacts-s3-access-key", "artifacts-s3-secret-key"})
+        by_identity.setdefault(svc["identity"], set()).update(keys - absent)
     hook = text(CHART / "templates" / "migrate-hook.yaml")
     match = re.search(r"\$hookKeys := list ((?:\"[^\"]+\" ?)+)", hook)
     assert match, "the migration hook's key list moved"
-    keys.update(re.findall(r'"([^"]+)"', match.group(1)))
+    migrate = set(re.findall(r'"([^"]+)"', match.group(1)))
     for name in VALUES["migrate"]["order"]:
-        keys.add(f"{VALUES['services'][name]['database']}-db-password")
-    return keys - set(staging("keyvault", "absent") or [])
+        migrate.add(f"{VALUES['services'][name]['database']}-db-password")
+    by_identity["migrate"] = migrate - absent
+    return by_identity
+
+
+def chart_secret_keys() -> set[str]:
+    return set().union(*chart_keys_by_identity().values())
+
+
+def bicep_secret_readers() -> dict[str, set[str]]:
+    """main.bicep's secretReaders: secret -> the identities granted Key Vault Secrets User on it."""
+    match = re.search(r"^var secretReaders = \{(.*?)^\}", MAIN, re.S | re.M)
+    assert match, "var secretReaders not found"
+    readers = {}
+    for secret, identities in re.findall(r"^\s*'([^']+)': \[([^\]]*)\]", match.group(1), re.M):
+        assert secret not in readers, secret
+        readers[secret] = set(re.findall(r"'([^']+)'", identities))
+    return readers
 
 
 def provided_secret_keys() -> set[str]:
@@ -96,6 +117,45 @@ def provided_secret_keys() -> set[str]:
 
 def test_bicep_creates_every_secret_the_chart_reads_and_no_other():
     assert provided_secret_keys() == chart_secret_keys()
+
+
+def test_each_identity_reads_exactly_its_workloads_secrets():
+    granted: dict[str, set[str]] = {}
+    for secret, identities in bicep_secret_readers().items():
+        for identity in identities:
+            granted.setdefault(identity, set()).add(secret)
+    assert granted == chart_keys_by_identity()
+
+
+def test_only_the_migration_hook_reads_the_admin_password():
+    assert bicep_secret_readers()["postgres-admin-password"] == {"migrate"}
+
+
+def test_roles_are_per_secret_and_purge_protection_always_on():
+    vault = text(AZURE / "modules" / "keyvault.bicep")
+    # Key Vault Secrets User only through the per-secret loop; the vault-wide role is the operator's Secrets Officer
+    assert len(re.findall(r"roleDefinitions', secretsUser\)", vault)) == 1
+    assert "scope: grantedSecrets[i]" in vault
+    assert re.search(r"^\s*enablePurgeProtection: true$", vault, re.M)
+    assert "PurgeProtection" not in text(AZURE / "staging.bicepparam")
+
+
+def test_postgres_pins_tls():
+    postgres = text(AZURE / "modules" / "postgres.bicep")
+    for name, value in (("require_secure_transport", "ON"), ("ssl_min_protocol_version", "TLSv1.2")):
+        assert re.search(rf"name: '{name}'\s+properties: \{{\s+value: '{value}'", postgres), name
+
+
+def test_documented_admin_password_meets_flexible_servers_rule():
+    """Three of four classes (upper, lower, digit, symbol); hex alone has two, and the first deploy would fail."""
+    readme = text(AZURE / "README.md")
+    match = re.search(r'^export QEOS_POSTGRES_ADMIN_PASSWORD="(.*)"$', readme, re.M)
+    assert match
+    sample = match.group(1).replace("$(openssl rand -hex 24)", "0123456789abcdef" * 3)
+    assert "$" not in sample, "the README command changed: update this test"
+    classes = [any(c.isupper() for c in sample), any(c.islower() for c in sample), any(c.isdigit() for c in sample),
+               any(not c.isalnum() for c in sample)]
+    assert sum(classes) >= 3 and 8 <= len(sample) <= 128
 
 
 def test_bicep_writes_postgres_admin_and_smtp_user():
@@ -145,4 +205,5 @@ def test_outputs_are_the_interface():
         "artifactsContainer",
         "workloadIdentityClientIds",
         "communicationEmailSender",
+        "stagingHostname",
     ]

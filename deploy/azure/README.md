@@ -10,10 +10,10 @@ install is `deploy/README.md` and does not change.
 | `main.bicep` | Subscription scope: the resource group and every module below; the outputs the chart and workflows use |
 | `staging.bicepparam` | Staging's sizes; secret, personal and per-operator values come from environment variables |
 | `modules/network.bicep` | VNet: subnet `aks-nodes` (service endpoints Key Vault, Storage) and subnet `postgres` (delegated) |
-| `modules/aks.bicep` | The cluster, its control-plane identity, Log Analytics for Defender, the maintenance windows |
+| `modules/aks.bicep` | The cluster, its control-plane identity, the edge's static public IP, Log Analytics for Defender, the maintenance windows |
 | `modules/acr.bicep` | Container registry; AcrPull for the kubelet, AcrPush for the GitHub identity |
 | `modules/identities.bicep` | One managed identity per workload identity, federated with its ServiceAccount |
-| `modules/keyvault.bicep` | Key Vault (RBAC), `postgres-admin-password`, `smtp-user`, Key Vault Secrets User for every identity |
+| `modules/keyvault.bicep` | Key Vault (RBAC), `postgres-admin-password`, `smtp-user`, Key Vault Secrets User per secret for the identities that read it |
 | `modules/postgres.bicep` | PostgreSQL Flexible Server, private access, its private DNS zone |
 | `modules/storage.bicep` | Storage account and container `qeos-artifacts`; Storage Blob Data Contributor for ingestion and retention |
 | `modules/email.bicep` | Communication Services, Email Service, the Azure-managed sender domain, the SMTP username and send role |
@@ -22,19 +22,20 @@ install is `deploy/README.md` and does not change.
 | `bicepconfig.json` | Linter rules; CI fails on any warning |
 
 CI (`ci.yml`, job `bicep`) builds and lints the templates and the parameter file on every push, and
-`scripts/tests/test_azure_bicep.py` fails when the Key Vault secret names, workload identities, ServiceAccount names,
-container name, admin login or pod range here differ from the chart's. Nothing in CI signs in to Azure.
+`scripts/tests/test_azure_bicep.py` fails when the Key Vault secret names, which identity reads which secret, the
+workload identities, ServiceAccount names, container name, admin login or pod range here differ from the chart's. Nothing in CI signs in to Azure.
 
 ## 1. What gets created
 
 | Resource | Settings that matter |
 |---|---|
 | AKS `aks-qeos-<env>` | Azure CNI Overlay powered by Cilium (`networkDataplane`/`networkPolicy: cilium`, pod range `10.244.0.0/16`); workload identity and OIDC issuer; Key Vault Secrets Store CSI add-on (rotation every 2 min); Application Routing's Gateway API implementation (GatewayClass `approuting-istio`) on the managed Gateway API CRDs, NGINX off; Entra ID sign-in with Azure RBAC, local accounts disabled; API server open only to `apiServerAuthorizedIpRanges`; auto-upgrade `patch`, node OS `NodeImage`, both in a Sunday 01:00-05:00 UTC window; Defender for Containers sensor; a tainted system pool (1 node) and an autoscaling user pool (2-4 nodes, Azure Linux) |
+| Public IP `pip-aks-qeos-<env>-edge` | Static, Standard, DNS label `qeos-<env>-<hash>` (scope `ResourceGroupReuse`, so Azure adds a hash: the name cannot be taken over); outside the cluster, so it survives stops and rebuilds; the control-plane identity has Network Contributor on it to attach it |
 | ACR `acrqeos<env><hash>` | No admin user, no anonymous pull; the kubelet pulls with AcrPull (no pull secret) |
-| PostgreSQL `psql-qeos-<env>-<hash>` | Version 16, `Standard_B1ms` Burstable in staging; private access in subnet `postgres` with zone `<server>.private.postgres.database.azure.com`; no public access; TLS required; backups 35 days; `pg_stat_statements` in `azure.extensions` and `shared_preload_libraries`; admin login `qeosadmin` (the chart's `postgres.adminUser`) |
+| PostgreSQL `psql-qeos-<env>-<hash>` | Version 16, `Standard_B1ms` Burstable in staging; private access in subnet `postgres` with zone `<server>.private.postgres.database.azure.com`; no public access; `require_secure_transport` on and `ssl_min_protocol_version` TLSv1.2, pinned; backups 35 days; `pg_stat_statements` allowed in `azure.extensions` (the platform already preloads it, so `shared_preload_libraries` keeps its default and no restart is needed); admin login `qeosadmin` (the chart's `postgres.adminUser`) |
 | Storage `stqeos<env><hash>` | Shared keys off (Entra ID only), no public blob access, TLS 1.2, HTTPS only; reachable from the node subnet and `operatorIpRanges` only; soft delete 14 days (blobs and containers), versioning on, previous versions removed after 14 days; private container `qeos-artifacts` |
-| Key Vault `kv-qeos-<env>-<hash>` | RBAC mode (no access policies), soft delete 90 days; purge protection on except in staging; reachable from the node subnet and `operatorIpRanges` only |
-| Managed identities `id-qeos-<env>-{services,ingestion,ingestion-retention,migrate}` | Federated with `system:serviceaccount:<namespace>:qeos-<identity>`, issuer the cluster's OIDC URL, audience `api://AzureADTokenExchange`; all four read Key Vault secrets; `ingestion` and `ingestion-retention` also read, write, copy and delete blobs in `qeos-artifacts` |
+| Key Vault `kv-qeos-<env>-<hash>` | RBAC mode (no access policies), soft delete 90 days; purge protection on in every environment (section 9); each secret readable only by the identities whose SecretProviderClasses list it (`secretReaders` in `main.bicep`), e.g. `postgres-admin-password` by `migrate` alone; reachable from the node subnet and `operatorIpRanges` only |
+| Managed identities `id-qeos-<env>-{services,ingestion,ingestion-retention,migrate}` | Federated with `system:serviceaccount:<namespace>:qeos-<identity>`, issuer the cluster's OIDC URL, audience `api://AzureADTokenExchange`; each reads its own Key Vault secrets; `ingestion` and `ingestion-retention` also read, write, copy and delete blobs in `qeos-artifacts` |
 | Communication Services `acs-qeos-<env>-<hash>` + Email Service | Data in `emailDataLocation` (Europe); the Azure-managed domain `<guid>.azurecomm.net`, sender `DoNotReply@` it; access keys off (SMTP signs in with Entra ID) |
 | Budget `budget-qeos-<env>` | `monthlyBudget` per month on the resource group; email to `budgetEmails` at 80% and 100% of actual cost |
 
@@ -49,6 +50,7 @@ Outputs (`az deployment sub show --name qeos-<env> --query properties.outputs`):
 | `storageAccountUrl`, `artifactsContainer` | chart `artifacts.azure.accountUrl`, `artifacts.azure.container` |
 | `workloadIdentityClientIds` | chart `keyvault.clientIds.{services,ingestion,ingestion-retention,migrate}` |
 | `communicationEmailSender` | chart `smtp.fromEmail` |
+| `stagingHostname` | `<label>.<region>.cloudapp.azure.com`, the edge's DNS name: chart `publicUrl` = `https://<stagingHostname>` (section 4.3) |
 
 The chart's `keyvault.tenantId` is the tenant, the same as the repository variable `AZURE_TENANT_ID`.
 
@@ -56,8 +58,8 @@ The chart's `keyvault.tenantId` is the tenant, the same as the repository variab
 
 1. **A subscription** the team controls (spec section 8) and an account with **Owner** on it, or Contributor plus
    Role Based Access Control Administrator: the templates create role assignments and one custom role.
-2. **Tools**: Azure CLI 2.86 or newer (the Application Routing Gateway API needs it), `az bicep install`, `kubectl`
-   and `kubelogin` (`az aks install-cli`), `openssl`, `gh`.
+2. **Tools**: Azure CLI 2.86 or newer (the Application Routing Gateway API needs it), `az bicep install`, `kubectl`,
+   `helm`, `jq` and `kubelogin` (`az aks install-cli`), `openssl`, `gh`.
 3. **Resource providers**, once per subscription:
 
    ```bash
@@ -74,10 +76,11 @@ The chart's `keyvault.tenantId` is the tenant, the same as the repository variab
 5. **The GitHub identity** (the `AZURE_CLIENT_ID` the workflows sign in with): an Entra application with federated
    credentials for this repository (`repo:<org>/Atriis.QEOS:ref:refs/heads/master`, and
    `repo:<org>/Atriis.QEOS:environment:staging` once the deploy workflow uses the `staging` environment). Its service
-   principal's object id is `QEOS_DEPLOY_PRINCIPAL_ID` below: Bicep gives it AcrPush on the registry and, on the
-   cluster, Azure Kubernetes Service Cluster User Role (kubeconfig), Azure Kubernetes Service RBAC Cluster Admin (helm,
-   cert-manager) and Azure Kubernetes Service Contributor Role (adding its runner to the authorised IP ranges for a
-   run). It needs no role on Key Vault or Storage.
+   principal's object id is `QEOS_DEPLOY_PRINCIPAL_ID` below: Bicep gives it AcrPush on the registry; on the cluster,
+   Azure Kubernetes Service Cluster User Role (kubeconfig) and Azure Kubernetes Service Contributor Role (adding its
+   runner to the authorised IP ranges for a run); and Azure Kubernetes Service RBAC Admin on the chart's namespace
+   only (`<cluster>/namespaces/qeos`: helm). Nothing cluster-wide: the namespace and cert-manager are a cluster
+   admin's one-time step (section 4.5). It needs no role on Key Vault or Storage.
 6. **An Entra group of cluster admins** (`QEOS_AKS_ADMIN_GROUP_ID`): with local accounts off, `kubectl` signs in with
    Entra ID, and only this group and the deploy identity get cluster-admin.
 
@@ -93,6 +96,7 @@ From the repository root, in bash. The parameter file reads these from the envir
 | `QEOS_OPERATOR_PRINCIPAL_ID` | no | Your object id (`az ad signed-in-user show --query id -o tsv`) or a group's: Key Vault Secrets Officer, for `init-secrets.sh` |
 | `QEOS_AKS_ADMIN_GROUP_ID` | no | The cluster admins group |
 | `QEOS_DEPLOY_PRINCIPAL_ID` | no | The GitHub identity's service principal object id |
+| `QEOS_SECRETS_INITIALIZED` | no | `true` once `init-secrets.sh` has run (section 3.1): the identities then get read access to its secrets |
 | `QEOS_SMTP_APP_CLIENT_ID`, `QEOS_SMTP_APP_PRINCIPAL_ID` | no | The ACS SMTP application (section 4.1); empty on the first deploy |
 
 ```bash
@@ -104,8 +108,9 @@ export QEOS_BUDGET_EMAILS="ops@example.com"
 export QEOS_OPERATOR_PRINCIPAL_ID="$(az ad signed-in-user show --query id -o tsv)"
 export QEOS_AKS_ADMIN_GROUP_ID="<group object id>"
 export QEOS_DEPLOY_PRINCIPAL_ID="$(az ad sp show --id <AZURE_CLIENT_ID> --query id -o tsv)"
-# First deploy only. Hex: no character that needs escaping anywhere
-export QEOS_POSTGRES_ADMIN_PASSWORD="$(openssl rand -hex 24)"
+# First deploy only. Flexible Server wants three of: upper case, lower case, digits, symbols. The fixed "Qa1-" gives
+# all four; the rest is random hex. No character needs escaping in a shell, a URL or SQL
+export QEOS_POSTGRES_ADMIN_PASSWORD="Qa1-$(openssl rand -hex 24)"
 
 # What would change, then the deploy (20-30 minutes the first time)
 az deployment sub what-if --name qeos-staging --location westeurope --parameters deploy/azure/staging.bicepparam
@@ -126,8 +131,11 @@ Redeploying also resets the API server's authorised ranges to `QEOS_ADMIN_IP_RAN
 
 ### 3.1 The secrets
 
-The chart's SecretProviderClasses read these Key Vault secrets (`deploy/helm/README.md`, "Secrets"); a missing one
-fails the pod's volume mount, so all must exist before the first `helm install`:
+The chart's SecretProviderClasses read these Key Vault secrets (`deploy/helm/README.md`, "Secrets"); a missing one,
+or one the workload's identity may not read, fails the pod's volume mount, so all must exist and be granted before the
+first `helm install`. Each identity reads only the secrets its workloads' SecretProviderClasses list (`secretReaders`
+in `main.bicep`, kept equal to the chart by `scripts/tests/test_azure_bicep.py`); a role on a secret needs the secret,
+so the secrets `init-secrets.sh` generates are granted by the deploy after it:
 
 | Secret | Written by |
 |---|---|
@@ -139,9 +147,12 @@ fails the pod's volume mount, so all must exist before the first `helm install`:
 
 ```bash
 KEYVAULT_NAME=<keyVaultName> bash deploy/azure/init-secrets.sh
+# Grant them: from now on every deploy runs with this set (forgetting it later removes nothing)
+export QEOS_SECRETS_INITIALIZED=true
+az deployment sub create --name qeos-staging --location westeurope --parameters deploy/azure/staging.bicepparam
 ```
 
-It keeps every secret that exists, so it is safe to rerun. The migration hook sets each database role's password from
+`init-secrets.sh` keeps every secret that exists, so it is safe to rerun. The migration hook sets each database role's password from
 the vault on every release: to rotate one, set a new value in the vault and deploy.
 
 ## 4. One-time steps Bicep cannot do
@@ -157,12 +168,14 @@ sp_id="$(az ad sp create --id "$app_id" --query id -o tsv)"
 # Shown once: keep it only in the variable. Note the expiry date: renew the secret and rerun init-secrets.sh before it
 SMTP_PASSWORD="$(az ad app credential reset --id "$app_id" --display-name acs-smtp --years 1 --query password -o tsv)"
 
-# Bicep adds the SMTP username qeos-staging (linked to the app), its send role and the secret smtp-user
-export QEOS_SMTP_APP_CLIENT_ID="$app_id" QEOS_SMTP_APP_PRINCIPAL_ID="$sp_id"
-az deployment sub create --name qeos-staging --location westeurope --parameters deploy/azure/staging.bicepparam
-
+# smtp-password first: the deploy below grants read access to it, which needs the secret
 SMTP_PASSWORD="$SMTP_PASSWORD" KEYVAULT_NAME=<keyVaultName> bash deploy/azure/init-secrets.sh
 unset SMTP_PASSWORD
+
+# Bicep adds the SMTP username qeos-staging (linked to the app), its send role, the secret smtp-user, and read access
+# to both SMTP secrets for the identities that send mail
+export QEOS_SMTP_APP_CLIENT_ID="$app_id" QEOS_SMTP_APP_PRINCIPAL_ID="$sp_id"
+az deployment sub create --name qeos-staging --location westeurope --parameters deploy/azure/staging.bicepparam
 ```
 
 The chart's SMTP settings: `smtp.host` `smtp.azurecomm.net`, `smtp.port` 587, `smtp.tls` true, `smtp.fromEmail` the
@@ -177,15 +190,29 @@ its own domain resource in `email.bicep` and DNS records (domain verification, S
 ### 4.2 Microsoft sign-in: redirect URIs
 
 Add the environment's address (the chart's `publicUrl`, `https://<host>` with no path) to the Entra app registration
-QEOS signs in with, as a **Single-page application** redirect URI (`docs/MICROSOFT_SIGN_IN.md`). Staging uses the
-Azure-provided address until a domain is chosen; when the address changes, add the new one.
+QEOS signs in with, as a **Single-page application** redirect URI (`docs/MICROSOFT_SIGN_IN.md`). Staging uses
+`https://<stagingHostname>` until a domain is chosen; when the address changes, add the new one.
 
-### 4.3 DNS (later)
+### 4.3 The edge's address and DNS
 
-The public domain is still open (spec 6a). When it is chosen: an A record (or CNAME to the Azure-provided name) for
-the host pointing at the public IP of the edge's load balancer
-(`kubectl -n qeos get gateway -o jsonpath='{.items[0].status.addresses[0].value}'`), then `publicUrl`, the
-certificate and the redirect URIs (4.2) follow it.
+Bicep creates the edge's public IP itself (`pip-aks-qeos-<env>-edge`, static, in the environment's resource group)
+with the DNS label that gives the output `stagingHostname` (`qeos-<env>-<hash>-<hash>.<region>.cloudapp.azure.com`).
+Because the cluster does not own it, the address and its name survive `az aks stop`, a node pool rebuild and even a
+new cluster. The add-on creates the Gateway's LoadBalancer Service; the chart's `Gateway` (Task 10) passes it these
+annotations through `spec.infrastructure.annotations`, so the Service takes this IP instead of a new one:
+
+```yaml
+service.beta.kubernetes.io/azure-pip-name: pip-aks-qeos-staging-edge
+service.beta.kubernetes.io/azure-load-balancer-resource-group: rg-qeos-staging
+```
+
+If the add-on ever stops passing them through, the per-Gateway ConfigMap customization (the add-on's allow list) sets
+the same annotations. Check after the first deploy that the Gateway's address is this IP:
+`kubectl -n qeos get gateway -o jsonpath='{.items[0].status.addresses[0].value}'` against
+`az network public-ip show -g rg-qeos-staging -n pip-aks-qeos-staging-edge --query ipAddress -o tsv`.
+
+The public domain is still open (spec 6a). When it is chosen: a CNAME from the host to `stagingHostname` (or an A
+record to the IP), then `publicUrl`, the certificate and the redirect URIs (4.2) follow it.
 
 ### 4.4 Old images in the registry
 
@@ -196,6 +223,28 @@ than 30 days, keeping the newest 20 tags of each repository:
 az acr task create --registry <acrName> --name purge-old-images --schedule "0 3 * * Sun" --context /dev/null \
   --cmd "acr purge --filter 'qeos/.*:.*' --ago 30d --keep 20 --untagged"
 ```
+
+### 4.5 Cluster-wide pieces (a cluster admin, once)
+
+The deploy identity is admin of the chart's namespace only, so a member of the cluster admins group does these once
+per cluster (and again after a cluster rebuild):
+
+```bash
+az aks get-credentials --resource-group rg-qeos-staging --name aks-qeos-staging
+kubelogin convert-kubeconfig -l azurecli
+
+# The chart's namespace: the deploy identity's RBAC Admin role is scoped to it
+kubectl create namespace qeos
+
+# cert-manager with its CRDs and Gateway API support (the chart's Certificate and Issuer use it). Pin a current
+# release from https://cert-manager.io/docs/releases/
+helm repo add jetstack https://charts.jetstack.io
+helm install cert-manager jetstack/cert-manager --namespace cert-manager --create-namespace --version <v1.x.y> \
+  --set crds.enabled=true --set config.enableGatewayAPI=true
+```
+
+If the edge uses a `ClusterIssuer` rather than the chart's namespaced `Issuer`, the cluster admin creates it here too.
+Upgrading cert-manager is the same `helm upgrade` by a cluster admin.
 
 ## 5. GitHub configuration
 
@@ -210,8 +259,9 @@ with OIDC and read secrets from nothing.
 | `ACR_NAME` | Output `acrName` | both |
 
 The deploy workflow (Task 10, `deploy-aks.yml`) reads the remaining outputs (`aksName`, `resourceGroup`,
-`keyVaultName`, `postgresHost`, `storageAccountUrl`, `workloadIdentityClientIds`, `communicationEmailSender`) as
-variables of the GitHub environment `staging`, under the names that workflow documents. To copy them after a deploy:
+`keyVaultName`, `postgresHost`, `storageAccountUrl`, `workloadIdentityClientIds`, `communicationEmailSender`,
+`stagingHostname`) as variables of the GitHub environment `staging`, under the names that workflow documents. To
+copy them after a deploy:
 
 ```bash
 az deployment sub show --name qeos-staging --query properties.outputs -o json > outputs.json
@@ -244,7 +294,7 @@ Contributor Role on the cluster and Contributor on the server. Keep in mind:
 - **Upgrades run only on a running cluster**: the Sunday 01:00-05:00 UTC window passes unused while staging is
   stopped. Start it before the window once in a while (or move staging's window into working hours) so patches land.
 - A stopped cluster ignores deploys: the deploy workflow fails until it is started.
-- The edge's public IP stays while the cluster is stopped.
+- The edge's public IP and `stagingHostname` stay while the cluster is stopped: Bicep owns the IP (4.3).
 
 ## 7. Switching CI over (fresh start, spec 5.13)
 
@@ -269,11 +319,29 @@ Results then flow to AKS from the next CI run. The old install keeps its data un
 Before production, staging proves both, timed against the targets (5 minutes of data loss, 1 hour to restore), and the
 results are written up here.
 
-## 9. Tearing staging down
+## 9. Tearing staging down, and Key Vault recovery
 
 ```bash
 az group delete --name rg-qeos-staging
 ```
 
-Key Vault and Communication Services names stay reserved while soft-deleted (staging's vault has no purge protection,
-so `az keyvault purge` frees it). The budget goes with the resource group.
+The budget goes with the resource group. Key Vault has **purge protection in every environment**: a deleted vault, or a
+deleted secret, stays recoverable for 90 days and nobody can purge it sooner. Losing the secrets by mistake costs more
+than a vault name kept busy after a teardown.
+
+- **Rebuilding in the same resource group name**: the vault's name comes from the subscription and the resource group
+  name, so a redeploy asks for the same name while the deleted vault still holds it, and fails. Recover the vault
+  first; the redeploy then updates it, with every secret as it was (`init-secrets.sh` keeps them):
+
+  ```bash
+  az keyvault list-deleted --query "[].name" -o tsv
+  az keyvault recover --name <keyVaultName>
+  ```
+
+- **A fresh vault instead**: deploy with another `resourceGroupName` (a new name and hash); the old vault expires on its
+  own after 90 days. Every secret is then new (run `init-secrets.sh` again, a new admin password).
+- **One deleted secret**: `az keyvault secret list-deleted --vault-name <keyVaultName>`, then
+  `az keyvault secret recover --vault-name <keyVaultName> --name <secret>`. Setting the same name again before
+  recovering it fails while the deleted one exists.
+
+Communication Services and Email Service names are free again once the resource group is gone.

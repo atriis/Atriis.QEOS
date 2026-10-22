@@ -1,6 +1,6 @@
 // PostgreSQL Flexible Server (spec 5.5): private access only, in a subnet of the cluster's VNet with its private DNS
-// zone; 35 days of backups for point-in-time restore; pg_stat_statements allowed and preloaded (postgres-exporter,
-// Stage 2). The migration hook's db-init creates the five databases and their roles with the admin login.
+// zone; TLS 1.2 or newer required; 35 days of backups for point-in-time restore; pg_stat_statements allowed
+// (postgres-exporter, Stage 2). The migration hook's db-init creates the five databases and their roles with the admin login.
 
 param location string
 param tags object
@@ -97,14 +97,28 @@ resource extensions 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@20
   }
 }
 
-resource preload 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2025-08-01' = {
+// Flexible Server already preloads pg_stat_statements (shared_preload_libraries' platform default), so that static
+// parameter is left alone: no restart
+
+// The server defaults, pinned: no plaintext connection, nothing older than TLS 1.2
+resource requireTls 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2025-08-01' = {
   parent: server
-  name: 'shared_preload_libraries'
+  name: 'require_secure_transport'
   properties: {
-    value: 'pg_stat_statements'
+    value: 'ON'
     source: 'user-override'
   }
   dependsOn: [extensions]
+}
+
+resource minTls 'Microsoft.DBforPostgreSQL/flexibleServers/configurations@2025-08-01' = {
+  parent: server
+  name: 'ssl_min_protocol_version'
+  properties: {
+    value: 'TLSv1.2'
+    source: 'user-override'
+  }
+  dependsOn: [requireTls]
 }
 
 output host string = server.properties.fullyQualifiedDomainName

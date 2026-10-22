@@ -19,6 +19,9 @@ param deployPrincipalId = readEnvironmentVariable('QEOS_DEPLOY_PRINCIPAL_ID', ''
 param smtpAppClientId = readEnvironmentVariable('QEOS_SMTP_APP_CLIENT_ID', '')
 param smtpAppPrincipalId = readEnvironmentVariable('QEOS_SMTP_APP_PRINCIPAL_ID', '')
 
+// true once init-secrets.sh has run (README, section 3.1): then each identity is given read access to each secret
+param generatedSecretsExist = bool(readEnvironmentVariable('QEOS_SECRETS_INITIALIZED', 'false'))
+
 // The first deploy: a new random value. Every later one: the value Key Vault holds (README)
 param postgresAdminPassword = readEnvironmentVariable('QEOS_POSTGRES_ADMIN_PASSWORD')
 
@@ -34,8 +37,6 @@ param postgresSkuName = 'Standard_B1ms'
 param postgresSkuTier = 'Burstable'
 param postgresStorageGB = 32
 param storageSku = 'Standard_LRS'
-// Staging's vault can be deleted and recreated under the same name after a teardown
-param keyVaultPurgeProtection = false
 
 param emailDataLocation = 'Europe'
 

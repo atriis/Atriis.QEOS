@@ -35,10 +35,16 @@ param userNodeMaxCount int = 4
 @description('The GitHub deploy identity (service principal object id). Empty: no role on the cluster.')
 param deployPrincipalId string = ''
 
+@description('The namespace the chart is installed in: the deploy identity is admin there only.')
+param namespace string
+
+@description('The DNS label of the edge public IP: <label>-<hash>.<region>.cloudapp.azure.com.')
+param edgeDnsLabel string
+
 var roles = {
   networkContributor: '4d97b98b-1d4f-4787-a291-c67834d212e7'
   aksClusterUser: '4abbcc35-e782-43d8-92c5-2d3f1bd2253f'
-  aksRbacClusterAdmin: 'b1ff04bb-8a4e-4dc4-8eb5-8693973ce19b'
+  aksRbacAdmin: '3498e952-d568-435e-9b2c-8d77e338d7f7'
   aksContributor: 'ed7f3fbd-7b88-4dd4-9017-9adb7ce333f8'
 }
 
@@ -75,6 +81,37 @@ resource nodesSubnet 'Microsoft.Network/virtualNetworks/subnets@2026-01-01' exis
 resource controlPlaneNetwork 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(nodesSubnet.id, controlPlane.id, roles.networkContributor)
   scope: nodesSubnet
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.networkContributor)
+    principalId: controlPlane.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// The edge's address: a static public IP created here, not by the cluster, so it and its DNS name survive a cluster stop
+// or rebuild. The add-on's Gateway takes it through its Service annotations (README, section 4.3). The label's scope
+// adds a hash to the name, so nobody else can take it over if this IP is deleted
+resource edgeIp 'Microsoft.Network/publicIPAddresses@2026-01-01' = {
+  name: 'pip-${name}-edge'
+  location: location
+  tags: tags
+  sku: {
+    name: 'Standard'
+  }
+  properties: {
+    publicIPAllocationMethod: 'Static'
+    publicIPAddressVersion: 'IPv4'
+    dnsSettings: {
+      domainNameLabel: edgeDnsLabel
+      domainNameLabelScope: 'ResourceGroupReuse'
+    }
+  }
+}
+
+// The cluster's load balancer attaches the IP: it lives outside the node resource group
+resource controlPlaneEdgeIp 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(edgeIp.id, controlPlane.id, roles.networkContributor)
+  scope: edgeIp
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.networkContributor)
     principalId: controlPlane.properties.principalId
@@ -227,9 +264,10 @@ resource nodeOsWindow 'Microsoft.ContainerService/managedClusters/maintenanceCon
   dependsOn: [upgradeWindow]
 }
 
-// The deploy workflow: kubeconfig (Cluster User), helm (RBAC Cluster Admin: the chart and cert-manager), and adding
-// its runner to the authorised IP ranges for the run (AKS Contributor)
-var deployRoles = empty(deployPrincipalId) ? [] : [roles.aksClusterUser, roles.aksRbacClusterAdmin, roles.aksContributor]
+// The deploy workflow: kubeconfig (Cluster User) and adding its runner to the authorised IP ranges for the run (AKS
+// Contributor) on the cluster; helm as admin of the chart's namespace only (RBAC Admin, below). Cluster-wide pieces
+// (the namespace, cert-manager and its issuer) are a cluster admin's one-time step (README, section 4.5)
+var deployRoles = empty(deployPrincipalId) ? [] : [roles.aksClusterUser, roles.aksContributor]
 
 resource deployAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
   for role in deployRoles: {
@@ -246,3 +284,21 @@ resource deployAccess 'Microsoft.Authorization/roleAssignments@2022-04-01' = [
 output name string = cluster.name
 output oidcIssuerUrl string = cluster.properties.oidcIssuerProfile.issuerURL
 output kubeletObjectId string = cluster.properties.identityProfile.kubeletidentity.objectId
+output edgeHostname string = edgeIp.properties.dnsSettings.fqdn
+
+// Kubernetes RBAC through Azure RBAC at namespace scope: <cluster id>/namespaces/<namespace>, not an ARM resource type
+#disable-next-line BCP081
+resource chartNamespace 'Microsoft.ContainerService/managedClusters/namespaces@2026-06-01' existing = {
+  parent: cluster
+  name: namespace
+}
+
+resource deployNamespaceAdmin 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(deployPrincipalId)) {
+  name: guid(cluster.id, namespace, deployPrincipalId, roles.aksRbacAdmin)
+  scope: chartNamespace
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.aksRbacAdmin)
+    principalId: deployPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
