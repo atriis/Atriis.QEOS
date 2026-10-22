@@ -1,4 +1,4 @@
-fastapi==0.143.0
+fastapi==0.148.0
 uvicorn[standard]==0.54.0
 python-multipart==0.0.32
 passlib[bcrypt]==1.7.4
@@ -8,15 +8,15 @@ bcrypt==4.3.0
 python-dotenv==1.2.4
 email-validator==2.3.0
 pydantic[email]==2.14.1
-pydantic-settings==2.15.0
-SQLAlchemy==2.1.4
+pydantic-settings==2.16.0
+SQLAlchemy==2.1.5
 psycopg[binary]==3.3.6
 alembic==1.20.0
 redis==8.1.0
 PyJWT==2.15.1
 cryptography==50.0.2
 python3-saml
-Authlib==1.8.0
+Authlib==1.9.1
 requests==2.34.2
 # Test dependencies (the suite could not run without these; matches organization-service)
 pytest==9.1.1
