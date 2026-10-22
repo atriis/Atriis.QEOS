@@ -4,9 +4,13 @@ A Key Vault secret the chart names but nobody creates fails the pod's secret mou
 name or namespace that differs from the chart's leaves its federated credential unused, and the pod gets no token. The
 tests read the Bicep and init-secrets.sh as text: CI's scripts/tests job has no Bicep CLI (the bicep job builds it).
 """
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -256,3 +260,67 @@ def test_outputs_are_the_interface():
         "communicationEmailSender",
         "stagingHostname",
     ]
+
+
+# ---- check-role-assignments.sh: what Bicep stopped giving stays (incremental deploys); the script finds it ----
+
+ROLE_CHECK = AZURE / "check-role-assignments.sh"
+RG_SCOPE = "/subscriptions/s/resourceGroups/rg-qeos-staging/providers"
+ACR = f"{RG_SCOPE}/Microsoft.ContainerRegistry/registries/acrqeosstag1"
+AKS = f"{RG_SCOPE}/Microsoft.ContainerService/managedClusters/aks-qeos-staging"
+CURRENT = {
+    "build": [("a1", "AcrPush", ACR)],
+    "deploy": [("a2", "AcrPull", ACR), ("a3", "Azure Kubernetes Service Cluster User Role", AKS),
+               ("a4", "Azure Kubernetes Service Contributor Role", AKS),
+               ("a5", "Azure Kubernetes Service RBAC Admin", f"{AKS}/namespaces/qeos")],
+}
+
+
+def check_roles(tmp_path, assignments: dict, *args: str):
+    bash = shutil.which("bash")
+    if not bash or "system32" in bash.lower():
+        pytest.skip("no bash")
+    for who, rows in assignments.items():
+        (tmp_path / f"{who}.tsv").write_text("".join("\t".join(row) + "\n" for row in rows), newline="\n")
+    stubs = tmp_path / "bin"
+    stubs.mkdir(exist_ok=True)
+    # az role assignment list --assignee ID ... | az role assignment delete --ids ID
+    (stubs / "az").write_text(
+        '#!/bin/sh\ncase "$3" in\n'
+        '  list) [ "$5" = build-id ] && cat "$DIR/build.tsv" || cat "$DIR/deploy.tsv" ;;\n'
+        '  delete) echo "$5" >> "$DIR/deleted" ;;\nesac\n', newline="\n")
+    (stubs / "az").chmod(0o755)
+    env = dict(os.environ, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}", DIR=tmp_path.as_posix(),
+               QEOS_BUILD_PRINCIPAL_ID="build-id", QEOS_DEPLOY_PRINCIPAL_ID="deploy-id", MSYS_NO_PATHCONV="1")
+    out = subprocess.run([bash, ROLE_CHECK.as_posix(), "rg-qeos-staging", *args], env=env, capture_output=True,
+                         text=True)
+    deleted = (tmp_path / "deleted").read_text().split() if (tmp_path / "deleted").exists() else []
+    return out, deleted
+
+
+def test_role_check_passes_what_bicep_gives(tmp_path):
+    out, deleted = check_roles(tmp_path, CURRENT)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert out.stdout.count("ok ") == 5 and "no stale role assignment" in out.stdout and deleted == []
+
+
+def test_role_check_flags_the_deploy_identitys_old_acrpush_and_deletes_it_when_asked(tmp_path):
+    before_split = {"build": CURRENT["build"],
+                    "deploy": CURRENT["deploy"] + [("old", "AcrPush", ACR),
+                                                   ("elsewhere", "Reader", "/subscriptions/s/resourceGroups/other")]}
+    out, deleted = check_roles(tmp_path, before_split)
+    assert out.returncode == 1 and "STALE  deploy  AcrPush" in out.stdout
+    assert "az role assignment delete --ids old" in out.stdout and "elsewhere" not in out.stdout and deleted == []
+    out, deleted = check_roles(tmp_path, before_split, "--delete")
+    assert out.returncode == 0 and deleted == ["old"]
+
+
+def test_role_check_knows_the_roles_bicep_assigns():
+    # The role names the script expects are those of the role ids acr.bicep and aks.bicep assign
+    script = text(ROLE_CHECK)
+    for role in ("build|AcrPush", "deploy|AcrPull", "deploy|Azure Kubernetes Service Cluster User Role",
+                 "deploy|Azure Kubernetes Service Contributor Role", "deploy|Azure Kubernetes Service RBAC Admin"):
+        assert f'"{role}")' in script
+    acr = text(AZURE / "modules" / "acr.bicep")
+    assert "var acrPush = '8311e382-0749-4cb8-b61a-ed27ecc9c4fc'" in acr
+    assert "var acrPull = '7f951dda-4ed3-4680-a7ca-43fe172d538d'" in acr

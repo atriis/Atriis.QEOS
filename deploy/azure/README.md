@@ -19,6 +19,7 @@ install is `deploy/README.md` and does not change.
 | `modules/email.bicep` | Communication Services, Email Service, the Azure-managed sender domain, the SMTP username and send role |
 | `modules/budget.bicep` | Monthly budget with alert emails at 80% and 100% |
 | `init-secrets.sh` | Generates, once, the Key Vault secrets Bicep does not write |
+| `check-role-assignments.sh` | Lists the GitHub identities' role assignments in the resource group and flags (or deletes) any Bicep no longer makes |
 | `bicepconfig.json` | Linter rules; CI fails on any warning |
 
 CI (`ci.yml`, job `bicep`) builds and lints the templates and the parameter file on every push, and
@@ -195,6 +196,33 @@ the vault on every release: to rotate one, set a new value in the vault and depl
 - **Deploys are incremental**: Bicep adds and updates, never deletes. Taking an identity out of a secret's
   `secretReaders` in `main.bicep` leaves its existing role assignment in place; remove it by hand
   (`az role assignment list --scope <secret id>`, then `az role assignment delete --ids <id>`).
+
+### 3.2 Role assignments Bicep no longer makes
+
+The same holds for the GitHub identities. Before the build identity was split off, the deploy identity held AcrPush on
+the registry; an environment deployed then keeps that assignment after the new Bicep has run (the deploy identity
+now gets AcrPull), so it could still push images. After every Bicep deploy that changes who holds which role, and
+once now on an environment created before the split, check, from the repository root:
+
+```bash
+export QEOS_BUILD_PRINCIPAL_ID=<build sp object id> QEOS_DEPLOY_PRINCIPAL_ID=<deploy sp object id>
+bash deploy/azure/check-role-assignments.sh rg-qeos-staging            # lists them; exit 1 if any is stale
+bash deploy/azure/check-role-assignments.sh rg-qeos-staging --delete   # removes the stale ones
+```
+
+It reads every assignment of the two service principals (`az role assignment list --assignee <id> --all`), keeps
+those inside the resource group, and accepts only what `modules/acr.bicep` and `modules/aks.bicep` make: build AcrPush
+on the registry; deploy AcrPull on the registry, Azure Kubernetes Service Cluster User Role and Contributor Role on the
+cluster, and Azure Kubernetes Service RBAC Admin on `<cluster>/namespaces/qeos`. By hand, the deploy identity's old
+role is:
+
+```bash
+acr_id="$(az acr show --name <acrName> --query id -o tsv)"
+az role assignment list --assignee "$QEOS_DEPLOY_PRINCIPAL_ID" --scope "$acr_id" -o table
+az role assignment delete --assignee "$QEOS_DEPLOY_PRINCIPAL_ID" --scope "$acr_id" --role AcrPush
+```
+
+Deleting needs User Access Administrator (or Owner) on the resource group, as the Bicep deploy itself does.
 
 ## 4. One-time steps Bicep cannot do
 

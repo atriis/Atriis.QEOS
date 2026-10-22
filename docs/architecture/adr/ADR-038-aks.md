@@ -84,6 +84,10 @@ must keep working unchanged.
   namespace only (cert-manager is a one-time cluster-admin step), and it cannot push images. A self-hosted runner in the VNet removes the need.
 - **Key Vault purge protection is on**, in staging too: losing secrets to a mistaken delete costs more than the
   friction of renaming a vault on a rebuild.
+- **Bicep deploys are incremental**: a role assignment Bicep no longer makes stays. The split of the GitHub identities
+  moved AcrPush from the deploy identity to the build identity, so an environment deployed before it keeps the deploy
+  identity's AcrPush until it is removed: `deploy/azure/check-role-assignments.sh` lists the two identities' roles in
+  the resource group and flags or deletes any Bicep does not make (`deploy/azure/README.md`, section 3.2).
 - **Per-secret access.** Each identity gets Key Vault Secrets User on the secrets it names, not on the vault. Only
   ingestion and its retention job hold a Storage data role, and Storage has shared-key access off.
 - **GitHub environment branch policies.** The deploy identity's federated credential trusts the `staging` and

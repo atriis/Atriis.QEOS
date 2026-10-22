@@ -464,8 +464,8 @@ jobs:
           check lint --file deploy/azure/staging.bicepparam
           exit "$status"
 
-      - name: Shellcheck init-secrets.sh
-        run: shellcheck deploy/azure/init-secrets.sh
+      - name: Shellcheck the Azure scripts
+        run: shellcheck deploy/azure/init-secrets.sh deploy/azure/check-role-assignments.sh
 
   gateway:
     name: Gateway and full stack
