@@ -1,9 +1,10 @@
-# kind in CI (Task 6): images loaded into the cluster as qeos/<service>:local, an in-cluster PostgreSQL and MinIO, and
+# kind in CI (Task 6): images loaded into the cluster as qeos/<service>:kind, an in-cluster PostgreSQL and MinIO, and
 # the secrets in an existing Secret qeos-secrets that the CI job creates from ciSecrets below.
 
 image:
   registry: ""
-  tag: local
+  # Not Compose's :local, so building them on a developer machine never replaces the dev stack's images
+  tag: kind
   # Loaded with `kind load docker-image`; never pulled
   pullPolicy: Never
 

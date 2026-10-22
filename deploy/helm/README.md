@@ -8,7 +8,7 @@ use it.
 | Values file | Where | What it adds |
 |---|---|---|
 | `values.yaml` | always | defaults only: no hostname, no secret, no environment |
-| `values-ci.yaml` | kind in CI | images loaded as `qeos/<service>:local`, in-cluster PostgreSQL and MinIO, secrets from the `qeos-secrets` Secret |
+| `values-ci.yaml` | kind in CI | images loaded as `qeos/<service>:kind`, in-cluster PostgreSQL and MinIO, secrets from the `qeos-secrets` Secret |
 | `values-staging.yaml` | AKS staging | Key Vault secrets, Azure Blob, the NetworkPolicy; Bicep's outputs come with `--set` |
 
 ```bash
@@ -16,7 +16,7 @@ use it.
 bash deploy/helm/qeos/tests/render_test.sh
 bash deploy/helm/qeos/tests/db_init_test.sh
 
-# kind (Task 6 does this in CI): create the Secret, then install
+# kind (CI job helm-kind; "Testing locally with kind" below): create the Secret, then install
 kubectl create namespace qeos
 kubectl -n qeos create secret generic qeos-secrets $(yq '.ciSecrets | to_entries | .[] | "--from-literal=" + .key + "=" + .value' deploy/helm/qeos/values-ci.yaml)
 helm install qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-ci.yaml --wait --timeout 10m
@@ -24,6 +24,53 @@ helm install qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-ci.yaml --
 # AKS: --timeout must exceed migrate.activeDeadlineSeconds (900 s), or Helm, not the Job, cuts a slow migration short
 helm upgrade --install qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-staging.yaml --set ... --atomic --wait --timeout 20m
 ```
+
+## Testing locally with kind
+
+The CI job `helm-kind` (`.github/workflows/ci.yml`) does this on every push: the render checks, the seven images, a
+kind cluster, the install, `scripts/smoke_k8s.sh`, and a failed upgrade. The same steps on a workstation with Docker
+(Desktop), kind, kubectl, helm 3 and yq v4:
+
+```bash
+# 1. The images, tagged as values-ci.yaml expects. :kind, not Compose's :local, so the dev stack's images stay as they are
+for pair in auth-service:platforms/auth-service/auth-service/Dockerfile organization-service:platforms/organization-service/Dockerfile \
+            project-service:platforms/project-service/Dockerfile ingestion-service:platforms/ingestion-service/Dockerfile \
+            test-management-service:platforms/test-management-service/Dockerfile dashboard:dashboard/Dockerfile; do
+  docker build -t "qeos/${pair%%:*}:kind" -f "${pair#*:}" .
+done
+docker build -t qeos/gateway:kind gateway
+
+# 2. A cluster on the Kubernetes minor AKS creates by default (1.36; the node image the CI job pins), the images in it
+kind create cluster --name qeos-kind --image kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
+kind load docker-image --name qeos-kind qeos/auth-service:kind qeos/organization-service:kind qeos/project-service:kind \
+  qeos/ingestion-service:kind qeos/test-management-service:kind qeos/dashboard:kind qeos/gateway:kind
+
+# 3. The Secret and the install (above): about 4 minutes, most of it pulling PostgreSQL and MinIO
+
+# 4. The smoke through a port-forward; the gateway runs GATEWAY_TLS=off, so it is plain HTTP
+pip install ./collector                       # qeos-collector, for the upload
+kubectl -n qeos port-forward svc/gateway 28080:8080 &
+bash scripts/smoke_k8s.sh http://localhost:28080 qeos     # ends with "all k8s checks passed"
+
+# 5. A migration that cannot run fails the upgrade; the release keeps serving (revision 1 deployed, 2 failed)
+helm upgrade qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-ci.yaml \
+  --set migrate.imageTag=does-not-exist --set migrate.activeDeadlineSeconds=60 --wait --timeout 5m   # fails
+helm history qeos -n qeos
+bash scripts/smoke_k8s.sh http://localhost:28080 qeos --health-only
+
+kind delete cluster --name qeos-kind
+```
+
+`smoke_k8s.sh` checks the gateway's `/health`, each service's `/health/<service>` route and the dashboard; then
+registers a user (its verification token read from the CI PostgreSQL with `kubectl exec`), logs in, creates an
+organization, a project and an API key, uploads a JUnit file with `qeos-collector` and reads the run back.
+`--health-only` stops after the health checks. It refuses any URL but `http://localhost:<port>` or `127.0.0.1`, and
+any kubectl context not named `kind-*`: it writes to the databases. Use a port nothing else publishes: if Compose's
+gateway holds it, the checks reach Compose (a TLS-on gateway answers `301`, and the script stops after the health
+checks).
+
+`kind create cluster` makes `kind-qeos-kind` the current kubectl context; `kind delete cluster` removes it, so switch
+back with `kubectl config use-context <yours>`.
 
 ## What it creates
 
