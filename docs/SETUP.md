@@ -1827,7 +1827,8 @@ case page shows the camera on the step.
 A failed Playwright test can send its trace (the ZIP with page snapshots, network calls and the action list) to QEOS.
 A **Trace** button then appears on a run's results and on a case's or scenario's latest result. It opens the trace in
 Playwright's trace viewer, which the dashboard serves itself at `/trace-viewer/` (nothing goes to another site), in a
-new tab; allow pop-ups for QEOS if the browser asks. The download button beside it saves `trace-<id>.zip` for
+new tab; allow pop-ups for QEOS if the browser asks. The viewer is Playwright's own, a pinned version served from the same
+origin as the dashboard. The download button beside it saves `trace-<id>.zip` for
 `npx playwright show-trace trace-<id>.zip`. This needs QEOS with ADR-037 and collector 0.14.0. Videos are not sent.
 
 **Privacy first.** A trace holds page snapshots and network traffic, which can include cookies, tokens and personal
@@ -1840,7 +1841,8 @@ Turn it on only if every project reader may see that (see SECURITY.md).
 2. **Project switch.** Owner or admin: Project Settings, **Keep traces from uploads**, on, and **Keep them for N days**
    (1 to 90, default 14). Turning it off later does not delete stored traces; they age out.
 3. **Tests.** With Playwright's own JSON reporter, set `trace: "retain-on-failure"` (or `on-first-retry`); the zip
-   attachments are found and sent. With cucumber-js, take the trace in an `After` hook and attach a reference
+   attachments are found and sent. With cucumber-js, start tracing in `Before` (the World must hold a Playwright `BrowserContext`), and in `After` save the trace and attach a reference
+   only when the scenario failed
    (`templates/github/cucumber-trace-hook.js`):
    `this.attach(JSON.stringify({ kind: "trace", path: tracePath }), "application/vnd.qeos.artifact+json");`
 4. **Collector.** Nothing to add: it asks QEOS first (`artifacts: true|false` in the key check). `--no-artifacts`

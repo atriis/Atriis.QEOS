@@ -12,7 +12,7 @@ which expire and need a GitHub sign-in. ADR-036 put MinIO behind ingestion for s
 
 - **Same store, new prefix.** A trace is `artifacts/{project_id}/{sha256}`, content-addressed per project like a
   screenshot. `blobs.kind` (`screenshot` or `trace`, migration 027) tells them apart; `result_artifacts` links a
-  result to at most 5 traces.
+  result to at most 5 traces (500 per run in the collector).
 - **Own upload route.** `HEAD|PUT /api/v1/collect/artifacts/{sha256}`, `application/zip` only, first bytes
   `PK\x03\x04`, at most 100 MB. The body streams to a temporary object, is checked (size, magic, SHA-256), then
   copied to its final key. The gateway streams it unbuffered with a 101 MB limit.
@@ -24,7 +24,20 @@ which expire and need a GitHub sign-in. ADR-036 put MinIO behind ingestion for s
   working directory, and hashes and streams them only when the key check says `artifacts: true`.
   `--no-artifacts` turns it off for a run.
 - **Stage 1 is a download.** Run results and the case and feature panels get a Trace button; the user opens the file
-  with `npx playwright show-trace`. The viewer in the browser is stage 2. Videos come later (design section 8).
+  with `npx playwright show-trace`. Videos come later (design section 8).
+- **Stage 2: one-time links.** The viewer cannot send the Bearer token, so
+  `POST /api/v1/projects/{p}/artifacts/{id}/link` (user JWT, read roles) returns `{url, expires_at}` and
+  `GET|HEAD /api/v1/artifact-links/{token}` serves the trace. The token is 32 random bytes, stored as SHA-256, valid
+  60 s, for one artifact and one user, and only from the client IP that asked (first `X-Forwarded-For`). Several
+  GET and Range requests are allowed in the 60 s. Every refusal is the same 404. Membership is checked at creation
+  only. Each use writes an audit log line without the token. Expired rows are deleted on create and by retention.
+- **Stage 2: token never logged.** The gateway masks the token in its access log and uvicorn's, including
+  percent-encoded paths; the link location sets `error_log crit` and `limit_req_log_level info`, and
+  `proxy_buffering off` (also on downloads) so trace bytes are not spooled to disk.
+- **Stage 2: self-hosted viewer.** The dashboard serves Playwright's own viewer from `playwright-core` (exact version
+  pinned in `dashboard/package.json`) at `/trace-viewer/`, same origin, with `Referrer-Policy: no-referrer` and
+  no-cache on `index.html` and `sw.bundle.js`. Never `trace.playwright.dev`. **Open trace** opens the result's first
+  trace in a new tab; Download stays.
 
 ## Consequences
 
@@ -36,5 +49,6 @@ which expire and need a GitHub sign-in. ADR-036 put MinIO behind ingestion for s
   "Artifact storage used".
 - A project purge deletes `artifacts/{project_id}/`; the export names traces but never carries the files.
 - The VM backup of the MinIO volume now holds traces too.
-- Stage 2 will serve Playwright's trace viewer from QEOS's own origin, opened by one-time links, so no trace
-  leaves the platform.
+- No trace leaves the platform. The viewer runs on the dashboard's origin, so bumping `playwright-core` is
+  deliberate and checked by opening a real trace.
+- Follow-ups: use the database clock (`now()`) for link create and check; open more than the first trace.
