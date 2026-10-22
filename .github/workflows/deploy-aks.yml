@@ -16,25 +16,21 @@ on:
         options: [ staging, production ]
         default: staging
       tag:
-        description: The images' tag, a full git SHA from master or a platform version (1.2.3)
+        description: The images' tag, a full git SHA on master or a platform version (1.2.3)
         type: string
         required: true
 
 permissions:
   contents: read
 
-# One deploy per environment at a time: each run adds its runner's address to the API server's authorised ranges and
-# removes it afterwards, and two runs editing that list at once would undo each other's change
-concurrency:
-  group: deploy-aks-${{ inputs.environment || 'staging' }}
-  cancel-in-progress: false
-
 jobs:
   target:
     name: Choose what to deploy
-    # workflow_run fires for every "Build platform images" run of a branch named master. Only a green run in this
-    # repository deploys; that workflow itself runs on CI's workflow_run, so its event is workflow_run, never push
-    # (a platform-v* tag run is a push, and its branch is the tag, which the branches filter above leaves out)
+    # The real guard is upstream: "Build platform images" builds only after a green CI run of a push to this repository
+    # (its own `if`), and only a run of it that concluded success gets here. The checks below repeat what the trigger
+    # already filters (the branch) or what holds for every workflow_run-triggered run (the repository): keep them, but
+    # never replace the conclusion check or build-platform's guard with them. A build run that pushed nothing (Azure not
+    # configured, all jobs skipped) leaves no built-sha artifact, and nothing is deployed
     if: >-
       github.event_name == 'workflow_dispatch' || (
         github.event.workflow_run.conclusion == 'success' &&
@@ -43,45 +39,96 @@ jobs:
         github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      # The triggering build run's artifact
+      actions: read
     outputs:
+      deploy: ${{ steps.target.outputs.deploy }}
       environment: ${{ steps.target.outputs.environment }}
       tag: ${{ steps.target.outputs.tag }}
       ref: ${{ steps.target.outputs.ref }}
     steps:
+      # The exact commit the build pushed images for (build-platform.yml, job built), never master's tip of the moment
+      - name: Get the built commit
+        if: github.event_name == 'workflow_run'
+        id: built
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: built-sha
+          path: ${{ runner.temp }}/built
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      # master's history, to check that what is deployed is on it
+      - uses: actions/checkout@v7
+        with:
+          ref: master
+          fetch-depth: 0
+
       - name: Check the environment and the tag
         id: target
         env:
           ENVIRONMENT: ${{ inputs.environment || 'staging' }}
-          # The commit the built images are tagged with (workflow_run) or the one asked for
-          TAG: ${{ inputs.tag || github.event.workflow_run.head_sha }}
+          INPUT_TAG: ${{ inputs.tag }}
+          BUILT_FILE: ${{ runner.temp }}/built/built-sha.txt
         run: |
           if [ "$ENVIRONMENT" != staging ]; then
             echo "::error::Only staging can be deployed now: production (values-production.yaml, the production cluster and its approval) is a later stage (spec 5.11)"
             exit 1
           fi
-          # Images are tagged with the full SHA (master) and, for platform-v* tags, with the version too (build-platform.yml)
-          if [[ "$TAG" =~ ^[0-9a-f]{40}$ ]]; then
-            ref="$TAG"
-          elif [[ "$TAG" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            ref="platform-v$TAG"
+          if [ "$GITHUB_EVENT_NAME" = workflow_run ]; then
+            if [ ! -s "$BUILT_FILE" ]; then
+              echo "::notice::The build pushed no images (no built-sha artifact): nothing to deploy"
+              echo "deploy=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            tag="$(tr -d '[:space:]' < "$BUILT_FILE")"
           else
-            echo "::error::tag must be a full git SHA (40 hex characters) or a platform version like 1.2.3, got '$TAG'"
+            tag="$INPUT_TAG"
+          fi
+          # Images are tagged with the full SHA (master) and, for platform-v* tags, with the version too (build-platform.yml)
+          if [[ "$tag" =~ ^[0-9a-f]{40}$ ]]; then
+            ref="$tag"
+          elif [[ "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            ref="platform-v$tag"
+          else
+            echo "::error::tag must be a full git SHA (40 hex characters) or a platform version like 1.2.3, got '$tag'"
+            exit 1
+          fi
+          # Only what master has is deployed: a SHA or tag from another branch stops here
+          if ! git rev-parse --verify --quiet "$ref^{commit}" >/dev/null; then
+            echo "::error::$ref is not in this repository"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$ref^{commit}" origin/master; then
+            echo "::error::$ref is not on master"
             exit 1
           fi
           {
+            echo "deploy=true"
             echo "environment=$ENVIRONMENT"
-            echo "tag=$TAG"
+            echo "tag=$tag"
             echo "ref=$ref"
           } >> "$GITHUB_OUTPUT"
 
   deploy:
     name: Deploy (${{ needs.target.outputs.environment }})
     needs: target
+    if: needs.target.outputs.deploy == 'true'
     runs-on: ubuntu-latest
-    # helm's 20 minutes, the API server range changes (a few minutes each) and the checks after
-    timeout-minutes: 45
-    # Its variables (below) and, for production later, its required reviewers; the Azure identity's federated
-    # credential trusts repo:<org>/<repo>:environment:<name>
+    # helm's 20 minutes, two authorised-range updates (a few minutes each, longer behind another cluster operation),
+    # the edge checks, and the cleanup
+    timeout-minutes: 60
+    # One deploy per environment at a time: each run adds its runner's address to the API server's authorised ranges
+    # and removes it afterwards, and two runs editing that list at once would undo each other's change. On the job, not
+    # the workflow: a run whose target is skipped never joins the group, so it cannot cancel a pending real deploy
+    concurrency:
+      group: deploy-aks-${{ needs.target.outputs.environment }}
+      cancel-in-progress: false
+    # Its variables and its deployment-branch policy (master only; deploy/azure/README.md, section 5.1); the Azure
+    # identity's federated credential trusts repo:<org>/<repo>:environment:<name>
     environment: ${{ needs.target.outputs.environment }}
     permissions:
       contents: read
@@ -92,6 +139,11 @@ jobs:
       TAG: ${{ needs.target.outputs.tag }}
       NAMESPACE: qeos
       CHART: deploy/helm/qeos
+      # kubectl and kubelogin, pinned with their checksums (local accounts are off: kubectl signs in through kubelogin)
+      KUBECTL_VERSION: v1.36.4
+      KUBECTL_SHA256: 8b8f088da2dab964f853b38464033b1be15ede2839eca751482357c45abdd05a
+      KUBELOGIN_VERSION: v0.2.20
+      KUBELOGIN_SHA256: 2e92450a929dd2aec4da818b40dd4fda97aaeae2d6cd9c1074cc1371210f4ab9
       # Repository variables (build-platform.yml uses them too)
       AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
@@ -109,8 +161,9 @@ jobs:
       PUBLIC_HOSTNAME: ${{ vars.PUBLIC_HOSTNAME }}
       ACME_EMAIL: ${{ vars.ACME_EMAIL }}
     steps:
-      # Safe to merge before Azure exists: the automatic run only prints a notice; a manual one fails
-      - name: Check that Azure is configured
+      # Safe to merge before Azure exists: the automatic run only prints a notice; a manual one fails. A value that is
+      # set but malformed always fails, before anything touches the cluster
+      - name: Check the configuration
         id: azure
         run: |
           missing=()
@@ -119,15 +172,36 @@ jobs:
                       EMAIL_SENDER PUBLIC_HOSTNAME ACME_EMAIL; do
             [ -n "${!name}" ] || missing+=("$name")
           done
-          if [ "${#missing[@]}" -eq 0 ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          elif [ "$GITHUB_EVENT_NAME" = workflow_run ]; then
-            echo "::notice::Skipping the deploy: variable(s) ${missing[*]} not set for $ENVIRONMENT (Azure is not configured yet)"
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-          else
+          if [ "${#missing[@]}" -gt 0 ]; then
+            if [ "$GITHUB_EVENT_NAME" = workflow_run ]; then
+              echo "::notice::Skipping the deploy: variable(s) ${missing[*]} not set for $ENVIRONMENT (Azure is not configured yet)"
+              echo "configured=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             echo "::error::Variable(s) ${missing[*]} not set (repository, or the GitHub environment $ENVIRONMENT)"
             exit 1
           fi
+          bad=()
+          # Bicep's workloadIdentityClientIds: one client id (a GUID) per workload identity, nothing missing or null
+          guid='^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$'
+          jq -e --arg guid "$guid" '. as $ids | type == "object" and
+            all(("services", "ingestion", "ingestion-retention", "migrate"); ($ids[.] | type == "string" and test($guid)))' \
+            <<< "$WORKLOAD_IDENTITY_CLIENT_IDS" >/dev/null 2>&1 \
+            || bad+=("WORKLOAD_IDENTITY_CLIENT_IDS (a JSON object with a client id for services, ingestion, ingestion-retention and migrate)")
+          [[ "$AZURE_TENANT_ID" =~ $guid ]] || bad+=("AZURE_TENANT_ID (a GUID)")
+          [[ "$STORAGE_ACCOUNT_URL" =~ ^https://[a-z0-9]+\.blob\.core\.windows\.net/?$ ]] || bad+=("STORAGE_ACCOUNT_URL (https://<account>.blob.core.windows.net)")
+          [[ "$PUBLIC_HOSTNAME" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || bad+=("PUBLIC_HOSTNAME (a host name, no scheme or path)")
+          [[ "$POSTGRES_HOST" =~ ^[a-z0-9.-]+$ ]] || bad+=("POSTGRES_HOST (a host name)")
+          [[ "$ACME_EMAIL" =~ ^[^@[:space:]]+@[^@[:space:]]+$ ]] || bad+=("ACME_EMAIL (an email address)")
+          [[ "$EMAIL_SENDER" =~ ^[^@[:space:]]+@[^@[:space:]]+$ ]] || bad+=("EMAIL_SENDER (an email address)")
+          for name in ACR_NAME AKS_NAME AKS_RESOURCE_GROUP KEY_VAULT_NAME ARTIFACTS_CONTAINER; do
+            [[ "${!name}" =~ ^[A-Za-z0-9._-]+$ ]] || bad+=("$name (a resource name)")
+          done
+          if [ "${#bad[@]}" -gt 0 ]; then
+            printf '::error::Malformed variable: %s\n' "${bad[@]}"
+            exit 1
+          fi
+          echo "configured=true" >> "$GITHUB_OUTPUT"
 
       # The chart of the commit the images were built from
       - uses: actions/checkout@v7
@@ -140,6 +214,21 @@ jobs:
         with:
           version: v3.16.4
 
+      - name: Install kubectl and kubelogin
+        if: steps.azure.outputs.configured == 'true'
+        run: |
+          bin="$HOME/.local/bin"
+          mkdir -p "$bin"
+          curl -fsSLo "$RUNNER_TEMP/kubectl" "https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/amd64/kubectl"
+          echo "$KUBECTL_SHA256  $RUNNER_TEMP/kubectl" | sha256sum -c -
+          install -m 755 "$RUNNER_TEMP/kubectl" "$bin/kubectl"
+          curl -fsSLo "$RUNNER_TEMP/kubelogin.zip" \
+            "https://github.com/Azure/kubelogin/releases/download/$KUBELOGIN_VERSION/kubelogin-linux-amd64.zip"
+          echo "$KUBELOGIN_SHA256  $RUNNER_TEMP/kubelogin.zip" | sha256sum -c -
+          unzip -q -o "$RUNNER_TEMP/kubelogin.zip" -d "$RUNNER_TEMP/kubelogin"
+          install -m 755 "$RUNNER_TEMP/kubelogin/bin/linux_amd64/kubelogin" "$bin/kubelogin"
+          echo "$bin" >> "$GITHUB_PATH"
+
       - name: Sign in to Azure
         if: steps.azure.outputs.configured == 'true'
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
@@ -148,17 +237,8 @@ jobs:
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
-      # Local accounts are off: kubectl and helm sign in with Entra ID through kubelogin, using the az session above
-      - name: Install kubectl and kubelogin
-        if: steps.azure.outputs.configured == 'true'
-        run: |
-          mkdir -p "$HOME/.local/bin"
-          az aks install-cli --client-version 1.36.4 \
-            --install-location "$HOME/.local/bin/kubectl" --kubelogin-install-location "$HOME/.local/bin/kubelogin"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      # A tag that was never pushed (the build skipped, failed, or master moved on before it pushed) stops here, not
-      # after 20 minutes of ImagePullBackOff and a rollback
+      # A second guard after the built-sha artifact: a tag whose seven images are not all in ACR stops here, not after
+      # 20 minutes of ImagePullBackOff and a rollback
       - name: Check that every image exists
         if: steps.azure.outputs.configured == 'true'
         run: |
@@ -191,28 +271,53 @@ jobs:
           echo "KUBECONFIG=$kubeconfig" >> "$GITHUB_ENV"
 
       # The API server admits only authorised ranges. This runner's address is added for the run and removed by the
-      # last step, whatever happens in between (the concurrency group keeps two runs from editing the list together)
+      # last step, whatever happens in between (the job's concurrency group keeps two runs from editing the list)
       - name: Allow this runner to reach the API server
         id: allow
         if: steps.azure.outputs.configured == 'true'
         run: |
+          # wait_idle: until no operation runs on the cluster (an update, an upgrade), at most 20 minutes
+          wait_idle() {
+            local state
+            for _ in $(seq 120); do
+              state="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query provisioningState -o tsv)"
+              case "$state" in Succeeded|Failed|Canceled) return 0 ;; esac
+              echo "The cluster is $state; waiting"
+              sleep 10
+            done
+            echo "::error::The cluster is still $state after 20 minutes"
+            return 1
+          }
           ip="$(curl -fsS --max-time 10 https://api.ipify.org)"
           [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Could not read this runner's address"; exit 1; }
           echo "ip=$ip" >> "$GITHUB_OUTPUT"
-          # Read first, so a failed az stops the step (a failure inside < <(...) would read as an empty list)
-          current="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query "apiServerAccessProfile.authorizedIpRanges[]" -o tsv)"
-          mapfile -t ranges < <(printf '%s\n' "$current" | grep -v '^$')
-          if [ "${#ranges[@]}" -eq 0 ]; then
-            echo "::error::$AKS_NAME has no authorised IP ranges: its API server should never be open to all"
-            exit 1
-          fi
-          if printf '%s\n' "${ranges[@]}" | grep -qx "$ip/32"; then
-            echo "$ip/32 is already authorised: left as it is"
-          else
+          for attempt in 1 2 3 4 5; do
+            wait_idle
+            # The list as it is now; read first, so a failed az stops the step (it never reads as an empty list)
+            current="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query "apiServerAccessProfile.authorizedIpRanges[]" -o tsv)"
+            mapfile -t ranges < <(printf '%s\n' "$current" | grep -v '^$')
+            if [ "${#ranges[@]}" -eq 0 ]; then
+              echo "::error::$AKS_NAME has no authorised IP ranges: its API server should never be open to all"
+              exit 1
+            fi
+            if printf '%s\n' "${ranges[@]}" | grep -qx "$ip/32"; then
+              echo "$ip/32 is authorised"
+              break
+            fi
+            # Set before the update: a run cancelled during it still removes the address
             echo "added=true" >> "$GITHUB_OUTPUT"
-            az aks update -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" \
-              --api-server-authorized-ip-ranges "$(IFS=,; echo "${ranges[*]},$ip/32")" --output none
-          fi
+            if out="$(az aks update -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" \
+                --api-server-authorized-ip-ranges "$(IFS=,; echo "${ranges[*]},$ip/32")" --output none 2>&1)"; then
+              echo "$ip/32 added"
+              break
+            fi
+            echo "$out"
+            # Another operation started meanwhile: wait for it and try again; anything else is an error
+            if ! grep -qE 'OperationNotAllowed|Conflict|AnotherOperationInProgress' <<< "$out" || [ "$attempt" -eq 5 ]; then
+              exit 1
+            fi
+          done
+          wait_idle
           # The change takes a little while to reach the API server's firewall
           for attempt in $(seq 30); do
             kubectl get --raw /readyz >/dev/null 2>&1 && exit 0
@@ -225,7 +330,11 @@ jobs:
       - name: Deploy the chart
         if: steps.azure.outputs.configured == 'true'
         run: |
-          ids() { jq -er --arg key "$1" '.[$key]' <<< "$WORKLOAD_IDENTITY_CLIENT_IDS"; }
+          # Each id is a GUID: the configuration check validated the object
+          id_services="$(jq -er '.services' <<< "$WORKLOAD_IDENTITY_CLIENT_IDS")"
+          id_ingestion="$(jq -er '.ingestion' <<< "$WORKLOAD_IDENTITY_CLIENT_IDS")"
+          id_retention="$(jq -er '.["ingestion-retention"]' <<< "$WORKLOAD_IDENTITY_CLIENT_IDS")"
+          id_migrate="$(jq -er '.migrate' <<< "$WORKLOAD_IDENTITY_CLIENT_IDS")"
           # --timeout above migrate.activeDeadlineSeconds (900 s), so the Job, not Helm, decides a slow migration
           helm upgrade --install qeos "$CHART" --namespace "$NAMESPACE" \
             -f "$CHART/values-$ENVIRONMENT.yaml" \
@@ -234,10 +343,10 @@ jobs:
             --set publicUrl="https://$PUBLIC_HOSTNAME" \
             --set keyvault.name="$KEY_VAULT_NAME" \
             --set keyvault.tenantId="$AZURE_TENANT_ID" \
-            --set keyvault.clientIds.services="$(ids services)" \
-            --set keyvault.clientIds.ingestion="$(ids ingestion)" \
-            --set keyvault.clientIds.ingestion-retention="$(ids ingestion-retention)" \
-            --set keyvault.clientIds.migrate="$(ids migrate)" \
+            --set keyvault.clientIds.services="$id_services" \
+            --set keyvault.clientIds.ingestion="$id_ingestion" \
+            --set keyvault.clientIds.ingestion-retention="$id_retention" \
+            --set keyvault.clientIds.migrate="$id_migrate" \
             --set postgres.host="$POSTGRES_HOST" \
             --set artifacts.azure.accountUrl="$STORAGE_ACCOUNT_URL" \
             --set artifacts.azure.container="$ARTIFACTS_CONTAINER" \
@@ -270,19 +379,45 @@ jobs:
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
-      # Removes only this runner's address, from the list as it is now, so a change made meanwhile (a Bicep deploy)
-      # stays. It never sets an empty list: that would open the API server to every address
+      # Removes only this runner's address. It first waits for any operation still running on the cluster (the add of a
+      # run cancelled mid-update goes on in Azure, and an upgrade may be running), then reads the list as it is NOW, so
+      # the address is never written back by a stale list and a change made meanwhile (a Bicep deploy) stays; it retries
+      # when another operation starts first. It never sets an empty list: that would open the API server to all
       - name: Remove this runner from the API server's ranges
         if: always() && steps.allow.outputs.added == 'true'
         env:
           RUNNER_IP: ${{ steps.allow.outputs.ip }}
         run: |
-          current="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query "apiServerAccessProfile.authorizedIpRanges[]" -o tsv)"
-          mapfile -t ranges < <(printf '%s\n' "$current" | grep -v -x -e "$RUNNER_IP/32" -e '')
-          if [ "${#ranges[@]}" -eq 0 ]; then
-            echo "::error::$RUNNER_IP/32 is the only authorised range left; not removed, as an empty list opens the API server. Remove it by hand (az aks update --api-server-authorized-ip-ranges <operators' ranges>)"
-            exit 1
-          fi
-          az aks update -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" \
-            --api-server-authorized-ip-ranges "$(IFS=,; echo "${ranges[*]}")" --output none
-          echo "$RUNNER_IP/32 removed"
+          wait_idle() {
+            local state
+            for _ in $(seq 120); do
+              state="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query provisioningState -o tsv)"
+              case "$state" in Succeeded|Failed|Canceled) return 0 ;; esac
+              echo "The cluster is $state; waiting"
+              sleep 10
+            done
+            echo "::error::The cluster is still $state after 20 minutes; $RUNNER_IP/32 may still be authorised"
+            return 1
+          }
+          for _ in 1 2 3 4 5; do
+            wait_idle
+            current="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query "apiServerAccessProfile.authorizedIpRanges[]" -o tsv)"
+            if ! grep -qx "$RUNNER_IP/32" <<< "$current"; then
+              echo "$RUNNER_IP/32 is not authorised"
+              exit 0
+            fi
+            mapfile -t ranges < <(printf '%s\n' "$current" | grep -v -x -e "$RUNNER_IP/32" -e '')
+            if [ "${#ranges[@]}" -eq 0 ]; then
+              echo "::error::$RUNNER_IP/32 is the only authorised range left; not removed, as an empty list opens the API server. Remove it by hand (az aks update --api-server-authorized-ip-ranges <operators' ranges>)"
+              exit 1
+            fi
+            if out="$(az aks update -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" \
+                --api-server-authorized-ip-ranges "$(IFS=,; echo "${ranges[*]}")" --output none 2>&1)"; then
+              echo "$RUNNER_IP/32 removed"
+              exit 0
+            fi
+            echo "$out"
+            grep -qE 'OperationNotAllowed|Conflict|AnotherOperationInProgress' <<< "$out" || exit 1
+          done
+          echo "::error::$RUNNER_IP/32 could not be removed after 5 attempts; remove it by hand"
+          exit 1

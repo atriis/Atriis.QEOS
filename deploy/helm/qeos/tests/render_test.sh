@@ -252,7 +252,7 @@ src="$(q "$OUT/staging.yaml" 'select(.kind == "NetworkPolicy" and .metadata.name
   | ($i | length | tostring) + " " + ($i[0].from | length | tostring) + " "
     + $i[0].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"] + " "
     + ($i[0].from[0].podSelector.matchLabels | to_entries | map(.key + "=" + .value) | sort | join(","))')"
-[ "$src" = "1 1 $NAMESPACE gateway.networking.k8s.io/gateway-class-name=approuting-istio,gateway.networking.k8s.io/gateway-name=qeos-edge" ] \
+[ "$src" = "1 1 $NAMESPACE gateway.networking.k8s.io/gateway-name=qeos-edge" ] \
   && pass "staging: gateway accepts traffic only from the edge's proxy pods (Gateway qeos-edge, namespace $NAMESPACE)" \
   || fail "staging: gateway-ingress allows '$src'"
 

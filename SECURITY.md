@@ -346,9 +346,14 @@ details.
   Encrypt certificate from cert-manager; plain HTTP only redirects. The edge keeps client addresses
   (`externalTrafficPolicy: Local`) and a NetworkPolicy lets only its proxy pods reach the gateway, which believes
   `X-Forwarded-For` from the pod range alone; the edge itself has no rate or body-size limits, so the gateway's (halved,
-  per pod) stay the enforcing ones. `deploy-aks.yml` signs in with OIDC, administers the `qeos` namespace only, and
-  opens the API server's authorised ranges to its runner's address for the run only, removing it in a step that
-  always runs. Everything the chart renders is namespaced; cert-manager is a cluster admin's one-time step.
+  per pod) stay the enforcing ones. `deploy-aks.yml` signs in with OIDC as the GitHub identity, which holds AcrPush
+  on the registry, Azure Kubernetes Service Contributor on the cluster (needed to add its runner to the API server's
+  authorised ranges; the role could also change those ranges or re-enable local accounts) and Kubernetes admin of the
+  `qeos` namespace only. Its federated credential trusts the GitHub environment, so the `staging` and `production`
+  environments must allow deployments from `master` only (production: protected `platform-v*` tags too;
+  `deploy/azure/README.md`, section 5.1), and the workflow deploys only commits on master whose images the build
+  pushed. The runner's address is authorised for the run only and removed in a step that always runs. Everything the
+  chart renders is namespaced; cert-manager is a cluster admin's one-time step.
 
 ## Known limitations
 

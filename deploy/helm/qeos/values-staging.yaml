@@ -35,18 +35,12 @@ gateway:
   # The edge's proxy pods get their addresses from the cluster's pod range: Azure CNI Overlay's, which Bicep sets
   # (main.bicep podCidr; scripts/tests/test_azure_bicep.py keeps them equal). Change both together
   trustedProxies: 10.244.0.0/16
-  # Per client IP and per gateway pod, half of Compose's: two pods serve, and the edge enforces no limit of its own
-  rates:
-    auth: 3r/s
-    api: 10r/s
-    collect: 5r/s
-    collectBlobs: 25r/s
-    collectArtifacts: 5r/s
+  # gateway.rates: values.yaml's halved defaults (per client IP and per gateway pod; the edge enforces no limit of its own)
 
+# The Gateway, its routes and certificate; edge.namespace stays empty: the add-on runs the proxy pods in the Gateway's
+# namespace, the release's
 edge:
   enabled: true
-  # The Gateway's namespace, where the add-on runs its proxy pods: the release's
-  namespace: qeos
 
 networkPolicy:
   enabled: true

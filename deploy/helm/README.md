@@ -102,9 +102,8 @@ back with `kubectl config use-context <yours>`.
   the ConfigMap `qeos-edge-options`, the cert-manager `Issuer` `qeos-letsencrypt` and `Certificate` `qeos-edge` ("The
   edge" below). Off in `values-ci.yaml`: the smoke reaches the gateway through a port-forward.
 - The **NetworkPolicy** `gateway-ingress` (when `networkPolicy.enabled`): the gateway's pods accept traffic only from
-  the edge's proxy pods: those labelled `gateway.networking.k8s.io/gateway-name: qeos-edge` and
-  `gateway.networking.k8s.io/gateway-class-name: approuting-istio` in `edge.namespace` (empty: the release namespace,
-  where the add-on runs them). The other policies of spec 5.3 come in Stage 2. It is off in `values-ci.yaml`: kind's
+  the edge's proxy pods: those labelled `gateway.networking.k8s.io/gateway-name: qeos-edge` (Istio's own selector for
+  a Gateway's pods) in `edge.namespace` (empty, also in staging: the release namespace, where the add-on runs them). The other policies of spec 5.3 come in Stage 2. It is off in `values-ci.yaml`: kind's
   default network plugin does not enforce policies.
 
 Everything the chart renders is namespaced and lands in the release namespace (no ClusterRole, ClusterIssuer,
@@ -216,17 +215,25 @@ gateway template (`manifests/charts/istio-control/istio-discovery/files/kube-gat
 
 `.github/workflows/deploy-aks.yml` (spec 5.8):
 
-- **Triggers**: after a successful "Build platform images" run on master (its images' SHA, to staging), and by hand
-  (`environment` staging or production, `tag` a full git SHA or a platform version such as `1.2.3`). Production is a
-  later stage: choosing it fails at once. Only green runs of this repository deploy automatically.
-- **Steps**: Azure sign-in with OIDC (no stored secret); a check that all seven images with that tag are in ACR and
-  that the cluster is running; `az aks get-credentials` and `kubelogin convert-kubeconfig -l azurecli` (local accounts
-  are off); the runner's address added to the API server's authorised ranges; `helm upgrade --install --atomic --wait
-  --timeout 20m` with `values-<environment>.yaml` and Bicep's outputs as `--set`; then a check that the Gateway is
-  programmed, the certificate ready and `https://<host>/health` answers. A last step, which runs whatever happened,
-  signs in again and removes the runner's address from the list as it is then (never leaving it empty, which would
-  open the API server to all). Runs are serialised per environment (`concurrency`), so two never edit that list
-  together.
+- **Triggers**: after a successful "Build platform images" run on master, to staging, and by hand (`environment`
+  staging or production, `tag` a full git SHA or a platform version such as `1.2.3`). Production is a later stage:
+  choosing it fails at once.
+- **What it deploys**: the exact commit the build pushed images for. The build's job `built` uploads it as the
+  artifact `built-sha` once all seven images are pushed, and the deploy downloads it from the triggering run; a build
+  that pushed nothing leaves none, and nothing is deployed. A manual tag or SHA must be on master (`git merge-base
+  --is-ancestor`), as must a platform version's `platform-v*` tag.
+- **Steps**: a check of every variable's form (the client ids are GUIDs, the URL and host names well formed) before
+  anything else; Azure sign-in with OIDC (no stored secret); kubectl and kubelogin pinned by version and SHA-256; a
+  check that all seven images with that tag are in ACR and that the cluster is running; `az aks get-credentials` and
+  `kubelogin convert-kubeconfig -l azurecli` (local accounts are off); the runner's address added to the API server's
+  authorised ranges (after waiting for any cluster operation in progress, retrying if one starts first, and waiting
+  again until the change has landed); `helm upgrade --install --atomic --wait --timeout 20m` with
+  `values-<environment>.yaml` and Bicep's outputs as `--set`; then a check that the Gateway is programmed, the
+  certificate ready and `https://<host>/health` answers. A last step, which runs whatever happened (a cancel too),
+  signs in again, waits until no operation runs on the cluster (the add of a cancelled run goes on in Azure), reads the
+  list as it is then and removes only the runner's address, retrying on a conflicting operation and never leaving the
+  list empty (which would open the API server to all). The deploy job is serialised per environment (`concurrency` on
+  the job, so a run that deploys nothing never takes a waiting deploy's place).
 - **Before Azure exists** the automatic run prints a notice and deploys nothing; a manual run fails, naming the
   missing variables.
 - It checks out the commit being deployed, so the chart always matches the images.

@@ -277,8 +277,26 @@ with OIDC and read secrets from nothing.
 
 `deploy-aks.yml` deploys the chart to staging after every successful image build on master, and by hand (Actions,
 **Deploy to AKS**, Run workflow: environment, tag). `deploy/helm/README.md` ("The deploy workflow") describes its
-steps. Its deploy job runs in the GitHub environment `staging` (Settings, Environments; created on the first run if
-missing) and reads the remaining outputs as that environment's variables. To copy them after a Bicep deploy:
+steps. Its deploy job runs in the GitHub environment `staging` and reads the remaining outputs as that environment's
+variables.
+
+**Create the environments with a deployment-branch policy first.** The GitHub identity's federated credential trusts
+any workflow run that declares `environment: staging`, and that token can push images (AcrPush), change the cluster
+(AKS Contributor) and administer the namespace. Limit `staging` to `master`, and `production` (later) to `master` and
+protected `platform-v*` tags, with required reviewers:
+
+```bash
+repo=<org>/Atriis.QEOS
+for env in staging production; do
+  gh api -X PUT "repos/$repo/environments/$env" --input - <<<'{"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}'
+  gh api -X POST "repos/$repo/environments/$env/deployment-branch-policies" -f name=master -f type=branch
+done
+gh api -X POST "repos/$repo/environments/production/deployment-branch-policies" -f 'name=platform-v*' -f type=tag
+# Tags platform-v* protected (Settings, Rules, Rulesets: a tag ruleset restricting creation, update and deletion);
+# production's required reviewers: Settings, Environments, production
+```
+
+The workflow checks too that what it deploys is on master. To copy the outputs after a Bicep deploy:
 
 ```bash
 az deployment sub show --name qeos-staging --query properties.outputs -o json > outputs.json

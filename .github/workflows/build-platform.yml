@@ -133,3 +133,29 @@ jobs:
             docker tag "${{ steps.name.outputs.local }}" "$IMAGE:$VERSION"
             docker push "$IMAGE:$VERSION"
           fi
+
+  # Records the commit every image was pushed for, as the artifact built-sha, once all seven pushed. deploy-aks.yml
+  # deploys exactly this commit, never master's tip of the moment (which may have moved on since CI ran)
+  built:
+    name: Record the built commit
+    needs: images
+    if: >-
+      github.event_name == 'workflow_run' && needs.images.result == 'success' &&
+      vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != '' && vars.AZURE_SUBSCRIPTION_ID != '' && vars.ACR_NAME != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Write the commit
+        env:
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Unexpected commit '$SHA'"; exit 1; }
+          echo "$SHA" > "$RUNNER_TEMP/built-sha.txt"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: built-sha
+          path: ${{ runner.temp }}/built-sha.txt
+          retention-days: 7
+          if-no-files-found: error
