@@ -15,7 +15,8 @@ which expire and need a GitHub sign-in. ADR-036 put MinIO behind ingestion for s
   result to at most 5 traces (500 per run in the collector).
 - **Own upload route.** `HEAD|PUT /api/v1/collect/artifacts/{sha256}`, `application/zip` only, first bytes
   `PK\x03\x04`, at most 100 MB. The body streams to a temporary object, is checked (size, magic, SHA-256), then
-  copied to its final key. The gateway streams it unbuffered with a 101 MB limit.
+  copied to its final key. The gateway streams it unbuffered with a 101 MB limit. Each ingestion process takes at
+  most 4 trace uploads at once; more get 503 with `Retry-After: 5`, which the collector retries within its budget.
 - **Separate switch and retention.** `keep_traces` (off by default) and `trace_days` (1 to 90, default 14) sit next
   to `keep_screenshots` in the project's collection settings. A trace expires after `trace_days` from the run's
   start, whatever the results' retention. An unreferenced trace is deleted after 7 days.

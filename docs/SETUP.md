@@ -1848,7 +1848,8 @@ Turn it on only if every project reader may see that (see SECURITY.md).
 4. **Collector.** Nothing to add: it asks QEOS first (`artifacts: true|false` in the key check). `--no-artifacts`
    (or `QEOS_NO_ARTIFACTS=1`, or `no-artifacts: true` in `.qeos.yml`) skips traces for a run or a repository.
 
-Limits: 100 MB per trace, 5 per result, 500 per run, 300 seconds for the upload phase, 2 at a time. A trace is kept
+Limits: 100 MB per trace, 5 per result, 500 per run, 300 seconds for the upload phase, 2 at a time (and at most 4
+at once per ingestion process: more wait for a retry after a 503). A trace is kept
 `trace_days` after the run started; one no result refers to is deleted after 7 days. The data export names traces but
 does not carry the files. On production storage other than this MinIO (S3, or a managed bucket), add a lifecycle
 rule `AbortIncompleteMultipartUpload` (for example after 1 day), so the parts of an upload that never finished do not

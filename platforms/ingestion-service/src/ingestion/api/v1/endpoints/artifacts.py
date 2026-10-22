@@ -67,6 +67,21 @@ def _declared_length(request: Request) -> Optional[int]:
     return int(declared)
 
 
+# Trace uploads streaming at once in this process. Each buffers a multipart part or two (8-16 MB), and slow ones pile
+# up under the gateway's rate, so a leaked key could otherwise exhaust the container's memory. One counter is enough:
+# the event loop runs one handler step at a time. Not store_slot: an upload holds its place for minutes, which would
+# starve the screenshot and download calls that share those slots
+MAX_TRACE_UPLOADS = 4
+_uploading = 0
+
+
+def _busy() -> HTTPException:
+    """503 with Retry-After: the collector retries a 5xx with backoff, within its upload budget."""
+    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                         detail="Too many trace uploads at once; try again shortly",
+                         headers={"Retry-After": BUSY_RETRY_AFTER})
+
+
 def _delete_quietly(store: ArtifactStore, key: str) -> None:
     try:
         store.delete([key])
@@ -80,7 +95,21 @@ async def put_artifact(
     sha256: str, request: Request, response: Response, db: Session = Depends(get_db),
     key: ApiKey = Depends(get_api_key), store: Optional[ArtifactStore] = Depends(get_artifact_store),
 ):
+    global _uploading
     _checked_hash(sha256)
+    if _uploading >= MAX_TRACE_UPLOADS:
+        raise _busy()
+    _uploading += 1
+    try:
+        await _receive(sha256, request, response, db, key, store)
+    finally:
+        _uploading -= 1
+    return {"sha256": sha256}
+
+
+async def _receive(sha256: str, request: Request, response: Response, db: Session, key: ApiKey,
+                   store: Optional[ArtifactStore]) -> None:
+    """The upload itself, while it holds one of MAX_TRACE_UPLOADS places."""
     project_id = key.project_id  # read before the commit below expires the key
     await run_in_threadpool(_check_enabled, db, project_id, store)
     media_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
@@ -110,7 +139,6 @@ async def put_artifact(
         await asyncio.shield(asyncio.to_thread(_delete_quietly, store, incoming))
     if not created:
         response.status_code = status.HTTP_200_OK
-    return {"sha256": sha256}
 
 
 # ---- download ----

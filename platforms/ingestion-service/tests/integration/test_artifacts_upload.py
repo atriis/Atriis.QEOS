@@ -308,3 +308,25 @@ def test_a_hash_with_a_trailing_newline_is_404_and_touches_nothing(client, store
     assert client.head(path, headers=headers).status_code == 404
     assert client.put(path, content=ZIP, headers={**headers, "Content-Type": "application/zip"}).status_code == 404
     assert nothing_left(store, db)
+
+
+def test_a_full_process_answers_503_with_retry_after_and_stores_nothing(client, store, headers, db, monkeypatch):
+    from src.ingestion.api.v1.endpoints import artifacts
+
+    monkeypatch.setattr(artifacts, "_uploading", artifacts.MAX_TRACE_UPLOADS)
+    response = put(client, headers)
+    assert response.status_code == 503, response.text
+    assert response.headers["Retry-After"] == "5"
+    assert nothing_left(store, db)
+    assert artifacts._uploading == artifacts.MAX_TRACE_UPLOADS  # a refused upload never held a slot
+
+
+def test_every_upload_gives_its_slot_back(client, store, headers, db, monkeypatch):
+    from src.ingestion.api.v1.endpoints import artifacts
+
+    monkeypatch.setattr(artifacts, "MAX_TRACE_UPLOADS", 1)
+    assert put(client, headers, data=OTHER_ZIP, path=url(ZIP)).status_code == 400  # hash mismatch
+    assert put(client, headers, media_type="image/png").status_code == 400  # refused before the body
+    assert put(client, headers).status_code == 201
+    assert put(client, headers).status_code == 200
+    assert artifacts._uploading == 0
