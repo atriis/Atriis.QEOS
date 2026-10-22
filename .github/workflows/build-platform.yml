@@ -16,41 +16,36 @@ on:
 permissions:
   contents: read
 
+# Master's builds run one at a time, in the order their CI runs finished (a newer pending run replaces an older pending
+# one, never a running one); deploy-aks.yml also refuses to deploy a commit older than the one deployed. Tags: per tag
+concurrency:
+  group: build-platform-${{ github.event_name == 'workflow_run' && 'master' || github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  images:
-    name: Image (${{ matrix.image }})
+  # Once for both paths: is Azure configured, and the image list (deploy/images.txt, the commit's own) as the matrix
+  config:
+    name: Configuration
     # workflow_run fires for every CI run whose branch is named master, a fork PR's included; only a green CI run of a push
-    # to this repository builds, since the job has the repository's variables and an OIDC token. Tags: job release
+    # to this repository builds, since the jobs have the repository's variables and an OIDC token
     if: >-
-      github.event_name == 'workflow_run' &&
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
+      (github.event_name == 'push' && github.ref_type == 'tag') || (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 5
     permissions:
       contents: read
-      # The OIDC token azure/login exchanges for an Azure access token (no stored secret)
-      id-token: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # image is the chart's qeos/<image> name (deploy/helm/qeos); context and dockerfile as in docker-compose.yml
-          - { image: auth-service, context: ., dockerfile: platforms/auth-service/auth-service/Dockerfile }
-          - { image: organization-service, context: ., dockerfile: platforms/organization-service/Dockerfile }
-          - { image: project-service, context: ., dockerfile: platforms/project-service/Dockerfile }
-          - { image: ingestion-service, context: ., dockerfile: platforms/ingestion-service/Dockerfile }
-          - { image: test-management-service, context: ., dockerfile: platforms/test-management-service/Dockerfile }
-          - { image: dashboard, context: ., dockerfile: dashboard/Dockerfile }
-          - { image: gateway, context: gateway, dockerfile: gateway/Dockerfile }
+    outputs:
+      configured: ${{ steps.azure.outputs.configured }}
+      images: ${{ steps.images.outputs.include }}
     env:
       AZURE_BUILD_CLIENT_ID: ${{ vars.AZURE_BUILD_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       ACR_NAME: ${{ vars.ACR_NAME }}
-      # The commit CI passed on
-      SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - name: Check that Azure is configured
         id: azure
@@ -60,31 +55,68 @@ jobs:
             [ -n "${!name}" ] || missing+=("$name")
           done
           if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::notice::Skipping the image build: repository variable(s) ${missing[*]} not set (Azure is not configured yet)"
+            echo "::notice::Skipping the images: repository variable(s) ${missing[*]} not set (Azure is not configured yet)"
             echo "configured=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          [[ "$ACR_NAME" =~ ^[A-Za-z0-9]+$ ]] || { echo "::error::Malformed ACR_NAME '$ACR_NAME'"; exit 1; }
+          echo "configured=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v7
         if: steps.azure.outputs.configured == 'true'
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          sparse-checkout: deploy/images.txt
+          sparse-checkout-cone-mode: false
+
+      # [{"image": ..., "context": ..., "dockerfile": ...}, ...] from "name context dockerfile" lines
+      - name: Read the image list
+        id: images
+        if: steps.azure.outputs.configured == 'true'
+        run: |
+          include="$(jq -Rnc '[inputs | select(test("^\\s*(#|$)") | not) | [splits("\\s+")] | map(select(. != ""))
+            | {image: .[0], context: .[1], dockerfile: .[2]}]' deploy/images.txt)"
+          [ "$(jq length <<< "$include")" -gt 0 ] || { echo "::error::deploy/images.txt lists no image"; exit 1; }
+          echo "include=$include" >> "$GITHUB_OUTPUT"
+
+  images:
+    name: Image (${{ matrix.image }})
+    needs: config
+    if: github.event_name == 'workflow_run' && needs.config.outputs.configured == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # The OIDC token azure/login exchanges for an Azure access token (no stored secret)
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        # deploy/images.txt: image is the chart's qeos/<image> name; context and dockerfile as in docker-compose.yml
+        include: ${{ fromJSON(needs.config.outputs.images) }}
+    env:
+      AZURE_BUILD_CLIENT_ID: ${{ vars.AZURE_BUILD_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ACR_NAME: ${{ vars.ACR_NAME }}
+      # The commit CI passed on
+      SHA: ${{ github.event.workflow_run.head_sha }}
+    steps:
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.SHA }}
 
       - name: Name the image
         id: name
-        if: steps.azure.outputs.configured == 'true'
         run: |
           echo "image=${ACR_NAME}.azurecr.io/qeos/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
           echo "local=qeos/${{ matrix.image }}:scan" >> "$GITHUB_OUTPUT"
 
       - name: Build
-        if: steps.azure.outputs.configured == 'true'
         run: docker build -t "${{ steps.name.outputs.local }}" -f "${{ matrix.dockerfile }}" "${{ matrix.context }}"
 
       # Fixable CRITICAL findings fail the job before anything is pushed; .trivyignore documents any accepted one
       - name: Scan with Trivy
-        if: steps.azure.outputs.configured == 'true'
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: ${{ steps.name.outputs.local }}
@@ -95,7 +127,6 @@ jobs:
           trivyignores: .trivyignore
 
       - name: Sign in to Azure
-        if: steps.azure.outputs.configured == 'true'
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ env.AZURE_BUILD_CLIENT_ID }}
@@ -103,11 +134,9 @@ jobs:
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign in to the registry
-        if: steps.azure.outputs.configured == 'true'
         run: az acr login --name "$ACR_NAME"
 
       - name: Push
-        if: steps.azure.outputs.configured == 'true'
         env:
           IMAGE: ${{ steps.name.outputs.image }}
         run: |
@@ -119,7 +148,8 @@ jobs:
   # runs the same digest staging ran (spec 5.2: built once, immutable, unchanged in every environment)
   release:
     name: Tag the release
-    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: config
+    if: github.event_name == 'push' && github.ref_type == 'tag' && needs.config.outputs.configured == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -134,29 +164,16 @@ jobs:
       # The tagged commit
       SHA: ${{ github.sha }}
     steps:
-      - name: Check that Azure is configured
-        id: azure
+      - name: Read the version
         run: |
-          missing=()
-          for name in AZURE_BUILD_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ACR_NAME; do
-            [ -n "${!name}" ] || missing+=("$name")
-          done
-          if [ "${#missing[@]}" -gt 0 ]; then
-            echo "::notice::Skipping the release: repository variable(s) ${missing[*]} not set (Azure is not configured yet)"
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          [[ "$ACR_NAME" =~ ^[A-Za-z0-9]+$ ]] || { echo "::error::Malformed ACR_NAME '$ACR_NAME'"; exit 1; }
           version="${GITHUB_REF_NAME#platform-v}"
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::$GITHUB_REF_NAME is not platform-v<major>.<minor>.<patch>"
             exit 1
           fi
           echo "VERSION=$version" >> "$GITHUB_ENV"
-          echo "configured=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v7
-        if: steps.azure.outputs.configured == 'true'
         with:
           ref: ${{ env.SHA }}
           # The tag check needs master's history
@@ -164,7 +181,6 @@ jobs:
 
       # A platform-v* tag releases what master has: a tag on any other commit releases nothing
       - name: Check that the tag is on master
-        if: steps.azure.outputs.configured == 'true'
         run: |
           git fetch --no-tags origin master
           if ! git merge-base --is-ancestor "$SHA" FETCH_HEAD; then
@@ -173,7 +189,6 @@ jobs:
           fi
 
       - name: Sign in to Azure
-        if: steps.azure.outputs.configured == 'true'
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
           client-id: ${{ env.AZURE_BUILD_CLIENT_ID }}
@@ -181,7 +196,6 @@ jobs:
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign in to the registry
-        if: steps.azure.outputs.configured == 'true'
         run: az acr login --name "$ACR_NAME"
 
       # Nothing is tagged until every check has passed for all seven: each :<sha> exists, no :<version> points at another
@@ -190,10 +204,10 @@ jobs:
       # az acr import needs a control-plane role; but it cannot delete a tag, so a wrong :<version> must never be pushed.
       # After each push the two digests are compared once more
       - name: Tag the images with the version
-        if: steps.azure.outputs.configured == 'true'
         run: |
-          images=(auth-service organization-service project-service ingestion-service test-management-service
-                  dashboard gateway)
+          # deploy/images.txt: the first word of each line that is not a comment
+          mapfile -t images < <(awk '!/^[[:space:]]*(#|$)/ {print $1}' deploy/images.txt)
+          [ "${#images[@]}" -gt 0 ] || { echo "::error::deploy/images.txt lists no image"; exit 1; }
           # digest NAME TAG: the manifest digest of qeos/NAME:TAG, empty when the registry has no such tag; any other
           # failure (sign-in, permission, network) is printed and stops the step
           digest() {
@@ -247,9 +261,8 @@ jobs:
   built:
     name: Record the built commit
     needs: images
-    if: >-
-      github.event_name == 'workflow_run' && needs.images.result == 'success' &&
-      vars.AZURE_BUILD_CLIENT_ID != '' && vars.AZURE_TENANT_ID != '' && vars.AZURE_SUBSCRIPTION_ID != '' && vars.ACR_NAME != ''
+    # Skipped images (Azure not configured, or a tag) never succeed
+    if: github.event_name == 'workflow_run' && needs.images.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}

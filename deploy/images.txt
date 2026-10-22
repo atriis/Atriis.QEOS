@@ -1,0 +1,10 @@
+# The platform images, one per line: the name (qeos/<name> in the registry, the chart's image), the build context and
+# the Dockerfile, as in docker-compose.yml. The one list build-platform.yml builds and tags, and deploy-aks.yml checks
+# before a deploy; scripts/tests/test_image_pipeline.py checks it against the chart and ci.yml's image-scan matrix
+auth-service             .        platforms/auth-service/auth-service/Dockerfile
+organization-service     .        platforms/organization-service/Dockerfile
+project-service          .        platforms/project-service/Dockerfile
+ingestion-service        .        platforms/ingestion-service/Dockerfile
+test-management-service  .        platforms/test-management-service/Dockerfile
+dashboard                .        dashboard/Dockerfile
+gateway                  gateway  gateway/Dockerfile

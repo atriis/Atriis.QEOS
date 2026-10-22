@@ -19,6 +19,10 @@ on:
         description: The images' tag, a full git SHA on master or a platform version (1.2.3)
         type: string
         required: true
+      allow_rollback:
+        description: Deploy even when the tag is older than what the environment runs (a deliberate rollback)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -150,6 +154,10 @@ jobs:
     env:
       ENVIRONMENT: ${{ needs.target.outputs.environment }}
       TAG: ${{ needs.target.outputs.tag }}
+      # The commit (or platform-v* tag) TAG names
+      REF: ${{ needs.target.outputs.ref }}
+      # Automatic runs never roll back; a manual one may, when asked
+      ALLOW_ROLLBACK: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_rollback }}
       NAMESPACE: qeos
       CHART: deploy/helm/qeos
       # kubectl and kubelogin, pinned with their checksums (local accounts are off: kubectl signs in through kubelogin)
@@ -222,11 +230,12 @@ jobs:
           fi
           echo "configured=true" >> "$GITHUB_OUTPUT"
 
-      # The chart of the commit the images were built from
+      # The chart of the commit the images were built from; all history, to compare it with what is deployed
       - uses: actions/checkout@v7
         if: steps.azure.outputs.configured == 'true'
         with:
           ref: ${{ needs.target.outputs.ref }}
+          fetch-depth: 0
 
       - uses: azure/setup-helm@v4
         if: steps.azure.outputs.configured == 'true'
@@ -261,9 +270,12 @@ jobs:
       - name: Check that every image exists
         if: steps.azure.outputs.configured == 'true'
         run: |
+          # deploy/images.txt of the commit deployed: the first word of each line that is not a comment
+          [ -s deploy/images.txt ] || { echo "::error::$REF has no deploy/images.txt: deploy a newer commit"; exit 1; }
+          mapfile -t images < <(awk '!/^[[:space:]]*(#|$)/ {print $1}' deploy/images.txt)
+          [ "${#images[@]}" -gt 0 ] || { echo "::error::deploy/images.txt lists no image"; exit 1; }
           missing=()
-          for name in auth-service organization-service project-service ingestion-service test-management-service \
-                      dashboard gateway; do
+          for name in "${images[@]}"; do
             az acr repository show --name "$ACR_NAME" --image "qeos/$name:$TAG" --output none 2>/dev/null \
               || missing+=("qeos/$name:$TAG")
           done
@@ -289,6 +301,29 @@ jobs:
           kubelogin convert-kubeconfig -l azurecli --kubeconfig "$kubeconfig"
           echo "KUBECONFIG=$kubeconfig" >> "$GITHUB_ENV"
 
+      # The helpers both authorised-range steps source (a step's shell functions do not reach the next step)
+      - name: Write the cluster helpers
+        if: steps.azure.outputs.configured == 'true'
+        run: |
+          cat > "$RUNNER_TEMP/aks-helpers.sh" <<'EOF'
+          # wait_idle DEADLINE: returns 0 once no operation runs on the cluster (an update, an upgrade), 1 at DEADLINE
+          # (epoch seconds). A failed read is retried like a busy cluster, so one transient az error ends nothing
+          wait_idle() {
+            local state=""
+            while [ "$(date +%s)" -lt "$1" ]; do
+              if state="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query provisioningState -o tsv 2>&1)"; then
+                case "$state" in Succeeded|Failed|Canceled) return 0 ;; esac
+                echo "The cluster is $state; waiting"
+              else
+                echo "Could not read the cluster's state, retrying: $state"
+              fi
+              sleep 10
+            done
+            echo "The cluster is still busy or unreadable at the deadline (${state:-no state read})"
+            return 1
+          }
+          EOF
+
       # The API server admits only authorised ranges. This runner's address is added for the run and removed by the
       # last step, whatever happens in between (the job's concurrency group keeps two runs from editing the list)
       - name: Allow this runner to reach the API server
@@ -296,25 +331,15 @@ jobs:
         if: steps.azure.outputs.configured == 'true'
         timeout-minutes: 15
         run: |
+          # shellcheck source=/dev/null
+          . "$RUNNER_TEMP/aks-helpers.sh"
           # One deadline for every wait and attempt below, inside the step's 15 minutes
           deadline=$(( $(date +%s) + 14 * 60 ))
-          # wait_idle: until no operation runs on the cluster (an update, an upgrade), at most until the deadline
-          wait_idle() {
-            local state
-            while [ "$(date +%s)" -lt "$deadline" ]; do
-              state="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query provisioningState -o tsv)"
-              case "$state" in Succeeded|Failed|Canceled) return 0 ;; esac
-              echo "The cluster is $state; waiting"
-              sleep 10
-            done
-            echo "::error::The cluster is still busy ($state) after 14 minutes"
-            return 1
-          }
           ip="$(curl -fsS --max-time 10 https://api.ipify.org)"
           [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Could not read this runner's address"; exit 1; }
           echo "ip=$ip" >> "$GITHUB_OUTPUT"
           for attempt in 1 2 3 4 5; do
-            wait_idle || exit 1
+            wait_idle "$deadline" || { echo "::error::The cluster is still busy after 14 minutes"; exit 1; }
             # The list as it is now; read first, so a failed az stops the step (it never reads as an empty list)
             current="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query "apiServerAccessProfile.authorizedIpRanges[]" -o tsv)"
             mapfile -t ranges < <(printf '%s\n' "$current" | grep -v '^$')
@@ -339,7 +364,7 @@ jobs:
               exit 1
             fi
           done
-          wait_idle || exit 1
+          wait_idle "$deadline" || { echo "::error::The cluster is still busy after 14 minutes"; exit 1; }
           # The change takes a little while to reach the API server's firewall
           for attempt in $(seq 30); do
             kubectl get --raw /readyz >/dev/null 2>&1 && exit 0
@@ -349,8 +374,43 @@ jobs:
           echo "::error::The API server is still unreachable from $ip"
           exit 1
 
-      - name: Deploy the chart
+      # Deploys follow the order builds finish, which is not always commit order: an older build finishing last must not
+      # roll the environment back. The release's image.tag says what runs; a tag older than it (its ancestor) is skipped,
+      # unless a manual run asked for the rollback. The same tag redeploys; one that is not on this history deploys
+      - name: Check that the deploy goes forward
+        id: forward
         if: steps.azure.outputs.configured == 'true'
+        run: |
+          if ! values="$(helm get values qeos --namespace "$NAMESPACE" --output json 2>&1)"; then
+            if grep -q 'release: not found' <<< "$values"; then
+              echo "No release yet: the first install"
+              echo "deploy=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::Could not read the release's values: $values"
+            exit 1
+          fi
+          deployed="$(jq -r '.image.tag // empty' <<< "$values")"
+          if [[ "$deployed" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            deployed_ref="platform-v$deployed"
+          else
+            deployed_ref="$deployed"
+          fi
+          if [ -z "$deployed" ] || ! git rev-parse --verify --quiet "$deployed_ref^{commit}" >/dev/null; then
+            echo "::warning::The release runs '$deployed', which is not a commit of this repository: deploying $TAG"
+          elif [ "$(git rev-parse "$deployed_ref^{commit}")" != "$(git rev-parse "$REF^{commit}")" ] \
+              && git merge-base --is-ancestor "$REF^{commit}" "$deployed_ref^{commit}"; then
+            if [ "$ALLOW_ROLLBACK" != true ]; then
+              echo "::notice::Not deployed: $TAG is older than $deployed, which $ENVIRONMENT runs (a later build finished first). Run the workflow by hand with allow_rollback to go back"
+              echo "deploy=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::warning::Rolling $ENVIRONMENT back from $deployed to $TAG (allow_rollback)"
+          fi
+          echo "deploy=true" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy the chart
+        if: steps.azure.outputs.configured == 'true' && steps.forward.outputs.deploy == 'true'
         # helm's own 20 minutes, and its rollback
         timeout-minutes: 25
         run: |
@@ -382,7 +442,7 @@ jobs:
 
       # The release is in place by now; these say whether users can reach it. The first certificate takes a few minutes
       - name: Check the edge
-        if: steps.azure.outputs.configured == 'true'
+        if: steps.azure.outputs.configured == 'true' && steps.forward.outputs.deploy == 'true'
         timeout-minutes: 20
         run: |
           kubectl -n "$NAMESPACE" wait --for=condition=Programmed gateway/qeos-edge --timeout 5m
@@ -416,30 +476,29 @@ jobs:
           RUNNER_IP: ${{ steps.allow.outputs.ip }}
         run: |
           leftover="$RUNNER_IP/32 may still be authorised on $AKS_NAME: remove it by hand (deploy/azure/README.md, section 5.1)"
+          # Every way this step fails says so, whatever stopped it
+          trap 'status=$?; [ "$status" = 0 ] || echo "::error::$leftover"' EXIT
+          # shellcheck source=/dev/null
+          . "$RUNNER_TEMP/aks-helpers.sh"
           now=$(date +%s)
           deadline=$(( now + 25 * 60 ))
           job_end=$(( ${JOB_STARTED:-$now} + (JOB_TIMEOUT_MINUTES - 2) * 60 ))
           [ "$deadline" -le "$job_end" ] || deadline=$job_end
           echo "Removing $RUNNER_IP/32 until $(date -u -d "@$deadline" +%H:%M:%SZ)"
-          wait_idle() {
-            local state
-            while [ "$(date +%s)" -lt "$deadline" ]; do
-              state="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query provisioningState -o tsv)"
-              case "$state" in Succeeded|Failed|Canceled) return 0 ;; esac
-              echo "The cluster is $state; waiting"
+          while wait_idle "$deadline"; do
+            # A failed read is retried within the deadline; it is never taken for an empty list
+            if ! current="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query "apiServerAccessProfile.authorizedIpRanges[]" -o tsv 2>&1)"; then
+              echo "Could not read the authorised ranges, retrying: $current"
               sleep 10
-            done
-            return 1
-          }
-          while wait_idle; do
-            current="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query "apiServerAccessProfile.authorizedIpRanges[]" -o tsv)"
+              continue
+            fi
             if ! grep -qx "$RUNNER_IP/32" <<< "$current"; then
               echo "$RUNNER_IP/32 is not authorised"
               exit 0
             fi
             mapfile -t ranges < <(printf '%s\n' "$current" | grep -v -x -e "$RUNNER_IP/32" -e '')
             if [ "${#ranges[@]}" -eq 0 ]; then
-              echo "::error::$RUNNER_IP/32 is the only authorised range left; not removed, as an empty list opens the API server. Remove it by hand (az aks update --api-server-authorized-ip-ranges <operators' ranges>)"
+              echo "::error::$RUNNER_IP/32 is the only authorised range left; not removed, as an empty list opens the API server (set the operators' ranges with az aks update --api-server-authorized-ip-ranges)"
               exit 1
             fi
             if out="$(az aks update -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" \
@@ -448,8 +507,8 @@ jobs:
               exit 0
             fi
             echo "$out"
-            grep -qE 'OperationNotAllowed|Conflict|AnotherOperationInProgress' <<< "$out" \
-              || { echo "::error::$leftover"; exit 1; }
+            # Another operation started first: wait for it and try again; anything else is an error
+            grep -qE 'OperationNotAllowed|Conflict|AnotherOperationInProgress' <<< "$out" || exit 1
           done
-          echo "::error::Out of time: $leftover"
+          echo "Out of time"
           exit 1

@@ -31,23 +31,44 @@ def chart_images() -> set[str]:
     return {svc.get("image", name) for name, svc in values["services"].items()}
 
 
-def test_matrix_builds_every_image_the_chart_uses():
-    matrix = load(WORKFLOWS / "build-platform.yml")["jobs"]["images"]["strategy"]["matrix"]["include"]
-    built = [entry["image"] for entry in matrix]
-    assert len(built) == len(set(built)), f"an image appears twice in the matrix: {built}"
+def image_list() -> list[dict]:
+    """deploy/images.txt, the one image list: "name context dockerfile" lines, # comments."""
+    entries = []
+    for line in (ROOT / "deploy" / "images.txt").read_text(encoding="utf-8").splitlines():
+        if line.strip() and not line.lstrip().startswith("#"):
+            image, context, dockerfile = line.split()
+            entries.append({"image": image, "context": context, "dockerfile": dockerfile})
+    return entries
+
+
+def test_the_image_list_is_every_image_the_chart_uses():
+    built = [entry["image"] for entry in image_list()]
+    assert len(built) == len(set(built)), f"an image appears twice in deploy/images.txt: {built}"
     assert set(built) == chart_images()
 
 
-def test_ci_scan_matrix_matches_the_push_matrix():
-    push = load(WORKFLOWS / "build-platform.yml")["jobs"]["images"]["strategy"]["matrix"]["include"]
+def test_ci_scan_matrix_matches_the_image_list():
     scan = load(WORKFLOWS / "ci.yml")["jobs"]["image-scan"]["strategy"]["matrix"]["include"]
-    assert scan == push
+    assert scan == image_list()
 
 
-def test_every_matrix_dockerfile_exists():
-    matrix = load(WORKFLOWS / "build-platform.yml")["jobs"]["images"]["strategy"]["matrix"]["include"]
-    for entry in matrix:
+def test_every_listed_dockerfile_exists():
+    for entry in image_list():
         assert (ROOT / entry["dockerfile"]).is_file(), entry
+
+
+def test_the_workflows_read_the_image_list_and_list_no_image_themselves():
+    # One source: the build matrix comes from the config job, the release and the deploy check read the file
+    jobs = build_jobs()
+    assert jobs["images"]["strategy"]["matrix"]["include"] == "${{ fromJSON(needs.config.outputs.images) }}"
+    assert "deploy/images.txt" in step(jobs["config"], "Read the image list")["run"]
+    release = step(jobs["release"], "Tag the images with the version")["run"]
+    check = step(load(WORKFLOWS / "deploy-aks.yml")["jobs"]["deploy"], "Check that every image exists")["run"]
+    for run in (release, check):
+        assert "awk '!/^[[:space:]]*(#|$)/ {print $1}' deploy/images.txt" in run
+    for name in ("build-platform.yml", "deploy-aks.yml"):
+        text = (WORKFLOWS / name).read_text(encoding="utf-8")
+        assert "test-management-service" not in text, f"{name} lists an image itself"
 
 
 def test_trigger_names_the_ci_workflow():
@@ -66,13 +87,6 @@ def test_deploy_listens_to_the_build_and_deploys_the_commit_it_recorded():
     assert upload[0]["with"]["name"] == download[0]["with"]["name"] == "built-sha"
     assert download[0]["with"]["run-id"] == "${{ github.event.workflow_run.id }}"
     assert build["jobs"]["built"]["needs"] == "images"
-
-
-def test_deploy_checks_every_image_the_build_pushes():
-    pushed = {entry["image"] for entry in load(WORKFLOWS / "build-platform.yml")["jobs"]["images"]["strategy"]["matrix"]["include"]}
-    check = next(s for s in load(WORKFLOWS / "deploy-aks.yml")["jobs"]["deploy"]["steps"] if s.get("name") == "Check that every image exists")
-    listed = set(check["run"].split("for name in ", 1)[1].split("; do", 1)[0].replace("\\", " ").split())
-    assert listed == pushed
 
 
 def test_deploy_concurrency_is_on_the_deploy_job_only():
@@ -97,7 +111,7 @@ def test_a_tag_never_builds_or_pushes_the_sha():
     # The build job runs for green CI runs on master only; the tag job builds and pushes nothing
     assert jobs["images"]["if"].startswith("github.event_name == 'workflow_run' &&")
     release = jobs["release"]
-    assert release["if"] == "github.event_name == 'push' && github.ref_type == 'tag'"
+    assert release["if"].startswith("github.event_name == 'push' && github.ref_type == 'tag'")
     script = "\n".join(s.get("run", "") + s.get("uses", "") for s in release["steps"])
     for forbidden in ("docker build ", "docker push", "docker tag", "trivy", "az acr import"):
         assert forbidden not in script, forbidden
@@ -109,11 +123,17 @@ def test_a_tag_never_builds_or_pushes_the_sha():
     assert run.index("--dry-run") < run.index("imagetools create --prefer-index=false --tag")
 
 
-def test_the_release_tags_every_image_the_build_pushes():
-    pushed = [entry["image"] for entry in build_jobs()["images"]["strategy"]["matrix"]["include"]]
-    run = step(build_jobs()["release"], "Tag the images with the version")["run"]
-    listed = run.split("images=(", 1)[1].split(")", 1)[0].split()
-    assert listed == pushed
+def test_build_runs_queue_and_the_azure_check_is_written_once():
+    build = load(WORKFLOWS / "build-platform.yml")
+    # Master's builds run one at a time, never cancelled
+    assert build["concurrency"] == {
+        "group": "build-platform-${{ github.event_name == 'workflow_run' && 'master' || github.ref }}",
+        "cancel-in-progress": False,
+    }
+    text = (WORKFLOWS / "build-platform.yml").read_text(encoding="utf-8")
+    assert text.count("Check that Azure is configured") == 1
+    for job in ("images", "release"):
+        assert build["jobs"][job]["needs"] == "config" and "needs.config.outputs.configured == 'true'" in build["jobs"][job]["if"]
 
 
 def bash() -> str:
@@ -162,15 +182,14 @@ def run_release(tmp_path: Path, registry: dict, **stub_env: str) -> tuple:
     env = dict(os.environ, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}", REG=reg.as_posix(),
                ACR_NAME="acrqeos", SHA="a" * 40, VERSION="1.2.3", MSYS_NO_PATHCONV="1", AZ_ERROR="", WRAP_IMAGE="")
     env.update(stub_env)
-    out = subprocess.run([bash(), "-e", script.as_posix()], env=env, capture_output=True, text=True)
+    out = subprocess.run([bash(), "-e", script.as_posix()], env=env, capture_output=True, text=True, cwd=ROOT)
     after = {f.name.replace("_", ":", 1): f.read_text().strip() for f in reg.iterdir()}
     log = (tmp_path / "docker.log").read_text() if (tmp_path / "docker.log").exists() else ""
     return out, after, log
 
 
 SHA = "a" * 40
-IMAGES = ["auth-service", "organization-service", "project-service", "ingestion-service", "test-management-service",
-          "dashboard", "gateway"]
+IMAGES = [entry["image"] for entry in image_list()]
 
 
 def test_release_gives_the_version_the_sha_images_digest(tmp_path):
@@ -241,6 +260,11 @@ def test_the_runner_cleanup_fits_in_the_job():
     # Every step that waits has a budget; with the cleanup's 25 minutes and a few for the rest, they fit in the job
     budgets = {s["name"]: s["timeout-minutes"] for s in job["steps"] if "timeout-minutes" in s}
     assert set(budgets) == {"Allow this runner to reach the API server", "Deploy the chart", "Check the edge"}
+    # One wait_idle, written once and sourced by both steps that edit the authorised ranges
+    text = (WORKFLOWS / "deploy-aks.yml").read_text(encoding="utf-8")
+    assert text.count("wait_idle() {") == 1
+    for name in ("Allow this runner to reach the API server", "Remove this runner from the API server's ranges"):
+        assert '. "$RUNNER_TEMP/aks-helpers.sh"' in step(job, name)["run"]
     assert sum(budgets.values()) + 25 + 10 <= job["timeout-minutes"]
     cleanup = step(job, "Remove this runner from the API server's ranges")["run"]
     assert "deadline=$(( now + 25 * 60 ))" in cleanup
@@ -254,3 +278,125 @@ def test_a_failed_artifact_download_is_a_warning():
     check = step(target, "Check the environment and the tag")
     assert check["env"]["BUILT_OUTCOME"] == "${{ steps.built.outcome }}"
     assert '"$BUILT_OUTCOME" != failure' in check["run"] and "::warning::Nothing deployed" in check["run"]
+
+
+# ---- deploy-aks.yml's scripts, run against stubs ----
+
+def deploy_step(name: str) -> str:
+    return step(load(WORKFLOWS / "deploy-aks.yml")["jobs"]["deploy"], name)["run"]
+
+
+def stub_bin(tmp_path: Path, **scripts: str) -> Path:
+    stubs = tmp_path / "bin"
+    stubs.mkdir(exist_ok=True)
+    # Waits take no time in tests
+    scripts.setdefault("sleep", "#!/bin/sh\nexit 0\n")
+    for name, body in scripts.items():
+        (stubs / name).write_text(body, newline="\n")
+        (stubs / name).chmod(0o755)
+    return stubs
+
+
+def run_step(tmp_path: Path, run: str, stubs: Path, cwd: Path, **env: str) -> subprocess.CompletedProcess:
+    script = tmp_path / "step.sh"
+    script.write_text(run, newline="\n")
+    output = tmp_path / "output"
+    output.touch()
+    full = dict(os.environ, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}", GITHUB_OUTPUT=output.as_posix(),
+                RUNNER_TEMP=tmp_path.as_posix(), MSYS_NO_PATHCONV="1")
+    full.update(env)
+    return subprocess.run([bash(), "-e", script.as_posix()], env=full, capture_output=True, text=True, cwd=cwd)
+
+
+def git(repo: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+
+
+@pytest.fixture
+def history(tmp_path):
+    """A repository with two commits on master: (repo, older sha, newer sha)."""
+    if not shutil.which("git"):
+        pytest.skip("no git")
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q", "-b", "master")
+    for n in (1, 2):
+        (repo / "f").write_text(str(n))
+        git(repo, "add", "f")
+        git(repo, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", f"c{n}")
+    newer = git(repo, "rev-parse", "HEAD")
+    return repo, git(repo, "rev-parse", "HEAD~1"), newer
+
+
+def forward(tmp_path, history, deployed: str, ref: str, allow: str = "false", helm_fails: str = ""):
+    repo = history[0]
+    helm = ('#!/bin/sh\n[ -z "$HELM_FAILS" ] || { echo "$HELM_FAILS" >&2; exit 1; }\n'
+            'echo "{\\"image\\":{\\"tag\\":\\"$DEPLOYED\\"}}"\n')
+    stubs = stub_bin(tmp_path, helm=helm, jq="#!/bin/sh\nsed -n 's/.*\"tag\":\"\\([^\"]*\\)\".*/\\1/p'\n")
+    out = run_step(tmp_path, deploy_step("Check that the deploy goes forward"), stubs, repo, DEPLOYED=deployed,
+                   HELM_FAILS=helm_fails, TAG=ref, REF=ref, ALLOW_ROLLBACK=allow, ENVIRONMENT="staging", NAMESPACE="qeos")
+    return out, (tmp_path / "output").read_text()
+
+
+def test_an_older_build_never_rolls_the_environment_back(tmp_path, history):
+    _, older, newer = history
+    out, output = forward(tmp_path, history, deployed=newer, ref=older)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "deploy=false" in output and "::notice::Not deployed" in out.stdout
+
+
+def test_a_manual_rollback_deploys_when_asked(tmp_path, history):
+    _, older, newer = history
+    out, output = forward(tmp_path, history, deployed=newer, ref=older, allow="true")
+    assert out.returncode == 0 and "deploy=true" in output and "::warning::Rolling staging back" in out.stdout
+
+
+@pytest.mark.parametrize("case", ["newer", "same", "first install"])
+def test_newer_same_and_first_deploys_go_ahead(tmp_path, history, case):
+    _, older, newer = history
+    if case == "first install":
+        out, output = forward(tmp_path, history, deployed="", ref=newer, helm_fails="Error: release: not found")
+    else:
+        out, output = forward(tmp_path, history, deployed=older if case == "newer" else newer, ref=newer)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "deploy=true" in output and "deploy=false" not in output
+
+
+def test_an_unreadable_release_stops_the_deploy(tmp_path, history):
+    _, _, newer = history
+    out, output = forward(tmp_path, history, deployed="", ref=newer, helm_fails="Error: Kubernetes cluster unreachable")
+    assert out.returncode != 0 and "Could not read the release's values" in out.stdout and "deploy=" not in output
+
+
+def cleanup(tmp_path, az: str) -> subprocess.CompletedProcess:
+    stubs = stub_bin(tmp_path, az=az)
+    helpers = run_step(tmp_path, deploy_step("Write the cluster helpers"), stubs, tmp_path)
+    assert helpers.returncode == 0, helpers.stderr
+    return run_step(tmp_path, deploy_step("Remove this runner from the API server's ranges"), stubs, tmp_path,
+                    RUNNER_IP="198.51.100.9", AKS_NAME="aks-qeos-staging", AKS_RESOURCE_GROUP="rg",
+                    JOB_TIMEOUT_MINUTES="100", STATE=(tmp_path / "state").as_posix())
+
+
+# az aks show: provisioningState, or the ranges; the first ranges read fails once (a transient error) when FLAKY is set
+AZ_RANGES = """#!/bin/sh
+case "$*" in
+  *provisioningState*) echo Succeeded ;;
+  *authorizedIpRanges*)
+    if [ ! -e "$STATE.read" ]; then : > "$STATE.read"; echo "ERROR: (ServiceUnavailable) try again" >&2; exit 1; fi
+    if [ -e "$STATE.removed" ]; then echo 203.0.113.7/32; else printf '203.0.113.7/32\n198.51.100.9/32\n'; fi ;;
+  *update*) %s ;;
+esac
+"""
+
+
+def test_cleanup_retries_a_failed_read_and_removes_the_address(tmp_path):
+    out = cleanup(tmp_path, AZ_RANGES % ': > "$STATE.removed"; echo "$*" > "$STATE.update"')
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "Could not read the authorised ranges, retrying" in out.stdout and "198.51.100.9/32 removed" in out.stdout
+    assert "--api-server-authorized-ip-ranges 203.0.113.7/32 " in (tmp_path / "state.update").read_text() + " "
+
+
+def test_every_cleanup_failure_says_to_remove_the_address_by_hand(tmp_path):
+    out = cleanup(tmp_path, AZ_RANGES % 'echo "ERROR: (AuthorizationFailed) no" >&2; exit 1')
+    assert out.returncode != 0
+    assert "::error::198.51.100.9/32 may still be authorised on aks-qeos-staging: remove it by hand" in out.stdout

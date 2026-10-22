@@ -223,32 +223,37 @@ gateway template (`manifests/charts/istio-control/istio-discovery/files/kube-gat
 `.github/workflows/deploy-aks.yml` (spec 5.8):
 
 - **Triggers**: after a successful "Build platform images" run on master, to staging, and by hand (`environment`
-  staging or production, `tag` a full git SHA or a platform version such as `1.2.3`). Production is a later stage:
-  choosing it fails at once.
+  staging or production, `tag` a full git SHA or a platform version such as `1.2.3`, `allow_rollback`). Production is
+  a later stage: choosing it fails at once.
+- **Never backwards**: builds of master run one at a time (`build-platform.yml`'s `concurrency`, queued, never
+  cancelled), but they follow the order CI runs finish, not commit order. So before `helm upgrade` the deploy reads the
+  release's `image.tag` (`helm get values`): a tag that is an ancestor of it is skipped with a notice, unless a manual
+  run sets `allow_rollback`. The same tag redeploys, and a first install has nothing to compare with.
 - **What it deploys**: the exact commit the build pushed images for. The build's job `built` uploads it as the
-  artifact `built-sha` once all seven images are pushed, and the deploy downloads it from the triggering run; a build
+  artifact `built-sha` once every image in `deploy/images.txt` is pushed, and the deploy downloads it from the triggering run; a build
   that pushed nothing leaves none, and nothing is deployed (a download that fails for another reason, such as an API
   error, is a warning naming it). A manual tag or SHA must be on master (`git merge-base --is-ancestor`), as must a
   platform version's `platform-v*` tag. A `platform-v*` tag builds nothing: `build-platform.yml`'s job `release`
   checks that master's build pushed `qeos/<image>:<sha>` for the tagged commit and copies each manifest to
   `:<version>` in the registry (`docker buildx imagetools create --prefer-index=false`, then the two digests compared),
-  so a version is the very image staging ran. Before it tags anything it checks all seven: every `:<sha>` exists (a
-  registry error other than "not found" is printed as it is), no `:<version>` points at another image (a version is
-  never moved), and the manifest imagetools would push (`--dry-run`) is the `:<sha>` one, since the build identity
-  cannot delete a wrong tag.
+  so a version is the very image staging ran. Before it tags anything it checks every image of `deploy/images.txt`:
+  every `:<sha>` exists (a registry error other than "not found" is printed as it is), no `:<version>` points at
+  another image (a version is never moved), and the manifest imagetools would push (`--dry-run`) is the `:<sha>` one,
+  since the build identity cannot delete a wrong tag.
 - **Steps**: a check of every variable's form (the client ids are GUIDs, the URL and host names well formed) before
   anything else; Azure sign-in with OIDC (no stored secret); kubectl and kubelogin pinned by version and SHA-256; a
-  check that all seven images with that tag are in ACR and that the cluster is running; `az aks get-credentials` and
-  `kubelogin convert-kubeconfig -l azurecli` (local accounts are off); the runner's address added to the API server's
+  check that every image of `deploy/images.txt` with that tag is in ACR and that the cluster is running;
+  `az aks get-credentials` and `kubelogin convert-kubeconfig -l azurecli` (local accounts are off); the runner's address added to the API server's
   authorised ranges (after waiting for any cluster operation in progress, retrying if one starts first, and waiting
   again until the change has landed); `helm upgrade --install --atomic --wait --timeout 20m` with
   `values-<environment>.yaml` and Bicep's outputs as `--set`; then a check that the Gateway is programmed, the
   certificate ready and `https://<host>/health` answers. A last step, which runs whatever happened (a cancel too),
   signs in again, waits until no operation runs on the cluster (the add of a cancelled run goes on in Azure), reads the
-  list as it is then and removes only the runner's address, retrying on a conflicting operation and never leaving the
-  list empty (which would open the API server to all). The steps before it have budgets (15, 25 and 20 minutes) and the
-  removal one deadline across all its attempts (25 minutes, never past the job's 100), so it always ends by itself; if
-  the address is left, it says so and how to remove it by hand (`deploy/azure/README.md`, section 5.1). The deploy job
+  list as it is then (a failed read is retried) and removes only the runner's address, retrying on a conflicting
+  operation and never leaving the list empty (which would open the API server to all). The steps before it have
+  budgets (15, 25 and 20 minutes) and the removal one deadline across all its attempts (25 minutes, never past the
+  job's 100), so it always ends by itself; whenever it fails, it says the address may be left and how to remove it by
+  hand (`deploy/azure/README.md`, section 5.1). The deploy job
   is serialised per environment (`concurrency` on the job, so a run that deploys nothing never takes a waiting
   deploy's place).
 - **Before Azure exists** the automatic run prints a notice and deploys nothing; a manual run fails, naming the
