@@ -652,7 +652,7 @@ jobs:
           GATEWAY_API_SHA256: 97598bf6ab3b33b9b5c5432bdd24de091e4e9c3aa0575ebb0710a2a19cd64d64
         run: |
           crds="$RUNNER_TEMP/gateway-api-standard.yaml"
-          curl -fsSLo "$crds" "https://github.com/kubernetes-sigs/gateway-api/releases/download/$GATEWAY_API_VERSION/standard-install.yaml"
+          curl -fsSL --max-time 60 -o "$crds" "https://github.com/kubernetes-sigs/gateway-api/releases/download/$GATEWAY_API_VERSION/standard-install.yaml"
           echo "$GATEWAY_API_SHA256  $crds" | sha256sum -c -
           kubectl apply --server-side -f "$crds"
           kubectl wait --for condition=Established --timeout 60s             crd/gateways.gateway.networking.k8s.io crd/httproutes.gateway.networking.k8s.io
