@@ -114,3 +114,18 @@ def test_delete_prefix_pages_and_keeps_other_projects(store, monkeypatch):
                         lambda **kwargs: original(results_per_page=3, **kwargs))  # three pages
     assert store.delete_prefix("screenshots/1/") == 7
     assert [blob.name for blob in original()] == ["screenshots/10/a"]
+
+
+def test_a_missing_container_is_not_a_missing_artifact():
+    from azure.core.credentials import AzureNamedKeyCredential
+
+    from src.ingestion.utils.azure_blob_store import ArtifactContainerMissing, AzureBlobArtifactStore
+
+    store = AzureBlobArtifactStore(URL, f"qeos-absent-{uuid.uuid4().hex[:12]}",
+                                   credential=AzureNamedKeyCredential(ACCOUNT, KEY))
+    for call in (lambda: store.get("screenshots/1/a"), lambda: store.open("screenshots/1/a"),
+                 lambda: store.get_range("screenshots/1/a", 0, 1),
+                 lambda: store.put("screenshots/1/a", b"x", "image/png"),
+                 lambda: store.delete(["screenshots/1/a"]), lambda: store.delete_prefix("screenshots/1/")):
+        with pytest.raises(ArtifactContainerMissing):
+            call()

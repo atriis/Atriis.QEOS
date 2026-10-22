@@ -12,7 +12,7 @@ from src.ingestion.core.config import settings
 from src.ingestion.utils import artifact_store
 from src.ingestion.utils.artifact_store import (
     ArtifactDeleteError, ArtifactNotFound, ArtifactRangeError, S3ArtifactStore, get_artifact_store)
-from src.ingestion.utils.azure_blob_store import AzureBlobArtifactStore
+from src.ingestion.utils.azure_blob_store import ArtifactContainerMissing, AzureBlobArtifactStore
 
 ACCOUNT_URL = "https://qeosartifacts.blob.core.windows.net"
 CONTAINER = "qeos-artifacts"
@@ -37,9 +37,12 @@ def made(monkeypatch):
         return client
 
     credential = MagicMock(name="DefaultAzureCredential")
+    workload = MagicMock(name="WorkloadIdentityCredential")
+    monkeypatch.delenv("AZURE_FEDERATED_TOKEN_FILE", raising=False)
     monkeypatch.setattr("azure.storage.blob.ContainerClient", container_client)
     monkeypatch.setattr("azure.identity.DefaultAzureCredential", credential)
-    return SimpleNamespace(clients=clients, credential=credential)
+    monkeypatch.setattr("azure.identity.WorkloadIdentityCredential", workload)
+    return SimpleNamespace(clients=clients, credential=credential, workload=workload)
 
 
 @pytest.fixture
@@ -72,9 +75,8 @@ def downloader(data: bytes) -> MagicMock:
 
 # Construction: workload identity, timeouts as the S3 store's
 
-def test_builds_its_clients_with_default_azure_credential_and_short_timeouts(made):
+def test_builds_its_clients_with_short_timeouts(made):
     store = AzureBlobArtifactStore(ACCOUNT_URL, CONTAINER)
-    made.credential.assert_called_once_with()
     client, copy_client = made.clients
     assert store._container is client and store._copy_container is copy_client
     for each in (client, copy_client):
@@ -82,18 +84,40 @@ def test_builds_its_clients_with_default_azure_credential_and_short_timeouts(mad
         assert each.made_with["container_name"] == CONTAINER
         assert each.made_with["credential"] is made.credential.return_value
         assert each.made_with["connection_timeout"] == 5
-        retry = each.made_with["retry_policy"]  # one retry, a second apart: not the SDK's 3 starting 15 s apart
-        assert retry.total_retries == 1 and retry.initial_backoff == 1
+        assert each.made_with["retry_policy"].initial_backoff == 1  # not the SDK's 15 s
         # a streamed read holds at most one chunk, never a whole trace
         assert each.made_with["max_single_get_size"] <= 4 * 1024 * 1024
         assert each.made_with["max_chunk_get_size"] <= 4 * 1024 * 1024
     assert client.made_with["read_timeout"] == 10
+    assert client.made_with["retry_policy"].total_retries == 1
+    # copy() stays within COPY_READ_TIMEOUT overall: its client does not retry
     assert copy_client.made_with["read_timeout"] == artifact_store.COPY_READ_TIMEOUT == 60
+    assert copy_client.made_with["retry_policy"].total_retries == 0
+
+
+def test_in_a_pod_only_workload_identity_signs_in(made, monkeypatch):
+    monkeypatch.setenv("AZURE_FEDERATED_TOKEN_FILE", "/var/run/secrets/azure/tokens/azure-identity-token")
+    AzureBlobArtifactStore(ACCOUNT_URL, CONTAINER)
+    made.workload.assert_called_once_with()
+    made.credential.assert_not_called()
+    assert made.clients[0].made_with["credential"] is made.workload.return_value
+
+
+def test_elsewhere_the_chain_has_no_managed_identity_and_no_developer_sign_in(made):
+    """A pod whose workload identity is not wired must fail, not sign in as the node through IMDS."""
+    AzureBlobArtifactStore(ACCOUNT_URL, CONTAINER)
+    made.workload.assert_not_called()
+    kwargs = made.credential.call_args.kwargs
+    for excluded in ("managed_identity", "shared_token_cache", "visual_studio_code", "cli", "developer_cli",
+                     "powershell", "interactive_browser", "broker"):
+        assert kwargs[f"exclude_{excluded}_credential"] is True
+    assert not kwargs.get("exclude_environment_credential") and not kwargs.get("exclude_workload_identity_credential")
 
 
 def test_takes_another_credential_when_given_one(made):
     AzureBlobArtifactStore(ACCOUNT_URL, CONTAINER, credential="azurite-key")
     made.credential.assert_not_called()
+    made.workload.assert_not_called()
     assert made.clients[0].made_with["credential"] == "azurite-key"
 
 
@@ -139,6 +163,13 @@ def test_open_streams_in_read_chunks_and_reports_the_size(azure, monkeypatch):
     assert size == 10
     assert list(chunks) == [b"012", b"3456", b"789"]  # no piece is larger than READ_CHUNK
     client.download_blob.assert_called_once_with("artifacts/1/a")
+
+
+def test_open_of_an_empty_blob_streams_nothing(azure):
+    store, client = azure
+    client.download_blob.return_value = downloader(b"")
+    chunks, size = store.open("artifacts/1/empty")
+    assert size == 0 and list(chunks) == []
 
 
 def test_open_of_a_missing_blob_raises_not_found_at_the_call(azure):
@@ -343,6 +374,89 @@ def test_copy_still_pending_after_the_copy_timeout_is_aborted(made, monkeypatch)
     with pytest.raises(TimeoutError):
         store.copy("artifacts/1/incoming/x", "artifacts/1/abc")
     target.abort_copy.assert_called_once_with("c1")
+
+
+def test_copy_time_includes_the_start_call(made, monkeypatch):
+    """The start call and the polling share one COPY_READ_TIMEOUT, as S3's single copy call: a start that took the
+    whole budget is not followed by another 60 s of polling."""
+    now = [0]
+    monkeypatch.setattr("src.ingestion.utils.azure_blob_store.time.monotonic", lambda: now[0])
+    store = AzureBlobArtifactStore(ACCOUNT_URL, CONTAINER)
+    target = _copy_target(made)
+
+    def slow_start(_url):
+        now[0] = 61
+        return {"copy_status": "pending", "copy_id": "c1"}
+
+    target.start_copy_from_url.side_effect = slow_start
+    with pytest.raises(TimeoutError):
+        store.copy("artifacts/1/incoming/x", "artifacts/1/abc")
+    target.get_blob_properties.assert_not_called()
+    target.abort_copy.assert_called_once_with("c1")
+
+
+def test_copy_keeps_the_timeout_when_the_abort_fails_too(made, monkeypatch):
+    clock = iter([0, 61])
+    monkeypatch.setattr("src.ingestion.utils.azure_blob_store.time.monotonic", lambda: next(clock))
+    store = AzureBlobArtifactStore(ACCOUNT_URL, CONTAINER)
+    target = _copy_target(made)
+    target.start_copy_from_url.return_value = {"copy_status": "pending", "copy_id": "c1"}
+    abort_error = http_error(409, "NoPendingCopyOperation")
+    target.abort_copy.side_effect = abort_error
+    with pytest.raises(TimeoutError) as raised:
+        store.copy("artifacts/1/incoming/x", "artifacts/1/abc")
+    assert raised.value.__cause__ is abort_error
+
+
+def test_a_failed_copy_whose_source_vanished_raises_not_found(made, monkeypatch):
+    monkeypatch.setattr("src.ingestion.utils.azure_blob_store.time.sleep", lambda _: None)
+    store = AzureBlobArtifactStore(ACCOUNT_URL, CONTAINER)
+    target = _copy_target(made)
+    target.start_copy_from_url.return_value = {"copy_status": "pending", "copy_id": "c1"}
+    target.get_blob_properties.return_value = SimpleNamespace(
+        copy=SimpleNamespace(status="failed", status_description="404 BlobNotFound"))
+    made.clients[0].get_blob_client.return_value.exists.return_value = False
+    with pytest.raises(ArtifactNotFound):
+        store.copy("artifacts/1/incoming/x", "artifacts/1/abc")
+    made.clients[0].get_blob_client.return_value.exists.return_value = True
+    with pytest.raises(RuntimeError, match="failed 404 BlobNotFound"):  # the source is there: another failure
+        store.copy("artifacts/1/incoming/x", "artifacts/1/abc")
+
+
+# A missing container is a misconfiguration: a 5xx, logged once, never a quiet 404
+
+def container_not_found() -> ResourceNotFoundError:
+    error = ResourceNotFoundError(message="ContainerNotFound")
+    error.status_code = 404
+    error.error_code = "ContainerNotFound"
+    return error
+
+
+def test_a_missing_container_is_not_a_missing_artifact_and_is_logged_once(made, caplog):
+    store = AzureBlobArtifactStore(f"{ACCOUNT_URL}/?sv=2025&sig=secret", CONTAINER)
+    client = made.clients[0]
+    client.download_blob.side_effect = container_not_found()
+    client.upload_blob.side_effect = container_not_found()
+    client.get_blob_client.return_value.get_blob_properties.side_effect = container_not_found()
+    made.clients[1].get_blob_client.return_value.start_copy_from_url.side_effect = container_not_found()
+    calls = [lambda: store.get("a"), lambda: store.open("a"), lambda: store.get_range("a", 0, 1),
+             lambda: store.open_range("a", 5, 4), lambda: store.copy("a", "b"),
+             lambda: store.put("a", b"x", "image/png")]
+    with caplog.at_level(logging.ERROR, logger="src.ingestion.utils.azure_blob_store"):
+        for call in calls:
+            with pytest.raises(ArtifactContainerMissing):
+                call()
+    assert not issubclass(ArtifactContainerMissing, ArtifactNotFound)
+    errors = [record.getMessage() for record in caplog.records if "ContainerNotFound" in record.getMessage()]
+    assert len(errors) == 1
+    assert f"'{CONTAINER}'" in errors[0] and ACCOUNT_URL in errors[0] and "secret" not in errors[0]
+
+
+def test_a_missing_container_fails_a_delete_instead_of_counting_as_deleted(azure):
+    store, client = azure
+    client.delete_blobs.return_value = _responses(404, code="ContainerNotFound")
+    with pytest.raises(ArtifactContainerMissing):
+        store.delete(["screenshots/1/a"])
 
 
 # delete / delete_prefix: batches, partial failures

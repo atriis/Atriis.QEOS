@@ -614,11 +614,16 @@ scoring missed its budget (p95 249 ms): reading the pairs of a change's units wa
 - Storage backends: `ARTIFACTS_BACKEND` is `s3` (the default, the settings above, used by the compose files) or
   `azure` (ADR-038, on AKS): Azure Blob Storage through `src/ingestion/utils/azure_blob_store.py`, with
   `ARTIFACTS_AZURE_ACCOUNT_URL` (`https://<account>.blob.core.windows.net`) and `ARTIFACTS_AZURE_CONTAINER`
-  (default `qeos-artifacts`). It signs in with `DefaultAzureCredential`, the pod's workload identity: there is no
-  key to set, and the identity needs a data role on the container (Storage Blob Data Contributor). Same keys and
-  errors as S3; streamed trace uploads are staged blocks committed once (a failed upload leaves no blob, Azure
-  drops the uncommitted blocks), reads stream 4 MB at a time, and deletes go in batches of 256. With `azure` and no
-  account URL, or any other backend value, there is no store, as above, and the service logs one warning. The
+  (default `qeos-artifacts`). It signs in with the pod's workload identity (`WorkloadIdentityCredential` when
+  `AZURE_FEDERATED_TOKEN_FILE` is set; otherwise `DefaultAzureCredential` limited to environment and workload
+  identity, so never the node's managed identity, the Azure CLI or other developer sign-ins): there is no key to set,
+  and the identity needs a data role on the container (Storage Blob Data Contributor). Same keys and errors as S3;
+  streamed trace uploads are staged blocks committed once (a failed upload leaves no blob, Azure drops the
+  uncommitted blocks), reads stream 4 MB at a time, deletes go in batches of 256, and a copy (call and polling
+  together) is bounded by the S3 store's 60 s. A container that does not exist is a misconfiguration, not a missing
+  artifact: every call fails as a 500 (`ArtifactContainerMissing`) and one ERROR names the container and the account
+  URL. With `azure` and no account URL, or any other backend value, there is no store, as above, and the service
+  logs one warning. The
   chart (`deploy/helm/qeos`, `artifacts.backend`) sets these. Tests: `tests/unit/test_azure_blob_store.py` (mocked
   SDK), and `tests/integration/test_azure_blob_azurite.py` against the Azurite emulator, skipped unless
   `AZURITE_URL` is set (`http://127.0.0.1:10000/devstoreaccount1`; the docstring has the `docker run` line).

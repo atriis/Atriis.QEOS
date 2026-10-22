@@ -202,11 +202,16 @@ details.
   dashboard's reach (its storage, the API under the user's session), so `playwright-core` is pinned to an exact version
   and a bump is deliberate, checked by opening a real trace before it ships.
 - **Artifact storage on AKS (ADR-038).** On Kubernetes, screenshots and traces go to Azure Blob Storage instead of
-  MinIO (`ARTIFACTS_BACKEND=azure`), under the same keys and with the same checks. Ingestion signs in with its
-  workload identity (`DefaultAzureCredential`): no account key, connection string or SAS token exists in QEOS, its
-  settings or its secrets, and the identity needs only data access to the one container. The container is private
-  (no anonymous access) and only ingestion-service and its retention job reach it; there are still no presigned URLs, every read goes
-  through ingestion with the user's JWT as above. Compose keeps MinIO.
+  MinIO (`ARTIFACTS_BACKEND=azure`), under the same keys and with the same checks. Ingestion signs in only with its
+  workload identity (`WorkloadIdentityCredential` in the pod; never the node's managed identity, so a pod whose
+  identity is not wired fails instead of borrowing the node's) and needs only a data role on the one container. QEOS,
+  its settings and its secrets hold no account key, connection string or SAS token. The storage account itself still
+  has keys unless shared-key access is turned off on it (`allowSharedKeyAccess: false`, set by the Bicep of the AKS
+  infrastructure, Task 9 of the stage 1 plan); until then, whoever can read the account's keys in Azure can read every
+  artifact. The container is private (no anonymous access). Only ingestion-service and its retention job are
+  *allowed* to read it (Azure RBAC on their identities); that is a permission, not a network boundary: the account's
+  endpoint is reachable from anywhere its network rules allow, unless a private endpoint or firewall closes it. There
+  are still no presigned URLs, and every read goes through ingestion with the user's JWT as above. Compose keeps MinIO.
 - **Gateway.** TLS 1.2/1.3. Per-IP rate limits: 20 requests/s on the API,
   10/s on uploads, 50/s (burst 100, 6 MB body) on screenshot uploads, 10/s (burst 20, 101 MB body, streamed
   unbuffered) on trace uploads, and 5/s on sign-in, registration, password and MFA
