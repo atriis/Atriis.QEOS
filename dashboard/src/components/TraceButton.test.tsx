@@ -4,6 +4,7 @@ import { http, HttpResponse } from "msw";
 import { server } from "../test/server";
 import { setAccessToken } from "../auth/tokens";
 import TraceButton from "./TraceButton";
+import { resetTraceViewerCheck } from "../lib/traceViewer";
 
 const P = "/api/v1/projects/42";
 
@@ -15,6 +16,14 @@ function stubSave() {
   return saved;
 }
 
+/** navigator.serviceWorker as a browser that can (or cannot) run the trace viewer; jsdom has none. */
+function stubServiceWorker(register: () => Promise<unknown> = () => Promise.resolve({})) {
+  const spy = vi.fn(register);
+  Object.defineProperty(navigator, "serviceWorker", { value: { register: spy }, configurable: true });
+  return spy;
+}
+
+beforeEach(() => { resetTraceViewerCheck(); stubServiceWorker(); });
 afterEach(() => vi.restoreAllMocks());
 
 test("renders nothing for 0 or an absent count", () => {
@@ -169,4 +178,55 @@ test("while one button works the other is disabled, so their messages cannot cro
   releaseOpen();
   await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Trace opened in a new tab"));
   expect(downloadButton).toBeEnabled();
+});
+
+const BLOCKED = "This browser cannot run the trace viewer for this site, usually because it does not trust the site's certificate. Download the trace instead, or ask an administrator for a trusted certificate.";
+
+test("a browser that refuses the viewer's service worker gets a reason instead of a blank tab, and no link", async () => {
+  setAccessToken("acc");
+  const { tab } = stubTab();
+  const register = stubServiceWorker(() => Promise.reject(new DOMException("An SSL certificate error occurred", "SecurityError")));
+  let linked = false;
+  server.use(
+    http.get(`${P}/runs/9/results/1/artifacts`, () => HttpResponse.json({ artifacts: [{ id: 5, kind: "trace", name: "a.zip", bytes: 4 }] })),
+    http.post(`${P}/artifacts/:id/link`, () => { linked = true; return HttpResponse.json({}, { status: 201 }); }),
+  );
+  render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={1} />);
+  await userEvent.click(screen.getByRole("button", { name: "Open trace for test_ok in a new tab" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(BLOCKED);
+  expect(register).toHaveBeenCalledWith("/trace-viewer/sw.bundle.js", { scope: "/trace-viewer/" });
+  expect(tab.closed).toBe(true);
+  expect(tab.location.href).toBe("");
+  expect(linked).toBe(false);
+  // Download still works, and the next click checks again (the certificate may be trusted by then)
+  expect(screen.getByRole("button", { name: "Download trace for test_ok" })).toBeEnabled();
+  await userEvent.click(screen.getByRole("button", { name: "Open trace for test_ok in a new tab" }));
+  await waitFor(() => expect(register).toHaveBeenCalledTimes(2));
+});
+
+test("a browser without service workers gets the same reason", async () => {
+  setAccessToken("acc");
+  const { tab } = stubTab();
+  Object.defineProperty(navigator, "serviceWorker", { value: undefined, configurable: true });
+  render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={1} />);
+  await userEvent.click(screen.getByRole("button", { name: "Open trace for test_ok in a new tab" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent(BLOCKED);
+  expect(tab.closed).toBe(true);
+});
+
+test("the viewer check runs once per page when it succeeds", async () => {
+  setAccessToken("acc");
+  stubTab();
+  const register = stubServiceWorker();
+  server.use(
+    http.get(`${P}/runs/9/results/1/artifacts`, () => HttpResponse.json({ artifacts: [{ id: 5, kind: "trace", name: "a.zip", bytes: 4 }] })),
+    http.post(`${P}/artifacts/:id/link`, () => HttpResponse.json({ url: "/api/v1/artifact-links/t", expires_at: "2026-10-22T10:00:00Z" }, { status: 201 })),
+  );
+  render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={1} />);
+  const button = screen.getByRole("button", { name: "Open trace for test_ok in a new tab" });
+  await userEvent.click(button);
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Trace opened in a new tab"));
+  await userEvent.click(button);
+  await waitFor(() => expect(button).toHaveAttribute("aria-busy", "false"));
+  expect(register).toHaveBeenCalledTimes(1);
 });

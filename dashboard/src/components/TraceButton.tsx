@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Download, ExternalLink } from "lucide-react";
 import { createArtifactLink, downloadArtifact, listResultArtifacts, traceViewerUrl } from "../api/artifacts";
 import { downloadBlob } from "../lib/csv";
+import { canRunTraceViewer } from "../lib/traceViewer";
 
 interface Props {
   projectId: number;
@@ -16,6 +17,9 @@ interface Props {
 }
 
 export const TRACE_NOTE = "A downloaded trace opens with npx playwright show-trace";
+
+const VIEWER_BLOCKED = "This browser cannot run the trace viewer for this site, usually because it does not trust the "
+  + "site's certificate. Download the trace instead, or ask an administrator for a trusted certificate.";
 
 type Status = "" | "Opening trace…" | "Trace opened in a new tab" | "Downloading trace…" | "Trace downloaded";
 
@@ -53,6 +57,12 @@ export default function TraceButton({ projectId, runId, resultId, name, count, s
     setStatus("Opening trace…");
     void (async () => {
       try {
+        if (!(await canRunTraceViewer())) {
+          tab.close();
+          setStatus("");
+          setError(VIEWER_BLOCKED);
+          return;
+        }
         const id = await firstTrace();
         if (id === undefined) throw new Error("no trace");
         // The link lasts 60 s: ask for it last, just before the viewer reads it

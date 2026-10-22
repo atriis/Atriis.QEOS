@@ -1860,8 +1860,8 @@ trace viewer in a new tab with the test's actions, and the download button saves
 opens.
 
 The viewer needs a service worker, and browsers register one only from an origin whose certificate they trust.
-With the local stack's self-signed certificate, clicking through the browser warning is not enough: the viewer tab
-stays blank. Trust the gateway's certificate on that machine (or use a certificate from a CA the browser trusts), or
+With the local stack's self-signed certificate, clicking through the browser warning is not enough: **Trace** then
+says the browser cannot run the viewer for this site instead of opening it. Trust the gateway's certificate on that machine (or use a certificate from a CA the browser trusts), or
 use **Download**.
 
 ---
@@ -2102,7 +2102,7 @@ The gateway always joins a Docker network fixed at `172.30.1.0/24`, with monitor
 | Signed out after editing `.env` | `SECRET_KEY` changed. Sign in again; API keys keep working. |
 | No verification or reset email | SMTP not configured: the links are in `docker compose logs auth-service`. If SMTP is configured, check that log for the SMTP error. |
 | 429 Too Many Requests | Per-IP rate limit (5/s on sign-in, 20/s API, 10/s uploads). Wait a second. Behind a proxy in production, check `GATEWAY_TRUSTED_PROXIES` (set by the prod file). |
-| **Trace** opens a blank viewer tab | The browser does not trust the gateway's certificate, so it refuses the viewer's service worker. Trust the certificate or use **Download**: [4.12](#412-traces). |
+| **Trace** says the browser cannot run the trace viewer | The browser does not trust the gateway's certificate, so it refuses the viewer's service worker. Trust the certificate or use **Download**: [4.12](#412-traces). |
 | SSO button shows, sign-in answers 503 | auth-service lacks `AZURE_CLIENT_ID` + `AZURE_ALLOWED_TENANTS` (set them in `.env`) or `GOOGLE_CLIENT_ID` (use the override file): [3.8](#38-single-sign-on-google-and-microsoft). |
 | Collector exits 2 | A configuration problem (URL, key, no matching files, `http://` URL, bad `--ca-file`, invalid `--trigger`). `qeos-collector check` names it. |
 | `impact` exits 2: "This API key may not read test suggestions" | The key is upload-only (403 `impact_not_allowed`). A project owner or admin turns on the key's **Test suggestions** switch in Settings → **API keys** ([4.1.1](#411-api-keys)); `qeos-collector check` then prints `Test suggestions: allowed`. |
