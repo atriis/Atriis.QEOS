@@ -64,7 +64,7 @@ export default function CollectionCard({ projectId, canManage }: Props) {
       <p id={hint} className="muted">
         Manual means a person started the run: “Run workflow” or a re-run on GitHub, a pipeline run from
         GitLab’s web page or a manual job, a manual Azure build. Runs started from QEOS are always collected.
-        Needs qeos-collector 0.5.0 or later; older collectors are always collected.
+        Needs qeos-collector 0.5.0 or later.
       </p>
       <div className="switch-row">
         <button
