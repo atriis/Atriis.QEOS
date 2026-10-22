@@ -17,9 +17,11 @@ permissions:
   contents: read
 
 # Master's builds run one at a time, in the order their CI runs finished (a newer pending run replaces an older pending
-# one, never a running one); deploy-aks.yml also refuses to deploy a commit older than the one deployed. Tags: per tag
+# one, never a running one); deploy-aks.yml also refuses to deploy a commit older than the one deployed. The group is
+# keyed on the config job's guard: a run that builds nothing (a failed or cancelled CI run, a fork's PR) gets a group of
+# its own, so it can never replace a pending real build. Tags: their own group too
 concurrency:
-  group: build-platform-${{ github.event_name == 'workflow_run' && 'master' || github.ref }}
+  group: build-platform-${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository) && 'master' || github.run_id }}
   cancel-in-progress: false
 
 jobs:

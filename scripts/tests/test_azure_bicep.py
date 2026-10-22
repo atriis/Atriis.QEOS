@@ -315,6 +315,18 @@ def test_role_check_flags_the_deploy_identitys_old_acrpush_and_deletes_it_when_a
     assert out.returncode == 0 and deleted == ["old"]
 
 
+def test_role_check_takes_the_namespace_bicep_was_given(tmp_path):
+    # main.bicep's namespace parameter: the RBAC Admin assignment is on <cluster>/namespaces/<namespace>
+    other = {"build": CURRENT["build"],
+             "deploy": CURRENT["deploy"][:3] + [("a5", "Azure Kubernetes Service RBAC Admin", f"{AKS}/namespaces/qeos-b")]}
+    out, _ = check_roles(tmp_path, other)
+    assert out.returncode == 1 and "STALE  deploy  Azure Kubernetes Service RBAC Admin" in out.stdout
+    out, _ = check_roles(tmp_path, other, "--namespace", "qeos-b")
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert bicep_string(MAIN, r"^param namespace string") == "qeos"
+    assert "namespace=qeos\n" in text(ROLE_CHECK)
+
+
 def test_role_check_knows_the_roles_bicep_assigns():
     # The role names the script expects are those of the role ids acr.bicep and aks.bicep assign
     script = text(ROLE_CHECK)

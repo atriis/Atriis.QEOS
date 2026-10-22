@@ -206,14 +206,15 @@ once now on an environment created before the split, check, from the repository 
 
 ```bash
 export QEOS_BUILD_PRINCIPAL_ID=<build sp object id> QEOS_DEPLOY_PRINCIPAL_ID=<deploy sp object id>
-bash deploy/azure/check-role-assignments.sh rg-qeos-staging            # lists them; exit 1 if any is stale
-bash deploy/azure/check-role-assignments.sh rg-qeos-staging --delete   # removes the stale ones
+# --namespace: main.bicep's namespace parameter (the default, qeos, may be left out)
+bash deploy/azure/check-role-assignments.sh rg-qeos-staging --namespace qeos            # lists them; exit 1 if any is stale
+bash deploy/azure/check-role-assignments.sh rg-qeos-staging --namespace qeos --delete   # removes the stale ones
 ```
 
 It reads every assignment of the two service principals (`az role assignment list --assignee <id> --all`), keeps
 those inside the resource group, and accepts only what `modules/acr.bicep` and `modules/aks.bicep` make: build AcrPush
 on the registry; deploy AcrPull on the registry, Azure Kubernetes Service Cluster User Role and Contributor Role on the
-cluster, and Azure Kubernetes Service RBAC Admin on `<cluster>/namespaces/qeos`. By hand, the deploy identity's old
+cluster, and Azure Kubernetes Service RBAC Admin on `<cluster>/namespaces/<namespace>`. By hand, the deploy identity's old
 role is:
 
 ```bash

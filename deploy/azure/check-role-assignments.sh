@@ -6,14 +6,26 @@
 # flags each one Bicep does not make; with --delete it removes the flagged ones.
 #
 # Usage: QEOS_BUILD_PRINCIPAL_ID=<object id> QEOS_DEPLOY_PRINCIPAL_ID=<object id> \
-#          bash deploy/azure/check-role-assignments.sh <resource group> [--delete]
+#          bash deploy/azure/check-role-assignments.sh <resource group> [--namespace <name>] [--delete]
+# --namespace: the chart's namespace, main.bicep's `namespace` parameter (default qeos)
 # Needs: az signed in with read access to role assignments (and User Access Administrator or Owner for --delete).
 # Exit status: 0 when nothing is stale (or every stale one was deleted), 1 when a stale assignment remains.
 set -euo pipefail
 
-rg="${1:?usage: check-role-assignments.sh <resource group> [--delete]}"
-delete="${2:-}"
-[ -z "$delete" ] || [ "$delete" = --delete ] || { echo "unknown option $delete" >&2; exit 2; }
+usage="usage: check-role-assignments.sh <resource group> [--namespace <name>] [--delete]"
+rg="${1:?$usage}"
+shift
+namespace=qeos
+delete=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --delete) delete=--delete ;;
+    --namespace) namespace="${2:?$usage}"; shift ;;
+    *) echo "unknown option $1; $usage" >&2; exit 2 ;;
+  esac
+  shift
+done
+[[ "$namespace" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ ]] || { echo "not a namespace name: $namespace" >&2; exit 2; }
 : "${QEOS_BUILD_PRINCIPAL_ID:?QEOS_BUILD_PRINCIPAL_ID is required (the build identity: its service principal object id)}"
 : "${QEOS_DEPLOY_PRINCIPAL_ID:?QEOS_DEPLOY_PRINCIPAL_ID is required (the deploy identity: its service principal object id)}"
 
@@ -23,7 +35,7 @@ expected() {
   local who="$1" role="$2" scope="${3,,}"
   local acr='/providers/microsoft.containerregistry/registries/[^/]+$'
   local aks='/providers/microsoft.containerservice/managedclusters/[^/]+$'
-  local ns='/providers/microsoft.containerservice/managedclusters/[^/]+/namespaces/qeos$'
+  local ns="/providers/microsoft.containerservice/managedclusters/[^/]+/namespaces/${namespace}\$"
   case "$who|$role" in
     "build|AcrPush") [[ "$scope" =~ $acr ]] ;;
     "deploy|AcrPull") [[ "$scope" =~ $acr ]] ;;
