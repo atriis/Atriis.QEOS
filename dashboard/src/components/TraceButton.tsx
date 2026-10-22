@@ -21,7 +21,8 @@ type Status = "" | "Opening trace…" | "Trace opened in a new tab" | "Downloadi
 
 /**
  * A result's Playwright traces (ADR-037): "Trace" opens the first one in the self-hosted trace viewer in a new tab,
- * the download button saves each as trace-<id>.zip. Nothing is requested until a button is pressed.
+ * the download button saves each as trace-<id>.zip. Nothing is requested until a button is pressed. While one works
+ * the other is disabled, so their status and error lines cannot cross.
  */
 export default function TraceButton({ projectId, runId, resultId, name, count, showNote }: Props) {
   const [busy, setBusy] = useState(false);
@@ -88,13 +89,13 @@ export default function TraceButton({ projectId, runId, resultId, name, count, s
 
   return (
     <>
-      <button type="button" className="shot-button trace-button" aria-label={`Open trace for ${name}`} aria-busy={opening}
-        onClick={() => { if (!opening) open(); }}>
+      <button type="button" className="shot-button trace-button" aria-label={`Open trace for ${name} in a new tab`}
+        aria-busy={opening} disabled={busy} onClick={() => { if (!opening) open(); }}>
         <ExternalLink size={14} aria-hidden="true" />
         <span>{opening ? "Opening…" : "Trace"}</span>
       </button>
       <button type="button" className="shot-button trace-button" aria-label={`Download trace for ${name}`} title="Download trace"
-        aria-busy={busy} onClick={() => { if (!busy) void download(); }}>
+        aria-busy={busy} disabled={opening} onClick={() => { if (!busy) void download(); }}>
         <Download size={14} aria-hidden="true" />
         {busy && <span>Downloading…</span>}
       </button>

@@ -196,7 +196,9 @@ details.
   The viewer is Playwright's own (`playwright-core`, an exact version in `dashboard/package.json`), copied into the
   dashboard image and served from `/trace-viewer/` on the same origin; no trace goes to `trace.playwright.dev` or
   any other site. Its page URL carries the link, so nginx sends `Referrer-Policy: no-referrer` there, and the
-  dashboard opens it in a new tab without an opener.
+  dashboard opens it in a new tab without an opener. The viewer runs on the dashboard's origin, with the
+  dashboard's reach (its storage, the API under the user's session), so `playwright-core` is pinned to an exact version
+  and a bump is deliberate, checked by opening a real trace before it ships.
 - **Gateway.** TLS 1.2/1.3. Per-IP rate limits: 20 requests/s on the API,
   10/s on uploads, 50/s (burst 100, 6 MB body) on screenshot uploads, 10/s (burst 20, 101 MB body, streamed
   unbuffered) on trace uploads, and 5/s on sign-in, registration, password and MFA

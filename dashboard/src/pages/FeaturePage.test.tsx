@@ -429,7 +429,7 @@ test("a scenario card shows a Trace button naming its case, only when the result
   );
   renderAt();
   const cards = await screen.findAllByRole("article");
-  expect(await within(cards[0]).findByRole("button", { name: "Open trace for TC-12" })).toBeInTheDocument();
+  expect(await within(cards[0]).findByRole("button", { name: "Open trace for TC-12 in a new tab" })).toBeInTheDocument();
   expect(within(cards[0]).getByRole("button", { name: "Download trace for TC-12" })).toBeInTheDocument();
   expect(within(cards[1]).queryByRole("button", { name: /(Open|Download) trace/ })).toBeNull();
   expect(screen.queryByText(/playwright show-trace/i)).toBeNull();

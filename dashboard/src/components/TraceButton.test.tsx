@@ -92,7 +92,7 @@ test("Open trace asks for a one-time link and sends a new tab to the self-hosted
     }),
   );
   render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={2} />);
-  await userEvent.click(screen.getByRole("button", { name: "Open trace for test_ok" }));
+  await userEvent.click(screen.getByRole("button", { name: "Open trace for test_ok in a new tab" }));
   const url = `${window.location.origin}/api/v1/artifact-links/tok-en`;
   await waitFor(() => expect(tab.location.href).toBe("/trace-viewer/index.html?trace=" + encodeURIComponent(url)));
   // The tab opens in the click itself (no pop-up blocker), blank, and loses its opener before it is sent anywhere
@@ -112,11 +112,11 @@ test("a failed link closes the blank tab, says so, and the button works again", 
     http.post(`${P}/artifacts/:id/link`, () => HttpResponse.json({ detail: "Not found" }, { status: 404 })),
   );
   render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={1} />);
-  await userEvent.click(screen.getByRole("button", { name: "Open trace for test_ok" }));
+  await userEvent.click(screen.getByRole("button", { name: "Open trace for test_ok in a new tab" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("The trace could not be opened. Try again.");
   expect(tab.closed).toBe(true);
   expect(tab.location.href).toBe("");
-  expect(screen.getByRole("button", { name: "Open trace for test_ok" })).toHaveAttribute("aria-busy", "false");
+  expect(screen.getByRole("button", { name: "Open trace for test_ok in a new tab" })).toHaveAttribute("aria-busy", "false");
 });
 
 test("a blocked pop-up asks to allow pop-ups and requests no link", async () => {
@@ -125,7 +125,48 @@ test("a blocked pop-up asks to allow pop-ups and requests no link", async () => 
   let linked = false;
   server.use(http.post(`${P}/artifacts/:id/link`, () => { linked = true; return HttpResponse.json({}, { status: 201 }); }));
   render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={1} />);
-  await userEvent.click(screen.getByRole("button", { name: "Open trace for test_ok" }));
+  await userEvent.click(screen.getByRole("button", { name: "Open trace for test_ok in a new tab" }));
   expect(await screen.findByRole("alert")).toHaveTextContent("Allow pop-ups for this site to open the trace.");
   expect(linked).toBe(false);
+});
+
+test("a result whose list has no trace closes the blank tab and says so", async () => {
+  setAccessToken("acc");
+  const { tab } = stubTab();
+  server.use(http.get(`${P}/runs/9/results/1/artifacts`, () => HttpResponse.json({ artifacts: [] })));
+  render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={1} />);
+  await userEvent.click(screen.getByRole("button", { name: "Open trace for test_ok in a new tab" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("The trace could not be opened. Try again.");
+  expect(tab.closed).toBe(true);
+  expect(tab.location.href).toBe("");
+});
+
+test("while one button works the other is disabled, so their messages cannot cross", async () => {
+  setAccessToken("acc");
+  stubSave();
+  stubTab();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  server.use(
+    http.get(`${P}/runs/9/results/1/artifacts`, async () => { await gate; return HttpResponse.json({ artifacts: [{ id: 5, kind: "trace", name: "a.zip", bytes: 4 }] }); }),
+    http.get(`${P}/artifacts/:id`, () => new HttpResponse("PK")),
+    http.post(`${P}/artifacts/:id/link`, () => HttpResponse.json({ url: "/api/v1/artifact-links/t", expires_at: "2026-10-22T10:00:00Z" }, { status: 201 })),
+  );
+  render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={1} />);
+  const openButton = screen.getByRole("button", { name: "Open trace for test_ok in a new tab" });
+  const downloadButton = screen.getByRole("button", { name: "Download trace for test_ok" });
+  await userEvent.click(downloadButton);
+  expect(openButton).toBeDisabled();
+  release();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Trace downloaded"));
+  expect(openButton).toBeEnabled();
+
+  let releaseOpen!: () => void;
+  const openGate = new Promise<void>((r) => { releaseOpen = r; });
+  server.use(http.get(`${P}/runs/9/results/1/artifacts`, async () => { await openGate; return HttpResponse.json({ artifacts: [{ id: 5, kind: "trace", name: "a.zip", bytes: 4 }] }); }));
+  await userEvent.click(openButton);
+  expect(downloadButton).toBeDisabled();
+  releaseOpen();
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Trace opened in a new tab"));
+  expect(downloadButton).toBeEnabled();
 });

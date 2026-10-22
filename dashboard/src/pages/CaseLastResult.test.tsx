@@ -249,7 +249,7 @@ test("a viewer, who cannot edit the case, can still open its screenshots", async
 test("a result with traces shows a Trace button beside the pill and the show-trace note; none without", async () => {
   setup(kase(), result({ result_id: 77, trace_count: 1 }));
   renderCase();
-  expect(await screen.findByRole("button", { name: "Open trace for TC-7" })).toHaveTextContent("Trace");
+  expect(await screen.findByRole("button", { name: "Open trace for TC-7 in a new tab" })).toHaveTextContent("Trace");
   expect(screen.getByRole("button", { name: "Download trace for TC-7" })).toBeInTheDocument();
   expect(screen.getByText(/a downloaded trace opens with npx playwright show-trace/i)).toBeInTheDocument();
 });
@@ -258,6 +258,6 @@ test("no Trace button when the result has no traces or the server does not say",
   setup(kase(), result({ result_id: 77 }));
   renderCase();
   await screen.findByText(/failed/i);
-  expect(screen.queryByRole("button", { name: /Download trace/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /(Open|Download) trace/ })).toBeNull();
   expect(screen.queryByText(/playwright show-trace/i)).toBeNull();
 });

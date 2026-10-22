@@ -452,9 +452,9 @@ test("a result with traces has a Trace button and a note; one without has none",
     { ...result, id: 3, test_key: "tests/a.py::TestLogin::test_old", name: "test_old" },
   ]))));
   renderDetail();
-  expect(await screen.findByRole("button", { name: "Open trace for test_ok" })).toHaveTextContent("Trace");
+  expect(await screen.findByRole("button", { name: "Open trace for test_ok in a new tab" })).toHaveTextContent("Trace");
   expect(screen.getByRole("button", { name: "Download trace for test_ok" })).toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: /Download trace for test_no/ })).toBeNull();
-  expect(screen.queryByRole("button", { name: /Download trace for test_old/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /(Open|Download) trace for test_no/ })).toBeNull();
+  expect(screen.queryByRole("button", { name: /(Open|Download) trace for test_old/ })).toBeNull();
   expect(screen.getByText(/a downloaded trace opens with npx playwright show-trace/i)).toBeInTheDocument();
 });
