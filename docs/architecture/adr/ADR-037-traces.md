@@ -56,4 +56,4 @@ which expire and need a GitHub sign-in. ADR-036 put MinIO behind ingestion for s
   deliberate and checked by opening a real trace.
 - A link's create and check both read the database's clock (`clock_timestamp()` on PostgreSQL, whose `now()` is
   fixed at the transaction's start), so replicas with skewed clocks agree on its 60 s (2026-10-22).
-- Follow-ups: open more than the first trace.
+- A result with several traces shows one numbered button per trace, each opening its own viewer tab (2026-10-22).

@@ -21,10 +21,11 @@ export const TRACE_NOTE = "A downloaded trace opens with npx playwright show-tra
 const VIEWER_BLOCKED = "This browser cannot run the trace viewer for this site, usually because it does not trust the "
   + "site's certificate. Download the trace instead, or ask an administrator for a trusted certificate.";
 
-type Status = "" | "Opening trace…" | "Trace opened in a new tab" | "Downloading trace…" | "Trace downloaded";
+type Status = "" | "Opening trace…" | `Trace${string} opened in a new tab` | "Downloading trace…" | "Trace downloaded";
 
 /**
- * A result's Playwright traces (ADR-037): "Trace" opens the first one in the self-hosted trace viewer in a new tab,
+ * A result's Playwright traces (ADR-037): "Trace" opens it in the self-hosted trace viewer in a new tab (several get
+ * one numbered button each, as the viewer shows one trace per tab),
  * the download button saves each as trace-<id>.zip. Nothing is requested until a button is pressed. While one works
  * the other is disabled, so their status and error lines cannot cross.
  */
@@ -33,18 +34,22 @@ export default function TraceButton({ projectId, runId, resultId, name, count, s
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState<Status>("");
-  if ((count ?? 0) <= 0) return null;
+  const total = count ?? 0;
+  if (total <= 0) return null;
+  // The viewer opens one trace per tab: several traces get one numbered button each
+  const several = total > 1;
 
-  async function firstTrace(): Promise<number | undefined> {
+  /** The id of the result's trace at `index` (0-based, in the result's order), undefined when it is gone. */
+  async function nthTrace(index: number): Promise<number | undefined> {
     const { artifacts } = await listResultArtifacts(projectId, runId, resultId);
-    return artifacts.find((a) => a.kind === "trace")?.id;
+    return artifacts.filter((a) => a.kind === "trace")[index]?.id;
   }
 
   /**
    * The tab opens blank inside the click, so no pop-up blocker stops it after the awaits below (Safari blocks a
    * window.open that follows an await). It loses its opener (as noopener would) before it is sent to the viewer.
    */
-  function open() {
+  function open(index: number) {
     setError("");
     const tab = window.open("", "_blank");
     if (!tab) {
@@ -63,12 +68,12 @@ export default function TraceButton({ projectId, runId, resultId, name, count, s
           setError(VIEWER_BLOCKED);
           return;
         }
-        const id = await firstTrace();
+        const id = await nthTrace(index);
         if (id === undefined) throw new Error("no trace");
         // The link lasts 60 s: ask for it last, just before the viewer reads it
         const { url } = await createArtifactLink(projectId, id);
         tab.location.href = traceViewerUrl(url);
-        setStatus("Trace opened in a new tab");
+        setStatus(several ? `Trace ${index + 1} opened in a new tab` : "Trace opened in a new tab");
       } catch {
         tab.close();
         setStatus("");
@@ -99,12 +104,28 @@ export default function TraceButton({ projectId, runId, resultId, name, count, s
 
   return (
     <>
-      <button type="button" className="shot-button trace-button" aria-label={`Open trace for ${name} in a new tab`}
-        aria-busy={opening} disabled={busy} onClick={() => { if (!opening) open(); }}>
-        <ExternalLink size={14} aria-hidden="true" />
-        <span>{opening ? "Opening…" : "Trace"}</span>
-      </button>
-      <button type="button" className="shot-button trace-button" aria-label={`Download trace for ${name}`} title="Download trace"
+      {several ? (
+        <span role="group" aria-label={`Traces for ${name}`} className="trace-group">
+          <span className="trace-group-label" aria-hidden="true">
+            <ExternalLink size={14} aria-hidden="true" />{opening ? "Opening…" : "Traces"}
+          </span>
+          {Array.from({ length: total }, (_, i) => (
+            <button key={i} type="button" className="shot-button trace-button trace-number"
+              aria-label={`Open trace ${i + 1} of ${total} for ${name} in a new tab`}
+              aria-busy={opening} disabled={busy} onClick={() => { if (!opening) open(i); }}>
+              {i + 1}
+            </button>
+          ))}
+        </span>
+      ) : (
+        <button type="button" className="shot-button trace-button" aria-label={`Open trace for ${name} in a new tab`}
+          aria-busy={opening} disabled={busy} onClick={() => { if (!opening) open(0); }}>
+          <ExternalLink size={14} aria-hidden="true" />
+          <span>{opening ? "Opening…" : "Trace"}</span>
+        </button>
+      )}
+      <button type="button" className="shot-button trace-button"
+        aria-label={`Download ${several ? "traces" : "trace"} for ${name}`} title={several ? "Download traces" : "Download trace"}
         aria-busy={busy} disabled={opening} onClick={() => { if (!busy) void download(); }}>
         <Download size={14} aria-hidden="true" />
         {busy && <span>Downloading…</span>}

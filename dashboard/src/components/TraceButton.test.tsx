@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { server } from "../test/server";
@@ -43,7 +43,7 @@ test("fetches with the Bearer token and saves trace-<id>.zip for each trace", as
     http.get(`${P}/artifacts/:id`, ({ request }) => { auth.push(request.headers.get("authorization")); return new HttpResponse("PK\x03\x04"); }),
   );
   render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={2} />);
-  await userEvent.click(screen.getByRole("button", { name: "Download trace for test_ok" }));
+  await userEvent.click(screen.getByRole("button", { name: "Download traces for test_ok" }));
   await waitFor(() => expect(saved).toEqual(["trace-5.zip", "trace-6.zip"]));
   expect(auth).toEqual(["Bearer acc", "Bearer acc"]);
 });
@@ -100,7 +100,7 @@ test("Open trace asks for a one-time link and sends a new tab to the self-hosted
       return HttpResponse.json({ url: "/api/v1/artifact-links/tok-en", expires_at: "2026-10-22T10:00:00Z" }, { status: 201 });
     }),
   );
-  render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={2} />);
+  render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={1} />);
   await userEvent.click(screen.getByRole("button", { name: "Open trace for test_ok in a new tab" }));
   const url = `${window.location.origin}/api/v1/artifact-links/tok-en`;
   await waitFor(() => expect(tab.location.href).toBe("/trace-viewer/index.html?trace=" + encodeURIComponent(url)));
@@ -108,7 +108,7 @@ test("Open trace asks for a one-time link and sends a new tab to the self-hosted
   expect(open).toHaveBeenCalledTimes(1);
   expect(open).toHaveBeenCalledWith("", "_blank");
   expect(tab.opener).toBeNull();
-  // The first trace only: the viewer opens one trace per tab
+  // One trace per tab: a count of 1 opens the first
   expect(asked).toEqual([{ path: "5", auth: "Bearer acc" }]);
   expect(screen.getByRole("status")).toHaveTextContent("Trace opened in a new tab");
 });
@@ -229,4 +229,41 @@ test("the viewer check runs once per page when it succeeds", async () => {
   await userEvent.click(button);
   await waitFor(() => expect(button).toHaveAttribute("aria-busy", "false"));
   expect(register).toHaveBeenCalledTimes(1);
+});
+
+test("several traces: a labelled group of numbered buttons, each opening its own trace", async () => {
+  setAccessToken("acc");
+  const { tab } = stubTab();
+  const asked: string[] = [];
+  server.use(
+    http.get(`${P}/runs/9/results/1/artifacts`, () => HttpResponse.json({ artifacts: [
+      { id: 5, kind: "trace", name: "trace", bytes: 4 }, { id: 6, kind: "trace", name: "trace", bytes: 4 },
+      { id: 7, kind: "trace", name: "trace", bytes: 4 }] })),
+    http.post(`${P}/artifacts/:id/link`, ({ params }) => {
+      asked.push(String(params.id));
+      return HttpResponse.json({ url: "/api/v1/artifact-links/t", expires_at: "2026-10-22T10:00:00Z" }, { status: 201 });
+    }),
+  );
+  render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={3} />);
+  const group = screen.getByRole("group", { name: "Traces for test_ok" });
+  const buttons = within(group).getAllByRole("button");
+  expect(buttons.map((b) => b.getAttribute("aria-label"))).toEqual([1, 2, 3].map((n) => `Open trace ${n} of 3 for test_ok in a new tab`));
+  expect(buttons.map((b) => b.textContent)).toEqual(["1", "2", "3"]);
+  expect(screen.queryByRole("button", { name: "Open trace for test_ok in a new tab" })).not.toBeInTheDocument();
+  await userEvent.click(buttons[1]);
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Trace 2 opened in a new tab"));
+  expect(asked).toEqual(["6"]);
+  expect(tab.location.href).toContain("/trace-viewer/index.html?trace=");
+  // The download still saves every trace
+  expect(screen.getByRole("button", { name: "Download traces for test_ok" })).toBeEnabled();
+});
+
+test("a trace that is gone since the count closes the tab and says so", async () => {
+  setAccessToken("acc");
+  const { tab } = stubTab();
+  server.use(http.get(`${P}/runs/9/results/1/artifacts`, () => HttpResponse.json({ artifacts: [{ id: 5, kind: "trace", name: "trace", bytes: 4 }] })));
+  render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={2} />);
+  await userEvent.click(screen.getByRole("button", { name: "Open trace 2 of 2 for test_ok in a new tab" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("The trace could not be opened. Try again.");
+  expect(tab.closed).toBe(true);
 });

@@ -1271,6 +1271,10 @@ button.shot-button { gap: var(--space-1); min-width: 24px; min-height: 24px; pad
 button.shot-button:hover:not(:disabled) { color: var(--text-primary); }
 button.shot-button-step { background: transparent; border-color: transparent; padding: 2px 4px; }
 button.trace-button { gap: var(--space-1); }
+/* Several traces: "Traces" then one numbered button each (the viewer shows one trace per tab) */
+.trace-group { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
+.trace-group-label { display: inline-flex; align-items: center; gap: var(--space-1); font-size: 12px; color: var(--text-secondary); }
+button.trace-number { font-variant-numeric: tabular-nums; font-weight: 600; }
 .trace-note { font-size: 12px; }
 .trace-error { color: var(--danger-text); font-size: 13px; }
 .field-inline { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
