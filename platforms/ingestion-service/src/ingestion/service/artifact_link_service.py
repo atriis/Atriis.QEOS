@@ -28,8 +28,10 @@ class LinkedFile(NamedTuple):
     size: int
 
 
-def utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+def db_now(db: Session) -> datetime:
+    """The database's clock. A link is created by one replica and followed through another; reading both times from
+    the one database keeps their 60 s the same whatever the replicas' own clocks say."""
+    return _aware(db.execute(select(func.now())).scalar_one())
 
 
 def client_ip(request: Request) -> str:
@@ -48,7 +50,7 @@ def _hash(token: str) -> str:
 def create(db: Session, artifact_id: int, user_id: int, ip: str) -> Tuple[str, datetime]:
     """A new link; returns the token (never stored, never logged) and when it expires. The expired links go first
     (an indexed delete), so they do not pile up between retention passes."""
-    now = utcnow()
+    now = db_now(db)
     db.query(ArtifactLink).filter(ArtifactLink.expires_at <= now).delete(synchronize_session=False)
     token = secrets.token_urlsafe(32)
     expires_at = now + timedelta(seconds=LINK_SECONDS)
@@ -78,7 +80,7 @@ def resolve(db: Session, token: str, ip: str) -> Optional[LinkedFile]:
         # As every artifact read: a row whose blob is not its run's project's is invisible
         .where(ArtifactLink.token_sha256 == _hash(token), Blob.project_id == Run.project_id)
     ).one_or_none()
-    if row is None or utcnow() >= _aware(row.expires_at) or row.client_ip != ip:
+    if row is None or db_now(db) >= _aware(row.expires_at) or row.client_ip != ip:
         return None
     return LinkedFile(row.user_id, row.project_id, row.artifact_id, row.sha256, row.media_type, row.bytes)
 

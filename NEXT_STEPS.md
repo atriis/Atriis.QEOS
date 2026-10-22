@@ -23,6 +23,6 @@ CI, and listed shipped features as unbuilt).
   The collector 0.14.0 release and the OBT hook (PR "QEOS: send failure traces to QEOS") are pending. Stage 2, the
   trace viewer in the browser, is done 2026-10-22: one-time links and Playwright's viewer (`playwright-core` pinned)
   served by the dashboard at `/trace-viewer/`. When bumping `playwright-core`, open a real trace before shipping.
-  Follow-ups: use the database clock (`now()`) for link create and check; open more than the first trace.
+  Follow-ups: open more than the first trace.
   Design: `docs/superpowers/specs/2026-10-21-traces-and-videos-design.md`.
 - **Videos.** Later, on top of traces: section 8 of the same design.

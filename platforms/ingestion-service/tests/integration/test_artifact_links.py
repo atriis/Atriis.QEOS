@@ -20,9 +20,9 @@ NOT_FOUND = {"detail": "Not found"}
 
 @pytest.fixture
 def clock(monkeypatch):
-    """The links' clock, moved by the tests."""
+    """The links' clock (the database's), moved by the tests."""
     now = {"at": T0}
-    monkeypatch.setattr(artifact_link_service, "utcnow", lambda: now["at"])
+    monkeypatch.setattr(artifact_link_service, "db_now", lambda db: now["at"])
     return now
 
 
@@ -236,3 +236,14 @@ def test_each_use_is_audited_without_the_token(client, auth, trace_row, clock, c
     used = [r.getMessage() for r in caplog.records if "artifact link used" in r.getMessage()]
     assert used == [f"artifact link used: user_id=7 artifact_id={artifact_id} ip={IP}"] * 2
     assert not any(token in r.getMessage() for r in caplog.records)
+
+
+def test_links_read_the_database_clock_not_the_replicas(db):
+    """Create and check read the same clock, the database's, so two replicas with skewed clocks agree on a link's
+    60 s. Unpatched here: the real clock, as an aware UTC time."""
+    from datetime import datetime, timezone
+
+    before = datetime.now(timezone.utc) - timedelta(seconds=5)
+    now = artifact_link_service.db_now(db)
+    assert now.tzinfo is not None
+    assert before <= now <= datetime.now(timezone.utc) + timedelta(seconds=5)
