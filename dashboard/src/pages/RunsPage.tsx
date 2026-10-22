@@ -5,7 +5,7 @@ import { ChevronRight } from "lucide-react";
 import { listRuns, RunFilters, RunScope, SCOPES } from "../api/runs";
 import { listLogPatterns } from "../api/logPatterns";
 import { RUNS_PAGE_SIZE } from "../lib/runQueries";
-import { formatDuration } from "../api/analytics";
+import { formatDuration, getBranches } from "../api/analytics";
 import ErrorBanner from "../components/ErrorBanner";
 import FilterBar from "../components/FilterBar";
 import FilterChips, { revealFilters, type AppliedFilter, type QuickChip } from "../components/FilterChips";
@@ -24,6 +24,9 @@ import { isSubset, stoppedAfterStage1 } from "../lib/runScope";
 
 // Shared with the Overview's run widgets, so their first page is this view's answer
 const PAGE = RUNS_PAGE_SIZE;
+// The branch list's reach: the API's longest period and largest page
+const BRANCH_DAYS = 365;
+const BRANCH_LIMIT = 200;
 // The API has no sort parameter for runs: the columns sort the page that is loaded
 const SORT_KEYS = ["started", "duration", "failed"] as const;
 type SortKey = (typeof SORT_KEYS)[number];
@@ -213,6 +216,16 @@ export default function RunsPage() {
     enabled: moreOpen || applied.pattern !== "",
   });
   const patternOptions = (patterns.data?.patterns ?? []).map((p) => ({ value: p.name, label: p.name }));
+  // The branch filter is an exact match, so it offers the project's branches: those with runs in the last year, as
+  // many as the API lists, A to Z. A branch from the URL that is not among them stays on offer
+  const branchList = useQuery({
+    queryKey: ["branches", id, BRANCH_DAYS, "all"],
+    queryFn: () => getBranches(id, { days: BRANCH_DAYS, limit: BRANCH_LIMIT }),
+    staleTime: 60_000,
+  });
+  const branchNames = new Set((branchList.data ?? []).flatMap((b) => (b.branch === null ? [] : [b.branch])));
+  if (form.branch) branchNames.add(form.branch);
+  const branchOptions = [...branchNames].sort((a, b) => a.localeCompare(b)).map((b) => ({ value: b, label: b }));
   // While the value filter is on, each run opens scoped to the results holding it
   const runSearch = applied.value
     ? `?${new URLSearchParams({ value: applied.value, ...(applied.pattern ? { pattern: applied.pattern } : {}) })}` : "";
@@ -240,10 +253,8 @@ export default function RunsPage() {
         <FilterBar>
           <FilterSelect label="Status" value={form.status} emptyLabel="All" onChange={(v) => set("status", v)}
             options={[{ value: "failing", label: "With failures" }, { value: "passing", label: "All green" }]} />
-          <label>
-            Branch
-            <input value={form.branch} onChange={(e) => set("branch", e.target.value)} placeholder="all" />
-          </label>
+          <FilterSelect label="Branch" value={form.branch} emptyLabel="All" onChange={(v) => set("branch", v)}
+            options={branchOptions} />
           <button type="submit" className="primary">Apply</button>
         </FilterBar>
         <details ref={moreRef} className="more-filters" open={moreOpen}

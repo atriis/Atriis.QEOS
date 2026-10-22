@@ -52,18 +52,29 @@ test("renders runs; clicking a run opens its detail", async () => {
   expect(await screen.findByText("RUN DETAIL")).toBeInTheDocument();
 });
 
+const branchStats = (branch: string | null) => ({ branch, runs: 1, executions: 1, failures: 0, pass_rate: 1, last_seen: "2026-10-01T12:00:00Z" });
+
 test("branch filter applies on submit; empty state offers to clear", async () => {
   const branches: (string | null)[] = [];
+  const asked: string[] = [];
   server.use(
     http.get("/api/v1/projects/42/runs", ({ request }) => {
       branches.push(new URL(request.url).searchParams.get("branch"));
       return HttpResponse.json([]);
     }),
+    http.get("/api/v1/projects/42/analytics/branches", ({ request }) => {
+      asked.push(new URL(request.url).search);
+      return HttpResponse.json([branchStats("main"), branchStats("release"), branchStats(null)]);
+    }),
   );
   renderRuns();
   await screen.findByText(/no runs/i);
   const before = branches.length;
-  await userEvent.type(screen.getByLabelText(/branch/i), "release");
+  // A dropdown of the project's branches (a year of runs, as many as the API gives), like the Branches view
+  const select = screen.getByLabelText(/branch/i);
+  await waitFor(() => expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["All", "main", "release"]));
+  expect(asked).toEqual(["?days=365&limit=200"]);
+  await userEvent.selectOptions(select, "release");
   expect(branches.length).toBe(before);
   await userEvent.click(screen.getByRole("button", { name: /apply/i }));
   expect(await screen.findByText(/no runs match these filters/i)).toBeInTheDocument();
@@ -336,4 +347,15 @@ test("the value filter is typed in More filters with a pattern from the project'
   await userEvent.selectOptions(await screen.findByLabelText("Pattern"), "trip_id");
   await userEvent.click(screen.getByRole("button", { name: "Apply" }));
   await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("value=3960562&pattern=trip_id"));
+});
+
+test("a branch in the URL that the list does not hold stays selected", async () => {
+  server.use(
+    http.get("/api/v1/projects/42/runs", () => HttpResponse.json([])),
+    http.get("/api/v1/projects/42/analytics/branches", () => HttpResponse.json([branchStats("main")])),
+  );
+  renderRuns("/projects/42/runs?branch=old%2Fbranch");
+  const select = await screen.findByRole("combobox", { name: "Branch" });
+  await waitFor(() => expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["All", "main", "old/branch"]));
+  expect(select).toHaveValue("old/branch");
 });
