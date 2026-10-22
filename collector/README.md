@@ -8,7 +8,7 @@ Cucumber).
 ## Install
 
 ```bash
-pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.13.1#subdirectory=collector"
+pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.14.0#subdirectory=collector"
 ```
 
 ### Renamed from `qav-collector` (0.4.0)
@@ -69,7 +69,7 @@ instead of storing it twice.
           QEOS_URL: https://qeos.example.com
           QEOS_API_KEY: ${{ secrets.QEOS_API_KEY }}
         run: |
-          pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.13.1#subdirectory=collector"
+          pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.14.0#subdirectory=collector"
           qeos-collector upload "reports/**/*.xml"
 ```
 
@@ -80,7 +80,7 @@ test:
   script:
     - pytest --junitxml=reports/junit.xml
   after_script:
-    - pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.13.1#subdirectory=collector"
+    - pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.14.0#subdirectory=collector"
     - qeos-collector upload "reports/**/*.xml"
   variables:
     QEOS_URL: https://qeos.example.com
@@ -98,7 +98,7 @@ post {
   always {
     withCredentials([string(credentialsId: 'qeos-api-key', variable: 'QEOS_API_KEY')]) {
       sh '''
-        pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.13.1#subdirectory=collector"
+        pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.14.0#subdirectory=collector"
         QEOS_URL=https://qeos.example.com qeos-collector upload "target/surefire-reports/*.xml"
       '''
     }
@@ -117,7 +117,7 @@ mass-archive guard is the backstop.
 steps:
   - script: mvn test   # or pytest --junitxml=reports/junit.xml, dotnet test --logger trx, …
   - script: |
-      pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.13.1#subdirectory=collector"
+      pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collector-v0.14.0#subdirectory=collector"
       qeos-collector upload "**/TEST-*.xml"
     displayName: Upload test results to QEOS
     condition: always()        # report results even when the tests failed
