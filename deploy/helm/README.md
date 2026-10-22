@@ -224,9 +224,11 @@ gateway template (`manifests/charts/istio-control/istio-discovery/files/kube-gat
   error, is a warning naming it). A manual tag or SHA must be on master (`git merge-base --is-ancestor`), as must a
   platform version's `platform-v*` tag. A `platform-v*` tag builds nothing: `build-platform.yml`'s job `release`
   checks that master's build pushed `qeos/<image>:<sha>` for the tagged commit and copies each manifest to
-  `:<version>` in the registry (`docker buildx imagetools create`, then the two digests compared), so a version is the
-  very image staging ran. It fails, naming them, when any `:<sha>` image is missing, and never moves an existing
-  version.
+  `:<version>` in the registry (`docker buildx imagetools create --prefer-index=false`, then the two digests compared),
+  so a version is the very image staging ran. Before it tags anything it checks all seven: every `:<sha>` exists (a
+  registry error other than "not found" is printed as it is), no `:<version>` points at another image (a version is
+  never moved), and the manifest imagetools would push (`--dry-run`) is the `:<sha>` one, since the build identity
+  cannot delete a wrong tag.
 - **Steps**: a check of every variable's form (the client ids are GUIDs, the URL and host names well formed) before
   anything else; Azure sign-in with OIDC (no stored secret); kubectl and kubelogin pinned by version and SHA-256; a
   check that all seven images with that tag are in ACR and that the cluster is running; `az aks get-credentials` and

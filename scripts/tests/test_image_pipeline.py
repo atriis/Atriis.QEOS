@@ -102,7 +102,11 @@ def test_a_tag_never_builds_or_pushes_the_sha():
     for forbidden in ("docker build ", "docker push", "docker tag", "trivy", "az acr import"):
         assert forbidden not in script, forbidden
     run = step(release, "Tag the images with the version")["run"]
-    assert 'docker buildx imagetools create --tag "$image:$VERSION" "$image@${want[$name]}"' in run
+    # Without --prefer-index=false imagetools wraps a single image manifest in a new index: another digest
+    assert 'docker buildx imagetools create --prefer-index=false --tag "$image:$VERSION" "$image@${want[$name]}"' in run
+    assert "imagetools create --tag" not in run and run.count("--prefer-index=false") == 2
+    # The dry-run check of every image comes before the first push
+    assert run.index("--dry-run") < run.index("imagetools create --prefer-index=false --tag")
 
 
 def test_the_release_tags_every_image_the_build_pushes():
@@ -120,8 +124,10 @@ def bash() -> str:
     return found
 
 
-def run_release(tmp_path: Path, registry: dict) -> tuple:
-    """The release step's script against stub az and docker over a registry of files {"name:tag": digest}."""
+def run_release(tmp_path: Path, registry: dict, **stub_env: str) -> tuple:
+    """The release step's script against stub az, docker and jq over a registry of files {"name:tag": digest}.
+
+    AZ_ERROR makes az fail as a sign-in would; WRAP_IMAGE makes imagetools plan another manifest for that image."""
     reg = tmp_path / "registry"
     reg.mkdir()
     for ref, digest in registry.items():
@@ -130,18 +136,32 @@ def run_release(tmp_path: Path, registry: dict) -> tuple:
     stubs.mkdir()
     # az acr repository show --name ACR --image qeos/NAME:TAG --query digest -o tsv
     (stubs / "az").write_text(
-        '#!/bin/sh\nref="${7#qeos/}"; f="$REG/$(echo "$ref" | tr : _)"\n'
-        '[ -f "$f" ] || { echo "manifest unknown" >&2; exit 3; }\ncat "$f"; echo\n', newline="\n")
-    # docker buildx imagetools create --tag REG/qeos/NAME:VERSION REG/qeos/NAME@DIGEST: the registry gets the same digest
+        '#!/bin/sh\n[ -z "$AZ_ERROR" ] || { echo "ERROR: $AZ_ERROR" >&2; exit 1; }\n'
+        'ref="${7#qeos/}"; f="$REG/$(echo "$ref" | tr : _)"\n'
+        '[ -f "$f" ] || { echo "ERROR: manifest unknown: manifest tagged by $ref is not found" >&2; exit 1; }\n'
+        'cat "$f"; echo\n', newline="\n")
+    # docker buildx imagetools inspect --raw REG/qeos/NAME@DIGEST, and
+    # docker buildx imagetools create --prefer-index=false [--dry-run] --tag REG/qeos/NAME:VERSION REG/qeos/NAME@DIGEST:
+    # a copy keeps the digest; for WRAP_IMAGE the plan is another manifest
     (stubs / "docker").write_text(
-        '#!/bin/sh\necho "$*" >> "$REG/../docker.log"\ndst="${5##*/qeos/}"; src="${6##*@}"\n'
-        'printf %s "$src" > "$REG/$(echo "$dst" | tr : _)"\n', newline="\n")
+        '#!/bin/sh\nlast=""; dry=""; dst=""; prev=""\n'
+        'for a in "$@"; do [ "$a" = --dry-run ] && dry=1; [ "$prev" = --tag ] && dst="$a"; prev="$a"; last="$a"; done\n'
+        'src="${last##*@}"; name="${last##*/qeos/}"; name="${name%@*}"\n'
+        'if [ "$3" = inspect ]; then echo "{\\"manifest\\":\\"$src\\"}"; exit 0; fi\n'
+        'if [ -n "$dry" ]; then\n'
+        '  if [ "$name" = "$WRAP_IMAGE" ]; then echo "{\\"index\\":\\"$src\\"}"; else echo "{\\"manifest\\":\\"$src\\"}"; fi\n'
+        '  exit 0\nfi\n'
+        'echo "$*" >> "$REG/../docker.log"\n'
+        'printf %s "$src" > "$REG/$(echo "${dst##*/qeos/}" | tr : _)"\n', newline="\n")
+    # jq -S -c . on one-line JSON leaves it as it is (a developer's machine may have no jq)
+    (stubs / "jq").write_text('#!/bin/sh\ncat\n', newline="\n")
     for stub in stubs.iterdir():
         stub.chmod(0o755)
     script = tmp_path / "step.sh"
     script.write_text(step(build_jobs()["release"], "Tag the images with the version")["run"], newline="\n")
     env = dict(os.environ, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}", REG=reg.as_posix(),
-               ACR_NAME="acrqeos", SHA="a" * 40, VERSION="1.2.3", MSYS_NO_PATHCONV="1")
+               ACR_NAME="acrqeos", SHA="a" * 40, VERSION="1.2.3", MSYS_NO_PATHCONV="1", AZ_ERROR="", WRAP_IMAGE="")
+    env.update(stub_env)
     out = subprocess.run([bash(), "-e", script.as_posix()], env=env, capture_output=True, text=True)
     after = {f.name.replace("_", ":", 1): f.read_text().strip() for f in reg.iterdir()}
     log = (tmp_path / "docker.log").read_text() if (tmp_path / "docker.log").exists() else ""
@@ -159,7 +179,7 @@ def test_release_gives_the_version_the_sha_images_digest(tmp_path):
     assert out.returncode == 0, out.stdout + out.stderr
     for i, name in enumerate(IMAGES):
         assert after[f"{name}:1.2.3"] == after[f"{name}:{SHA}"] == f"sha256:{i:064x}"
-    assert log.count("buildx imagetools create") == 7
+    assert log.count("buildx imagetools create --prefer-index=false --tag") == 7
 
 
 def test_release_with_a_missing_sha_image_tags_nothing(tmp_path):
@@ -176,6 +196,22 @@ def test_release_never_moves_an_existing_version(tmp_path):
     out, after, log = run_release(tmp_path, built)
     assert out.returncode != 0 and "never moved" in out.stdout
     assert log == "" and after["dashboard:1.2.3"] == "sha256:" + "f" * 64
+
+
+def test_release_tags_nothing_when_imagetools_would_change_a_digest(tmp_path):
+    # Every image's planned manifest is checked before the first push: AcrPush cannot delete a wrong tag
+    built = {f"{name}:{SHA}": f"sha256:{i:064x}" for i, name in enumerate(IMAGES)}
+    out, after, log = run_release(tmp_path, built, WRAP_IMAGE="gateway")
+    assert out.returncode != 0 and "would not copy qeos/gateway" in out.stdout
+    assert log == "" and not any(ref.endswith(":1.2.3") for ref in after)
+
+
+def test_release_prints_a_registry_error_rather_than_missing(tmp_path):
+    built = {f"{name}:{SHA}": f"sha256:{i:064x}" for i, name in enumerate(IMAGES)}
+    out, after, log = run_release(tmp_path, built, AZ_ERROR="unauthorized: authentication required")
+    assert out.returncode != 0
+    assert "::error::Could not read qeos/auth-service:" in out.stderr and "unauthorized" in out.stderr
+    assert "Not in acrqeos" not in out.stdout and log == ""
 
 
 # ---- Two Azure identities: the build one (AcrPush) and the deploy one (the cluster), never the same variable ----

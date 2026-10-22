@@ -184,17 +184,28 @@ jobs:
         if: steps.azure.outputs.configured == 'true'
         run: az acr login --name "$ACR_NAME"
 
-      # Every image is checked first: a release with one image missing tags none. Then each :<sha> manifest is copied as
-      # is to :<version> (imagetools with one source and no change pushes the same manifest; AcrPush is enough, where
-      # az acr import needs a control-plane role), and the two digests are compared
+      # Nothing is tagged until every check has passed for all seven: each :<sha> exists, no :<version> points at another
+      # image, and what imagetools would push is the :<sha> manifest itself (--dry-run). --prefer-index=false: by default
+      # imagetools wraps a single image manifest in a new index, a different digest. AcrPush is enough for this, where
+      # az acr import needs a control-plane role; but it cannot delete a tag, so a wrong :<version> must never be pushed.
+      # After each push the two digests are compared once more
       - name: Tag the images with the version
         if: steps.azure.outputs.configured == 'true'
         run: |
           images=(auth-service organization-service project-service ingestion-service test-management-service
                   dashboard gateway)
-          # digest NAME TAG: the manifest digest of qeos/NAME:TAG in the registry, empty when it is not there
+          # digest NAME TAG: the manifest digest of qeos/NAME:TAG, empty when the registry has no such tag; any other
+          # failure (sign-in, permission, network) is printed and stops the step
           digest() {
-            az acr repository show --name "$ACR_NAME" --image "qeos/$1:$2" --query digest -o tsv 2>/dev/null || true
+            local out
+            if out="$(az acr repository show --name "$ACR_NAME" --image "qeos/$1:$2" --query digest -o tsv 2>&1)"; then
+              echo "$out"
+            elif grep -qiE 'manifest unknown|manifest_unknown|name unknown|name_unknown|not found' <<< "$out"; then
+              echo ""
+            else
+              echo "::error::Could not read qeos/$1:$2 in $ACR_NAME: $out" >&2
+              return 1
+            fi
           }
           declare -A want
           missing=()
@@ -207,18 +218,25 @@ jobs:
             exit 1
           fi
           for name in "${images[@]}"; do
+            image="$ACR_NAME.azurecr.io/qeos/$name"
             have="$(digest "$name" "$VERSION")"
             if [ -n "$have" ] && [ "$have" != "${want[$name]}" ]; then
               echo "::error::qeos/$name:$VERSION already exists for another image ($have): a version is never moved"
               exit 1
             fi
+            planned="$(docker buildx imagetools create --prefer-index=false --dry-run --tag "$image:$VERSION" "$image@${want[$name]}" | jq -S -c .)"
+            source="$(docker buildx imagetools inspect --raw "$image@${want[$name]}" | jq -S -c .)"
+            if [ -z "$source" ] || [ "$planned" != "$source" ]; then
+              echo "::error::imagetools would not copy qeos/$name:$SHA as it is (another manifest, another digest): nothing tagged"
+              exit 1
+            fi
           done
           for name in "${images[@]}"; do
             image="$ACR_NAME.azurecr.io/qeos/$name"
-            docker buildx imagetools create --tag "$image:$VERSION" "$image@${want[$name]}"
+            docker buildx imagetools create --prefer-index=false --tag "$image:$VERSION" "$image@${want[$name]}"
             got="$(digest "$name" "$VERSION")"
             if [ "$got" != "${want[$name]}" ]; then
-              echo "::error::qeos/$name:$VERSION is $got, not the digest of :$SHA (${want[$name]})"
+              echo "::error::qeos/$name:$VERSION is $got, not the digest of :$SHA (${want[$name]}). Someone with AcrDelete must remove it (az acr repository untag --name $ACR_NAME --image qeos/$name:$VERSION) before a rerun"
               exit 1
             fi
             echo "qeos/$name:$VERSION = qeos/$name:$SHA (${want[$name]})"
