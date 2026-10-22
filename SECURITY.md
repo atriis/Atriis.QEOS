@@ -193,6 +193,10 @@ details.
   the token. The gateway checks no credential on `/api/v1/artifact-links/` (the link is it), limits it as the API,
   keeps its error log to critical messages (which would otherwise print the token) and streams trace bytes without
   buffering them to disk. Creating a link deletes the expired ones, and so does the retention job.
+  The viewer is Playwright's own (`playwright-core`, an exact version in `dashboard/package.json`), copied into the
+  dashboard image and served from `/trace-viewer/` on the same origin; no trace goes to `trace.playwright.dev` or
+  any other site. Its page URL carries the link, so nginx sends `Referrer-Policy: no-referrer` there, and the
+  dashboard opens it in a new tab without an opener.
 - **Gateway.** TLS 1.2/1.3. Per-IP rate limits: 20 requests/s on the API,
   10/s on uploads, 50/s (burst 100, 6 MB body) on screenshot uploads, 10/s (burst 20, 101 MB body, streamed
   unbuffered) on trace uploads, and 5/s on sign-in, registration, password and MFA

@@ -1825,9 +1825,10 @@ case page shows the camera on the step.
 ### 4.12 Traces
 
 A failed Playwright test can send its trace (the ZIP with page snapshots, network calls and the action list) to QEOS.
-A **Trace** button then appears on a run's results and on a case's or scenario's latest result, and downloads
-`trace-<id>.zip`. Open it with `npx playwright show-trace trace-<id>.zip`. This needs QEOS with ADR-037 and collector
-0.14.0. The viewer in the browser is not built yet, and videos are not sent.
+A **Trace** button then appears on a run's results and on a case's or scenario's latest result. It opens the trace in
+Playwright's trace viewer, which the dashboard serves itself at `/trace-viewer/` (nothing goes to another site), in a
+new tab; allow pop-ups for QEOS if the browser asks. The download button beside it saves `trace-<id>.zip` for
+`npx playwright show-trace trace-<id>.zip`. This needs QEOS with ADR-037 and collector 0.14.0. Videos are not sent.
 
 **Privacy first.** A trace holds page snapshots and network traffic, which can include cookies, tokens and personal
 data of your test accounts. QEOS cannot mask it. Traces are **off by default**, per project, with their own switch.
@@ -1849,8 +1850,9 @@ Limits: 100 MB per trace, 5 per result, 500 per run, 300 seconds for the upload 
 `trace_days` after the run started; one no result refers to is deleted after 7 days. The data export names traces but
 does not carry the files.
 
-**Verify (4.12):** after a failed run with the switch on, the collector prints the traces it stored, and the Trace
-button downloads a ZIP that `npx playwright show-trace` opens.
+**Verify (4.12):** after a failed run with the switch on, the collector prints the traces it stored, **Trace** opens the
+trace viewer in a new tab with the test's actions, and the download button saves a ZIP that `npx playwright show-trace`
+opens.
 
 ---
 

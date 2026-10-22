@@ -18,7 +18,23 @@ API answers.
     npm run test       # Vitest + Testing Library + MSW
     npm run typecheck  # tsc --noEmit
     npm run lint       # eslint
-    npm run build      # production build to dist/
+    npm run build      # production build to dist/, then the trace viewer to dist/trace-viewer/
+
+## Trace viewer
+
+`npm run build` copies Playwright's own trace viewer
+(`playwright-core/lib/vite/traceViewer`) to `dist/trace-viewer/`
+(`scripts/copy-trace-viewer.mjs`) and checks its page, service worker and
+snapshot page are there (`scripts/check-trace-viewer.mjs`); either failing
+stops the build. `playwright-core` is a dev dependency pinned to an exact
+version: change it on purpose, then open a real trace before shipping, because
+the viewer is used from a sub-path that Playwright does not promise to keep
+working. nginx serves `/trace-viewer/` with `Referrer-Policy: no-referrer` (the
+page URL carries a one-time trace link) and `Cache-Control: no-cache`, and
+answers 404 for a file it lacks instead of the SPA's `index.html`. The viewer's
+service worker registers with the scope `/trace-viewer/`. **Trace** opens
+`/trace-viewer/index.html?trace=<absolute one-time link>` in a new tab
+(ADR-037). `npm run dev` does not serve the viewer; use the built image.
 
 ## Shared files
 
