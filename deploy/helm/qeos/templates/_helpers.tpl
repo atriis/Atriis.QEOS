@@ -24,6 +24,17 @@
 {{- trimSuffix "/" $url -}}
 {{- end -}}
 
+{{/* The host of publicUrl, without a port: the edge's listeners, routes and certificate */}}
+{{- define "qeos.publicHost" -}}
+{{- $host := (urlParse (include "qeos.publicUrl" .)).host -}}
+{{- regexReplaceAll ":[0-9]+$" $host "" -}}
+{{- end -}}
+
+{{/* The edge's namespace: where the add-on runs the Gateway's proxy pods (the Gateway's own namespace) */}}
+{{- define "qeos.edgeNamespace" -}}
+{{- default .Release.Namespace .Values.edge.namespace -}}
+{{- end -}}
+
 {{/* qeos.labels (dict "ctx" $ "name" "<service>" "component" "<kind>") */}}
 {{- define "qeos.labels" -}}
 app.kubernetes.io/name: {{ .name }}
@@ -110,7 +121,13 @@ app.kubernetes.io/instance: {{ .ctx.Release.Name }}
 {{- $_ := set $env "MONITORING_ENABLED" (toString $ctx.Values.monitoring.enabled) -}}
 {{- end -}}
 {{- if $svc.smtp -}}
-{{- $_ := set $env "SMTP_HOST" $ctx.Values.smtp.host -}}
+{{- /* A server that wants a sign-in, with no credentials, refuses every message, and the links are then neither sent nor
+logged. So while Key Vault lacks smtp-user or smtp-password (keyvault.absent), SMTP_HOST stays empty: links are logged */ -}}
+{{- $smtpHost := $ctx.Values.smtp.host -}}
+{{- if and (eq (include "qeos.keyvault" $ctx) "true") (or (has "smtp-user" $ctx.Values.keyvault.absent) (has "smtp-password" $ctx.Values.keyvault.absent)) -}}
+{{- $smtpHost = "" -}}
+{{- end -}}
+{{- $_ := set $env "SMTP_HOST" $smtpHost -}}
 {{- $_ := set $env "SMTP_PORT" (toString $ctx.Values.smtp.port) -}}
 {{- $_ := set $env "SMTP_TLS" (toString $ctx.Values.smtp.tls) -}}
 {{- $_ := set $env "EMAILS_FROM_EMAIL" $ctx.Values.smtp.fromEmail -}}

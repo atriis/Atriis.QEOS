@@ -368,7 +368,9 @@ On Azure Kubernetes Service the platform runs from the Helm chart in [`deploy/he
 (ADR-038). Its images are built, scanned with Trivy and pushed to Azure Container Registry by the
 `Build platform images` workflow, as `<registry>.azurecr.io/qeos/<service>:<git sha>` (plus `:<version>` for a
 `platform-v*` tag). The workflow does nothing until the repository variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
-`AZURE_SUBSCRIPTION_ID` and `ACR_NAME` are set.
+`AZURE_SUBSCRIPTION_ID` and `ACR_NAME` are set. The `Deploy to AKS` workflow then installs those images on staging
+with Helm, behind a Gateway API edge with a Let's Encrypt certificate; the Azure resources and the one-time steps are in
+[`deploy/azure/README.md`](deploy/azure/README.md).
 
 ---
 

@@ -37,6 +37,7 @@ def bicep_string(source: str, pattern: str) -> str:
 MAIN = text(AZURE / "main.bicep")
 VALUES = load(CHART / "values.yaml")
 STAGING = load(CHART / "values-staging.yaml")
+SMTP_KEYS = {"smtp-user", "smtp-password"}
 
 
 def staging(*keys):
@@ -63,7 +64,9 @@ def chart_identities() -> set[str]:
 def chart_keys_by_identity() -> dict[str, set[str]]:
     """identity -> the Key Vault keys staging's SecretProviderClasses of its workloads read (secretproviderclass.yaml,
     one per workload, and the migration hook's qeos-migrate, migrate-hook.yaml)."""
-    absent = set(staging("keyvault", "absent") or [])
+    # The SMTP credentials are absent from staging only until the ACS SMTP application exists; Bicep then writes and
+    # grants smtp-user and init-secrets.sh sets smtp-password (README, section 4.1), so they count as read here
+    absent = set(staging("keyvault", "absent") or []) - SMTP_KEYS
     by_identity: dict[str, set[str]] = {}
     for svc in VALUES["services"].values():
         if not svc.get("identity"):
@@ -191,6 +194,16 @@ def test_names_and_ranges_shared_with_the_chart():
     assert bicep_string(MAIN, r"^var artifactsContainer") == staging("artifacts", "azure", "container")
     assert bicep_string(MAIN, r"^param postgresAdminLogin string") == staging("postgres", "adminUser")
     assert bicep_string(MAIN, r"^var podCidr") == staging("gateway", "trustedProxies")
+
+
+def test_deploy_workflow_names_the_edge_ip_as_bicep_does():
+    # aks.bicep names the edge's public IP after the cluster; the deploy workflow derives it from the AKS_NAME variable
+    assert "name: 'pip-${name}-edge'" in text(AZURE / "modules" / "aks.bicep")
+    workflow = text(ROOT / ".github" / "workflows" / "deploy-aks.yml")
+    assert 'edge.publicIp.name="pip-${AKS_NAME}-edge"' in workflow
+    assert 'edge.publicIp.resourceGroup="$AKS_RESOURCE_GROUP"' in workflow
+    # The workflow installs into the namespace the federated credentials and the deploy identity's role name
+    assert re.search(r"^\s*NAMESPACE: qeos$", workflow, re.M)
 
 
 def test_outputs_are_the_interface():

@@ -1,0 +1,46 @@
+{{- /* The edge's certificate (spec 5.4): Let's Encrypt through cert-manager, HTTP-01 answered through the edge's own
+Gateway. Namespaced on purpose: the deploy identity administers this namespace only, so cert-manager itself (CRDs,
+controller, Gateway API support) is a cluster admin's one-time step (deploy/azure/README.md, section 4.5) */ -}}
+{{- if .Values.edge.enabled }}
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: qeos-letsencrypt
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "qeos-edge" "component" "edge") | nindent 4 }}
+spec:
+  acme:
+    server: {{ .Values.edge.acme.server | quote }}
+    email: {{ required "edge.acme.email is required with edge.enabled: Let's Encrypt's contact" .Values.edge.acme.email | quote }}
+    # The ACME account key; cert-manager creates this Secret
+    privateKeySecretRef:
+      name: qeos-letsencrypt-account
+    solvers:
+      - http01:
+          gatewayHTTPRoute:
+            parentRefs:
+              - kind: Gateway
+                name: qeos-edge
+                namespace: {{ .Release.Namespace }}
+                sectionName: http
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: qeos-edge
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "qeos-edge" "component" "edge") | nindent 4 }}
+spec:
+  # The Gateway's https listener reads it
+  secretName: qeos-edge-tls
+  dnsNames:
+    - {{ include "qeos.publicHost" . | quote }}
+  issuerRef:
+    kind: Issuer
+    name: qeos-letsencrypt
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+{{- end }}

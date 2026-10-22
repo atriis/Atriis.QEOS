@@ -89,9 +89,26 @@ gateway:
     collectArtifacts: 5r/s
   importMaxBody: 25m
 
-# The namespace of the edge in front of the gateway (AKS Application Routing); the only one the gateway accepts
+# The edge in front of the gateway (spec 5.4): a Gateway API Gateway of AKS Application Routing's Istio implementation
+# that ends TLS, an HTTPRoute to the gateway Service, and a cert-manager Issuer and Certificate (Let's Encrypt, HTTP-01).
+# deploy/helm/README.md, "The edge"
 edge:
-  namespace: app-routing-system
+  # Render the Gateway, the HTTPRoutes, the Issuer and the Certificate (AKS; needs the add-on and cert-manager)
+  enabled: false
+  # The namespace of the edge's proxy pods, the only ones the gateway accepts traffic from (NetworkPolicy gateway-ingress).
+  # The add-on runs them in the Gateway's own namespace, which is the release's. Empty: the release namespace
+  namespace: ""
+  gatewayClassName: approuting-istio
+  # The static public IP the Gateway's LoadBalancer Service takes (Bicep: pip-<aksName>-edge in the environment's
+  # resource group); both required with edge.enabled
+  publicIp:
+    name: ""
+    resourceGroup: ""
+  acme:
+    # Required with edge.enabled: Let's Encrypt's contact for expiry and account notices
+    email: ""
+    # Let's Encrypt production; https://acme-staging-v02.api.letsencrypt.org/directory for untrusted test certificates
+    server: https://acme-v02.api.letsencrypt.org/directory
 
 networkPolicy:
   enabled: true

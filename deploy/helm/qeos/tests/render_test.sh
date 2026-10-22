@@ -13,9 +13,13 @@ failures=0
 pass() { printf 'ok    %s\n' "$1"; }
 fail() { printf 'FAIL  %s\n' "$1"; failures=$((failures + 1)); }
 
-# The Azure values arrive from Bicep's outputs with --set in the deploy workflow (Task 10); placeholders here
+# The Azure values arrive from Bicep's outputs with --set in the deploy workflow (deploy-aks.yml); placeholders here
+STAGING_HOST=qeos-staging-abc123.hash0123.westeurope.cloudapp.azure.com
 STAGING_SET=(
   --set image.registry=example.azurecr.io --set image.tag=0123abc
+  --set publicUrl=https://$STAGING_HOST
+  --set edge.publicIp.name=pip-aks-qeos-staging-edge --set edge.publicIp.resourceGroup=rg-qeos-staging
+  --set edge.acme.email=ops@example.com --set smtp.fromEmail=DoNotReply@example.azurecomm.net
   --set keyvault.name=kv-placeholder --set keyvault.tenantId=00000000-0000-0000-0000-000000000000
   --set keyvault.clientIds.services=11111111-1111-1111-1111-111111111111
   --set keyvault.clientIds.ingestion=22222222-2222-2222-2222-222222222222
@@ -54,6 +58,8 @@ render() {
 }
 render ci -f "$CHART/values-ci.yaml"
 render staging -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}"
+# Once the ACS SMTP application exists, its secrets are in the vault and keyvault.absent drops them
+render staging-email -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" --set 'keyvault.absent={tm-secrets-key}'
 # values.yaml alone holds no environment: a render must stop on the settings each environment has to give
 if helm template qeos "$CHART" --namespace "$NAMESPACE" >/dev/null 2>"$OUT/defaults.err"; then
   fail "values.yaml alone renders: the required settings are not enforced"
@@ -241,10 +247,65 @@ backend() { q "$OUT/$1.yaml" 'select(.kind == "ConfigMap" and .metadata.name == 
 [ "$(backend staging)" = azure ] && pass "staging: artifacts on Azure Blob" || fail "staging: ARTIFACTS_BACKEND is '$(backend staging)'"
 np() { q "$OUT/$1.yaml" '[select(.kind == "NetworkPolicy")] | length'; }
 [ "$(np ci)" = 0 ] && pass "ci: no NetworkPolicy (kind does not enforce them)" || fail "ci: $(np ci) NetworkPolicy rendered"
-src="$(q "$OUT/staging.yaml" 'select(.kind == "NetworkPolicy" and .metadata.name == "gateway-ingress")
-  | .spec.ingress[0].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]')"
-[ "$src" = app-routing-system ] && pass "staging: gateway accepts traffic only from the edge's namespace" \
+# The add-on runs the Gateway's proxy pods in the Gateway's namespace, labelled by Istio's gateway template
+src="$(q "$OUT/staging.yaml" 'select(.kind == "NetworkPolicy" and .metadata.name == "gateway-ingress") | .spec.ingress as $i
+  | ($i | length | tostring) + " " + ($i[0].from | length | tostring) + " "
+    + $i[0].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"] + " "
+    + ($i[0].from[0].podSelector.matchLabels | to_entries | map(.key + "=" + .value) | sort | join(","))')"
+[ "$src" = "1 1 $NAMESPACE gateway.networking.k8s.io/gateway-class-name=approuting-istio,gateway.networking.k8s.io/gateway-name=qeos-edge" ] \
+  && pass "staging: gateway accepts traffic only from the edge's proxy pods (Gateway qeos-edge, namespace $NAMESPACE)" \
   || fail "staging: gateway-ingress allows '$src'"
+
+# ---- the edge (spec 5.4): Gateway, routes, Issuer and Certificate on AKS only ----
+st="$OUT/staging.yaml"
+for kind in Gateway HTTPRoute Issuer Certificate; do
+  n="$(q "$OUT/ci.yaml" "[select(.kind == \"$kind\")] | length")"
+  [ "$n" = 0 ] && pass "ci: no $kind (edge.enabled off on kind)" || fail "ci: $n $kind rendered"
+done
+n="$(q "$st" '[select(.kind == "Gateway" and .metadata.name == "qeos-edge" and .spec.gatewayClassName == "approuting-istio")] | length')"
+[ "$n" = 1 ] && pass "staging: Gateway qeos-edge of class approuting-istio" || fail "staging: $n Gateway qeos-edge of class approuting-istio"
+hosts="$(q "$st" '[(select(.kind == "Gateway") | .spec.listeners[].hostname), (select(.kind == "HTTPRoute") | .spec.hostnames[]),
+  (select(.kind == "Certificate") | .spec.dnsNames[])] | unique | join(" ")')"
+[ "$hosts" = "$STAGING_HOST" ] && pass "staging: every listener, route and the certificate name publicUrl's host" \
+  || fail "staging: edge host names '$hosts', want $STAGING_HOST"
+l="$(q "$st" 'select(.kind == "Gateway") | [.spec.listeners[] | .name + ":" + (.port | tostring) + ":" + .protocol + ":" + (.tls.certificateRefs[0].name // "")] | join(" ")')"
+[ "$l" = "http:80:HTTP: https:443:HTTPS:qeos-edge-tls" ] && pass "staging: listeners http 80 and https 443 with qeos-edge-tls" \
+  || fail "staging: listeners are '$l'"
+a="$(q "$st" 'select(.kind == "Gateway") | .spec.infrastructure.annotations | .["service.beta.kubernetes.io/azure-pip-name"] + " " + .["service.beta.kubernetes.io/azure-load-balancer-resource-group"]')"
+[ "$a" = "pip-aks-qeos-staging-edge rg-qeos-staging" ] && pass "staging: the Gateway's Service takes Bicep's static public IP" \
+  || fail "staging: infrastructure annotations are '$a'"
+p="$(q "$st" 'select(.kind == "Gateway") | .spec.infrastructure.parametersRef.name' )"
+etp="$(q "$st" "select(.kind == \"ConfigMap\" and .metadata.name == \"$p\") | .data.service | from_yaml | .spec.externalTrafficPolicy")"
+[ "$etp" = Local ] && pass "staging: the edge's Service keeps client IPs (externalTrafficPolicy Local via $p)" \
+  || fail "staging: externalTrafficPolicy through parametersRef '$p' is '$etp'"
+probes="$(q "$st" "select(.kind == \"ConfigMap\" and .metadata.name == \"$p\") | .data.service | from_yaml | .metadata.annotations
+  | to_entries | map(select(.value == null) | .key) | length")"
+[ "$probes" = 6 ] && pass "staging: the Cluster-only health-probe annotations are unset" || fail "staging: $probes probe annotations unset, want 6"
+r="$(q "$st" 'select(.kind == "HTTPRoute" and .metadata.name == "qeos") | .spec | .parentRefs[0].sectionName + " "
+  + .rules[0].backendRefs[0].name + ":" + (.rules[0].backendRefs[0].port | tostring) + " " + .rules[0].timeouts.request')"
+[ "$r" = "https gateway:8080 0s" ] && pass "staging: HTTPS goes to the gateway Service, no edge timeout" || fail "staging: route qeos is '$r'"
+r="$(q "$st" 'select(.kind == "HTTPRoute" and .metadata.name == "qeos-https-redirect") | .spec | .parentRefs[0].sectionName + " "
+  + .rules[0].filters[0].requestRedirect.scheme + " " + (.rules[0].filters[0].requestRedirect.statusCode | tostring)')"
+[ "$r" = "http https 301" ] && pass "staging: plain HTTP redirects to HTTPS" || fail "staging: redirect route is '$r'"
+c="$(q "$st" 'select(.kind == "Certificate") | .spec.secretName + " " + .spec.issuerRef.kind + "/" + .spec.issuerRef.name')"
+[ "$c" = "qeos-edge-tls Issuer/qeos-letsencrypt" ] && pass "staging: Certificate from the namespaced Issuer into qeos-edge-tls" \
+  || fail "staging: Certificate is '$c'"
+i="$(q "$st" 'select(.kind == "Issuer") | .spec.acme | .server + " " + .solvers[0].http01.gatewayHTTPRoute.parentRefs[0].name + "/" + .solvers[0].http01.gatewayHTTPRoute.parentRefs[0].sectionName')"
+[ "$i" = "https://acme-v02.api.letsencrypt.org/directory qeos-edge/http" ] && pass "staging: Let's Encrypt HTTP-01 through the Gateway's http listener" \
+  || fail "staging: Issuer is '$i'"
+# The deploy identity administers the namespace only: nothing cluster-scoped, nothing aimed at another namespace
+for env in ci staging; do
+  bad="$(q "$OUT/$env.yaml" '[select(.kind != null) | select((.kind | test("^(Deployment|Service|ConfigMap|ServiceAccount|Job|PodDisruptionBudget|NetworkPolicy|SecretProviderClass|Gateway|HTTPRoute|Issuer|Certificate)$") | not)
+    or (.metadata.namespace // "") != "") | .kind + "/" + .metadata.name] | join(" ")')"
+  [ -z "$bad" ] && pass "$env: only namespaced kinds, none with a namespace of its own" || fail "$env: cluster-scoped or foreign: $bad"
+done
+smtp() { q "$OUT/$1.yaml" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-auth-service-env") | .data.SMTP_HOST + " " + .data.SMTP_PORT + " " + .data.SMTP_TLS'; }
+[ "$(smtp staging)" = " 587 true" ] && pass "staging: no SMTP_HOST while the vault lacks the SMTP credentials (links logged)" \
+  || fail "staging: SMTP settings are '$(smtp staging)'"
+[ "$(smtp staging-email)" = "smtp.azurecomm.net 587 true" ] && pass "staging: Communication Services SMTP once the credentials exist" \
+  || fail "staging (email): SMTP settings are '$(smtp staging-email)'"
+u="$(q "$st" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-auth-service-env") | .data.BASE_URL')"
+[ "$u" = "https://$STAGING_HOST" ] && pass "staging: BASE_URL is publicUrl" || fail "staging: BASE_URL is '$u'"
 spc="$(q "$OUT/staging.yaml" 'select(.kind == "SecretProviderClass" and .metadata.name == "qeos-migrate") | .metadata.annotations["helm.sh/hook-weight"]')"
 [ "$spc" = -10 ] && pass "staging: migration SecretProviderClass is a hook at weight -10" || fail "staging: its hook weight is '$spc'"
 n="$(q "$OUT/ci.yaml" '[select(.kind == "SecretProviderClass")] | length')"

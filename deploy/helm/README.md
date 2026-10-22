@@ -9,7 +9,7 @@ use it.
 |---|---|---|
 | `values.yaml` | always | defaults only: no hostname, no secret, no environment |
 | `values-ci.yaml` | kind in CI | images loaded as `qeos/<service>:kind`, in-cluster PostgreSQL and MinIO, secrets from the `qeos-secrets` Secret |
-| `values-staging.yaml` | AKS staging | Key Vault secrets, Azure Blob, the NetworkPolicy; Bicep's outputs come with `--set` |
+| `values-staging.yaml` | AKS staging | Key Vault secrets, Azure Blob, the edge (Gateway API, TLS), email, the NetworkPolicy; Bicep's outputs come with `--set` from the deploy workflow |
 
 ```bash
 # Render and check (needs helm 3 and yq v4; no cluster), and db-init's secret handling (stub psql)
@@ -21,7 +21,8 @@ kubectl create namespace qeos
 kubectl -n qeos create secret generic qeos-secrets $(yq '.ciSecrets | to_entries | .[] | "--from-literal=" + .key + "=" + .value' deploy/helm/qeos/values-ci.yaml)
 helm install qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-ci.yaml --wait --timeout 10m
 
-# AKS: --timeout must exceed migrate.activeDeadlineSeconds (900 s), or Helm, not the Job, cuts a slow migration short
+# AKS: the workflow deploy-aks.yml runs this ("The deploy workflow" below). --timeout must exceed
+# migrate.activeDeadlineSeconds (900 s), or Helm, not the Job, cuts a slow migration short
 helm upgrade --install qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-staging.yaml --set ... --atomic --wait --timeout 20m
 ```
 
@@ -88,7 +89,7 @@ back with `kubectl config use-context <yours>`.
   `impact-rollup` and `weekly-summary` with 1 replica each (their PostgreSQL advisory locks make a second copy
   harmless, so a rolling update may overlap).
 - **Services** (ClusterIP) with the Compose names: the APIs on 8000, the dashboard and the gateway on 8080. Nothing is
-  exposed outside the cluster by the chart; the edge (Gateway API, Task 10) sends traffic to the `gateway` Service.
+  exposed outside the cluster by these; the edge (below) sends traffic to the `gateway` Service.
 - One **ConfigMap** per workload, `qeos-<service>-env`, with its non-secret settings; secrets reach the pods only as
   `secretKeyRef`s (below). A change to the settings rolls the pods (`checksum/env` annotation).
 - **ServiceAccounts** `qeos-services`, `qeos-ingestion`, `qeos-ingestion-retention` (and the hook's `qeos-migrate`):
@@ -97,9 +98,17 @@ back with `kubectl config use-context <yours>`.
   webhook it triggers injects `AZURE_CLIENT_ID` and `AZURE_TENANT_ID` into every container's env, where they would
   override auth-service's settings of the same name (its Entra sign-in app). The Key Vault CSI driver needs no label:
   it gets the ServiceAccount's token itself.
+- The **edge** (when `edge.enabled`, AKS): the Gateway `qeos-edge`, the HTTPRoutes `qeos` and `qeos-https-redirect`,
+  the ConfigMap `qeos-edge-options`, the cert-manager `Issuer` `qeos-letsencrypt` and `Certificate` `qeos-edge` ("The
+  edge" below). Off in `values-ci.yaml`: the smoke reaches the gateway through a port-forward.
 - The **NetworkPolicy** `gateway-ingress` (when `networkPolicy.enabled`): the gateway's pods accept traffic only from
-  the edge's namespace, `edge.namespace` (Application Routing: `app-routing-system`). The other policies of spec 5.3
-  come in Stage 2. It is off in `values-ci.yaml`: kind's default network plugin does not enforce policies.
+  the edge's proxy pods: those labelled `gateway.networking.k8s.io/gateway-name: qeos-edge` and
+  `gateway.networking.k8s.io/gateway-class-name: approuting-istio` in `edge.namespace` (empty: the release namespace,
+  where the add-on runs them). The other policies of spec 5.3 come in Stage 2. It is off in `values-ci.yaml`: kind's
+  default network plugin does not enforce policies.
+
+Everything the chart renders is namespaced and lands in the release namespace (no ClusterRole, ClusterIssuer,
+GatewayClass or Namespace): the deploy identity administers that namespace only. `tests/render_test.sh` checks it.
 
 Every container runs as its image's non-root user (uid 10001 for the Python images, 101 for nginx) with a read-only
 root filesystem, no privilege escalation, all capabilities dropped and the RuntimeDefault seccomp profile. Writable
@@ -135,12 +144,17 @@ sleep of 5 s let in-flight requests and in-API background tasks finish while the
 | `artifacts.backend` | `s3` | `s3` or `azure` (`ARTIFACTS_BACKEND`) |
 | `artifacts.s3.endpoint`, `.bucket` | `""`, `qeos-artifacts` | `ARTIFACTS_S3_*`; the keys are secrets |
 | `artifacts.azure.accountUrl`, `.container` | `""`, `qeos-artifacts` | `ARTIFACTS_AZURE_*` (workload identity, no key) |
-| `smtp.host`, `.port`, `.tls`, `.fromEmail`, `.fromName` | empty host: no email | the non-secret SMTP settings |
+| `smtp.host`, `.port`, `.tls`, `.fromEmail`, `.fromName` | empty host: no email | the non-secret SMTP settings; with Key Vault, `SMTP_HOST` stays empty while `smtp-user` or `smtp-password` is in `keyvault.absent` (a server that wants a sign-in would refuse every message, and the links would be neither sent nor logged) |
 | `monitoring.enabled` | `false` | `MONITORING_ENABLED` for auth and the gateway; Grafana comes in Stage 2 |
 | `gateway.trustedProxies` | required | the edge's address range (`GATEWAY_TRUSTED_PROXIES`); real client IPs and per-IP limits depend on it |
 | `gateway.rates.*` | `auth 3r/s`, `api 10r/s`, `collect 5r/s`, `collectBlobs 25r/s`, `collectArtifacts 5r/s` | `RATE_*`, per pod: half of Compose's, as two pods serve |
 | `gateway.importMaxBody` | `25m` | `GATEWAY_IMPORT_MAX_BODY` |
-| `edge.namespace` | `app-routing-system` | the only namespace the gateway accepts traffic from |
+| `edge.enabled` | `false` | render the Gateway, the HTTPRoutes, the Issuer and the Certificate (AKS) |
+| `edge.namespace` | `""` | the edge proxy pods' namespace (`gateway-ingress`); empty: the release namespace |
+| `edge.gatewayClassName` | `approuting-istio` | Application Routing's Gateway API implementation |
+| `edge.publicIp.name`, `.resourceGroup` | required with `edge.enabled` | Bicep's static public IP, `pip-<aksName>-edge` in the environment's resource group |
+| `edge.acme.email` | required with `edge.enabled` | Let's Encrypt's contact (expiry notices) |
+| `edge.acme.server` | Let's Encrypt production | the ACME directory; `https://acme-staging-v02.api.letsencrypt.org/directory` for untrusted test certificates |
 | `networkPolicy.enabled` | `true` | renders `gateway-ingress` |
 | `migrate.order` | the five APIs | the hook's migration order, after db-init |
 | `migrate.imageTag` | `""` | the migration images' tag; empty: `image.tag` |
@@ -156,8 +170,84 @@ themselves (ADR-038, Task 4).
 Resources are starting estimates (APIs 100m/256Mi requested, 1 CPU/512Mi limit; ingestion 1Gi; loop jobs 512Mi;
 nginx 128Mi), not yet measured on a running cluster. Revisit them with `kubectl top` once staging carries real load.
 
-The edge in front of the gateway (Task 10) keeps the public `Host` header, so the services' redirects and links use
-the public address. Its routes, certificate and limits come in Task 10.
+## The edge (AKS)
+
+Spec 5.4. AKS's Application Routing add-on, in its Gateway API mode (GatewayClass `approuting-istio`, an Istio control
+plane in `aks-istio-system` that manages Gateways only), runs the edge. The chart creates (`templates/gateway-api.yaml`,
+`templates/certificate.yaml`):
+
+- **Gateway `qeos-edge`**: listener `https` (443) ends TLS for `publicUrl`'s host with the Secret `qeos-edge-tls`;
+  listener `http` (80) answers Let's Encrypt's challenge and redirects everything else to HTTPS (HTTPRoute
+  `qeos-https-redirect`, 301). For each Gateway the add-on creates, in the Gateway's namespace, a Deployment, a
+  LoadBalancer Service, an HPA (2-5 replicas) and a PDB, all named `qeos-edge-approuting-istio`.
+- **HTTPRoute `qeos`**: everything over HTTPS to the `gateway` Service on 8080, which applies Compose's routes, limits
+  and `auth_request`. The public `Host` reaches the gateway, so the services' redirects and links use the public
+  address.
+- **The static public IP**: `spec.infrastructure.annotations` (`service.beta.kubernetes.io/azure-pip-name`,
+  `azure-load-balancer-resource-group`), which the add-on copies onto its Service, make it take Bicep's
+  `pip-<aksName>-edge` and so the DNS name `stagingHostname` (`deploy/azure/README.md`, section 4.3).
+- **Client addresses**: `spec.infrastructure.parametersRef` points at the ConfigMap `qeos-edge-options`, the add-on's
+  per-Gateway customization, overlaid on the generated Service: `externalTrafficPolicy: Local`, and the add-on's
+  health-probe annotations for ports 80 and 443 unset, as the add-on's documentation requires with `Local` (Azure's
+  load balancer then probes the Service's health-check node port). With `Local` the edge sees each client's address
+  and appends it to `X-Forwarded-For`; the gateway believes that header only from `gateway.trustedProxies`, the pod
+  range (Azure CNI Overlay, `10.244.0.0/16`, where the edge pods get their addresses), and takes the last untrusted
+  address (`real_ip_recursive`). Without `Local` every client would share one SNAT address and one rate-limit bucket.
+- **The certificate**: a namespaced cert-manager `Issuer` (`qeos-letsencrypt`, ACME, HTTP-01 through the Gateway's
+  `http` listener) and a `Certificate` (`qeos-edge`, ECDSA P-256, renewed by cert-manager) writing `qeos-edge-tls`.
+  cert-manager itself, with its CRDs and Gateway API support, is a cluster admin's one-time step
+  (`deploy/azure/README.md`, section 4.5). The https listener stays unready until the first certificate is issued (a
+  few minutes after the first deploy).
+
+**Limits.** The add-on offers no rate limits, body-size limits or request buffering settings (no `EnvoyFilter`; its
+documentation lists these as unsupported). It applies no body-size limit and streams request bodies, so the gateway's
+own limits stay the enforcing ones: per-IP rates halved (`gateway.rates`, two gateway pods), bodies up to 101m for
+artifacts with buffering off. The route's overall timeout is off (`timeouts.request: 0s`), so a long upload is never
+cut by the edge; the gateway's proxy timeouts end slow requests. Per-client limits shared across gateway pods wait for
+Redis (spec 5.4).
+
+Sources: [Application routing add-on with the Gateway API](https://learn.microsoft.com/azure/aks/app-routing-gateway-api)
+(GatewayClass, generated resources, limitations, `externalTrafficPolicy: Local` and the probe annotations),
+[Istio add-on Gateway API, ConfigMap customizations](https://learn.microsoft.com/azure/aks/istio-gateway-api)
+(`parametersRef`, the allow list, which has `spec.externalTrafficPolicy` and `metadata.annotations`), and Istio's
+gateway template (`manifests/charts/istio-control/istio-discovery/files/kube-gateway.yaml`) for the proxy pods' labels.
+
+## The deploy workflow
+
+`.github/workflows/deploy-aks.yml` (spec 5.8):
+
+- **Triggers**: after a successful "Build platform images" run on master (its images' SHA, to staging), and by hand
+  (`environment` staging or production, `tag` a full git SHA or a platform version such as `1.2.3`). Production is a
+  later stage: choosing it fails at once. Only green runs of this repository deploy automatically.
+- **Steps**: Azure sign-in with OIDC (no stored secret); a check that all seven images with that tag are in ACR and
+  that the cluster is running; `az aks get-credentials` and `kubelogin convert-kubeconfig -l azurecli` (local accounts
+  are off); the runner's address added to the API server's authorised ranges; `helm upgrade --install --atomic --wait
+  --timeout 20m` with `values-<environment>.yaml` and Bicep's outputs as `--set`; then a check that the Gateway is
+  programmed, the certificate ready and `https://<host>/health` answers. A last step, which runs whatever happened,
+  signs in again and removes the runner's address from the list as it is then (never leaving it empty, which would
+  open the API server to all). Runs are serialised per environment (`concurrency`), so two never edit that list
+  together.
+- **Before Azure exists** the automatic run prints a notice and deploys nothing; a manual run fails, naming the
+  missing variables.
+- It checks out the commit being deployed, so the chart always matches the images.
+
+Variables: the repository's `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` and `ACR_NAME`
+(`build-platform.yml` uses them too); the rest are variables of the GitHub environment (`staging`), none secret:
+
+| Variable | Value (Bicep output) | Chart value |
+|---|---|---|
+| `AKS_NAME` | `aksName` | the cluster; `edge.publicIp.name` = `pip-<AKS_NAME>-edge` |
+| `AKS_RESOURCE_GROUP` | `resourceGroup` | `edge.publicIp.resourceGroup` |
+| `KEY_VAULT_NAME` | `keyVaultName` | `keyvault.name` (`keyvault.tenantId` is `AZURE_TENANT_ID`) |
+| `POSTGRES_HOST` | `postgresHost` | `postgres.host` |
+| `STORAGE_ACCOUNT_URL` | `storageAccountUrl` | `artifacts.azure.accountUrl` |
+| `ARTIFACTS_CONTAINER` | `artifactsContainer` | `artifacts.azure.container` |
+| `WORKLOAD_IDENTITY_CLIENT_IDS` | `workloadIdentityClientIds` (the JSON object) | `keyvault.clientIds.*` |
+| `EMAIL_SENDER` | `communicationEmailSender` | `smtp.fromEmail` |
+| `PUBLIC_HOSTNAME` | `stagingHostname` (later, the chosen domain) | `publicUrl` = `https://<PUBLIC_HOSTNAME>` |
+| `ACME_EMAIL` | an address the team reads | `edge.acme.email` |
+
+`deploy/azure/README.md` (sections 2 and 5) covers the identity, its roles and copying the outputs.
 
 ## Secrets
 

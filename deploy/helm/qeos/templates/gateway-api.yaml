@@ -1,0 +1,124 @@
+{{- /* The edge (spec 5.4): a Gateway of AKS Application Routing's Istio implementation (GatewayClass approuting-istio)
+ends TLS for publicUrl's host and sends everything to the gateway Service over plain HTTP. The add-on runs the proxy
+pods, their Deployment and their LoadBalancer Service, all named qeos-edge-approuting-istio, in this namespace.
+deploy/helm/README.md, "The edge" */ -}}
+{{- if .Values.edge.enabled }}
+{{- $host := include "qeos.publicHost" . }}
+---
+# The add-on's per-Gateway customization (spec.infrastructure.parametersRef), overlaid on the Service it generates. Only
+# fields on the add-on's allow list pass its webhook; externalTrafficPolicy and annotations are on it.
+# externalTrafficPolicy Local keeps the client's address, so the gateway's per-IP limits see each client, not one SNAT
+# address. The add-on's health-probe annotations are for Cluster and must be unset with Local (an empty value unsets
+# them in the strategic merge patch): Azure's load balancer then probes the Service's healthCheckNodePort
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qeos-edge-options
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "qeos-edge" "component" "edge") | nindent 4 }}
+data:
+  service: |
+    spec:
+      externalTrafficPolicy: Local
+    metadata:
+      annotations:
+        service.beta.kubernetes.io/port_80_health-probe_port:
+        service.beta.kubernetes.io/port_80_health-probe_protocol:
+        service.beta.kubernetes.io/port_80_health-probe_request-path:
+        service.beta.kubernetes.io/port_443_health-probe_port:
+        service.beta.kubernetes.io/port_443_health-probe_protocol:
+        service.beta.kubernetes.io/port_443_health-probe_request-path:
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: qeos-edge
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "qeos-edge" "component" "edge") | nindent 4 }}
+spec:
+  gatewayClassName: {{ .Values.edge.gatewayClassName }}
+  infrastructure:
+    # Copied onto the generated LoadBalancer Service: it takes Bicep's static public IP (and its DNS name) instead of a
+    # new one (deploy/azure/README.md, section 4.3)
+    annotations:
+      service.beta.kubernetes.io/azure-pip-name: {{ required "edge.publicIp.name is required with edge.enabled" .Values.edge.publicIp.name | quote }}
+      service.beta.kubernetes.io/azure-load-balancer-resource-group: {{ required "edge.publicIp.resourceGroup is required with edge.enabled" .Values.edge.publicIp.resourceGroup | quote }}
+    parametersRef:
+      group: ""
+      kind: ConfigMap
+      name: qeos-edge-options
+  listeners:
+    # Let's Encrypt's HTTP-01 challenge (cert-manager adds its own route here) and the redirect to HTTPS
+    - name: http
+      hostname: {{ $host | quote }}
+      port: 80
+      protocol: HTTP
+      allowedRoutes:
+        namespaces:
+          from: Same
+    - name: https
+      hostname: {{ $host | quote }}
+      port: 443
+      protocol: HTTPS
+      tls:
+        mode: Terminate
+        certificateRefs:
+          # Written by cert-manager (certificate.yaml); the listener is not ready until the first certificate is issued
+          - kind: Secret
+            name: qeos-edge-tls
+      allowedRoutes:
+        namespaces:
+          from: Same
+---
+# Everything over HTTPS goes to the gateway, which applies the routes, limits and auth_request of Compose. The add-on sets
+# no body-size limit and streams request bodies (no buffering), so the gateway's own limits (artifacts 101m) are the
+# enforcing ones. "0s" turns the route's overall timeout off: the gateway's proxy timeouts end slow requests, and an
+# edge timeout would cut long uploads short
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: qeos
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "qeos-edge" "component" "edge") | nindent 4 }}
+spec:
+  parentRefs:
+    - name: qeos-edge
+      sectionName: https
+  hostnames:
+    - {{ $host | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: gateway
+          port: 8080
+      timeouts:
+        request: 0s
+---
+# Plain HTTP answers with a redirect to HTTPS. cert-manager's challenge route on the same listener matches its exact path,
+# which wins over this prefix
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: qeos-https-redirect
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "qeos-edge" "component" "edge") | nindent 4 }}
+spec:
+  parentRefs:
+    - name: qeos-edge
+      sectionName: http
+  hostnames:
+    - {{ $host | quote }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+{{- end }}

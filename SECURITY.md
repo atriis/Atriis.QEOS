@@ -342,6 +342,13 @@ details.
   with no fix yet are not blocking. Accepting a finding on purpose means a line with the reason in `.trivyignore`; it is
   empty today. The images are pushed by a GitHub Actions job that signs in to Azure with OIDC (no stored secret).
   Planned: Microsoft Defender for Containers on the cluster and registry, set up in the Bicep.
+- **AKS edge and deploys (ADR-038).** On AKS, TLS ends at a Gateway API edge (AKS Application Routing) with a Let's
+  Encrypt certificate from cert-manager; plain HTTP only redirects. The edge keeps client addresses
+  (`externalTrafficPolicy: Local`) and a NetworkPolicy lets only its proxy pods reach the gateway, which believes
+  `X-Forwarded-For` from the pod range alone; the edge itself has no rate or body-size limits, so the gateway's (halved,
+  per pod) stay the enforcing ones. `deploy-aks.yml` signs in with OIDC, administers the `qeos` namespace only, and
+  opens the API server's authorised ranges to its runner's address for the run only, removing it in a step that
+  always runs. Everything the chart renders is namespaced; cert-manager is a cluster admin's one-time step.
 
 ## Known limitations
 

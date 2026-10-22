@@ -1,17 +1,22 @@
-# AKS staging (ADR-038). The values Bicep outputs arrive with --set from the deploy workflow (Task 10): image.registry,
-# image.tag, keyvault.name, keyvault.tenantId, keyvault.clientIds.*, postgres.host, artifacts.azure.accountUrl.
-# Task 10 adds publicUrl (the Azure-provided address), the edge and the SMTP host.
+# AKS staging (ADR-038). Nothing here names a real host or holds a secret: the deploy workflow (.github/workflows/
+# deploy-aks.yml) passes Bicep's outputs with --set from the GitHub environment staging's variables: image.registry,
+# image.tag, publicUrl (https://<stagingHostname>), keyvault.name, keyvault.tenantId, keyvault.clientIds.*,
+# postgres.host, artifacts.azure.accountUrl and .container, smtp.fromEmail, edge.publicIp.* and edge.acme.email.
 
-# Placeholder until Task 10 sets the Azure-provided address; .invalid never resolves
-publicUrl: https://qeos-staging.invalid
+# Required, from the workflow: https://<stagingHostname>, the edge's Azure-provided DNS name
+publicUrl: ""
 
 secrets:
   source: keyvault
 
 keyvault:
-  # Optional keys staging's vault does not hold yet
+  # Optional keys staging's vault does not hold yet. smtp-user and smtp-password: remove both once the ACS SMTP
+  # application exists and its secrets are in the vault (deploy/azure/README.md, section 4.1); until then the chart
+  # leaves SMTP_HOST empty and verification links appear in the auth-service log
   absent:
     - tm-secrets-key
+    - smtp-user
+    - smtp-password
 
 postgres:
   adminUser: qeosadmin
@@ -20,13 +25,28 @@ postgres:
 artifacts:
   backend: azure
 
+# Azure Communication Services Email over SMTP (STARTTLS on 587); the sender comes from the workflow
+smtp:
+  host: smtp.azurecomm.net
+  port: 587
+  tls: true
+
 gateway:
-  # The edge's pods (Application Routing) are in the cluster's pod range: Azure CNI Overlay's default, which Bicep
-  # (Task 9) keeps. Change both together
+  # The edge's proxy pods get their addresses from the cluster's pod range: Azure CNI Overlay's, which Bicep sets
+  # (main.bicep podCidr; scripts/tests/test_azure_bicep.py keeps them equal). Change both together
   trustedProxies: 10.244.0.0/16
+  # Per client IP and per gateway pod, half of Compose's: two pods serve, and the edge enforces no limit of its own
+  rates:
+    auth: 3r/s
+    api: 10r/s
+    collect: 5r/s
+    collectBlobs: 25r/s
+    collectArtifacts: 5r/s
 
 edge:
-  namespace: app-routing-system
+  enabled: true
+  # The Gateway's namespace, where the add-on runs its proxy pods: the release's
+  namespace: qeos
 
 networkPolicy:
   enabled: true

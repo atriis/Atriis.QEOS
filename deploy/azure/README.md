@@ -50,7 +50,7 @@ Outputs (`az deployment sub show --name qeos-<env> --query properties.outputs`):
 | `storageAccountUrl`, `artifactsContainer` | chart `artifacts.azure.accountUrl`, `artifacts.azure.container` |
 | `workloadIdentityClientIds` | chart `keyvault.clientIds.{services,ingestion,ingestion-retention,migrate}` |
 | `communicationEmailSender` | chart `smtp.fromEmail` |
-| `stagingHostname` | `<label>.<region>.cloudapp.azure.com`, the edge's DNS name: chart `publicUrl` = `https://<stagingHostname>` (section 4.3) |
+| `stagingHostname` | the edge's DNS name, `qeos-<env>-<hash>.<hash>.<region>.cloudapp.azure.com` (section 4.3): chart `publicUrl` = `https://<stagingHostname>` |
 
 The chart's `keyvault.tenantId` is the tenant, the same as the repository variable `AZURE_TENANT_ID`.
 
@@ -74,15 +74,16 @@ The chart's `keyvault.tenantId` is the tenant, the same as the repository variab
    switched on per subscription, so Bicep leaves it alone. If the subscription does not have it yet:
    `az security pricing create --name Containers --tier standard`.
 5. **The GitHub identity** (the `AZURE_CLIENT_ID` the workflows sign in with): an Entra application with federated
-   credentials for this repository (`repo:<org>/Atriis.QEOS:ref:refs/heads/master`, and
-   `repo:<org>/Atriis.QEOS:environment:staging` once the deploy workflow uses the `staging` environment). Its service
+   credentials for this repository: `repo:<org>/Atriis.QEOS:ref:refs/heads/master` (`build-platform.yml`) and
+   `repo:<org>/Atriis.QEOS:environment:staging` (`deploy-aks.yml`, whose deploy job runs in the GitHub environment
+   `staging`). Its service
    principal's object id is `QEOS_DEPLOY_PRINCIPAL_ID` below: Bicep gives it AcrPush on the registry; on the cluster,
    Azure Kubernetes Service Cluster User Role (kubeconfig) and Azure Kubernetes Service Contributor Role (adding its
    runner to the authorised IP ranges for a run); and Azure Kubernetes Service RBAC Admin on the chart's namespace
    only (`<cluster>/namespaces/qeos`: helm). Nothing cluster-wide: the namespace and cert-manager are a cluster
    admin's one-time step (section 4.5). It needs no role on Key Vault or Storage.
 6. **An Entra group of cluster admins** (`QEOS_AKS_ADMIN_GROUP_ID`): with local accounts off, `kubectl` signs in with
-   Entra ID, and only this group and the deploy identity get cluster-admin.
+   Entra ID, and only this group gets cluster-admin. The deploy identity is admin of the namespace `qeos` only (item 5).
 
 ## 3. Deploy
 
@@ -155,6 +156,13 @@ az deployment sub create --name qeos-staging --location westeurope --parameters 
 `init-secrets.sh` keeps every secret that exists, so it is safe to rerun. The migration hook sets each database role's password from
 the vault on every release: to rotate one, set a new value in the vault and deploy.
 
+- **A pod stuck in `ContainerCreating` with a CSI mount error `403 Forbidden`** right after `init-secrets.sh`: the deploy
+  with `QEOS_SECRETS_INITIALIZED=true` was skipped, so no identity may read the new secrets yet. Run it (above); the
+  pods mount on their next retry.
+- **Deploys are incremental**: Bicep adds and updates, never deletes. Taking an identity out of a secret's
+  `secretReaders` in `main.bicep` leaves its existing role assignment in place; remove it by hand
+  (`az role assignment list --scope <secret id>`, then `az role assignment delete --ids <id>`).
+
 ## 4. One-time steps Bicep cannot do
 
 ### 4.1 Email: the ACS SMTP application
@@ -178,11 +186,12 @@ export QEOS_SMTP_APP_CLIENT_ID="$app_id" QEOS_SMTP_APP_PRINCIPAL_ID="$sp_id"
 az deployment sub create --name qeos-staging --location westeurope --parameters deploy/azure/staging.bicepparam
 ```
 
-The chart's SMTP settings: `smtp.host` `smtp.azurecomm.net`, `smtp.port` 587, `smtp.tls` true, `smtp.fromEmail` the
-output `communicationEmailSender`. The send role is a custom role with only the three permissions ACS documents for
+The chart's SMTP settings (`values-staging.yaml`): `smtp.host` `smtp.azurecomm.net`, `smtp.port` 587, `smtp.tls` true;
+`smtp.fromEmail` is the output `communicationEmailSender` (the deploy workflow's `EMAIL_SENDER`). The send role is a custom role with only the three permissions ACS documents for
 SMTP. The portal (Communication Services, **SMTP Usernames**) shows the username as *Ready to use* once everything is
-linked. Until this is done, deploy with `smtp-user` and `smtp-password` added to `keyvault.absent` and an empty
-`smtp.host`: the platform runs and email links appear only in the auth-service log.
+linked. Until this is done, `values-staging.yaml` lists `smtp-user` and `smtp-password` in `keyvault.absent`, and the
+chart then leaves `SMTP_HOST` empty: the platform runs and email links appear only in the auth-service log. Once both
+secrets are in the vault and granted, remove the two entries from `keyvault.absent` and deploy.
 
 The Azure-managed domain is meant for testing and has low sending limits. A custom sender domain (production) needs
 its own domain resource in `email.bicep` and DNS records (domain verification, SPF, DKIM) at the DNS host.
@@ -196,10 +205,12 @@ QEOS signs in with, as a **Single-page application** redirect URI (`docs/MICROSO
 ### 4.3 The edge's address and DNS
 
 Bicep creates the edge's public IP itself (`pip-aks-qeos-<env>-edge`, static, in the environment's resource group)
-with the DNS label that gives the output `stagingHostname` (`qeos-<env>-<hash>-<hash>.<region>.cloudapp.azure.com`).
+with the DNS label that gives the output `stagingHostname` (`qeos-<env>-<hash>.<hash>.<region>.cloudapp.azure.com`: the label carries one hash, and
+the label's reuse scope makes Azure add another before the region; always copy the output, never build the name).
 Because the cluster does not own it, the address and its name survive `az aks stop`, a node pool rebuild and even a
-new cluster. The add-on creates the Gateway's LoadBalancer Service; the chart's `Gateway` (Task 10) passes it these
-annotations through `spec.infrastructure.annotations`, so the Service takes this IP instead of a new one:
+new cluster. The add-on creates the Gateway's LoadBalancer Service; the chart's `Gateway` `qeos-edge` passes it these
+annotations through `spec.infrastructure.annotations` (from the deploy workflow's `AKS_NAME` and `AKS_RESOURCE_GROUP`),
+so the Service takes this IP instead of a new one:
 
 ```yaml
 service.beta.kubernetes.io/azure-pip-name: pip-aks-qeos-staging-edge
@@ -208,8 +219,12 @@ service.beta.kubernetes.io/azure-load-balancer-resource-group: rg-qeos-staging
 
 If the add-on ever stops passing them through, the per-Gateway ConfigMap customization (the add-on's allow list) sets
 the same annotations. Check after the first deploy that the Gateway's address is this IP:
-`kubectl -n qeos get gateway -o jsonpath='{.items[0].status.addresses[0].value}'` against
+`kubectl -n qeos get gateway qeos-edge -o jsonpath='{.status.addresses[0].value}'` against
 `az network public-ip show -g rg-qeos-staging -n pip-aks-qeos-staging-edge --query ipAddress -o tsv`.
+
+Check too that the Service keeps client addresses (`kubectl -n qeos get svc qeos-edge-approuting-istio -o
+jsonpath='{.spec.externalTrafficPolicy}'` is `Local`, set through the chart's ConfigMap `qeos-edge-options`) and that
+the gateway logs real client addresses (`kubectl -n qeos logs deploy/gateway`), not `10.244.x.x`.
 
 The public domain is still open (spec 6a). When it is chosen: a CNAME from the host to `stagingHostname` (or an A
 record to the IP), then `publicUrl`, the certificate and the redirect URIs (4.2) follow it.
@@ -243,8 +258,8 @@ helm install cert-manager jetstack/cert-manager --namespace cert-manager --creat
   --set crds.enabled=true --set config.enableGatewayAPI=true
 ```
 
-If the edge uses a `ClusterIssuer` rather than the chart's namespaced `Issuer`, the cluster admin creates it here too.
-Upgrading cert-manager is the same `helm upgrade` by a cluster admin.
+The chart brings its own namespaced `Issuer` (Let's Encrypt, HTTP-01 through the Gateway) and `Certificate`, so
+nothing else cluster-wide is needed. Upgrading cert-manager is the same `helm upgrade` by a cluster admin.
 
 ## 5. GitHub configuration
 
@@ -258,18 +273,35 @@ with OIDC and read secrets from nothing.
 | `AZURE_SUBSCRIPTION_ID` | The subscription | both |
 | `ACR_NAME` | Output `acrName` | both |
 
-The deploy workflow (Task 10, `deploy-aks.yml`) reads the remaining outputs (`aksName`, `resourceGroup`,
-`keyVaultName`, `postgresHost`, `storageAccountUrl`, `workloadIdentityClientIds`, `communicationEmailSender`,
-`stagingHostname`) as variables of the GitHub environment `staging`, under the names that workflow documents. To
-copy them after a deploy:
+### 5.1 The deploy workflow
+
+`deploy-aks.yml` deploys the chart to staging after every successful image build on master, and by hand (Actions,
+**Deploy to AKS**, Run workflow: environment, tag). `deploy/helm/README.md` ("The deploy workflow") describes its
+steps. Its deploy job runs in the GitHub environment `staging` (Settings, Environments; created on the first run if
+missing) and reads the remaining outputs as that environment's variables. To copy them after a Bicep deploy:
 
 ```bash
 az deployment sub show --name qeos-staging --query properties.outputs -o json > outputs.json
-gh variable set ACR_NAME --body "$(jq -r .acrName.value outputs.json)"
+out() { jq -r ".$1.value" outputs.json; }
+gh variable set ACR_NAME --body "$(out acrName)"
+gh variable set AKS_NAME --env staging --body "$(out aksName)"
+gh variable set AKS_RESOURCE_GROUP --env staging --body "$(out resourceGroup)"
+gh variable set KEY_VAULT_NAME --env staging --body "$(out keyVaultName)"
+gh variable set POSTGRES_HOST --env staging --body "$(out postgresHost)"
+gh variable set STORAGE_ACCOUNT_URL --env staging --body "$(out storageAccountUrl)"
+gh variable set ARTIFACTS_CONTAINER --env staging --body "$(out artifactsContainer)"
+gh variable set WORKLOAD_IDENTITY_CLIENT_IDS --env staging --body "$(jq -c .workloadIdentityClientIds.value outputs.json)"
+gh variable set EMAIL_SENDER --env staging --body "$(out communicationEmailSender)"
+gh variable set PUBLIC_HOSTNAME --env staging --body "$(out stagingHostname)"
+gh variable set ACME_EMAIL --env staging --body "ops@example.com"     # Let's Encrypt's expiry notices
 ```
 
-The deploy identity signs in to the cluster with Entra ID: the workflow needs `kubelogin`
-(`kubelogin convert-kubeconfig -l azurecli` after `az aks get-credentials`), since the cluster has no local accounts.
+Until every variable is set, the automatic run only prints a notice. Before the first deploy: section 3.1 (secrets),
+4.5 (namespace and cert-manager) and the cluster running. The workflow signs in to the cluster with Entra ID
+(`kubelogin convert-kubeconfig -l azurecli` after `az aks get-credentials`: the cluster has no local accounts), and
+adds its runner's address to the API server's authorised ranges for the run only, removing it in a final step that
+runs even when the deploy fails. If a run is cancelled hard and the address stays, the next Bicep deploy resets the
+list to `QEOS_ADMIN_IP_RANGES` (section 3), or remove it with `az aks update --api-server-authorized-ip-ranges`.
 
 ## 6. Staging stop and start (spec 5.14)
 
