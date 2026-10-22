@@ -551,6 +551,10 @@ jobs:
       # The Secret the chart reads with secrets.source kubernetes, from values-ci.yaml's dummy values
       - name: Create the namespace and the qeos-secrets Secret
         run: |
+          # Dummy values, but never printed: masked before anything (the failure dump's pod logs included) could show one
+          while IFS= read -r value; do
+            echo "::add-mask::$value"
+          done < <(yq '.ciSecrets[]' "$CHART/values-ci.yaml")
           kubectl create namespace "$NAMESPACE"
           mapfile -t literals < <(yq '.ciSecrets | to_entries | .[] | "--from-literal=" + .key + "=" + .value' "$CHART/values-ci.yaml")
           kubectl -n "$NAMESPACE" create secret generic qeos-secrets "${literals[@]}"
@@ -565,36 +569,77 @@ jobs:
         run: |
           kubectl -n "$NAMESPACE" port-forward svc/gateway 28080:8080 &
           pf=$!
-          for _ in $(seq 30); do curl -s -o /dev/null http://localhost:28080/health && break; sleep 1; done
+          for _ in $(seq 30); do curl -s --max-time 2 -o /dev/null http://localhost:28080/health && break; sleep 1; done
           status=0
           bash scripts/smoke_k8s.sh http://localhost:28080 "$NAMESPACE" || status=$?
           kill "$pf"
           exit "$status"
 
-      # Review Focus 2: a migration that cannot run (an image tag that does not exist) fails the upgrade, Helm applies
-      # none of the new Deployments, and the running release keeps serving
+      # Each service's image with an `alembic` that starts and exits 1: the realistic failed migration. FROM the :kind
+      # images, so only the shim differs; ahead of /usr/local/bin on PATH, outside /tmp (an emptyDir in the hook)
+      - name: Build and load the broken-migration images
+        run: |
+          images=()
+          for name in auth-service organization-service project-service ingestion-service test-management-service; do
+            printf '%s\n' "FROM qeos/$name:$TAG" "USER 0" \
+              "RUN mkdir -p /opt/broken && printf '#!/bin/sh\necho broken migration >&2\nexit 1\n' > /opt/broken/alembic && chmod 755 /opt/broken/alembic" \
+              "ENV PATH=/opt/broken:\$PATH" "USER 10001" | docker build -q -t "qeos/$name:broken-migration" -
+            images+=("qeos/$name:broken-migration")
+          done
+          docker run --rm --entrypoint sh qeos/auth-service:broken-migration -c 'alembic upgrade head; test $? = 1'
+          kind load docker-image --name qeos-kind "${images[@]}"
+
+      # Review Focus 2: a failed migration fails the upgrade, Helm applies none of the new Deployments, and the running
+      # release keeps serving. Twice: a migration that exits 1 (the Job fails at once: backoffLimit 0) and one whose image
+      # does not exist (it never starts; the Job fails on its deadline)
       - name: A failed migration leaves the release serving
         run: |
-          before="$(kubectl -n "$NAMESPACE" get deploy -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.generation} {end}')"
-          if helm upgrade qeos "$CHART" -n "$NAMESPACE" -f "$CHART/values-ci.yaml" \
-               --set migrate.imageTag=does-not-exist --set migrate.activeDeadlineSeconds=60 --wait --timeout 5m; then
-            echo "::error::the upgrade with a missing migration image succeeded"
+          generations() {
+            kubectl -n "$NAMESPACE" get deploy -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.generation} {end}'
+          }
+          # failed_upgrade CASE REVISIONS REASON [helm args...]: the upgrade fails for REASON, history is REVISIONS
+          failed_upgrade() {
+            local case="$1" want_revisions="$2" want_reason="$3"
+            shift 3
+            local before after revisions reason
+            before="$(generations)"
+            if helm upgrade qeos "$CHART" -n "$NAMESPACE" -f "$CHART/values-ci.yaml" "$@" --wait --timeout 5m; then
+              echo "::error::$case: the upgrade succeeded"
+              return 1
+            fi
+            reason="$(kubectl -n "$NAMESPACE" get job qeos-migrate -o jsonpath='{.status.conditions[?(@.type=="Failed")].reason}')"
+            if [ "$reason" != "$want_reason" ]; then
+              echo "::error::$case: the migration Job failed with '$reason', expected $want_reason"
+              return 1
+            fi
+            helm history qeos -n "$NAMESPACE"
+            revisions="$(helm history qeos -n "$NAMESPACE" -o json | yq -p json '[.[] | (.revision | tostring) + ":" + .status] | join(" ")')"
+            if [ "$revisions" != "$want_revisions" ]; then
+              echo "::error::$case: expected history '$want_revisions', got '$revisions'"
+              return 1
+            fi
+            after="$(generations)"
+            if [ "$before" != "$after" ]; then
+              echo "::error::$case: the failed upgrade changed Deployments: $before -> $after"
+              return 1
+            fi
+            echo "$case: the upgrade failed ($reason), revision 1 is still deployed, no Deployment changed"
+          }
+
+          failed_upgrade "a migration exits 1" "1:deployed 2:failed" BackoffLimitExceeded \
+            --set migrate.imageTag=broken-migration
+          code="$(kubectl -n "$NAMESPACE" get pods -l job-name=qeos-migrate \
+            -o jsonpath='{.items[0].status.initContainerStatuses[?(@.name=="auth-service")].state.terminated.exitCode}')"
+          if [ "$code" != 1 ]; then
+            echo "::error::the auth-service migration exited with '$code', expected 1"
             exit 1
           fi
-          helm history qeos -n "$NAMESPACE"
-          revisions="$(helm history qeos -n "$NAMESPACE" -o json | yq -p json '[.[] | (.revision | tostring) + ":" + .status] | join(" ")')"
-          if [ "$revisions" != "1:deployed 2:failed" ]; then
-            echo "::error::expected revision 1 deployed and revision 2 failed, got: $revisions"
-            exit 1
-          fi
-          after="$(kubectl -n "$NAMESPACE" get deploy -o jsonpath='{range .items[*]}{.metadata.name}={.metadata.generation} {end}')"
-          if [ "$before" != "$after" ]; then
-            echo "::error::the failed upgrade changed Deployments: $before -> $after"
-            exit 1
-          fi
+          failed_upgrade "a migration image is missing" "1:deployed 2:failed 3:failed" DeadlineExceeded \
+            --set migrate.imageTag=does-not-exist --set migrate.activeDeadlineSeconds=60
+
           kubectl -n "$NAMESPACE" port-forward svc/gateway 28080:8080 &
           pf=$!
-          for _ in $(seq 30); do curl -s -o /dev/null http://localhost:28080/health && break; sleep 1; done
+          for _ in $(seq 30); do curl -s --max-time 2 -o /dev/null http://localhost:28080/health && break; sleep 1; done
           status=0
           bash scripts/smoke_k8s.sh http://localhost:28080 "$NAMESPACE" --health-only || status=$?
           kill "$pf"

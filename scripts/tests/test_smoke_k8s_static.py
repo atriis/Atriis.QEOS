@@ -2,10 +2,13 @@
 
 The script runs against kind in CI (job helm-kind); these keep it safe to run and in step with the gateway and the job.
 """
+import os
 import re
 import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "smoke_k8s.sh"
@@ -33,13 +36,20 @@ def test_bash_strict_mode():
 
 
 def test_executable_in_git():
+    # Locally a missing git or an untracked file skips; in CI (CI is set) either one fails
+    in_ci = bool(os.environ.get("CI"))
     if not shutil.which("git"):
-        return
+        if in_ci:
+            pytest.fail("git is not on PATH: cannot check that scripts/smoke_k8s.sh is executable")
+        pytest.skip("git is not on PATH")
     out = subprocess.run(
         ["git", "ls-files", "--stage", "scripts/smoke_k8s.sh"], cwd=ROOT, capture_output=True, text=True
     ).stdout
-    if out:  # not yet added: nothing to check
-        assert out.startswith("100755"), f"scripts/smoke_k8s.sh is not executable in git: {out.strip()}"
+    if not out:
+        if in_ci:
+            pytest.fail("scripts/smoke_k8s.sh is not tracked by git")
+        pytest.skip("scripts/smoke_k8s.sh is not tracked yet")
+    assert out.startswith("100755"), f"scripts/smoke_k8s.sh is not executable in git: {out.strip()}"
 
 
 def test_refuses_anything_but_a_local_forward_on_kind():
@@ -90,9 +100,50 @@ def test_ci_job_runs_the_script_both_ways():
     ports = set(re.findall(r"port-forward svc/gateway (\d+):8080", job))
     urls = set(re.findall(r"smoke_k8s\.sh http://localhost:(\d+)", job))
     assert ports and ports == urls, f"port-forward ports {ports} and smoke URLs {urls} differ"
-    # The failed-upgrade check uses a migration tag that cannot exist and must see the upgrade fail
-    assert "--set migrate.imageTag=does-not-exist" in job
+    # The failed upgrades: a migration that exits 1 (BackoffLimitExceeded) and one whose image is missing (its deadline)
     assert re.search(r"if helm upgrade .*\n(.*\n)*?.*then\n\s+echo \"::error::", job)
+    assert re.search(r'"1:deployed 2:failed" BackoffLimitExceeded \\\n\s+--set migrate\.imageTag=broken-migration\n', job)
+    assert re.search(
+        r'"1:deployed 2:failed 3:failed" DeadlineExceeded \\\n\s+--set migrate\.imageTag=does-not-exist '
+        r"--set migrate\.activeDeadlineSeconds=60\n",
+        job,
+    )
+    assert "status.conditions[?(@.type==\"Failed\")].reason" in job, "the Job's failure reason is not checked"
+    assert re.search(r'docker build -q -t "qeos/\$name:broken-migration"', job)
+    assert re.search(r"kind load docker-image --name qeos-kind \"\$\{images\[@\]\}\"\n(.*\n)*?.*A failed migration", job)
+
+
+def test_ci_job_curls_time_out():
+    for line in helm_kind_job().splitlines():
+        if re.search(r"\bcurl\b", line):
+            assert "--max-time" in line, f"curl without --max-time in helm-kind: {line.strip()}"
+
+
+def test_ci_job_masks_the_dummy_secrets_first():
+    job = helm_kind_job()
+    mask = job.index("::add-mask::")
+    assert re.search(r"done < <\(yq '\.ciSecrets\[\]' \"\$CHART/values-ci\.yaml\"\)", job)
+    assert mask < job.index("kubectl create namespace"), "the masks must come before the Secret exists"
+    assert mask < job.index("kubectl -n \"$NAMESPACE\" logs"), "the masks must come before the failure dump"
+
+
+def test_failures_print_only_redacted_output():
+    text = script()
+    # Every response body or command output reaches a FAIL line through redacted(), never raw
+    for line in text.splitlines():
+        if re.match(r"\s*(fail|echo|printf)\b", line) or "fail \"" in line:
+            assert not re.search(r"\$\((head|tail|cat)\b", line), f"raw output in a failure line: {line.strip()}"
+    body = text[text.index("redacted() {"):]
+    assert "qeos_[A-Za-z0-9_-]+" in body and "access_token|refresh_token|token|key" in body
+    # Blanked before the cut, so a cut cannot leave part of a key
+    assert body.index("sed -E") < body.index("head -c 300")
+
+
+def test_run_counts_are_parsed_not_grepped():
+    text = script()
+    assert '"total":3,"passed":1' not in text, "the counts depend on the server's JSON key order"
+    assert re.search(r'"\$PY" -c .*json', text)
+    assert '[ "$counts" = "3 1 1 1 0" ]' in text
 
 
 def test_ci_job_pins_kind_and_the_images_match_values_ci():

@@ -46,8 +46,18 @@ check() {
   if [ "$status" = "$expected" ]; then
     pass "$name ($status)"
   else
-    fail "$name: expected $expected, got $status: $(head -c 300 "$TMP/body" 2>/dev/null)"
+    fail "$name: expected $expected, got $status: $(redacted "$TMP/body")"
   fi
+}
+
+# redacted FILE [tail] -- 300 bytes of it (its start, or its end with "tail") with API keys and tokens blanked first,
+# so a cut never leaves part of one: a failure prints this, never a raw response body or command output
+redacted() {
+  sed -E \
+    -e 's/qeos_[A-Za-z0-9_-]+/qeos_[redacted]/g' \
+    -e 's/"(access_token|refresh_token|token|key)":"[^"]*"/"\1":"[redacted]"/g' \
+    -e 's/eyJ[A-Za-z0-9_.-]+/[redacted-jwt]/g' \
+    "$1" 2>/dev/null | if [ "${2:-}" = tail ]; then tail -c 300; else head -c 300; fi
 }
 
 # body_has NAME TEXT -- the last response body contains TEXT
@@ -55,7 +65,7 @@ body_has() {
   if grep -qF -- "$2" "$TMP/body" 2>/dev/null; then
     pass "$1"
   else
-    fail "$1: body was $(head -c 300 "$TMP/body" 2>/dev/null)"
+    fail "$1: body was $(redacted "$TMP/body")"
   fi
 }
 
@@ -81,6 +91,19 @@ if [ "$HEALTH_ONLY" = true ]; then
   exit 0
 fi
 
+# Python reads JSON below (python3, else python: Windows has no python3 outside the Store stub)
+PY=""
+for candidate in python3 python; do
+  if "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 9))' >/dev/null 2>&1; then
+    PY="$candidate"
+    break
+  fi
+done
+if [ -z "$PY" ]; then
+  echo "FAIL  no Python 3.9+ found (tried python3, python)"
+  exit 1
+fi
+
 # ---- a real user: register -> verify (token from the database, as from the email) -> log in ----
 SUFFIX="$(date +%s)-$$"
 EMAIL="smoke-k8s-$SUFFIX@example.com"
@@ -90,7 +113,7 @@ check "register a user -> auth-service" 202 POST "$BASE/api/v1/auth/register" \
 VERIFY_TOKEN="$("${KUBECTL[@]}" exec deploy/postgres -- psql -U postgres -d auth_db -tAc \
   "SELECT token FROM pending_registrations WHERE email='$EMAIL' ORDER BY id DESC LIMIT 1" 2>"$TMP/psql_err" \
   | tr -d ' \r\n')"
-[ -n "$VERIFY_TOKEN" ] || fail "no verification token in auth_db: $(head -c 300 "$TMP/psql_err")"
+[ -n "$VERIFY_TOKEN" ] || fail "no verification token in auth_db: $(redacted "$TMP/psql_err")"
 check "verify the email" 200 GET "$BASE/api/v1/auth/verify-email?token=$VERIFY_TOKEN"
 check "log in" 200 POST "$BASE/api/v1/auth/login" \
   -H "Content-Type: application/json" -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}"
@@ -129,11 +152,19 @@ elif QEOS_URL="$BASE" QEOS_API_KEY="$API_KEY" qeos-collector upload "$TMP/junit.
       --fail-on-error 2>"$TMP/collector_err"; then
   pass "qeos-collector uploads a JUnit file through the gateway"
 else
-  fail "qeos-collector upload: $(tail -c 400 "$TMP/collector_err")"
+  fail "qeos-collector upload: $(redacted "$TMP/collector_err" tail)"
 fi
 RUN_ID="$(sed -n 's/.*uploaded run \([0-9][0-9]*\).*/\1/p' "$TMP/collector_err" 2>/dev/null | head -1)"
 check "read the run back -> /api/v1/runs" 200 GET "$BASE/api/v1/runs/${RUN_ID:-0}" "${AUTH[@]}"
-body_has "... with the collector's counts" '"total":3,"passed":1,"failed":1,"skipped":1,"errored":0'
+# Parsed, not grepped: the counts must not depend on the server's key order
+counts="$("$PY" -c 'import json, sys
+run = json.load(open(sys.argv[1]))
+print(" ".join(str(run.get(k)) for k in ("total", "passed", "failed", "skipped", "errored")))' "$TMP/body" 2>/dev/null)"
+if [ "$counts" = "3 1 1 1 0" ]; then
+  pass "... with the collector's counts (total passed failed skipped errored: $counts)"
+else
+  fail "... with the collector's counts: expected '3 1 1 1 0', got '$counts': $(redacted "$TMP/body")"
+fi
 check "the project lists it" 200 GET "$BASE/api/v1/projects/${PROJECT_ID:-0}/runs" "${AUTH[@]}"
 body_has "... including the run" "\"id\":${RUN_ID:-0}"
 

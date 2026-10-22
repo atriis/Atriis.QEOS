@@ -28,7 +28,7 @@ helm upgrade --install qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-
 ## Testing locally with kind
 
 The CI job `helm-kind` (`.github/workflows/ci.yml`) does this on every push: the render checks, the seven images, a
-kind cluster, the install, `scripts/smoke_k8s.sh`, and a failed upgrade. The same steps on a workstation with Docker
+kind cluster, the install, `scripts/smoke_k8s.sh`, and two failed upgrades. The same steps on a workstation with Docker
 (Desktop), kind, kubectl, helm 3 and yq v4:
 
 ```bash
@@ -52,10 +52,16 @@ pip install ./collector                       # qeos-collector, for the upload
 kubectl -n qeos port-forward svc/gateway 28080:8080 &
 bash scripts/smoke_k8s.sh http://localhost:28080 qeos     # ends with "all k8s checks passed"
 
-# 5. A migration that cannot run fails the upgrade; the release keeps serving (revision 1 deployed, 2 failed)
+# 5. A failed migration fails the upgrade; the release keeps serving. First one that starts and exits 1: each image
+#    with an `alembic` shim (the CI step "Build and load the broken-migration images" builds them), so the Job fails
+#    at once (backoffLimit 0, reason BackoffLimitExceeded)
+helm upgrade qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-ci.yaml \
+  --set migrate.imageTag=broken-migration --wait --timeout 5m                                         # fails
+kubectl -n qeos get job qeos-migrate -o jsonpath='{.status.conditions[?(@.type=="Failed")].reason}'   # BackoffLimitExceeded
+#    Then one whose image does not exist: it never starts, and the Job fails on its deadline (DeadlineExceeded)
 helm upgrade qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-ci.yaml \
   --set migrate.imageTag=does-not-exist --set migrate.activeDeadlineSeconds=60 --wait --timeout 5m   # fails
-helm history qeos -n qeos
+helm history qeos -n qeos          # 1 deployed, 2 failed, 3 failed
 bash scripts/smoke_k8s.sh http://localhost:28080 qeos --health-only
 
 kind delete cluster --name qeos-kind
@@ -67,7 +73,9 @@ organization, a project and an API key, uploads a JUnit file with `qeos-collecto
 `--health-only` stops after the health checks. It refuses any URL but `http://localhost:<port>` or `127.0.0.1`, and
 any kubectl context not named `kind-*`: it writes to the databases. Use a port nothing else publishes: if Compose's
 gateway holds it, the checks reach Compose (a TLS-on gateway answers `301`, and the script stops after the health
-checks).
+checks). A failed check prints the status and at most 300 bytes of the body with API keys and tokens blanked, never
+the raw body. In CI the `ciSecrets` dummy values are masked (`::add-mask::`) before the Secret is created, so the pod
+logs printed on a failure cannot show them either.
 
 `kind create cluster` makes `kind-qeos-kind` the current kubectl context; `kind delete cluster` removes it, so switch
 back with `kubectl config use-context <yours>`.
