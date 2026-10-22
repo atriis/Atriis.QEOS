@@ -383,6 +383,7 @@ with Helm, behind a Gateway API edge with a Let's Encrypt certificate; the Azure
 | Dashboard | `cd dashboard && npm run lint && npm run typecheck && npx vitest run && npm run build` |
 | Monitoring configuration | `bash monitoring/check.sh` (promtool rule tests, amtool, dashboard lint) |
 | Whole stack | `bash scripts/smoke_gateway.sh` against a running local stack |
+| Helm chart | `bash deploy/helm/qeos/render_test.sh`, and `scripts/smoke_k8s.sh` against a kind cluster (the `helm-kind` job; `deploy/helm/README.md`) |
 | Architecture docs | `python scripts/check_architecture_docs.py` (README diagram and table, blueprint banner, gateway routes) |
 
 **Continuous integration** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push:
@@ -391,6 +392,8 @@ with Helm, behind a Gateway API edge with a Let's Encrypt certificate; the Azure
 - the dashboard checks;
 - container smoke tests;
 - the full-stack gateway smoke, twice: without and with the monitoring profile;
+- `helm-kind`: the Helm chart installed on a throwaway kind cluster (migration hook included) and smoke-tested;
+- the Bicep build and lint, the Trivy image scan and the read-only-image check;
 - the architecture docs check.
 
 **Before pushing:** `git config core.hooksPath .githooks` once per clone runs the architecture docs check

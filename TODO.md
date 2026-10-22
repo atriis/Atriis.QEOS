@@ -98,7 +98,10 @@
 ### Gateway follow-ups
 - [x] Monitoring dashboards (Prometheus/Grafana) — *Phase 1, "Basic monitoring stack"*. Done 2026-10 (ADR-027): see "Execution intelligence and operations" item 2
 - [x] Single-VM production deployment package — `deploy/` (ADR-019): Caddy TLS edge with Let's Encrypt as the only published service, gateway real-IP rate limits trusting only Caddy's fixed address, restart policies, `init-env.sh` strong secrets, daily `backup.sh` with restore verified, installation guide. Waiting on a VM + domain
-- [ ] Kubernetes ingress; real certificates — *Phase 1 infra, when a cluster exists*
+- [x] Kubernetes ingress; real certificates — staging done 2026-10-22 (ADR-038): Gateway API edge (AKS Application Routing) and cert-manager with Let's Encrypt; first real deploy pending
+  - [ ] AKS Stage 2: NetworkPolicies beyond the edge's, read-only root filesystem checked on the cluster, kube-prometheus-stack with QEOS's rules and the five dashboards, the Grafana proxy sidecar (header secret instead of IP trust), Container Insights
+  - [ ] AKS Stage 3: production cluster, approval-gated deploy of `platform-v*`, restore drill proving 5 minutes of data loss and 1 hour to restore, the CI switch-over checklist
+  - [ ] **User action:** apply the GitHub environment branch policies (`staging`: master only; `production`: master and `platform-v*` tags; `deploy/azure/README.md` section 5.1), then run the first staging deploy and the checks in ADR-038 "Verify on the first real deploy"
 - [x] Service-to-service auth so organization-service can check users in auth-service — auth-service gained `GET /internal/v1/users/{id}` (HTTP Basic, same INTERNAL_API_PASSWORD pattern as project-service's retention API); the superuser `AUTH_SERVICE_TOKEN` is gone from config, compose and docs
 - [ ] Shared rate limits in Redis — *when more than one gateway instance runs*
 - [ ] JWT validation and per-user limits at the gateway — *when the gateway should reject bad tokens itself*
@@ -294,7 +297,7 @@ item-level record is "Analytics API (Phase 3, step 1)" and "Dashboard follow-ups
 72. [x] Integrate with all foundation services
 
 ### Execution intelligence and operations (agreed 2026-10-08, in this order)
-Kubernetes stays out until its blueprint trigger fires (first multi-node deployment); Docker Compose on one VM is the production target.
+Kubernetes stayed out until its blueprint trigger fired; it fired 2026-10-21 (AKS, ADR-038). Docker Compose on one VM remains a supported install.
 1. [x] Suite duration prediction (done 2026-10-08): ingestion `POST /analytics/duration-estimate` (per-test p50 of passed runs, p90 of all, per-environment with fallback, project overhead + parallelism fitted on the last 20 runs); estimate in the Run dialog, live in the selection bar and on suite detail; stored on run requests (test-management migration 008) for "≈ n min left" and "estimated vs took". Later: warn when the estimate exceeds the workflow timeout
 2. [x] Monitoring: Prometheus, Grafana and Alertmanager as an opt-in profile of the production compose; `/metrics` on every service, Postgres and container exporters, starter dashboards and alerts (service down, 5xx rate, disk). Done 2026-10: ADR-027, spec `docs/superpowers/specs/2026-10-10-monitoring-design.md`; blueprint §11 names, job heartbeats (ingestion migration 017), five dashboards, alerts to email/Slack/Teams, Grafana at `/grafana/` for superusers
 3. [x] Customisable Overview (done 2026-10-11, ADR-028, spec `docs/superpowers/specs/2026-10-11-customisable-overview-design.md`): 14 widgets over the existing analytics and three templates (QA lead, Developer, Flaky hunt); a project default (owners/admins) and a personal layout per user with "reset to project default" (project-service migration 004, optimistic versions, 409 Reload/Overwrite); one widget catalogue file shared by validation and the dashboard registry (24 widgets, 64 KB); refresh on a new run driven by each widget's stale keys; test-management `GET /suites?created_by=me`

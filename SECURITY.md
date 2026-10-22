@@ -207,8 +207,8 @@ details.
   identity is not wired fails instead of borrowing the node's) and needs only a data role on the one container. QEOS,
   its settings and its secrets hold no account key, connection string or SAS token. The storage account itself still
   has keys unless shared-key access is turned off on it (`allowSharedKeyAccess: false`, set by the Bicep of the AKS
-  infrastructure, Task 9 of the stage 1 plan); until then, whoever can read the account's keys in Azure can read every
-  artifact. The container is private (no anonymous access). Only ingestion-service and its retention job are
+  infrastructure, `deploy/azure/modules/storage.bicep`); if it is ever turned back on, whoever can read the account's
+  keys in Azure can read every artifact. The container is private (no anonymous access). Only ingestion-service and its retention job are
   *allowed* to read it (Azure RBAC on their identities); that is a permission, not a network boundary: the account's
   endpoint is reachable from anywhere its network rules allow, unless a private endpoint or firewall closes it. There
   are still no presigned URLs, and every read goes through ingestion with the user's JWT as above. Compose keeps MinIO.
@@ -341,7 +341,8 @@ details.
   scan before pushing an image to Azure Container Registry, so an image with such a finding is never pushed. Findings
   with no fix yet are not blocking. Accepting a finding on purpose means a line with the reason in `.trivyignore`; it is
   empty today. The images are pushed by a GitHub Actions job that signs in to Azure with OIDC (no stored secret).
-  Planned: Microsoft Defender for Containers on the cluster and registry, set up in the Bicep.
+  Microsoft Defender for Containers' sensor is turned on by the Bicep; the plan itself is billed and enabled per
+  subscription (`deploy/azure/README.md`, one-time steps).
 - **AKS edge and deploys (ADR-038).** On AKS, TLS ends at a Gateway API edge (AKS Application Routing) with a Let's
   Encrypt certificate from cert-manager; plain HTTP only redirects. The edge keeps client addresses
   (`externalTrafficPolicy: Local`) and a NetworkPolicy lets only its proxy pods reach the gateway, which believes

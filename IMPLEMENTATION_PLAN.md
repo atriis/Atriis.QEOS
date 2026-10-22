@@ -69,7 +69,7 @@ numbers in platforms/ingestion-service/README.md.
 | Redis shared rate limits / cache | second gateway instance |
 | ClickHouse analytics warehouse | rollups stop holding at ~10× data |
 | ~~Artifact storage (MinIO)~~ | started 2026-10-19 with step screenshots (ADR-036): MinIO in both compose files, images served through ingestion, off by default per project. Next slices: videos, traces, Playwright attachments |
-| Kubernetes + real certs | first multi-node deployment (the monitoring stack did not wait for it: it shipped as a compose profile, §2) |
+| ~~Kubernetes + real certs~~ | trigger met 2026-10-21 (AKS, ADR-038): Stage 1 (staging: Helm chart, Bicep, Flexible Server, Azure Blob, Gateway API edge, Key Vault, kind CI job) built 2026-10-22, first real deploy pending. Next: Stage 2 (NetworkPolicies, kube-prometheus-stack, Grafana sidecar) and Stage 3 (production, restore drill). The Compose path is unchanged |
 | ~~Test Management service (blueprint capability)~~ | started 2026-10-06 on product pull (ADR-022): cases, suites, link to automated tests, Gherkin import (ADR-023) and sync (`qeos-collector import-features`, ADR-024), Run from QEOS (ADR-025). Next slices: versioning, dynamic suites, ticket links |
 | Workspaces: group QA projects with the product repos they test (Phase 4) | product pull, after Phase 2 exit; components-under-test data (ADR-018) is already being captured |
 | GitHub App "connect repository" (commits/PRs of product repos via API + webhooks) | cross-repo correlation work begins (Phase 6); ingestion stays push-based regardless |

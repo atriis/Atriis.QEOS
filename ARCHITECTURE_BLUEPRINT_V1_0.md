@@ -9,7 +9,7 @@
 > | Services | CURRENT: auth, organization, project, ingestion, test-management (`platforms/`), NGINX gateway, MinIO object storage (`minio`, for screenshots; ADR-036), React dashboard (`dashboard/`), collector agent (`collector/`, plus `collector-action/` and `collector-jenkins/`), ingestion-retention + analytics-rollup + impact-rollup + weekly-summary jobs |
 > | Data layer | CURRENT: PostgreSQL 15 only (one DB per service). MinIO (S3-compatible object storage for step screenshots, ADR-036). Kafka, MongoDB, Neo4j, Qdrant, ClickHouse, Redis, Elasticsearch: TARGET, none deployed |
 > | Events / CDC / QIP backbone (sect. 6, 8, 12) | TARGET. All cross-service communication today is synchronous HTTP via the gateway |
-> | Deployment (sect. 9, 18, 23) | CURRENT: docker-compose (maturity L0); production package for one VM behind a Caddy TLS edge (`deploy/`, ADR-019). Kubernetes/Istio/Vault/ArgoCD: TARGET |
+> | Deployment (sect. 9, 18, 23) | CURRENT: docker-compose (maturity L0); production package for one VM behind a Caddy TLS edge (`deploy/`, ADR-019); **AKS staging built 2026-10-22** (ADR-038: Helm chart `deploy/helm/`, Bicep `deploy/azure/`, Flexible Server and Azure Blob, Gateway API edge with cert-manager, Key Vault secrets; first real deploy pending). Production on AKS, Istio/Vault/ArgoCD: TARGET |
 > | Security (sect. 10) | CURRENT: JWT + rotation + replay detection, httpOnly refresh cookie, email verification, password reset/change, TOTP MFA, Google/Microsoft SSO (tenant allowlist), org roles, per-project API keys, gateway rate zones, built-in + per-project masking, retention, legal hold, export, GitHub tokens encrypted at rest. OPA/ABAC/SPIFFE/Vault/audit log: TARGET |
 > | Analytics | CURRENT: ingestion stores every uploaded run unless the project's collection setting discards manual CI runs (ADR-030); ingestion-service analytics API (trends incl. weekly/monthly, tests, history, flaky with daily rollups and quarantine, branches, run compare, failures by cause) and the Report (summary, failure causes, regressions, by area, coverage, duration; ADR-026) on PostgreSQL — fulfils the role sect. 8's "QIP Analytics Service" targets. Test impact analysis is built (likely affected tests from co-failure statistics, each suggestion stored at upload and its accuracy measured, and run first in CI by the collector; ADR-029); a learned model and embeddings stay TARGET behind "Phase 6 AI engine work begins". No AI/ML today |
 > | Test management / execution | CURRENT: test-management-service (ADR-022): cases, suites, Gherkin import and sync (ADR-023, ADR-024); runs started in the customer's GitHub Actions (ADR-025). Environment orchestration, artifacts: TARGET |
@@ -25,7 +25,7 @@
 > | Redis (shared rate limits, cache) | Second gateway instance |
 > | ClickHouse | Rollup tables stop holding (e.g. flaky 90d > 5 s at ~10x current data) |
 > | MinIO (artifacts) | Artifacts feature (screenshots/videos/traces) starts. **CURRENT: trigger met 2026-10-19 (step screenshots, ADR-036)** |
-> | Kubernetes + real certificates | First multi-node deployment |
+> | Kubernetes + real certificates | First multi-node deployment. **CURRENT: trigger met 2026-10-21 (AKS, ADR-038); staging built 2026-10-22, production is Stage 3** |
 > | Qdrant / Neo4j / QIP services | Phase 6 AI engine work begins |
 > | MongoDB / Elasticsearch | Only with evidence PostgreSQL JSONB / full-text cannot serve the need |
 > | Loki (logs with `traceId`) | An incident cannot be diagnosed from `docker compose logs`, or a second VM |

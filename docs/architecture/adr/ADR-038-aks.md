@@ -1,0 +1,113 @@
+# ADR-038: QEOS on Azure Kubernetes Service (AKS), with Azure-managed state
+
+Status: Accepted (2026-10-21; Stage 1, staging, built 2026-10-22; first real deploy pending) · Spec: `docs/superpowers/specs/2026-10-21-aks-deployment-design.md` · Supersedes ADR-003 for AKS
+
+## Context
+
+QEOS ran as one Docker Compose project, on a laptop or on a single VM behind a Caddy TLS edge (ADR-019). The
+blueprint kept Kubernetes behind the trigger "first multi-node deployment", and ADR-003 is a placeholder that
+leaves managed Kubernetes "to be addressed separately". The team now wants QEOS published on AKS, with state in
+Azure services and a deploy that is repeatable. The Compose path (local development, CI, the single-VM package)
+must keep working unchanged.
+
+## Decision
+
+- **AKS, one cluster per environment** (staging built; production is Stage 3). Azure resources are Bicep in
+  `deploy/azure/`; the application is one Helm chart, `deploy/helm/qeos/`, with `values.yaml`, `values-staging.yaml`,
+  `values-production.yaml` and `values-ci.yaml`. Deployed by a GitHub Actions workflow, not GitOps.
+- **State lives in managed services.** PostgreSQL is Azure Database for PostgreSQL Flexible Server (five databases,
+  one login role per service, the admin login used only by the migration Job, TLS required). Screenshots and traces
+  are Azure Blob Storage, through `AzureBlobArtifactStore` behind `ARTIFACTS_BACKEND=azure` (default `s3`, so
+  Compose keeps MinIO), authenticated by workload identity with no key anywhere. The cluster holds no state.
+- **Images are built once.** `build-platform.yml` builds, Trivy-scans (a fixable critical finding fails the build)
+  and pushes every image to Azure Container Registry as `<acr>/qeos/<svc>:<git-sha>` (and `:<version>` for a
+  `platform-v*` tag), signing in by OIDC. Every image runs as a non-root user with a read-only-ready root
+  filesystem; nginx images listen on 8080/8443. The dashboard reads its sign-in settings at start from `/config.js`
+  (falling back to the build-time `VITE_*` values), so one image serves every environment.
+- **Secrets from Key Vault** through the Secrets Store CSI driver, one SecretProviderClass and one managed identity
+  per workload, so a workload reads only the secrets it names. Internal service URLs no longer embed the password:
+  `*_INTERNAL_URL` is bare and `INTERNAL_API_PASSWORD` is read separately (Compose sets both).
+- **Migrations are a Helm `pre-install,pre-upgrade` hook Job** (`db-init`, then each service's `alembic upgrade
+  head`); if it fails the release fails and the old pods keep serving. APIs wait in an init container until their
+  database is at the image's head. Migrations stay compatible with the previous release (expand, then contract).
+- **Edge: the AKS Application Routing add-on with Gateway API**, plus cert-manager (Let's Encrypt, HTTP-01). The
+  add-on's Gateway API implementation is Istio-based (`approuting-istio`). A static public IP outside the cluster
+  survives stops and rebuilds; the Gateway names it by annotation. One `HTTPRoute` sends everything to the QEOS
+  gateway over HTTP inside the cluster (the gateway's own TLS is off on AKS). One NetworkPolicy lets only the edge's
+  proxy pods reach the gateway, which trusts `X-Forwarded-For` from the pod range alone.
+- **Two replicas of each API, the dashboard and the gateway**, with PodDisruptionBudgets and spread across nodes.
+  The four loop jobs run one replica each (advisory locks make more harmless).
+- **Fresh start.** AKS begins empty; no data moves from an existing install.
+- **Deploys:** `deploy-aks.yml` (manual or chained after a green build on master) signs in by OIDC, adds the runner's
+  address to the API server's authorised ranges for the run only, and runs `helm upgrade --install --atomic --wait`
+  of exactly the SHA the build pushed. Production is gated by a GitHub environment approval and deploys a
+  `platform-v*` version.
+- **Chosen without the user, as built:** Bicep over Terraform; Helm over Kustomize; email through Azure
+  Communication Services (Azure-managed sender domain in staging); recovery targets of 5 minutes data loss and 1 hour
+  to restore (proved by a restore drill before production); a Sunday-night maintenance window with automatic patch
+  and node-image upgrades; Azure budget alerts at 80% and 100%; staging stopped outside working hours;
+  kube-prometheus-stack in the cluster, not Azure managed Prometheus or Grafana (Grafana must stay behind the
+  gateway's superuser check).
+
+## Alternatives considered
+
+- **ingress-nginx on AKS.** Rejected: upstream maintenance ended in March 2026 and Microsoft patches the add-on's
+  NGINX only through November 2026. Gateway API is the path Microsoft recommends.
+- **Caddy on AKS.** Rejected: certificates and routing are the cluster edge's job there.
+- **PostgreSQL or MinIO as pods.** Rejected: backups, point-in-time restore and durability are Azure's to run.
+- **Replace Compose with the chart.** Rejected: development, CI and single-VM installs need it unchanged.
+
+## Consequences
+
+- **Costs.** AKS nodes (one system and two to four user nodes of 2 vCPU in staging; the control plane on the Free
+  tier), Flexible Server (B1ms in staging), a Storage account, Key Vault, ACR (Basic) and Communication Services
+  replace one VM. Staging stops outside working hours; a budget of 300 per month alerts at 80% and 100%.
+  Production stays on and costs more (Stage 3).
+- **Compose is kept**, and CI still runs its smoke tests; the chart is tested in a throwaway kind cluster on every
+  push (`helm-kind`, with in-cluster PostgreSQL and MinIO), so chart, migration-hook and nginx mistakes fail before
+  AKS.
+- **Edge limits.** The add-on has no edge rate or body-size limits, so the QEOS gateway's own limits stay the
+  enforcing ones. With two gateway replicas nginx's per-pod zones allow a client up to twice the rate, so the limits
+  are halved on AKS (a chart value). Exact shared limits wait for Redis.
+- **The deploy identity keeps AKS Contributor** (trade-off). Adding the runner to the API server's authorised ranges
+  needs `managedClusters/write`, and a custom role would not be narrower. The role could also change those ranges or
+  re-enable local accounts. It is otherwise scoped: AcrPush on the registry, Kubernetes RBAC Admin on the `qeos`
+  namespace only (cert-manager is a one-time cluster-admin step). A self-hosted runner in the VNet removes the need.
+- **Key Vault purge protection is on**, in staging too: losing secrets to a mistaken delete costs more than the
+  friction of renaming a vault on a rebuild.
+- **Per-secret access.** Each identity gets Key Vault Secrets User on the secrets it names, not on the vault. Only
+  ingestion and its retention job hold a Storage data role, and Storage has shared-key access off.
+- **GitHub environment branch policies.** The federated credential trusts the `staging` and `production`
+  environments, so each must allow deployments from `master` only (production also `platform-v*` tags). Bicep and
+  the workflow cannot set this; an admin must (`deploy/azure/README.md`, section 5.1).
+- Per-process limits in ingestion (8 storage calls, a 60 s pending-deletion cache) become per pod.
+- Staging stopped during the Sunday window misses its upgrade; documented.
+
+## Verify on the first real deploy
+
+Nothing here can be proved without a real subscription:
+
+- Key Vault CSI mounts for pods without the workload-identity label (only ingestion and retention carry it).
+  Fallback: keep the label and pin auth-service's `AZURE_*` variables.
+- Blob copy and batch delete with Entra authentication; the Storage Blob Data Contributor role for ingestion and
+  retention; the 18 s credential-failure latency.
+- The namespace-scope Kubernetes RBAC Admin assignment, and that it covers Gateway API and cert-manager resources.
+- The IP-level Network Contributor the edge's static address needs.
+- The Gateway's static-IP annotations (`azure-pip-name`, `azure-load-balancer-resource-group`).
+- Real client IPs reach the gateway (`externalTrafficPolicy: Local`) and the trusted-proxy range matches.
+- The add-on's proxy pods and the probe annotations; the namespace the edge pods run in.
+- `pg_stat_statements` preloaded on Flexible Server; `db-init` on PostgreSQL 16.
+- A cancelled deploy run still removes the runner's /32 from the authorised ranges.
+- Federated credentials, SMTP keys in the vault, and sign-in by Microsoft with the new redirect URI.
+
+## Later
+
+- **Redis** shared rate limits (the trigger, a second gateway instance, is met on AKS; the per-pod limits are the stopgap).
+- **A queue** for in-API background work (notifications, impact evaluation, log scan).
+- **Entra database authentication** on Flexible Server with workload identity, so no service holds a database
+  password (NEXT_STEPS).
+- **Stage 2, hardening and monitoring:** NetworkPolicies beyond the one the edge needs, kube-prometheus-stack with
+  QEOS's rules and dashboards, the Grafana proxy sidecar (header secret, replacing IP trust), Container Insights.
+- **Stage 3, production:** the production cluster, the approval-gated deploy, the restore drill that proves the
+  recovery targets, the CI switch-over checklist, a self-hosted runner if required.
+- Migrating data from an existing install; Front Door or WAF; a corporate landing zone.

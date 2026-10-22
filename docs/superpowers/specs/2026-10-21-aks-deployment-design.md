@@ -1,6 +1,6 @@
 # Running QEOS on Azure Kubernetes Service (AKS)
 
-Date: 2026-10-21 · Status: approved 2026-10-21 (domain still open; not needed for Stage 1) · Decision record to write: ADR-038
+Date: 2026-10-21 · Status: approved 2026-10-21; Stage 1 (staging) built 2026-10-22, first real deploy pending (domain still open; not needed for Stage 1) · Decision record: ADR-038
 
 ## 1. Intent
 
@@ -231,7 +231,7 @@ domain.
 
 A CI job installs the Helm chart into a throwaway kind cluster with in-cluster PostgreSQL and MinIO (values
 file `values-ci.yaml`, `ARTIFACTS_BACKEND=s3`), waits for the migration hook and all pods, and runs
-`scripts/smoke_gateway.sh` against it through a port-forward. `helm lint` and `helm template` with each
+`scripts/smoke_k8s.sh` against it through a port-forward. `helm lint` and `helm template` with each
 values file run too. Chart, migration-hook and nginx-upstream mistakes then fail CI on every push, before
 anything reaches AKS.
 

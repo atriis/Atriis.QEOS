@@ -10,7 +10,14 @@ CI, and listed shipped features as unbuilt).
 - **Current vs target architecture**: ARCHITECTURE_BLUEPRINT_V1_0.md Implementation Status banner.
 - **Current-state spec**: TECHNICAL_SPECIFICATION.md.
 
-## AKS follow-ups (design 2026-10-21, ADR-038 to write)
+## AKS follow-ups (ADR-038, Stage 1 built 2026-10-22)
+
+- **Run the first staging deploy** (needs the Azure subscription): deploy the Bicep, set the repository variables, apply
+  the GitHub environment branch policies, run `deploy-aks.yml`, then `scripts/smoke_k8s.sh` against the staging address
+  and work through "Verify on the first real deploy" in ADR-038.
+- **Stage 2** (NetworkPolicies, kube-prometheus-stack with QEOS's rules and dashboards, the Grafana proxy sidecar,
+  Container Insights) and **Stage 3** (production, the restore drill, the CI switch-over); see TODO.md.
+- Redis shared rate limits and a queue for in-API background work stay behind their triggers.
 
 - Password-less database sign-in on AKS: Microsoft Entra authentication on PostgreSQL Flexible Server with
   workload identity, so no service holds a database password. Needs token refresh in every service's

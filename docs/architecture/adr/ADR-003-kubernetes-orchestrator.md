@@ -1,6 +1,6 @@
 # ADR-003: Select Kubernetes as Container Orchestrator
 
-- Status: Proposed (TARGET architecture; reclassified 2026-10-02 — adopt only when the Blueprint's Implementation Status trigger fires; nothing here is deployed)
+- Status: Superseded for AKS by ADR-038 (built for staging 2026-10-22); otherwise Proposed (TARGET architecture; reclassified 2026-10-02 — adopt only when the Blueprint's Implementation Status trigger fires; nothing here is deployed)
 - Date: 2024-01-29
 - Version: 1.0
 - Authors: Architecture Team

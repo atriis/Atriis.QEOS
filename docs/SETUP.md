@@ -1939,6 +1939,10 @@ Templates and references: [`templates/github/`](../templates/github/),
 Move to a VM when colleagues depend on the data, hosted CI must report all the time, or results
 become worth keeping. The full guide is **[`deploy/README.md`](../deploy/README.md)**. In short:
 
+(To run on Azure Kubernetes Service instead of a VM, see [`deploy/azure/README.md`](../deploy/azure/README.md) for
+the Azure resources and one-time steps and [`deploy/helm/README.md`](../deploy/helm/README.md) for the chart; ADR-038.
+The local stack and the VM package below are unchanged.)
+
 1. An Ubuntu 24.04 VM (2 vCPU, 4 GB RAM, 30 GB disk is enough for a pilot), a DNS A record, and
    inbound 443 and 80 from anywhere, plus 22 from your IP only. With monitoring ([7.4](#74-monitoring-optional)), use 8 GB RAM.
 2. Install Docker, clone the repository, then:
