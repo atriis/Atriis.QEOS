@@ -2,7 +2,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
+# apt-get upgrade: the base image's patched packages (Trivy fails the build on fixable CRITICAL findings, ADR-038)
+RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 

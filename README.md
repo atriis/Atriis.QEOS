@@ -364,6 +364,12 @@ and [`deploy/README.md`](deploy/README.md). The design is in [ADR-027](docs/arch
 
 The design is in ADR-019.
 
+On Azure Kubernetes Service the platform runs from the Helm chart in [`deploy/helm/`](deploy/helm/README.md)
+(ADR-038). Its images are built, scanned with Trivy and pushed to Azure Container Registry by the
+`Build platform images` workflow, as `<registry>.azurecr.io/qeos/<service>:<git sha>` (plus `:<version>` for a
+`platform-v*` tag). The workflow does nothing until the repository variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
+`AZURE_SUBSCRIPTION_ID` and `ACR_NAME` are set.
+
 ---
 
 ## Development and tests

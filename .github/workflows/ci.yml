@@ -489,6 +489,59 @@ jobs:
           COMPOSE_PROFILES: monitoring
         run: docker compose down --volumes
 
+  # Every platform image as build-platform.yml builds it, scanned by Trivy: a fixable CRITICAL finding fails here, in the
+  # pull request, rather than when master's images are pushed (ADR-038). Nothing is pushed
+  image-scan:
+    name: Trivy (${{ matrix.image }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: auth-service, context: ., dockerfile: platforms/auth-service/auth-service/Dockerfile }
+          - { image: organization-service, context: ., dockerfile: platforms/organization-service/Dockerfile }
+          - { image: project-service, context: ., dockerfile: platforms/project-service/Dockerfile }
+          - { image: ingestion-service, context: ., dockerfile: platforms/ingestion-service/Dockerfile }
+          - { image: test-management-service, context: ., dockerfile: platforms/test-management-service/Dockerfile }
+          - { image: dashboard, context: ., dockerfile: dashboard/Dockerfile }
+          - { image: gateway, context: gateway, dockerfile: gateway/Dockerfile }
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build
+        run: docker build -t "qeos/${{ matrix.image }}:scan" -f "${{ matrix.dockerfile }}" "${{ matrix.context }}"
+
+      - name: Scan with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: qeos/${{ matrix.image }}:scan
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
+
+  # Non-root and a read-only root filesystem with only /tmp writable, as on AKS (ADR-038). The script starts only
+  # containers and a network it labels itself, and removes just those
+  readonly-images:
+    name: Read-only images
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the images
+        run: |
+          for pair in auth-service:platforms/auth-service/auth-service/Dockerfile                       organization-service:platforms/organization-service/Dockerfile                       project-service:platforms/project-service/Dockerfile                       ingestion-service:platforms/ingestion-service/Dockerfile                       test-management-service:platforms/test-management-service/Dockerfile                       dashboard:dashboard/Dockerfile; do
+            docker build -t "qeos/${pair%%:*}:ci" -f "${pair#*:}" .
+          done
+          docker build -t qeos/gateway:ci gateway
+
+      - name: Check the images
+        env:
+          IMAGE_TAG: ci
+        run: bash scripts/check_readonly_images.sh
+
   # The Helm chart (ADR-038, spec 5.10) on a throwaway kind cluster: render checks, install with the migration hook,
   # an end-to-end smoke through the gateway, then a failed migration on upgrade must leave the release serving
   helm-kind:

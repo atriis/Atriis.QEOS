@@ -1,0 +1,118 @@
+name: Build platform images
+
+# Builds the seven platform images, scans each with Trivy and pushes it to Azure Container Registry (ADR-038, spec 5.2).
+# Runs after CI succeeded on master, and on platform-v* tags. Safe to merge before Azure exists: without the repository
+# variables below it only prints a notice.
+on:
+  workflow_run:
+    workflows: [ CI ]
+    types: [ completed ]
+    branches: [ master ]
+  push:
+    tags: [ "platform-v*" ]
+
+permissions:
+  contents: read
+
+jobs:
+  images:
+    name: Image (${{ matrix.image }})
+    # workflow_run fires for every CI run on master; only a green one builds
+    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # The OIDC token azure/login exchanges for an Azure access token (no stored secret)
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # image is the chart's qeos/<image> name (deploy/helm/qeos); context and dockerfile as in docker-compose.yml
+          - { image: auth-service, context: ., dockerfile: platforms/auth-service/auth-service/Dockerfile }
+          - { image: organization-service, context: ., dockerfile: platforms/organization-service/Dockerfile }
+          - { image: project-service, context: ., dockerfile: platforms/project-service/Dockerfile }
+          - { image: ingestion-service, context: ., dockerfile: platforms/ingestion-service/Dockerfile }
+          - { image: test-management-service, context: ., dockerfile: platforms/test-management-service/Dockerfile }
+          - { image: dashboard, context: ., dockerfile: dashboard/Dockerfile }
+          - { image: gateway, context: gateway, dockerfile: gateway/Dockerfile }
+    env:
+      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ACR_NAME: ${{ vars.ACR_NAME }}
+      # The commit CI passed on (workflow_run) or the tagged one (push)
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - name: Check that Azure is configured
+        id: azure
+        run: |
+          missing=()
+          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ACR_NAME; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::notice::Skipping the image build: repository variable(s) ${missing[*]} not set (Azure is not configured yet)"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v7
+        if: steps.azure.outputs.configured == 'true'
+        with:
+          ref: ${{ env.SHA }}
+
+      # Tags: the image is also pushed as :<version>, platform-v1.2.3 -> 1.2.3
+      - name: Name the image
+        id: name
+        if: steps.azure.outputs.configured == 'true'
+        run: |
+          image="${ACR_NAME}.azurecr.io/qeos/${{ matrix.image }}"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "local=qeos/${{ matrix.image }}:scan" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then
+            echo "version=${GITHUB_REF_NAME#platform-v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        if: steps.azure.outputs.configured == 'true'
+        run: docker build -t "${{ steps.name.outputs.local }}" -f "${{ matrix.dockerfile }}" "${{ matrix.context }}"
+
+      # Fixable CRITICAL findings fail the job before anything is pushed; .trivyignore documents any accepted one
+      - name: Scan with Trivy
+        if: steps.azure.outputs.configured == 'true'
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.name.outputs.local }}
+          scanners: vuln
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          trivyignores: .trivyignore
+
+      - name: Sign in to Azure
+        if: steps.azure.outputs.configured == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign in to the registry
+        if: steps.azure.outputs.configured == 'true'
+        run: az acr login --name "$ACR_NAME"
+
+      - name: Push
+        if: steps.azure.outputs.configured == 'true'
+        env:
+          IMAGE: ${{ steps.name.outputs.image }}
+          VERSION: ${{ steps.name.outputs.version }}
+        run: |
+          docker tag "${{ steps.name.outputs.local }}" "$IMAGE:$SHA"
+          docker push "$IMAGE:$SHA"
+          if [ -n "$VERSION" ]; then
+            docker tag "${{ steps.name.outputs.local }}" "$IMAGE:$VERSION"
+            docker push "$IMAGE:$VERSION"
+          fi

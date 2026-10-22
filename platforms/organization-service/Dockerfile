@@ -4,7 +4,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y \
+# apt-get upgrade: the base image's patched packages (Trivy fails the build on fixable CRITICAL findings, ADR-038)
+RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
@@ -15,7 +16,8 @@ COPY shared/ ./shared/
 COPY platforms/organization-service/requirements.txt ./platforms/organization-service/
 
 WORKDIR /app/platforms/organization-service
-RUN pip install --no-cache-dir -r requirements.txt
+# certifi 2026.10.19 drops the emSign roots with compromised keys (GHSA-6q48-6c7w-9gw2); it is only a transitive dependency
+RUN pip install --no-cache-dir -r requirements.txt "certifi>=2026.10.19"
 
 # Application code and the migration tooling, so `alembic upgrade head` can run from the image
 COPY platforms/organization-service/src/ ./src/

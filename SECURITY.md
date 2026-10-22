@@ -323,6 +323,12 @@ details.
 - **Supply chain.** Dependabot updates for pip, npm and GitHub Actions. CodeQL analysis
   runs once GitHub Code Security is enabled for the repository and the repository variable
   `CODEQL_ENABLED` is `true`; until then the CodeQL workflow is skipped, not failed.
+- **Image scanning (ADR-038).** CI builds every platform image and scans it with Trivy (operating-system packages and
+  Python libraries); a CRITICAL finding that has a fix fails the pull request, and `build-platform.yml` runs the same
+  scan before pushing an image to Azure Container Registry, so an image with such a finding is never pushed. Findings
+  with no fix yet are not blocking. Accepting a finding on purpose means a line with the reason in `.trivyignore`; it is
+  empty today. The images are pushed by a GitHub Actions job that signs in to Azure with OIDC (no stored secret).
+  Planned: Microsoft Defender for Containers on the cluster and registry, set up in the Bicep.
 
 ## Known limitations
 
