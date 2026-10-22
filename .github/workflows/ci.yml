@@ -532,7 +532,12 @@ jobs:
 
       - name: Build the images
         run: |
-          for pair in auth-service:platforms/auth-service/auth-service/Dockerfile                       organization-service:platforms/organization-service/Dockerfile                       project-service:platforms/project-service/Dockerfile                       ingestion-service:platforms/ingestion-service/Dockerfile                       test-management-service:platforms/test-management-service/Dockerfile                       dashboard:dashboard/Dockerfile; do
+          for pair in auth-service:platforms/auth-service/auth-service/Dockerfile \
+                      organization-service:platforms/organization-service/Dockerfile \
+                      project-service:platforms/project-service/Dockerfile \
+                      ingestion-service:platforms/ingestion-service/Dockerfile \
+                      test-management-service:platforms/test-management-service/Dockerfile \
+                      dashboard:dashboard/Dockerfile; do
             docker build -t "qeos/${pair%%:*}:ci" -f "${pair#*:}" .
           done
           docker build -t qeos/gateway:ci gateway

@@ -17,3 +17,6 @@ pytest==9.1.1
 # Relative path, resolved from this file's directory. The Dockerfile mirrors the repo
 # layout so this same path resolves inside the image.
 -e ../../shared
+
+# Floor for the transitive certifi: 2026.10.19 drops the emSign roots with compromised keys (GHSA-6q48-6c7w-9gw2)
+certifi>=2026.10.19

@@ -18,8 +18,9 @@ RUN npm run build
 
 # Non-root (ADR-038): nginx (uid 101) on port 8080, pid and temporary files in /tmp, so the root filesystem can be
 # read-only
-FROM nginxinc/nginx-unprivileged:1.27-alpine
-# The base image's patched packages (Trivy fails the build on fixable CRITICAL findings, ADR-038)
+# nginx 1.30.6 on Alpine 3.24.2 (stable), pinned by digest; Dependabot's docker ecosystem proposes the bumps
+FROM nginxinc/nginx-unprivileged:1.30-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
+# Stopgap between base image bumps: the base's patched packages (Trivy fails the build on fixable CRITICAL findings, ADR-038)
 USER root
 RUN apk upgrade --no-cache
 COPY dashboard/nginx.conf /etc/nginx/conf.d/default.conf

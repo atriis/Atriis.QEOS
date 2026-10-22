@@ -66,3 +66,20 @@ updates:
     groups:
       actions:
         patterns: ["*"]
+
+  # Base images of every Dockerfile (the nginx images are pinned by digest, the Python ones by tag)
+  - package-ecosystem: "docker"
+    directories:
+      - "/dashboard"
+      - "/gateway"
+      - "/platforms/auth-service/auth-service"
+      - "/platforms/organization-service"
+      - "/platforms/project-service"
+      - "/platforms/ingestion-service"
+      - "/platforms/test-management-service"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      docker-base-images:
+        patterns: ["*"]

@@ -17,8 +17,13 @@ permissions:
 jobs:
   images:
     name: Image (${{ matrix.image }})
-    # workflow_run fires for every CI run on master; only a green one builds
-    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
+    # workflow_run fires for every CI run whose branch is named master, a fork PR's included; only a green CI run of a push
+    # to this repository builds, since the job has the repository's variables and an OIDC token
+    if: >-
+      github.event_name == 'push' || (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -63,6 +68,18 @@ jobs:
         if: steps.azure.outputs.configured == 'true'
         with:
           ref: ${{ env.SHA }}
+          # The tag check needs master's history
+          fetch-depth: 0
+
+      # A platform-v* tag releases what master has: a tag on any other commit builds nothing
+      - name: Check that the tag is on master
+        if: steps.azure.outputs.configured == 'true' && github.ref_type == 'tag'
+        run: |
+          git fetch --no-tags origin master
+          if ! git merge-base --is-ancestor "$SHA" FETCH_HEAD; then
+            echo "::error::$GITHUB_REF_NAME ($SHA) is not on master"
+            exit 1
+          fi
 
       # Tags: the image is also pushed as :<version>, platform-v1.2.3 -> 1.2.3
       - name: Name the image

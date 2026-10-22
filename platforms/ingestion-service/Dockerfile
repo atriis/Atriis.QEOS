@@ -2,7 +2,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# apt-get upgrade: the base image's patched packages (Trivy fails the build on fixable CRITICAL findings, ADR-038)
+# apt-get upgrade: python:3.11-slim is rebuilt only now and then, and Trivy fails the build on a fixable CRITICAL finding
+# (ADR-038; linux-libc-dev, pulled in by gcc, was one). Not pinned: the patched packages are the point
 RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     gcc \
     && rm -rf /var/lib/apt/lists/*

@@ -1,11 +1,13 @@
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+# nginx 1.30.6 on Alpine 3.24.2 (stable), pinned by digest; Dependabot's docker ecosystem proposes the bumps
+FROM nginxinc/nginx-unprivileged:1.30-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
 
 # Packages are installed as root; the image itself runs as nginx (uid 101) below
 USER root
 
 # openssl: self-signed certificate on first start; gettext: envsubst for the config template;
 # curl: the compose healthcheck
-RUN apk add --no-cache openssl gettext curl
+# apk upgrade: stopgap between base image bumps, as in the dashboard image
+RUN apk upgrade --no-cache && apk add --no-cache openssl gettext curl
 
 COPY nginx.conf.template /etc/qeos/nginx.conf.template
 COPY grafana-on.conf grafana-off.conf /etc/qeos/
