@@ -34,7 +34,9 @@ page URL carries a one-time trace link) and `Cache-Control: no-cache`, and
 answers 404 for a file it lacks instead of the SPA's `index.html`. The viewer's
 service worker registers with the scope `/trace-viewer/`. **Trace** opens
 `/trace-viewer/index.html?trace=<absolute one-time link>` in a new tab
-(ADR-037). `npm run dev` does not serve the viewer; use the built image.
+(ADR-037). So the access log is the image's usual line with the requested path
+in place of the request line (no query, on every location), and the viewer's
+error log keeps critical messages only. `npm run dev` does not serve the viewer; use the built image.
 
 ## Shared files
 

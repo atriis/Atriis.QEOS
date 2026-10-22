@@ -132,7 +132,7 @@ class ScreenshotIn(BaseModel):
     _clean_text = field_validator("step_text", mode="after")(_replace_unstorable)
 
 
-MAX_ARTIFACT_KEYS = 4  # ArtifactIn's fields, and one a newer collector may add
+MAX_ARTIFACT_KEYS = 8  # ArtifactIn's three fields, and room for those a newer collector may add (videos)
 MAX_ARTIFACTS_PER_RESULT = 5
 
 

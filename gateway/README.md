@@ -153,7 +153,9 @@ cannot choose its own rate-limit bucket. `docker compose logs gateway` shows one
 request. A one-time link's path carries its token, so it is logged as `/api/v1/artifact-links/***`, also when the
 path arrives percent-encoded (the mask reads the decoded path). NGINX's error log prints the request line, so on the
 link location it keeps only critical messages and logs rate-limit refusals at info, below that. The trade-off: a 502,
-504 or 429 on a link leaves no error-log line (the access log still has its status, without the token).
+504 or 429 on a link leaves no error-log line (the access log still has its status, without the token). The trace
+viewer's URL (`/trace-viewer/index.html?trace=<link>`) carries the whole link in its query: it is logged as its path
+alone, and `location /trace-viewer/` keeps the same error-log settings.
 
 ## Adding a service
 

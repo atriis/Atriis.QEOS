@@ -1850,7 +1850,9 @@ Turn it on only if every project reader may see that (see SECURITY.md).
 
 Limits: 100 MB per trace, 5 per result, 500 per run, 300 seconds for the upload phase, 2 at a time. A trace is kept
 `trace_days` after the run started; one no result refers to is deleted after 7 days. The data export names traces but
-does not carry the files.
+does not carry the files. On production storage other than this MinIO (S3, or a managed bucket), add a lifecycle
+rule `AbortIncompleteMultipartUpload` (for example after 1 day), so the parts of an upload that never finished do not
+stay in the bucket.
 
 **Verify (4.12):** after a failed run with the switch on, the collector prints the traces it stored, **Trace** opens the
 trace viewer in a new tab with the test's actions, and the download button saves a ZIP that `npx playwright show-trace`

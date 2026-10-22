@@ -9,7 +9,6 @@ Before(async function () {
   await this.context.tracing.start({ screenshots: true, snapshots: true });
 });
 
-// The World must hold a Playwright BrowserContext as `this.context`, created before this hook runs.
 After(async function (scenario) {
   // Only a failed scenario keeps a trace; a passed one stops tracing without saving.
   if (scenario.result?.status !== Status.FAILED) {

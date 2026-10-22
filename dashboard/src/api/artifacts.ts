@@ -1,7 +1,7 @@
 import { apiBlob, apiFetch } from "./http";
 
 /** One stored artifact of a result (ADR-037); only traces for now. */
-export type ResultArtifact = { id: number; kind: "trace"; name: string; bytes: number };
+export type ResultArtifact = { id: number; kind: "trace"; name: string | null; bytes: number };
 
 /** A result's artifacts, without their bytes. */
 export function listResultArtifacts(projectId: number, runId: number, resultId: number): Promise<{ artifacts: ResultArtifact[] }> {

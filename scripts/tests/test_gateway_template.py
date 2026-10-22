@@ -266,8 +266,29 @@ def test_the_access_log_never_shows_a_link_token(tmp_path):
     assert "'\"uri\":\"$request_uri\",'" not in lines
     # Keyed on the decoded, normalised $uri, so a percent-encoded or doubled-slash form of the path is masked too
     mapping = location_block(nginx_conf, "map $uri $log_uri {")
-    assert mapping[1:] == ['"~*^/api/v1/artifact-links(/|$)" "/api/v1/artifact-links/***";', "default $request_uri;",
-                           "}"]
+    assert mapping[1:] == ['"~*^/api/v1/artifact-links(/|$)" "/api/v1/artifact-links/***";',
+                           '"~*^/trace-viewer(/|$)" $uri;', "default $request_uri;", "}"]
+
+
+def test_the_trace_viewer_is_logged_without_its_query(tmp_path):
+    """The viewer's URL is /trace-viewer/index.html?trace=<the one-time link>: its path is logged, never the query."""
+    nginx_conf, _ = ok(tmp_path)
+    mapping = location_block(nginx_conf, "map $uri $log_uri {")
+    viewer = mapping.index('"~*^/trace-viewer(/|$)" $uri;')
+    assert viewer < mapping.index("default $request_uri;")
+    # Every access log of the gateway is the JSON one, built on $log_uri
+    lines = active(nginx_conf)
+    assert [line for line in lines if line.startswith("access_log")] == ["access_log /dev/stdout json;"]
+    assert [line for line in lines if line.startswith("log_format")] == ["log_format json escape=json '{'"]
+
+
+def test_the_trace_viewer_keeps_its_link_out_of_the_error_log(kubernetes):
+    nginx_conf, _ = kubernetes
+    block = location_block(nginx_conf, "location /trace-viewer/ {")
+    assert "limit_req zone=api burst=40 nodelay;" in block
+    assert "limit_req_log_level info;" in block
+    assert "error_log /dev/stderr crit;" in block
+    assert "set $upstream http://dashboard.qeos.svc.cluster.local:8080;" in block and "proxy_pass $upstream;" in block
 
 
 def test_artifact_links_keep_the_token_out_of_the_error_log_and_off_the_disk(tmp_path):

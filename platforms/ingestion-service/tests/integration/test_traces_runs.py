@@ -96,6 +96,14 @@ def test_a_malformed_reference_is_dropped_not_a_422(client, key, db):
     assert linked(db) == [(0, blob_id(db, 7, SHA), "trace", None)]
 
 
+def test_fields_a_newer_collector_adds_are_ignored_up_to_eight_keys(client, key, db):
+    newer = {**trace(SHA, "newer"), "media_type": "application/zip", "a": 1, "b": 2, "c": 3, "d": 4}  # 8 keys
+    too_many = {**newer, "e": 5}  # 9: dropped before it is validated
+    response = post(client, key, [too_many, newer])
+    assert response.status_code == 201, response.text
+    assert linked(db) == [(0, blob_id(db, 7, SHA), "trace", "newer")]
+
+
 def test_more_than_five_traces_is_a_422(client, key, db):
     assert post(client, key, [trace(SHA)] * 6).status_code == 422
 

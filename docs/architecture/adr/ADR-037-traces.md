@@ -33,7 +33,9 @@ which expire and need a GitHub sign-in. ADR-036 put MinIO behind ingestion for s
   only. Each use writes an audit log line without the token. Expired rows are deleted on create and by retention.
 - **Stage 2: token never logged.** The gateway masks the token in its access log and uvicorn's, including
   percent-encoded paths; the link location sets `error_log crit` and `limit_req_log_level info`, and
-  `proxy_buffering off` (also on downloads) so trace bytes are not spooled to disk.
+  `proxy_buffering off` (also on downloads) so trace bytes are not spooled to disk. The viewer's URL carries the
+  link in its query, so both nginx (gateway and dashboard) log `/trace-viewer/` without the query and keep its error
+  log to critical messages (final review, 2026-10-22).
 - **Stage 2: self-hosted viewer.** The dashboard serves Playwright's own viewer from `playwright-core` (exact version
   pinned in `dashboard/package.json`) at `/trace-viewer/`, same origin, with `Referrer-Policy: no-referrer` and
   no-cache on `index.html` and `sw.bundle.js`. Never `trace.playwright.dev`. **Open trace** opens the result's first
