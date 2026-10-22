@@ -366,9 +366,9 @@ The design is in ADR-019.
 
 On Azure Kubernetes Service the platform runs from the Helm chart in [`deploy/helm/`](deploy/helm/README.md)
 (ADR-038). Its images are built, scanned with Trivy and pushed to Azure Container Registry by the
-`Build platform images` workflow, as `<registry>.azurecr.io/qeos/<service>:<git sha>` (plus `:<version>` for a
-`platform-v*` tag). The workflow does nothing until the repository variables `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`,
-`AZURE_SUBSCRIPTION_ID` and `ACR_NAME` are set. The `Deploy to AKS` workflow then installs those images on staging
+`Build platform images` workflow, as `<registry>.azurecr.io/qeos/<service>:<git sha>`; a `platform-v*` tag builds
+nothing and gives those same images the version as a second tag. The workflow does nothing until the repository
+variables `AZURE_BUILD_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` and `ACR_NAME` are set. The `Deploy to AKS` workflow then installs those images on staging
 with Helm, behind a Gateway API edge with a Let's Encrypt certificate; the Azure resources and the one-time steps are in
 [`deploy/azure/README.md`](deploy/azure/README.md).
 
@@ -383,7 +383,7 @@ with Helm, behind a Gateway API edge with a Let's Encrypt certificate; the Azure
 | Dashboard | `cd dashboard && npm run lint && npm run typecheck && npx vitest run && npm run build` |
 | Monitoring configuration | `bash monitoring/check.sh` (promtool rule tests, amtool, dashboard lint) |
 | Whole stack | `bash scripts/smoke_gateway.sh` against a running local stack |
-| Helm chart | `bash deploy/helm/qeos/render_test.sh`, and `scripts/smoke_k8s.sh` against a kind cluster (the `helm-kind` job; `deploy/helm/README.md`) |
+| Helm chart | `bash deploy/helm/qeos/tests/render_test.sh` and `bash deploy/helm/qeos/tests/db_init_test.sh`, and `scripts/smoke_k8s.sh` against a kind cluster (the `helm-kind` job; `deploy/helm/README.md`) |
 | Architecture docs | `python scripts/check_architecture_docs.py` (README diagram and table, blueprint banner, gateway routes) |
 
 **Continuous integration** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every push:

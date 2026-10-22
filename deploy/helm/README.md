@@ -220,8 +220,13 @@ gateway template (`manifests/charts/istio-control/istio-discovery/files/kube-gat
   choosing it fails at once.
 - **What it deploys**: the exact commit the build pushed images for. The build's job `built` uploads it as the
   artifact `built-sha` once all seven images are pushed, and the deploy downloads it from the triggering run; a build
-  that pushed nothing leaves none, and nothing is deployed. A manual tag or SHA must be on master (`git merge-base
-  --is-ancestor`), as must a platform version's `platform-v*` tag.
+  that pushed nothing leaves none, and nothing is deployed (a download that fails for another reason, such as an API
+  error, is a warning naming it). A manual tag or SHA must be on master (`git merge-base --is-ancestor`), as must a
+  platform version's `platform-v*` tag. A `platform-v*` tag builds nothing: `build-platform.yml`'s job `release`
+  checks that master's build pushed `qeos/<image>:<sha>` for the tagged commit and copies each manifest to
+  `:<version>` in the registry (`docker buildx imagetools create`, then the two digests compared), so a version is the
+  very image staging ran. It fails, naming them, when any `:<sha>` image is missing, and never moves an existing
+  version.
 - **Steps**: a check of every variable's form (the client ids are GUIDs, the URL and host names well formed) before
   anything else; Azure sign-in with OIDC (no stored secret); kubectl and kubelogin pinned by version and SHA-256; a
   check that all seven images with that tag are in ACR and that the cluster is running; `az aks get-credentials` and
@@ -232,17 +237,23 @@ gateway template (`manifests/charts/istio-control/istio-discovery/files/kube-gat
   certificate ready and `https://<host>/health` answers. A last step, which runs whatever happened (a cancel too),
   signs in again, waits until no operation runs on the cluster (the add of a cancelled run goes on in Azure), reads the
   list as it is then and removes only the runner's address, retrying on a conflicting operation and never leaving the
-  list empty (which would open the API server to all). The deploy job is serialised per environment (`concurrency` on
-  the job, so a run that deploys nothing never takes a waiting deploy's place).
+  list empty (which would open the API server to all). The steps before it have budgets (15, 25 and 20 minutes) and the
+  removal one deadline across all its attempts (25 minutes, never past the job's 100), so it always ends by itself; if
+  the address is left, it says so and how to remove it by hand (`deploy/azure/README.md`, section 5.1). The deploy job
+  is serialised per environment (`concurrency` on the job, so a run that deploys nothing never takes a waiting
+  deploy's place).
 - **Before Azure exists** the automatic run prints a notice and deploys nothing; a manual run fails, naming the
   missing variables.
 - It checks out the commit being deployed, so the chart always matches the images.
 
-Variables: the repository's `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` and `ACR_NAME`
-(`build-platform.yml` uses them too); the rest are variables of the GitHub environment (`staging`), none secret:
+Variables: the repository's `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` and `ACR_NAME` (`build-platform.yml` uses
+them too, with its own `AZURE_BUILD_CLIENT_ID`); the rest are variables of the GitHub environment (`staging`), none
+secret. `AZURE_DEPLOY_CLIENT_ID`, the deploy identity, is one of them and never a repository variable: only a job that
+declares the environment can sign in as it.
 
 | Variable | Value (Bicep output) | Chart value |
 |---|---|---|
+| `AZURE_DEPLOY_CLIENT_ID` | the GitHub deploy application's client id (`deploy/azure/README.md`, section 2) | none: the workflow's Azure sign-in |
 | `AKS_NAME` | `aksName` | the cluster; `edge.publicIp.name` = `pip-<AKS_NAME>-edge` |
 | `AKS_RESOURCE_GROUP` | `resourceGroup` | `edge.publicIp.resourceGroup` |
 | `KEY_VAULT_NAME` | `keyVaultName` | `keyvault.name` (`keyvault.tenantId` is `AZURE_TENANT_ID`) |
@@ -254,7 +265,7 @@ Variables: the repository's `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRI
 | `PUBLIC_HOSTNAME` | `stagingHostname` (later, the chosen domain) | `publicUrl` = `https://<PUBLIC_HOSTNAME>` |
 | `ACME_EMAIL` | an address the team reads | `edge.acme.email` |
 
-`deploy/azure/README.md` (sections 2 and 5) covers the identity, its roles and copying the outputs.
+`deploy/azure/README.md` (sections 2 and 5) covers the two identities, their roles and copying the outputs.
 
 ## Secrets
 

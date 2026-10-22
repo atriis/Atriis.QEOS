@@ -11,7 +11,7 @@ install is `deploy/README.md` and does not change.
 | `staging.bicepparam` | Staging's sizes; secret, personal and per-operator values come from environment variables |
 | `modules/network.bicep` | VNet: subnet `aks-nodes` (service endpoints Key Vault, Storage) and subnet `postgres` (delegated) |
 | `modules/aks.bicep` | The cluster, its control-plane identity, the edge's static public IP, Log Analytics for Defender, the maintenance windows |
-| `modules/acr.bicep` | Container registry; AcrPull for the kubelet, AcrPush for the GitHub identity |
+| `modules/acr.bicep` | Container registry; AcrPull for the kubelet and the GitHub deploy identity, AcrPush for the GitHub build identity |
 | `modules/identities.bicep` | One managed identity per workload identity, federated with its ServiceAccount |
 | `modules/keyvault.bicep` | Key Vault (RBAC), `postgres-admin-password`, `smtp-user`, Key Vault Secrets User per secret for the identities that read it |
 | `modules/postgres.bicep` | PostgreSQL Flexible Server, private access, its private DNS zone |
@@ -73,15 +73,46 @@ The chart's `keyvault.tenantId` is the tenant, the same as the repository variab
 4. **Defender for Containers plan**: the cluster's security profile turns the sensor on, but the plan is billed and
    switched on per subscription, so Bicep leaves it alone. If the subscription does not have it yet:
    `az security pricing create --name Containers --tier standard`.
-5. **The GitHub identity** (the `AZURE_CLIENT_ID` the workflows sign in with): an Entra application with federated
-   credentials for this repository: `repo:<org>/Atriis.QEOS:ref:refs/heads/master` (`build-platform.yml`) and
-   `repo:<org>/Atriis.QEOS:environment:staging` (`deploy-aks.yml`, whose deploy job runs in the GitHub environment
-   `staging`). Its service
-   principal's object id is `QEOS_DEPLOY_PRINCIPAL_ID` below: Bicep gives it AcrPush on the registry; on the cluster,
-   Azure Kubernetes Service Cluster User Role (kubeconfig) and Azure Kubernetes Service Contributor Role (adding its
-   runner to the authorised IP ranges for a run); and Azure Kubernetes Service RBAC Admin on the chart's namespace
-   only (`<cluster>/namespaces/qeos`: helm). Nothing cluster-wide: the namespace and cert-manager are a cluster
-   admin's one-time step (section 4.5). It needs no role on Key Vault or Storage.
+5. **Two GitHub identities**, two Entra applications, so that pushing images never carries the right to change the
+   cluster, and the cluster roles are reachable only from a job that declares a GitHub environment (whose branch
+   policy and, for production, reviewers then apply; section 5.1). Neither needs a role on Key Vault or Storage.
+
+   | | Build (`AZURE_BUILD_CLIENT_ID`, repository variable) | Deploy (`AZURE_DEPLOY_CLIENT_ID`, environment variable) |
+   |---|---|---|
+   | Used by | `build-platform.yml`: images on master, the `release` job on `platform-v*` tags | `deploy-aks.yml`, its `deploy` job only |
+   | Federated credentials (subject) | `repo:<org>/Atriis.QEOS:ref:refs/heads/master`, and one per release tag (below) | `repo:<org>/Atriis.QEOS:environment:staging` only (`environment:production` in Stage 3) |
+   | Object id for Bicep | `QEOS_BUILD_PRINCIPAL_ID` | `QEOS_DEPLOY_PRINCIPAL_ID` |
+   | Roles Bicep gives it | AcrPush on the registry, nothing else | AcrPull on the registry (it checks the images exist); on the cluster Azure Kubernetes Service Cluster User Role (kubeconfig) and Azure Kubernetes Service Contributor Role (adding its runner to the authorised IP ranges for a run); Azure Kubernetes Service RBAC Admin on the chart's namespace only (`<cluster>/namespaces/qeos`: helm) |
+
+   Nothing cluster-wide: the namespace and cert-manager are a cluster admin's one-time step (section 4.5).
+
+   ```bash
+   repo=<org>/Atriis.QEOS
+   # issuer, audience and subject: GitHub's OIDC token (Microsoft Entra "Configure an app to trust an external
+   # identity provider", scenario GitHub Actions)
+   fic() { az ad app federated-credential create --id "$1" --parameters \
+     "{\"name\":\"$2\",\"issuer\":\"https://token.actions.githubusercontent.com\",\"subject\":\"repo:$repo:$3\",\"audiences\":[\"api://AzureADTokenExchange\"]}"; }
+   build_app="$(az ad app create --display-name qeos-github-build --query appId -o tsv)"
+   az ad sp create --id "$build_app"
+   fic "$build_app" master ref:refs/heads/master
+   deploy_app="$(az ad app create --display-name qeos-github-deploy --query appId -o tsv)"
+   az ad sp create --id "$deploy_app"
+   fic "$deploy_app" env-staging environment:staging
+   ```
+
+   **Release tags.** A `platform-v1.2.3` run presents the subject `repo:<org>/Atriis.QEOS:ref:refs/tags/platform-v1.2.3`.
+   A federated credential's subject is matched exactly, and the GA way is one credential per tag, created before the
+   tag is pushed: `fic "$build_app" platform-v1-2-3 ref:refs/tags/platform-v1.2.3` (a credential's name allows only
+   letters, digits, `-` and `_`). An application holds at most 20 federated credentials, so delete the previous
+   release's once its tag run passed
+   (`az ad app federated-credential delete --id "$build_app" --federated-credential-id platform-v1-2-2`). A wildcard
+   (`claims['sub'] matches 'repo:<org>/Atriis.QEOS:ref:refs/tags/platform-v*' and claims['repository_id'] eq '<id>'`)
+   needs a flexible federated identity credential, which is in preview and set through Microsoft Graph beta
+   (`az rest`); move to it once it is generally available. Sources:
+   [workload identity federation, GitHub Actions](https://learn.microsoft.com/entra/workload-id/workload-identity-federation-create-trust),
+   [limits](https://learn.microsoft.com/entra/workload-id/workload-identity-federation-considerations),
+   [flexible federated identity credentials (preview)](https://learn.microsoft.com/entra/workload-id/workload-identities-flexible-federated-identity-credentials).
+   The release job only adds the version tag to images master's build already pushed (AcrPush is enough).
 6. **An Entra group of cluster admins** (`QEOS_AKS_ADMIN_GROUP_ID`): with local accounts off, `kubectl` signs in with
    Entra ID, and only this group gets cluster-admin. The deploy identity is admin of the namespace `qeos` only (item 5).
 
@@ -96,7 +127,8 @@ From the repository root, in bash. The parameter file reads these from the envir
 | `QEOS_BUDGET_EMAILS` | yes | Comma-separated addresses for the budget alerts |
 | `QEOS_OPERATOR_PRINCIPAL_ID` | no | Your object id (`az ad signed-in-user show --query id -o tsv`) or a group's: Key Vault Secrets Officer, for `init-secrets.sh` |
 | `QEOS_AKS_ADMIN_GROUP_ID` | no | The cluster admins group |
-| `QEOS_DEPLOY_PRINCIPAL_ID` | no | The GitHub identity's service principal object id |
+| `QEOS_BUILD_PRINCIPAL_ID` | no | The GitHub build identity's service principal object id (AcrPush) |
+| `QEOS_DEPLOY_PRINCIPAL_ID` | no | The GitHub deploy identity's service principal object id (AcrPull, the cluster roles) |
 | `QEOS_SECRETS_INITIALIZED` | no | `true` once `init-secrets.sh` has run (section 3.1): the identities then get read access to its secrets |
 | `QEOS_SMTP_APP_CLIENT_ID`, `QEOS_SMTP_APP_PRINCIPAL_ID` | no | The ACS SMTP application (section 4.1); empty on the first deploy |
 
@@ -108,7 +140,8 @@ export QEOS_ADMIN_IP_RANGES="$(curl -s https://api.ipify.org)/32"
 export QEOS_BUDGET_EMAILS="ops@example.com"
 export QEOS_OPERATOR_PRINCIPAL_ID="$(az ad signed-in-user show --query id -o tsv)"
 export QEOS_AKS_ADMIN_GROUP_ID="<group object id>"
-export QEOS_DEPLOY_PRINCIPAL_ID="$(az ad sp show --id <AZURE_CLIENT_ID> --query id -o tsv)"
+export QEOS_BUILD_PRINCIPAL_ID="$(az ad sp show --id <AZURE_BUILD_CLIENT_ID> --query id -o tsv)"
+export QEOS_DEPLOY_PRINCIPAL_ID="$(az ad sp show --id <AZURE_DEPLOY_CLIENT_ID> --query id -o tsv)"
 # First deploy only. Flexible Server wants three of: upper case, lower case, digits, symbols. The fixed "Qa1-" gives
 # all four; the rest is random hex. No character needs escaping in a shell, a URL or SQL
 export QEOS_POSTGRES_ADMIN_PASSWORD="Qa1-$(openssl rand -hex 24)"
@@ -236,7 +269,7 @@ than 30 days, keeping the newest 20 tags of each repository:
 
 ```bash
 az acr task create --registry <acrName> --name purge-old-images --schedule "0 3 * * Sun" --context /dev/null \
-  --cmd "acr purge --filter 'qeos/.*:.*' --ago 30d --keep 20 --untagged"
+  --cmd "acr purge --filter 'qeos/.*:[0-9a-f]{40}' --ago 30d --keep 20 --untagged"
 ```
 
 ### 4.5 Cluster-wide pieces (a cluster admin, once)
@@ -268,7 +301,7 @@ with OIDC and read secrets from nothing.
 
 | Variable | Value | Used by |
 |---|---|---|
-| `AZURE_CLIENT_ID` | The GitHub identity's application (client) id | `build-platform.yml`, the deploy workflow |
+| `AZURE_BUILD_CLIENT_ID` | The GitHub build application's client id (section 2, item 5) | `build-platform.yml` |
 | `AZURE_TENANT_ID` | The tenant id (also the chart's `keyvault.tenantId`) | both |
 | `AZURE_SUBSCRIPTION_ID` | The subscription | both |
 | `ACR_NAME` | Output `acrName` | both |
@@ -280,10 +313,11 @@ with OIDC and read secrets from nothing.
 steps. Its deploy job runs in the GitHub environment `staging` and reads the remaining outputs as that environment's
 variables.
 
-**Create the environments with a deployment-branch policy first.** The GitHub identity's federated credential trusts
-any workflow run that declares `environment: staging`, and that token can push images (AcrPush), change the cluster
-(AKS Contributor) and administer the namespace. Limit `staging` to `master`, and `production` (later) to `master` and
-protected `platform-v*` tags, with required reviewers:
+**Create the environments with a deployment-branch policy first.** The deploy identity's federated credential
+trusts any workflow run that declares `environment: staging`, and that token can change the cluster (AKS
+Contributor) and administer the namespace. Its client id, `AZURE_DEPLOY_CLIENT_ID`, is a variable of the environment,
+never of the repository, so a job without the environment cannot even name it. Limit `staging` to `master`, and
+`production` (later) to `master` and protected `platform-v*` tags, with required reviewers:
 
 ```bash
 repo=<org>/Atriis.QEOS
@@ -302,6 +336,8 @@ The workflow checks too that what it deploys is on master. To copy the outputs a
 az deployment sub show --name qeos-staging --query properties.outputs -o json > outputs.json
 out() { jq -r ".$1.value" outputs.json; }
 gh variable set ACR_NAME --body "$(out acrName)"
+gh variable set AZURE_BUILD_CLIENT_ID --body "<build app's client id>"
+gh variable set AZURE_DEPLOY_CLIENT_ID --env staging --body "<deploy app's client id>"   # never without --env
 gh variable set AKS_NAME --env staging --body "$(out aksName)"
 gh variable set AKS_RESOURCE_GROUP --env staging --body "$(out resourceGroup)"
 gh variable set KEY_VAULT_NAME --env staging --body "$(out keyVaultName)"
@@ -318,8 +354,17 @@ Until every variable is set, the automatic run only prints a notice. Before the 
 4.5 (namespace and cert-manager) and the cluster running. The workflow signs in to the cluster with Entra ID
 (`kubelogin convert-kubeconfig -l azurecli` after `az aks get-credentials`: the cluster has no local accounts), and
 adds its runner's address to the API server's authorised ranges for the run only, removing it in a final step that
-runs even when the deploy fails. If a run is cancelled hard and the address stays, the next Bicep deploy resets the
-list to `QEOS_ADMIN_IP_RANGES` (section 3), or remove it with `az aks update --api-server-authorized-ip-ranges`.
+runs even when the deploy fails. That step ends by itself within 25 minutes (the job allows for it); when it could
+not remove the address (the cluster stayed busy, an error, a run cancelled hard), its log says
+`<address>/32 may still be authorised`. The next Bicep deploy resets the list to `QEOS_ADMIN_IP_RANGES` (section 3),
+or remove it by hand, keeping every other range (an empty list would open the API server to all):
+
+```bash
+ip=<the runner's address from the log>
+ranges="$(az aks show -g <resourceGroup> -n <aksName> --query "apiServerAccessProfile.authorizedIpRanges[]" -o tsv \
+  | grep -vx "$ip/32" | paste -sd, -)"
+[ -n "$ranges" ] && az aks update -g <resourceGroup> -n <aksName> --api-server-authorized-ip-ranges "$ranges"
+```
 
 ## 6. Staging stop and start (spec 5.14)
 

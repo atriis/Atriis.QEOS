@@ -13,19 +13,23 @@ must keep working unchanged.
 ## Decision
 
 - **AKS, one cluster per environment** (staging built; production is Stage 3). Azure resources are Bicep in
-  `deploy/azure/`; the application is one Helm chart, `deploy/helm/qeos/`, with `values.yaml`, `values-staging.yaml`,
-  `values-production.yaml` and `values-ci.yaml`. Deployed by a GitHub Actions workflow, not GitOps.
+  `deploy/azure/`; the application is one Helm chart, `deploy/helm/qeos/`, with `values.yaml`, `values-staging.yaml`
+  and `values-ci.yaml` (`values-production.yaml` comes with production, Stage 3). Deployed by a GitHub Actions
+  workflow, not GitOps.
 - **State lives in managed services.** PostgreSQL is Azure Database for PostgreSQL Flexible Server (five databases,
   one login role per service, the admin login used only by the migration Job, TLS required). Screenshots and traces
   are Azure Blob Storage, through `AzureBlobArtifactStore` behind `ARTIFACTS_BACKEND=azure` (default `s3`, so
   Compose keeps MinIO), authenticated by workload identity with no key anywhere. The cluster holds no state.
 - **Images are built once.** `build-platform.yml` builds, Trivy-scans (a fixable critical finding fails the build)
-  and pushes every image to Azure Container Registry as `<acr>/qeos/<svc>:<git-sha>` (and `:<version>` for a
-  `platform-v*` tag), signing in by OIDC. Every image runs as a non-root user with a read-only-ready root
+  and pushes every image to Azure Container Registry as `<acr>/qeos/<svc>:<git-sha>`, signing in by OIDC. A
+  `platform-v*` tag never rebuilds: it checks that master's build pushed `:<git-sha>` for the tagged commit and copies
+  each manifest to `:<version>` in the registry, comparing the digests, so production runs the image staging ran.
+  Every image runs as a non-root user with a read-only-ready root
   filesystem; nginx images listen on 8080/8443. The dashboard reads its sign-in settings at start from `/config.js`
   (falling back to the build-time `VITE_*` values), so one image serves every environment.
-- **Secrets from Key Vault** through the Secrets Store CSI driver, one SecretProviderClass and one managed identity
-  per workload, so a workload reads only the secrets it names. Internal service URLs no longer embed the password:
+- **Secrets from Key Vault** through the Secrets Store CSI driver: one SecretProviderClass per workload, read through
+  one of four managed identities (`services`, shared by seven workloads, `ingestion`, `ingestion-retention` and
+  `migrate`), so a workload mounts only the secrets it names. Internal service URLs no longer embed the password:
   `*_INTERNAL_URL` is bare and `INTERNAL_API_PASSWORD` is read separately (Compose sets both).
 - **Migrations are a Helm `pre-install,pre-upgrade` hook Job** (`db-init`, then each service's `alembic upgrade
   head`); if it fails the release fails and the old pods keep serving. APIs wait in an init container until their
@@ -38,6 +42,11 @@ must keep working unchanged.
 - **Two replicas of each API, the dashboard and the gateway**, with PodDisruptionBudgets and spread across nodes.
   The four loop jobs run one replica each (advisory locks make more harmless).
 - **Fresh start.** AKS begins empty; no data moves from an existing install.
+- **Two GitHub identities.** The build identity (`AZURE_BUILD_CLIENT_ID`) holds AcrPush only and trusts `master`
+  and the release tags (one federated credential per tag: wildcard subjects need Entra's flexible federated
+  credentials, in preview). The deploy identity (`AZURE_DEPLOY_CLIENT_ID`, a variable of the GitHub environment)
+  holds AcrPull and the cluster roles and trusts only `environment:<name>`, so the environment's branch policy and
+  reviewers guard every use of the cluster roles.
 - **Deploys:** `deploy-aks.yml` (manual or chained after a green build on master) signs in by OIDC, adds the runner's
   address to the API server's authorised ranges for the run only, and runs `helm upgrade --install --atomic --wait`
   of exactly the SHA the build pushed. Production is gated by a GitHub environment approval and deploys a
@@ -71,14 +80,15 @@ must keep working unchanged.
   are halved on AKS (a chart value). Exact shared limits wait for Redis.
 - **The deploy identity keeps AKS Contributor** (trade-off). Adding the runner to the API server's authorised ranges
   needs `managedClusters/write`, and a custom role would not be narrower. The role could also change those ranges or
-  re-enable local accounts. It is otherwise scoped: AcrPush on the registry, Kubernetes RBAC Admin on the `qeos`
-  namespace only (cert-manager is a one-time cluster-admin step). A self-hosted runner in the VNet removes the need.
+  re-enable local accounts. It is otherwise scoped: AcrPull on the registry, Kubernetes RBAC Admin on the `qeos`
+  namespace only (cert-manager is a one-time cluster-admin step), and it cannot push images. A self-hosted runner in the VNet removes the need.
 - **Key Vault purge protection is on**, in staging too: losing secrets to a mistaken delete costs more than the
   friction of renaming a vault on a rebuild.
 - **Per-secret access.** Each identity gets Key Vault Secrets User on the secrets it names, not on the vault. Only
   ingestion and its retention job hold a Storage data role, and Storage has shared-key access off.
-- **GitHub environment branch policies.** The federated credential trusts the `staging` and `production`
-  environments, so each must allow deployments from `master` only (production also `platform-v*` tags). Bicep and
+- **GitHub environment branch policies.** The deploy identity's federated credential trusts the `staging` and
+  `production` environments only, so each must allow deployments from `master` only (production also `platform-v*`
+  tags). Bicep and
   the workflow cannot set this; an admin must (`deploy/azure/README.md`, section 5.1).
 - Per-process limits in ingestion (8 storage calls, a 60 s pending-deletion cache) become per pod.
 - Staging stopped during the Sunday window misses its upgrade; documented.
@@ -96,9 +106,16 @@ Nothing here can be proved without a real subscription:
 - The Gateway's static-IP annotations (`azure-pip-name`, `azure-load-balancer-resource-group`).
 - Real client IPs reach the gateway (`externalTrafficPolicy: Local`) and the trusted-proxy range matches.
 - The add-on's proxy pods and the probe annotations; the namespace the edge pods run in.
-- `pg_stat_statements` preloaded on Flexible Server; `db-init` on PostgreSQL 16.
+- `pg_stat_statements` preloaded on Flexible Server; `db-init` with Flexible Server's admin (CI's kind job already
+  runs it on PostgreSQL 16 as a `CREATEROLE CREATEDB` admin that is not a superuser, which needs the role granted
+  `WITH INHERIT TRUE, SET TRUE`).
+- The Defender for Containers plan is enabled on the subscription (`az security pricing show --name Containers`:
+  `pricingTier` `Standard`); Bicep turns on the sensor only.
 - A cancelled deploy run still removes the runner's /32 from the authorised ranges.
-- Federated credentials, SMTP keys in the vault, and sign-in by Microsoft with the new redirect URI.
+- Federated credentials (the build identity on master and on a release tag, the deploy identity on
+  `environment:staging`), SMTP keys in the vault, and sign-in by Microsoft with the new redirect URI.
+- AcrPull is enough for the deploy identity's `az acr repository show`, and AcrPush for the release job's
+  `docker buildx imagetools create` and digest check.
 
 ## Later
 

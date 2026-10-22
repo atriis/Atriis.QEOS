@@ -340,21 +340,30 @@ details.
   Python libraries); a CRITICAL finding that has a fix fails the pull request, and `build-platform.yml` runs the same
   scan before pushing an image to Azure Container Registry, so an image with such a finding is never pushed. Findings
   with no fix yet are not blocking. Accepting a finding on purpose means a line with the reason in `.trivyignore`; it is
-  empty today. The images are pushed by a GitHub Actions job that signs in to Azure with OIDC (no stored secret).
+  empty today. The images are pushed by a GitHub Actions job that signs in to Azure with OIDC (no stored secret) as
+  the build identity. A `platform-v*` release builds nothing: it adds the version tag to the image master's build
+  pushed and scanned, and checks the digests match, so production runs exactly what staging ran.
   Microsoft Defender for Containers' sensor is turned on by the Bicep; the plan itself is billed and enabled per
   subscription (`deploy/azure/README.md`, one-time steps).
 - **AKS edge and deploys (ADR-038).** On AKS, TLS ends at a Gateway API edge (AKS Application Routing) with a Let's
   Encrypt certificate from cert-manager; plain HTTP only redirects. The edge keeps client addresses
   (`externalTrafficPolicy: Local`) and a NetworkPolicy lets only its proxy pods reach the gateway, which believes
   `X-Forwarded-For` from the pod range alone; the edge itself has no rate or body-size limits, so the gateway's (halved,
-  per pod) stay the enforcing ones. `deploy-aks.yml` signs in with OIDC as the GitHub identity, which holds AcrPush
-  on the registry, Azure Kubernetes Service Contributor on the cluster (needed to add its runner to the API server's
-  authorised ranges; the role could also change those ranges or re-enable local accounts) and Kubernetes admin of the
-  `qeos` namespace only. Its federated credential trusts the GitHub environment, so the `staging` and `production`
-  environments must allow deployments from `master` only (production: protected `platform-v*` tags too;
-  `deploy/azure/README.md`, section 5.1), and the workflow deploys only commits on master whose images the build
-  pushed. The runner's address is authorised for the run only and removed in a step that always runs. Everything the
-  chart renders is namespaced; cert-manager is a cluster admin's one-time step.
+  per pod) stay the enforcing ones. GitHub signs in to Azure as one of two Entra applications, by OIDC with no
+  stored secret (`deploy/azure/README.md`, section 2):
+  - the **build identity** (`build-platform.yml`) holds AcrPush on the registry and nothing else; its federated
+    credentials trust `master` and each release tag. It can push images, never touch the cluster.
+  - the **deploy identity** (`deploy-aks.yml`) holds AcrPull on the registry, Azure Kubernetes Service Cluster User
+    and Contributor on the cluster (Contributor is needed to add its runner to the API server's authorised ranges; it
+    could also change those ranges or re-enable local accounts) and Kubernetes admin of the `qeos` namespace only. Its
+    federated credential trusts only the GitHub environment (`environment:staging`, later `production`), and its
+    client id is a variable of that environment, so only a job that declares the environment can sign in as it. The
+    environments must therefore allow deployments from `master` only (production: protected `platform-v*` tags too,
+    with reviewers; section 5.1).
+
+  The workflow deploys only commits on master whose images the build pushed. The runner's address is authorised for
+  the run only and removed in a step that always runs and ends within its own deadline, saying when an address is
+  left to remove by hand. Everything the chart renders is namespaced; cert-manager is a cluster admin's one-time step.
 
 ## Known limitations
 
