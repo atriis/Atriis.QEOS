@@ -1,0 +1,20 @@
+{
+  "analyzers": {
+    "core": {
+      "enabled": true,
+      "rules": {
+        "use-recent-api-versions": { "level": "warning" },
+        "use-resource-symbol-reference": { "level": "warning" },
+        "use-user-defined-types": { "level": "off" },
+        "explicit-values-for-loc-params": { "level": "warning" },
+        "use-secure-value-for-secure-inputs": { "level": "error" },
+        "outputs-should-not-contain-secrets": { "level": "error" },
+        "secure-params-in-nested-deploy": { "level": "error" },
+        "no-hardcoded-env-urls": { "level": "error" },
+        "what-if-short-circuiting": { "level": "warning" },
+        "no-unused-params": { "level": "error" },
+        "no-unused-vars": { "level": "error" }
+      }
+    }
+  }
+}
