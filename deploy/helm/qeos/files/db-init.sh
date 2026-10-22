@@ -49,8 +49,17 @@ for db in $DATABASES; do
 SELECT format('CREATE ROLE %I LOGIN', :'role') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'role')\gexec
 -- a server running with log_statement=ddl or all would log this password; the default is none
 ALTER ROLE :"role" WITH LOGIN PASSWORD :'pw';
--- Flexible Server's admin is not a superuser: it must be a member of a role to give it a database
-SELECT format('GRANT %I TO CURRENT_USER', :'role') WHERE NOT pg_has_role(current_user, :'role', 'MEMBER')\gexec
+-- Flexible Server's admin is not a superuser: to give the role a database it must be able to SET ROLE to it, and to
+-- revoke on that database it must hold the role's privileges (INHERIT). PostgreSQL 16 already makes the role's creator
+-- a member WITH ADMIN only (no INHERIT, no SET), for which 'MEMBER' is true: check USAGE (and SET on 16), not MEMBER.
+-- A superuser passes every check and is never granted anything
+SELECT :SERVER_VERSION_NUM >= 160000 AS pg16 \gset
+\if :pg16
+SELECT format('GRANT %I TO CURRENT_USER WITH INHERIT TRUE, SET TRUE', :'role')
+  WHERE NOT (pg_has_role(current_user, :'role', 'USAGE') AND pg_has_role(current_user, :'role', 'SET'))\gexec
+\else
+SELECT format('GRANT %I TO CURRENT_USER', :'role') WHERE NOT pg_has_role(current_user, :'role', 'USAGE')\gexec
+\endif
 SELECT format('CREATE DATABASE %I OWNER %I', :'db', :'role') WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = :'db')\gexec
 ALTER DATABASE :"db" OWNER TO :"role";
 -- Only its owner (and the admin) connects: no service reaches another's database

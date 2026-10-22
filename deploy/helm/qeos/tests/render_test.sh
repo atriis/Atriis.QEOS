@@ -314,6 +314,31 @@ n="$(q "$OUT/staging.yaml" '[select(.metadata.labels["app.kubernetes.io/componen
 [ "$n" = 0 ] && pass "staging: no in-cluster postgres or MinIO" || fail "staging: $n CI backing resources rendered"
 n="$(q "$OUT/ci.yaml" '[select(.kind == "Deployment" and (.metadata.name == "postgres" or .metadata.name == "minio"))] | length')"
 [ "$n" = 2 ] && pass "ci: in-cluster postgres and MinIO" || fail "ci: $n of postgres/MinIO rendered"
+# The CI server is what Flexible Server is: the same major, and db-init's admin is a CREATEROLE CREATEDB login created
+# by the init script, not the superuser
+pgdeploy='select(.kind == "Deployment" and .metadata.name == "postgres") | .spec.template.spec'
+major="$(sed -n "s/^param version string = '\([0-9]*\)'.*/\1/p" "$CHART/../../azure/modules/postgres.bicep")"
+img="$(q "$OUT/ci.yaml" "$pgdeploy | .containers[0].image")"
+[ -n "$major" ] && [[ "$img" == postgres:"$major".* ]] && pass "ci: the in-cluster server is PostgreSQL $major, as Flexible Server ($img)" \
+  || fail "ci: the in-cluster server is '$img', Flexible Server is '$major'"
+super="$(q "$OUT/ci.yaml" "$pgdeploy | .containers[0].env[] | select(.name == \"POSTGRES_USER\") | .value")"
+admin="$(q "$OUT/ci.yaml" "$pgdeploy | .containers[0].env[] | select(.name == \"QEOS_ADMIN_USER\") | .value")"
+pguser="$(q "$OUT/ci.yaml" 'select(.kind == "Job" and .metadata.name == "qeos-migrate") | .spec.template.spec.initContainers[] | select(.name == "db-init") | .env[] | select(.name == "PGUSER") | .value')"
+[ "$super" = postgres ] && [ "$admin" = qeosadmin ] && [ "$pguser" = qeosadmin ] \
+  && pass "ci: db-init connects as qeosadmin, which the init script creates; the superuser is postgres" \
+  || fail "ci: superuser '$super', init script admin '$admin', db-init PGUSER '$pguser'"
+mnt="$(q "$OUT/ci.yaml" "$pgdeploy | (.containers[0].volumeMounts[] | select(.name == \"init\") | .mountPath) + \" \" + (.volumes[] | select(.name == \"init\") | .configMap.name)")"
+[ "$mnt" = "/docker-entrypoint-initdb.d postgres-init" ] && pass "ci: the init script is mounted for the entrypoint" \
+  || fail "ci: the init volume is '$mnt'"
+w="$(q "$OUT/ci.yaml" 'select(.kind == "ConfigMap" and .metadata.name == "postgres-init") | .metadata.annotations["helm.sh/hook-weight"] + " " + (.data["ci-postgres-init.sh"] | test("CREATEROLE CREATEDB NOSUPERUSER") | tostring)')"
+[ "$w" = "-20 true" ] && pass "ci: the postgres-init ConfigMap is a hook with the server (-20) and creates a non-superuser admin" \
+  || fail "ci: postgres-init is '$w'"
+if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" --set postgres.adminUser=postgres >/dev/null 2>"$OUT/super.err"; then
+  fail "ci: postgres.adminUser=postgres renders (db-init would run as the superuser)"
+else
+  grep -q "must not be postgres" "$OUT/super.err" && pass "ci: postgres.adminUser=postgres is refused" \
+    || fail "ci: adminUser=postgres failed for another reason: $(tail -n 2 "$OUT/super.err")"
+fi
 # kind's images are tagged :kind, never Compose's :local: a local kind build must not replace the dev stack's images
 bad="$(q "$OUT/ci.yaml" '[.spec.template.spec | (.containers // []) + (.initContainers // []) | .[].image | select(test("^qeos/") and (test(":kind$") | not))] | unique | join(",")' | tr -d "[:space:]")"
 [ -z "$bad" ] && pass "ci: every qeos/ image is tagged :kind" || fail "ci: images not tagged :kind: $bad"

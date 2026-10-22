@@ -139,7 +139,7 @@ sleep of 5 s let in-flight requests and in-API background tasks finish while the
 | `postgres.host` | required | the server (Flexible Server: `<name>.postgres.database.azure.com`) |
 | `postgres.adminUser` | `qeosadmin` | the admin login, used by the migration hook only |
 | `postgres.sslmode` | `require` | `PGSSLMODE` for every connection (`disable` for the in-cluster CI server) |
-| `postgres.clientImage` | `postgres:15.13` | psql for db-init (needs psql 15 or newer) |
+| `postgres.clientImage` | `postgres:16.15` | psql for db-init (needs psql 15 or newer) |
 | `artifacts.backend` | `s3` | `s3` or `azure` (`ARTIFACTS_BACKEND`) |
 | `artifacts.s3.endpoint`, `.bucket` | `""`, `qeos-artifacts` | `ARTIFACTS_S3_*`; the keys are secrets |
 | `artifacts.azure.accountUrl`, `.container` | `""`, `qeos-artifacts` | `ARTIFACTS_AZURE_*` (workload identity, no key) |
@@ -296,6 +296,9 @@ alone, and each migration sees its own role's password and `secret-key`. One ini
 1. `db-init` (`files/db-init.sh`, in `postgres.clientImage`, as the admin login): creates each database and its login
    role `<db>_app` if missing, sets the role's password from `<db>-db-password`, makes the role the owner of its own
    database and revokes `CONNECT` from everyone else. Idempotent; it works with Flexible Server's admin, which is not a
+   superuser: it grants each role to the admin `WITH INHERIT TRUE, SET TRUE` (PostgreSQL 16 gives a role's creator
+   only an ADMIN membership, and `CREATE DATABASE ... OWNER` needs `SET ROLE`). kind's in-cluster server mirrors this:
+   PostgreSQL 16 with `qeosadmin` created `CREATEROLE CREATEDB` only (`files/ci-postgres-init.sh`), not as the
    superuser. It checks every password first: a missing or blank one stops it before any role is changed (an empty
    password would clear the role's and lock out its running pods). `tests/db_init_test.sh` covers this.
 2. Each service in `migrate.order` (`files/migrate.sh <db>`, in the service's own image): `alembic upgrade head` as

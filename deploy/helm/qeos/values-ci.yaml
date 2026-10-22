@@ -17,7 +17,8 @@ secrets:
 
 postgres:
   host: postgres
-  adminUser: postgres
+  # adminUser stays qeosadmin: not the server's superuser, created CREATEROLE CREATEDB as on Flexible Server
+  # (templates/ci-backing.yaml), so db-init and the migrations run here with the rights they have on Azure
   # The in-cluster server has no TLS
   sslmode: disable
 

@@ -53,7 +53,7 @@ postgres:
   # libpq's PGSSLMODE for every connection; Flexible Server requires TLS
   sslmode: require
   # psql for db-init (\getenv needs psql 15 or newer)
-  clientImage: postgres:15.13
+  clientImage: postgres:16.15
 
 artifacts:
   # s3 (MinIO or any S3 API, keys artifacts-s3-access-key and artifacts-s3-secret-key) or azure (Blob, workload identity)
@@ -138,7 +138,8 @@ migrate:
 # In-cluster PostgreSQL and MinIO for kind (values-ci.yaml); never on AKS
 ci:
   backing: false
-  postgresImage: postgres:15.13
+  # The major Flexible Server runs (deploy/azure/modules/postgres.bicep)
+  postgresImage: postgres:16.15
   # The same image and digest as docker-compose.yml
   minioImage: cgr.dev/chainguard/minio@sha256:709099319add48dfb44aa596a7070d3ddd8dd04d7ae881765719aec29df9e510
 

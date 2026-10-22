@@ -40,6 +40,18 @@ if run complete; then
   [ "$n" = 5 ] && pass "every secret present: five roles set" || fail "every secret present: $n ALTER ROLE, want 5"
   grep -qx 'password=testmgmt-pw' "$WORK/complete.log" && pass "each role gets its own password" \
     || fail "testmgmt's password did not reach psql"
+  # PostgreSQL 16 makes a role's creator a member WITH ADMIN only, for which pg_has_role(..., 'MEMBER') is already
+  # true: guarding on MEMBER skips the grant and CREATE DATABASE ... OWNER fails with "must be able to SET ROLE".
+  # The real server path runs in CI's helm-kind job (PostgreSQL 16, a CREATEROLE CREATEDB admin)
+  if grep -q "'MEMBER')" "$WORK/complete.log"; then
+    fail "the admin's grant is guarded by MEMBER, which PostgreSQL 16's implicit ADMIN-only membership satisfies"
+  elif [ "$(grep -c "GRANT %I TO CURRENT_USER WITH INHERIT TRUE, SET TRUE" "$WORK/complete.log")" = 5 ] \
+    && [ "$(grep -c "pg_has_role(current_user, :'role', 'SET')" "$WORK/complete.log")" = 5 ] \
+    && [ "$(grep -c "pg_has_role(current_user, :'role', 'USAGE')" "$WORK/complete.log")" = 10 ]; then
+    pass "each role is granted to the admin WITH INHERIT, SET unless it has USAGE (and SET on 16)"
+  else
+    fail "the admin's grant is not checked by USAGE and SET"
+  fi
 else
   fail "every secret present: exit non-zero: $(cat "$WORK/complete.err")"
 fi
