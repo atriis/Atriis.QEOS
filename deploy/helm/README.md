@@ -205,6 +205,13 @@ artifacts with buffering off. The route's overall timeout is off (`timeouts.requ
 cut by the edge; the gateway's proxy timeouts end slow requests. Per-client limits shared across gateway pods wait for
 Redis (spec 5.4).
 
+Gateway API version: the add-on needs AKS's Managed Gateway API installation, which installs the standard channel only,
+bundle v1.2.1 on Kubernetes 1.26-1.33 up to v1.5.1 on 1.36
+([Managed Gateway API installation](https://learn.microsoft.com/azure/aks/managed-gateway-api)). The fields the chart
+uses beyond the basics, `Gateway.spec.infrastructure` (`annotations`, `parametersRef`) and `HTTPRoute` `rules[].timeouts`,
+are standard since v1.2.0. `tests/render_test.sh` pins the fields, and CI's `helm-kind` job applies the rendered
+Gateway and HTTPRoutes (server-side dry run, strict validation) against the v1.2.1 standard CRDs.
+
 Sources: [Application routing add-on with the Gateway API](https://learn.microsoft.com/azure/aks/app-routing-gateway-api)
 (GatewayClass, generated resources, limitations, `externalTrafficPolicy: Local` and the probe annotations),
 [Istio add-on Gateway API, ConfigMap customizations](https://learn.microsoft.com/azure/aks/istio-gateway-api)

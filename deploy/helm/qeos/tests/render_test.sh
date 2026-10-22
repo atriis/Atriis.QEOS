@@ -287,6 +287,17 @@ r="$(q "$st" 'select(.kind == "HTTPRoute" and .metadata.name == "qeos") | .spec 
 r="$(q "$st" 'select(.kind == "HTTPRoute" and .metadata.name == "qeos-https-redirect") | .spec | .parentRefs[0].sectionName + " "
   + .rules[0].filters[0].requestRedirect.scheme + " " + (.rules[0].filters[0].requestRedirect.statusCode | tostring)')"
 [ "$r" = "http https 301" ] && pass "staging: plain HTTP redirects to HTTPS" || fail "staging: redirect route is '$r'"
+# AKS's Managed Gateway API installs the standard channel only, from bundle v1.2.1 (Kubernetes 1.26-1.33) to v1.5.1
+# (1.36; learn.microsoft.com/azure/aks/managed-gateway-api). Gateway.spec.infrastructure (annotations, parametersRef)
+# and HTTPRoute rules[].timeouts are standard since v1.2.0, so the chart keeps to these fields; CI's helm-kind job applies
+# the rendered objects with server-side dry run against the v1.2.1 standard CRDs
+k="$(q "$st" 'select(.kind == "Gateway") | (.spec | keys | join(",")) + " " + (.spec.infrastructure | keys | join(","))
+  + " " + (.spec.infrastructure.parametersRef | keys | join(","))')"
+[ "$k" = "gatewayClassName,infrastructure,listeners annotations,parametersRef group,kind,name" ]   && pass "staging: the Gateway uses standard-channel v1.2 fields only" || fail "staging: the Gateway's fields are '$k'"
+k="$(q "$st" '[select(.kind == "HTTPRoute") | .spec.rules[] | keys | .[]] + [select(.kind == "HTTPRoute") | .spec.rules[].timeouts // {} | keys | .[]] | sort | unique | join(",")')"
+[ "$k" = "backendRefs,filters,matches,request,timeouts" ] && pass "staging: the HTTPRoutes use standard-channel v1.2 fields only"   || fail "staging: the HTTPRoutes' rule fields are '$k'"
+v="$(q "$st" '[select(.kind == "Gateway" or .kind == "HTTPRoute") | .apiVersion] | unique | join(",")')"
+[ "$v" = "gateway.networking.k8s.io/v1" ] && pass "staging: Gateway API v1 (standard) only" || fail "staging: Gateway API versions '$v'"
 c="$(q "$st" 'select(.kind == "Certificate") | .spec.secretName + " " + .spec.issuerRef.kind + "/" + .spec.issuerRef.name')"
 [ "$c" = "qeos-edge-tls Issuer/qeos-letsencrypt" ] && pass "staging: Certificate from the namespaced Issuer into qeos-edge-tls" \
   || fail "staging: Certificate is '$c'"
@@ -363,6 +374,11 @@ for secret in "${dummies[@]}"; do
   done
 done
 [ "$leaks" = 0 ] && [ "${#dummies[@]}" -ge 5 ] && pass "no dummy secret in any rendered manifest (${#dummies[@]} checked)"
+
+# RENDER_OUT=DIR keeps the rendered manifests (CI's helm-kind job checks the edge against Gateway API's CRDs)
+if [ -n "${RENDER_OUT:-}" ]; then
+  mkdir -p "$RENDER_OUT" && cp "$OUT"/*.yaml "$RENDER_OUT"/
+fi
 
 if [ "$failures" -gt 0 ]; then
   echo "$failures chart check(s) failed"

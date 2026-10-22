@@ -615,6 +615,9 @@ jobs:
       # helm lint and template with each values file, no secret in any manifest; db-init's secret handling (stub psql).
       # yq (mikefarah v4) is on the runner image
       - name: Chart render checks
+        env:
+          # The rendered manifests, for the Gateway API check below
+          RENDER_OUT: ${{ runner.temp }}/render
         run: |
           yq --version
           bash "$CHART/tests/render_test.sh"
@@ -639,6 +642,25 @@ jobs:
           node_image: kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed
           kubectl_version: v1.36.4
           cluster_name: qeos-kind
+
+      # The oldest Gateway API CRDs AKS's Managed Gateway API installs (standard channel, bundle v1.2.1 on Kubernetes
+      # 1.26-1.33; learn.microsoft.com/azure/aks/managed-gateway-api) must accept staging's Gateway and HTTPRoutes:
+      # server-side dry run with strict field validation, so a field newer than v1.2.1 or experimental fails here
+      - name: The edge against the oldest Gateway API CRDs AKS manages
+        env:
+          GATEWAY_API_VERSION: v1.2.1
+          GATEWAY_API_SHA256: 97598bf6ab3b33b9b5c5432bdd24de091e4e9c3aa0575ebb0710a2a19cd64d64
+        run: |
+          crds="$RUNNER_TEMP/gateway-api-standard.yaml"
+          curl -fsSLo "$crds" "https://github.com/kubernetes-sigs/gateway-api/releases/download/$GATEWAY_API_VERSION/standard-install.yaml"
+          echo "$GATEWAY_API_SHA256  $crds" | sha256sum -c -
+          kubectl apply --server-side -f "$crds"
+          kubectl wait --for condition=Established --timeout 60s             crd/gateways.gateway.networking.k8s.io crd/httproutes.gateway.networking.k8s.io
+          yq 'select(.kind == "Gateway" or .kind == "HTTPRoute")' "$RUNNER_TEMP/render/staging.yaml" > "$RUNNER_TEMP/edge.yaml"
+          [ "$(yq ea '[select(.kind != null)] | length' "$RUNNER_TEMP/edge.yaml")" = 3 ] || { echo "::error::expected a Gateway and two HTTPRoutes"; exit 1; }
+          kubectl apply -n default --dry-run=server --validate=strict -f "$RUNNER_TEMP/edge.yaml"
+          # Remove them again: kind's own install below never uses Gateway API
+          kubectl delete --ignore-not-found -f "$crds"
 
       - name: Load the images into kind
         run: |
