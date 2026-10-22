@@ -43,6 +43,11 @@ class Settings(BaseServiceSettings):
     ARTIFACTS_S3_BUCKET: Optional[str] = None
     ARTIFACTS_S3_ACCESS_KEY: Optional[str] = None
     ARTIFACTS_S3_SECRET_KEY: Optional[str] = None
+    # s3 (the four settings above) or azure: Azure Blob through DefaultAzureCredential, workload identity on AKS, no
+    # keys (ADR-038). With azure and no account URL (https://<account>.blob.core.windows.net) there is no store either
+    ARTIFACTS_BACKEND: str = "s3"
+    ARTIFACTS_AZURE_ACCOUNT_URL: Optional[str] = None
+    ARTIFACTS_AZURE_CONTAINER: str = "qeos-artifacts"
 
     # Public origin of the dashboard, for the run link in failure notifications. Empty: no link
     DASHBOARD_URL: str = ""

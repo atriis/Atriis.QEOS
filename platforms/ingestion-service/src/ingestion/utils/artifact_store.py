@@ -1,7 +1,7 @@
-"""Artifact storage for screenshots (ADR-036) and traces (ADR-037): an S3-compatible bucket, MinIO in the compose files.
-Only ingestion talks to it. Without all four ARTIFACTS_S3_* settings there is no store (None) and QEOS works as
-before without screenshots. get_artifact_store() takes no request, so FastAPI routes and batch jobs (retention,
-purge) call it the same way."""
+"""Artifact storage for screenshots (ADR-036) and traces (ADR-037): an S3-compatible bucket, MinIO in the compose files,
+or Azure Blob on AKS (ARTIFACTS_BACKEND=azure, azure_blob_store.py, ADR-038). Only ingestion talks to it. Without its
+settings there is no store (None) and QEOS works as before without screenshots. get_artifact_store() takes no request,
+so FastAPI routes and batch jobs (retention, purge) call it the same way."""
 import asyncio
 import logging
 import threading
@@ -331,18 +331,46 @@ class S3ArtifactStore:
 
 _lock = threading.Lock()
 _store: Optional[ArtifactStore] = None
+_warned = False
 
 
 def reset() -> None:
     """Forgets the cached store (tests, after changing the settings)."""
-    global _store
+    global _store, _warned
     with _lock:
         _store = None
+        _warned = False
+
+
+def _warn_once(message: str, *args: object) -> None:
+    """get_artifact_store() runs on every request: a misconfiguration is logged once, not each time."""
+    global _warned
+    if not _warned:
+        _warned = True
+        logger.warning(message, *args)
 
 
 def get_artifact_store() -> Optional[ArtifactStore]:
-    """The configured store, built once, or None when any ARTIFACTS_S3_* setting is unset or empty."""
+    """The configured store, built once, or None when it is not configured: with ARTIFACTS_BACKEND=s3 (the default)
+    any ARTIFACTS_S3_* setting unset or empty, with azure (ADR-038) no ARTIFACTS_AZURE_ACCOUNT_URL."""
     global _store
+    backend = (settings.ARTIFACTS_BACKEND or "s3").strip().lower()
+    if backend == "azure":
+        account_url, container = settings.ARTIFACTS_AZURE_ACCOUNT_URL, settings.ARTIFACTS_AZURE_CONTAINER
+        if not (account_url and container):
+            _warn_once("ARTIFACTS_BACKEND is azure but ARTIFACTS_AZURE_ACCOUNT_URL or ARTIFACTS_AZURE_CONTAINER is "
+                       "empty: no artifact store, screenshots and traces are off")
+            return None
+        with _lock:
+            if _store is None:
+                from src.ingestion.utils.azure_blob_store import AzureBlobArtifactStore
+
+                _store = AzureBlobArtifactStore(account_url, container)
+            return _store
+    if backend != "s3":
+        _warn_once("ARTIFACTS_BACKEND is %r, not s3 or azure: no artifact store, screenshots and traces are off",
+                   backend)
+        return None
     endpoint, bucket = settings.ARTIFACTS_S3_ENDPOINT, settings.ARTIFACTS_S3_BUCKET
     access_key, secret_key = settings.ARTIFACTS_S3_ACCESS_KEY, settings.ARTIFACTS_S3_SECRET_KEY
     if not (endpoint and bucket and access_key and secret_key):

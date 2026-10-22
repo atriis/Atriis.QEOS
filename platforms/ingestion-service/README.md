@@ -611,6 +611,17 @@ scoring missed its budget (p95 249 ms): reading the pairs of a change's units wa
   `ARTIFACTS_S3_ACCESS_KEY` and `ARTIFACTS_S3_SECRET_KEY` together; if any is unset there is no store and QEOS works
   without screenshots or traces. Objects are keyed `screenshots/{project_id}/{sha256}` and `artifacts/{project_id}/{sha256}`. The MinIO volume is copied by
   `deploy/backup.sh`; see deploy/README.md section 7.
+- Storage backends: `ARTIFACTS_BACKEND` is `s3` (the default, the settings above, used by the compose files) or
+  `azure` (ADR-038, on AKS): Azure Blob Storage through `src/ingestion/utils/azure_blob_store.py`, with
+  `ARTIFACTS_AZURE_ACCOUNT_URL` (`https://<account>.blob.core.windows.net`) and `ARTIFACTS_AZURE_CONTAINER`
+  (default `qeos-artifacts`). It signs in with `DefaultAzureCredential`, the pod's workload identity: there is no
+  key to set, and the identity needs a data role on the container (Storage Blob Data Contributor). Same keys and
+  errors as S3; streamed trace uploads are staged blocks committed once (a failed upload leaves no blob, Azure
+  drops the uncommitted blocks), reads stream 4 MB at a time, and deletes go in batches of 256. With `azure` and no
+  account URL, or any other backend value, there is no store, as above, and the service logs one warning. The
+  chart (`deploy/helm/qeos`, `artifacts.backend`) sets these. Tests: `tests/unit/test_azure_blob_store.py` (mocked
+  SDK), and `tests/integration/test_azure_blob_azurite.py` against the Azurite emulator, skipped unless
+  `AZURITE_URL` is set (`http://127.0.0.1:10000/devstoreaccount1`; the docstring has the `docker run` line).
 
 ## Known limitations
 

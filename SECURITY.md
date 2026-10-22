@@ -201,6 +201,12 @@ details.
   dashboard's access log has the requested path without any query, its error log critical messages for the viewer. The viewer runs on the dashboard's origin, with the
   dashboard's reach (its storage, the API under the user's session), so `playwright-core` is pinned to an exact version
   and a bump is deliberate, checked by opening a real trace before it ships.
+- **Artifact storage on AKS (ADR-038).** On Kubernetes, screenshots and traces go to Azure Blob Storage instead of
+  MinIO (`ARTIFACTS_BACKEND=azure`), under the same keys and with the same checks. Ingestion signs in with its
+  workload identity (`DefaultAzureCredential`): no account key, connection string or SAS token exists in QEOS, its
+  settings or its secrets, and the identity needs only data access to the one container. The container is private
+  (no anonymous access) and only ingestion-service and its retention job reach it; there are still no presigned URLs, every read goes
+  through ingestion with the user's JWT as above. Compose keeps MinIO.
 - **Gateway.** TLS 1.2/1.3. Per-IP rate limits: 20 requests/s on the API,
   10/s on uploads, 50/s (burst 100, 6 MB body) on screenshot uploads, 10/s (burst 20, 101 MB body, streamed
   unbuffered) on trace uploads, and 5/s on sign-in, registration, password and MFA
