@@ -73,6 +73,9 @@ jobs:
           ENVIRONMENT: ${{ inputs.environment || 'staging' }}
           INPUT_TAG: ${{ inputs.tag }}
           BUILT_FILE: ${{ runner.temp }}/built/built-sha.txt
+          BUILT_OUTCOME: ${{ steps.built.outcome }}
+          BUILD_RUN_ID: ${{ github.event.workflow_run.id }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$ENVIRONMENT" != staging ]; then
             echo "::error::Only staging can be deployed now: production (values-production.yaml, the production cluster and its approval) is a later stage (spec 5.11)"
@@ -80,7 +83,16 @@ jobs:
           fi
           if [ "$GITHUB_EVENT_NAME" = workflow_run ]; then
             if [ ! -s "$BUILT_FILE" ]; then
-              echo "::notice::The build pushed no images (no built-sha artifact): nothing to deploy"
+              # The download fails both when the run has no such artifact (the build pushed nothing) and for any other
+              # reason (an API error, an expired artifact): only the run's artifact list tells them apart
+              names="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$BUILD_RUN_ID/artifacts" \
+                --jq '[.artifacts[] | select(.name == "built-sha") | .name + (if .expired then " (expired)" else "" end)] | join(",")' 2>&1)" \
+                || names="listing failed: $names"
+              if [ "$BUILT_OUTCOME" != failure ] || [ -z "$names" ]; then
+                echo "::notice::The build pushed no images (no built-sha artifact): nothing to deploy"
+              else
+                echo "::warning::Nothing deployed: the built-sha artifact of build run $BUILD_RUN_ID could not be downloaded (download step: $BUILT_OUTCOME; artifact: $names). Deploy by hand (Run workflow, tag = the build's commit) once the cause is fixed"
+              fi
               echo "deploy=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
@@ -118,17 +130,18 @@ jobs:
     needs: target
     if: needs.target.outputs.deploy == 'true'
     runs-on: ubuntu-latest
-    # helm's 20 minutes, two authorised-range updates (a few minutes each, longer behind another cluster operation),
-    # the edge checks, and the cleanup
-    timeout-minutes: 60
+    # Every step that waits has its own budget (the runner's authorised range 15 minutes, helm 25, the edge 20), so the
+    # removal of the runner's address always has its 25 minutes left: JOB_TIMEOUT_MINUTES below must equal this
+    timeout-minutes: 100
     # One deploy per environment at a time: each run adds its runner's address to the API server's authorised ranges
     # and removes it afterwards, and two runs editing that list at once would undo each other's change. On the job, not
     # the workflow: a run whose target is skipped never joins the group, so it cannot cancel a pending real deploy
     concurrency:
       group: deploy-aks-${{ needs.target.outputs.environment }}
       cancel-in-progress: false
-    # Its variables and its deployment-branch policy (master only; deploy/azure/README.md, section 5.1); the Azure
-    # identity's federated credential trusts repo:<org>/<repo>:environment:<name>
+    # Its variables and its deployment-branch policy (master only; deploy/azure/README.md, section 5.1). The deploy
+    # identity's federated credential trusts repo:<org>/<repo>:environment:<name> and nothing else, and its client id is
+    # a variable of the environment, so only a job that declares the environment can sign in as it
     environment: ${{ needs.target.outputs.environment }}
     permissions:
       contents: read
@@ -144,8 +157,11 @@ jobs:
       KUBECTL_SHA256: 8b8f088da2dab964f853b38464033b1be15ede2839eca751482357c45abdd05a
       KUBELOGIN_VERSION: v0.2.20
       KUBELOGIN_SHA256: 2e92450a929dd2aec4da818b40dd4fda97aaeae2d6cd9c1074cc1371210f4ab9
+      JOB_TIMEOUT_MINUTES: 100
+      # The GitHub environment's variable (never a repository variable): the deploy identity, which can change the
+      # cluster. build-platform.yml signs in as the build identity (AZURE_BUILD_CLIENT_ID, AcrPush only)
+      AZURE_DEPLOY_CLIENT_ID: ${{ vars.AZURE_DEPLOY_CLIENT_ID }}
       # Repository variables (build-platform.yml uses them too)
-      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       ACR_NAME: ${{ vars.ACR_NAME }}
@@ -166,8 +182,10 @@ jobs:
       - name: Check the configuration
         id: azure
         run: |
+          # The cleanup's deadline counts from here (the job's start, near enough)
+          echo "JOB_STARTED=$(date +%s)" >> "$GITHUB_ENV"
           missing=()
-          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ACR_NAME AKS_NAME AKS_RESOURCE_GROUP \
+          for name in AZURE_DEPLOY_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ACR_NAME AKS_NAME AKS_RESOURCE_GROUP \
                       KEY_VAULT_NAME POSTGRES_HOST STORAGE_ACCOUNT_URL ARTIFACTS_CONTAINER WORKLOAD_IDENTITY_CLIENT_IDS \
                       EMAIL_SENDER PUBLIC_HOSTNAME ACME_EMAIL; do
             [ -n "${!name}" ] || missing+=("$name")
@@ -189,6 +207,7 @@ jobs:
             <<< "$WORKLOAD_IDENTITY_CLIENT_IDS" >/dev/null 2>&1 \
             || bad+=("WORKLOAD_IDENTITY_CLIENT_IDS (a JSON object with a client id for services, ingestion, ingestion-retention and migrate)")
           [[ "$AZURE_TENANT_ID" =~ $guid ]] || bad+=("AZURE_TENANT_ID (a GUID)")
+          [[ "$AZURE_DEPLOY_CLIENT_ID" =~ $guid ]] || bad+=("AZURE_DEPLOY_CLIENT_ID (a GUID)")
           [[ "$STORAGE_ACCOUNT_URL" =~ ^https://[a-z0-9]+\.blob\.core\.windows\.net/?$ ]] || bad+=("STORAGE_ACCOUNT_URL (https://<account>.blob.core.windows.net)")
           [[ "$PUBLIC_HOSTNAME" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] || bad+=("PUBLIC_HOSTNAME (a host name, no scheme or path)")
           [[ "$POSTGRES_HOST" =~ ^[a-z0-9.-]+$ ]] || bad+=("POSTGRES_HOST (a host name)")
@@ -233,7 +252,7 @@ jobs:
         if: steps.azure.outputs.configured == 'true'
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
-          client-id: ${{ env.AZURE_CLIENT_ID }}
+          client-id: ${{ env.AZURE_DEPLOY_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
@@ -275,24 +294,27 @@ jobs:
       - name: Allow this runner to reach the API server
         id: allow
         if: steps.azure.outputs.configured == 'true'
+        timeout-minutes: 15
         run: |
-          # wait_idle: until no operation runs on the cluster (an update, an upgrade), at most 20 minutes
+          # One deadline for every wait and attempt below, inside the step's 15 minutes
+          deadline=$(( $(date +%s) + 14 * 60 ))
+          # wait_idle: until no operation runs on the cluster (an update, an upgrade), at most until the deadline
           wait_idle() {
             local state
-            for _ in $(seq 120); do
+            while [ "$(date +%s)" -lt "$deadline" ]; do
               state="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query provisioningState -o tsv)"
               case "$state" in Succeeded|Failed|Canceled) return 0 ;; esac
               echo "The cluster is $state; waiting"
               sleep 10
             done
-            echo "::error::The cluster is still $state after 20 minutes"
+            echo "::error::The cluster is still busy ($state) after 14 minutes"
             return 1
           }
           ip="$(curl -fsS --max-time 10 https://api.ipify.org)"
           [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::Could not read this runner's address"; exit 1; }
           echo "ip=$ip" >> "$GITHUB_OUTPUT"
           for attempt in 1 2 3 4 5; do
-            wait_idle
+            wait_idle || exit 1
             # The list as it is now; read first, so a failed az stops the step (it never reads as an empty list)
             current="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query "apiServerAccessProfile.authorizedIpRanges[]" -o tsv)"
             mapfile -t ranges < <(printf '%s\n' "$current" | grep -v '^$')
@@ -317,7 +339,7 @@ jobs:
               exit 1
             fi
           done
-          wait_idle
+          wait_idle || exit 1
           # The change takes a little while to reach the API server's firewall
           for attempt in $(seq 30); do
             kubectl get --raw /readyz >/dev/null 2>&1 && exit 0
@@ -329,6 +351,8 @@ jobs:
 
       - name: Deploy the chart
         if: steps.azure.outputs.configured == 'true'
+        # helm's own 20 minutes, and its rollback
+        timeout-minutes: 25
         run: |
           # Each id is a GUID: the configuration check validated the object
           id_services="$(jq -er '.services' <<< "$WORKLOAD_IDENTITY_CLIENT_IDS")"
@@ -359,6 +383,7 @@ jobs:
       # The release is in place by now; these say whether users can reach it. The first certificate takes a few minutes
       - name: Check the edge
         if: steps.azure.outputs.configured == 'true'
+        timeout-minutes: 20
         run: |
           kubectl -n "$NAMESPACE" wait --for=condition=Programmed gateway/qeos-edge --timeout 5m
           kubectl -n "$NAMESPACE" wait --for=condition=Ready certificate/qeos-edge --timeout 10m
@@ -375,32 +400,38 @@ jobs:
         if: always() && steps.allow.outputs.added == 'true'
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
-          client-id: ${{ env.AZURE_CLIENT_ID }}
+          client-id: ${{ env.AZURE_DEPLOY_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       # Removes only this runner's address. It first waits for any operation still running on the cluster (the add of a
       # run cancelled mid-update goes on in Azure, and an upgrade may be running), then reads the list as it is NOW, so
       # the address is never written back by a stale list and a change made meanwhile (a Bicep deploy) stays; it retries
-      # when another operation starts first. It never sets an empty list: that would open the API server to all
+      # when another operation starts first. It never sets an empty list: that would open the API server to all. All its
+      # waits and attempts share one deadline, 25 minutes and never past the job's own end, so it always ends by itself
+      # and says when the address is left behind (deploy/azure/README.md, section 5.1: removing it by hand)
       - name: Remove this runner from the API server's ranges
         if: always() && steps.allow.outputs.added == 'true'
         env:
           RUNNER_IP: ${{ steps.allow.outputs.ip }}
         run: |
+          leftover="$RUNNER_IP/32 may still be authorised on $AKS_NAME: remove it by hand (deploy/azure/README.md, section 5.1)"
+          now=$(date +%s)
+          deadline=$(( now + 25 * 60 ))
+          job_end=$(( ${JOB_STARTED:-$now} + (JOB_TIMEOUT_MINUTES - 2) * 60 ))
+          [ "$deadline" -le "$job_end" ] || deadline=$job_end
+          echo "Removing $RUNNER_IP/32 until $(date -u -d "@$deadline" +%H:%M:%SZ)"
           wait_idle() {
             local state
-            for _ in $(seq 120); do
+            while [ "$(date +%s)" -lt "$deadline" ]; do
               state="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query provisioningState -o tsv)"
               case "$state" in Succeeded|Failed|Canceled) return 0 ;; esac
               echo "The cluster is $state; waiting"
               sleep 10
             done
-            echo "::error::The cluster is still $state after 20 minutes; $RUNNER_IP/32 may still be authorised"
             return 1
           }
-          for _ in 1 2 3 4 5; do
-            wait_idle
+          while wait_idle; do
             current="$(az aks show -g "$AKS_RESOURCE_GROUP" -n "$AKS_NAME" --query "apiServerAccessProfile.authorizedIpRanges[]" -o tsv)"
             if ! grep -qx "$RUNNER_IP/32" <<< "$current"; then
               echo "$RUNNER_IP/32 is not authorised"
@@ -417,7 +448,8 @@ jobs:
               exit 0
             fi
             echo "$out"
-            grep -qE 'OperationNotAllowed|Conflict|AnotherOperationInProgress' <<< "$out" || exit 1
+            grep -qE 'OperationNotAllowed|Conflict|AnotherOperationInProgress' <<< "$out" \
+              || { echo "::error::$leftover"; exit 1; }
           done
-          echo "::error::$RUNNER_IP/32 could not be removed after 5 attempts; remove it by hand"
+          echo "::error::Out of time: $leftover"
           exit 1

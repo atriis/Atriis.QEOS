@@ -1,8 +1,10 @@
 name: Build platform images
 
-# Builds the seven platform images, scans each with Trivy and pushes it to Azure Container Registry (ADR-038, spec 5.2).
-# Runs after CI succeeded on master, and on platform-v* tags. Safe to merge before Azure exists: without the repository
-# variables below it only prints a notice.
+# Builds the seven platform images, scans each with Trivy and pushes it to Azure Container Registry as :<sha> (ADR-038,
+# spec 5.2), after CI succeeded on master. A platform-v* tag builds nothing: it adds :<version> to the images master's
+# build already pushed and scanned for that commit, so the version is the very image staging ran (same digest). Safe to
+# merge before Azure exists: without the repository variables below it only prints a notice. It signs in as the GitHub
+# build identity (AZURE_BUILD_CLIENT_ID: AcrPush only, trusted for master and the release tags; deploy/azure/README.md)
 on:
   workflow_run:
     workflows: [ CI ]
@@ -18,12 +20,12 @@ jobs:
   images:
     name: Image (${{ matrix.image }})
     # workflow_run fires for every CI run whose branch is named master, a fork PR's included; only a green CI run of a push
-    # to this repository builds, since the job has the repository's variables and an OIDC token
+    # to this repository builds, since the job has the repository's variables and an OIDC token. Tags: job release
     if: >-
-      github.event_name == 'push' || (
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.event == 'push' &&
-        github.event.workflow_run.head_repository.full_name == github.repository)
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -43,18 +45,18 @@ jobs:
           - { image: dashboard, context: ., dockerfile: dashboard/Dockerfile }
           - { image: gateway, context: gateway, dockerfile: gateway/Dockerfile }
     env:
-      AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      AZURE_BUILD_CLIENT_ID: ${{ vars.AZURE_BUILD_CLIENT_ID }}
       AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
       ACR_NAME: ${{ vars.ACR_NAME }}
-      # The commit CI passed on (workflow_run) or the tagged one (push)
-      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      # The commit CI passed on
+      SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
       - name: Check that Azure is configured
         id: azure
         run: |
           missing=()
-          for name in AZURE_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ACR_NAME; do
+          for name in AZURE_BUILD_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ACR_NAME; do
             [ -n "${!name}" ] || missing+=("$name")
           done
           if [ "${#missing[@]}" -gt 0 ]; then
@@ -68,30 +70,13 @@ jobs:
         if: steps.azure.outputs.configured == 'true'
         with:
           ref: ${{ env.SHA }}
-          # The tag check needs master's history
-          fetch-depth: 0
 
-      # A platform-v* tag releases what master has: a tag on any other commit builds nothing
-      - name: Check that the tag is on master
-        if: steps.azure.outputs.configured == 'true' && github.ref_type == 'tag'
-        run: |
-          git fetch --no-tags origin master
-          if ! git merge-base --is-ancestor "$SHA" FETCH_HEAD; then
-            echo "::error::$GITHUB_REF_NAME ($SHA) is not on master"
-            exit 1
-          fi
-
-      # Tags: the image is also pushed as :<version>, platform-v1.2.3 -> 1.2.3
       - name: Name the image
         id: name
         if: steps.azure.outputs.configured == 'true'
         run: |
-          image="${ACR_NAME}.azurecr.io/qeos/${{ matrix.image }}"
-          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "image=${ACR_NAME}.azurecr.io/qeos/${{ matrix.image }}" >> "$GITHUB_OUTPUT"
           echo "local=qeos/${{ matrix.image }}:scan" >> "$GITHUB_OUTPUT"
-          if [ "${GITHUB_REF_TYPE}" = tag ]; then
-            echo "version=${GITHUB_REF_NAME#platform-v}" >> "$GITHUB_OUTPUT"
-          fi
 
       - name: Build
         if: steps.azure.outputs.configured == 'true'
@@ -113,7 +98,7 @@ jobs:
         if: steps.azure.outputs.configured == 'true'
         uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
         with:
-          client-id: ${{ env.AZURE_CLIENT_ID }}
+          client-id: ${{ env.AZURE_BUILD_CLIENT_ID }}
           tenant-id: ${{ env.AZURE_TENANT_ID }}
           subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
@@ -125,14 +110,119 @@ jobs:
         if: steps.azure.outputs.configured == 'true'
         env:
           IMAGE: ${{ steps.name.outputs.image }}
-          VERSION: ${{ steps.name.outputs.version }}
         run: |
           docker tag "${{ steps.name.outputs.local }}" "$IMAGE:$SHA"
           docker push "$IMAGE:$SHA"
-          if [ -n "$VERSION" ]; then
-            docker tag "${{ steps.name.outputs.local }}" "$IMAGE:$VERSION"
-            docker push "$IMAGE:$VERSION"
+
+  # A platform-v* tag (platform-v1.2.3 -> :1.2.3) releases what master's build pushed for the tagged commit: no build, no
+  # push of :<sha>. Each image's existing :<sha> manifest gets the version as a second tag in the registry, so production
+  # runs the same digest staging ran (spec 5.2: built once, immutable, unchanged in every environment)
+  release:
+    name: Tag the release
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # The OIDC token azure/login exchanges for an Azure access token (no stored secret)
+      id-token: write
+    env:
+      AZURE_BUILD_CLIENT_ID: ${{ vars.AZURE_BUILD_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ACR_NAME: ${{ vars.ACR_NAME }}
+      # The tagged commit
+      SHA: ${{ github.sha }}
+    steps:
+      - name: Check that Azure is configured
+        id: azure
+        run: |
+          missing=()
+          for name in AZURE_BUILD_CLIENT_ID AZURE_TENANT_ID AZURE_SUBSCRIPTION_ID ACR_NAME; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::notice::Skipping the release: repository variable(s) ${missing[*]} not set (Azure is not configured yet)"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          [[ "$ACR_NAME" =~ ^[A-Za-z0-9]+$ ]] || { echo "::error::Malformed ACR_NAME '$ACR_NAME'"; exit 1; }
+          version="${GITHUB_REF_NAME#platform-v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$GITHUB_REF_NAME is not platform-v<major>.<minor>.<patch>"
+            exit 1
+          fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v7
+        if: steps.azure.outputs.configured == 'true'
+        with:
+          ref: ${{ env.SHA }}
+          # The tag check needs master's history
+          fetch-depth: 0
+
+      # A platform-v* tag releases what master has: a tag on any other commit releases nothing
+      - name: Check that the tag is on master
+        if: steps.azure.outputs.configured == 'true'
+        run: |
+          git fetch --no-tags origin master
+          if ! git merge-base --is-ancestor "$SHA" FETCH_HEAD; then
+            echo "::error::$GITHUB_REF_NAME ($SHA) is not on master"
+            exit 1
+          fi
+
+      - name: Sign in to Azure
+        if: steps.azure.outputs.configured == 'true'
+        uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ env.AZURE_BUILD_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign in to the registry
+        if: steps.azure.outputs.configured == 'true'
+        run: az acr login --name "$ACR_NAME"
+
+      # Every image is checked first: a release with one image missing tags none. Then each :<sha> manifest is copied as
+      # is to :<version> (imagetools with one source and no change pushes the same manifest; AcrPush is enough, where
+      # az acr import needs a control-plane role), and the two digests are compared
+      - name: Tag the images with the version
+        if: steps.azure.outputs.configured == 'true'
+        run: |
+          images=(auth-service organization-service project-service ingestion-service test-management-service
+                  dashboard gateway)
+          # digest NAME TAG: the manifest digest of qeos/NAME:TAG in the registry, empty when it is not there
+          digest() {
+            az acr repository show --name "$ACR_NAME" --image "qeos/$1:$2" --query digest -o tsv 2>/dev/null || true
+          }
+          declare -A want
+          missing=()
+          for name in "${images[@]}"; do
+            want[$name]="$(digest "$name" "$SHA")"
+            [ -n "${want[$name]}" ] || missing+=("qeos/$name:$SHA")
+          done
+          if [ "${#missing[@]}" -gt 0 ]; then
+            echo "::error::Not in $ACR_NAME: ${missing[*]}. A release only tags the images master's build pushed and scanned for $SHA: let Build platform images finish (or rerun it) for that commit on master, then rerun this job"
+            exit 1
+          fi
+          for name in "${images[@]}"; do
+            have="$(digest "$name" "$VERSION")"
+            if [ -n "$have" ] && [ "$have" != "${want[$name]}" ]; then
+              echo "::error::qeos/$name:$VERSION already exists for another image ($have): a version is never moved"
+              exit 1
+            fi
+          done
+          for name in "${images[@]}"; do
+            image="$ACR_NAME.azurecr.io/qeos/$name"
+            docker buildx imagetools create --tag "$image:$VERSION" "$image@${want[$name]}"
+            got="$(digest "$name" "$VERSION")"
+            if [ "$got" != "${want[$name]}" ]; then
+              echo "::error::qeos/$name:$VERSION is $got, not the digest of :$SHA (${want[$name]})"
+              exit 1
+            fi
+            echo "qeos/$name:$VERSION = qeos/$name:$SHA (${want[$name]})"
+          done
 
   # Records the commit every image was pushed for, as the artifact built-sha, once all seven pushed. deploy-aks.yml
   # deploys exactly this commit, never master's tip of the moment (which may have moved on since CI ran)
@@ -141,7 +231,7 @@ jobs:
     needs: images
     if: >-
       github.event_name == 'workflow_run' && needs.images.result == 'success' &&
-      vars.AZURE_CLIENT_ID != '' && vars.AZURE_TENANT_ID != '' && vars.AZURE_SUBSCRIPTION_ID != '' && vars.ACR_NAME != ''
+      vars.AZURE_BUILD_CLIENT_ID != '' && vars.AZURE_TENANT_ID != '' && vars.AZURE_SUBSCRIPTION_ID != '' && vars.ACR_NAME != ''
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
