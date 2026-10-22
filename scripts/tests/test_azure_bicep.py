@@ -206,6 +206,42 @@ def test_deploy_workflow_names_the_edge_ip_as_bicep_does():
     assert re.search(r"^\s*NAMESPACE: qeos$", workflow, re.M)
 
 
+def role_assignments(source: str) -> dict[str, tuple[str, str]]:
+    """Each role assignment resource: its symbolic name -> (role, principal)."""
+    found = {}
+    for match in re.finditer(r"^resource (\w+) 'Microsoft\.Authorization/roleAssignments@[^']+' = (.*?)^\}", source,
+                             re.S | re.M):
+        role = re.search(r"roleDefinitions', ([\w.]+)\)", match.group(2))
+        principal = re.search(r"principalId: ([\w.]+)", match.group(2))
+        found[match.group(1)] = (role.group(1) if role else "", principal.group(1) if principal else "")
+    return found
+
+
+def test_build_identity_pushes_images_and_nothing_else():
+    # build-platform.yml (master and the release tags): AcrPush on the registry only
+    acr = role_assignments(text(AZURE / "modules" / "acr.bicep"))
+    assert acr["buildPush"] == ("acrPush", "buildPrincipalId")
+    assert acr["deployPull"] == ("acrPull", "deployPrincipalId")
+    assert [name for name, (role, _) in acr.items() if role == "acrPush"] == ["buildPush"]
+    aks = text(AZURE / "modules" / "aks.bicep")
+    assert "buildPrincipalId" not in aks
+    assert re.search(r"^\s+buildPrincipalId: buildPrincipalId$", MAIN, re.M)
+    assert len(re.findall(r"buildPrincipalId: buildPrincipalId", MAIN)) == 1
+
+
+def test_deploy_identity_has_the_cluster_roles_and_only_pull():
+    aks = text(AZURE / "modules" / "aks.bicep")
+    assert "var deployRoles = empty(deployPrincipalId) ? [] : [roles.aksClusterUser, roles.aksContributor]" in aks
+    assert role_assignments(aks)["deployNamespaceAdmin"] == ("roles.aksRbacAdmin", "deployPrincipalId")
+    assert len(re.findall(r"deployPrincipalId: deployPrincipalId", MAIN)) == 2
+
+
+def test_parameter_file_reads_both_identities():
+    params = text(AZURE / "staging.bicepparam")
+    assert "param buildPrincipalId = readEnvironmentVariable('QEOS_BUILD_PRINCIPAL_ID', '')" in params
+    assert "param deployPrincipalId = readEnvironmentVariable('QEOS_DEPLOY_PRINCIPAL_ID', '')" in params
+
+
 def test_outputs_are_the_interface():
     outputs = re.findall(r"^output (\w+) ", MAIN, re.M)
     assert outputs == [

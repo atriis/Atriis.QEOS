@@ -27,7 +27,10 @@ param operatorPrincipalId string = ''
 @description('Entra ID groups that are AKS cluster admins.')
 param aksAdminGroupObjectIds string[] = []
 
-@description('The GitHub OIDC application\'s service principal object id (AZURE_CLIENT_ID): AcrPush and the cluster roles the deploy workflow needs. Empty: none.')
+@description('The GitHub build application\'s service principal object id (AZURE_BUILD_CLIENT_ID): AcrPush. Empty: none.')
+param buildPrincipalId string = ''
+
+@description('The GitHub deploy application\'s service principal object id (AZURE_DEPLOY_CLIENT_ID), trusted for GitHub environments only: AcrPull and the cluster roles the deploy workflow needs. Empty: none.')
 param deployPrincipalId string = ''
 
 @description('Empty: the region\'s default Kubernetes version.')
@@ -187,6 +190,7 @@ module acr 'modules/acr.bicep' = {
     name: 'acrqeos${take(environmentName, 4)}${suffix}'
     sku: acrSku
     kubeletObjectId: aks.outputs.kubeletObjectId
+    buildPrincipalId: buildPrincipalId
     deployPrincipalId: deployPrincipalId
   }
 }

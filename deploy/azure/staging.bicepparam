@@ -9,12 +9,13 @@ param location = 'westeurope'
 param apiServerAuthorizedIpRanges = split(readEnvironmentVariable('QEOS_ADMIN_IP_RANGES'), ',')
 param operatorIpRanges = split(readEnvironmentVariable('QEOS_ADMIN_IP_RANGES'), ',')
 
-// Object ids (empty: skipped): the operator who runs init-secrets.sh, the AKS admin group, the GitHub OIDC application's
-// service principal, and the ACS SMTP application (README, one-time steps)
+// Object ids (empty: skipped): the operator who runs init-secrets.sh, the AKS admin group, the GitHub build and deploy
+// applications' service principals, and the ACS SMTP application (README, one-time steps)
 param operatorPrincipalId = readEnvironmentVariable('QEOS_OPERATOR_PRINCIPAL_ID', '')
 param aksAdminGroupObjectIds = empty(readEnvironmentVariable('QEOS_AKS_ADMIN_GROUP_ID', ''))
   ? []
   : [readEnvironmentVariable('QEOS_AKS_ADMIN_GROUP_ID', '')]
+param buildPrincipalId = readEnvironmentVariable('QEOS_BUILD_PRINCIPAL_ID', '')
 param deployPrincipalId = readEnvironmentVariable('QEOS_DEPLOY_PRINCIPAL_ID', '')
 param smtpAppClientId = readEnvironmentVariable('QEOS_SMTP_APP_CLIENT_ID', '')
 param smtpAppPrincipalId = readEnvironmentVariable('QEOS_SMTP_APP_PRINCIPAL_ID', '')

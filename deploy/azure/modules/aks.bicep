@@ -32,13 +32,13 @@ param userNodeVmSize string = 'Standard_D2as_v5'
 param userNodeMinCount int = 2
 param userNodeMaxCount int = 4
 
-@description('The GitHub deploy identity (service principal object id). Empty: no role on the cluster.')
+@description('The GitHub deploy identity (service principal object id), trusted for GitHub environments only. Empty: no role on the cluster.')
 param deployPrincipalId string = ''
 
 @description('The namespace the chart is installed in: the deploy identity is admin there only.')
 param namespace string
 
-@description('The DNS label of the edge public IP: <label>-<hash>.<region>.cloudapp.azure.com.')
+@description('The DNS label of the edge public IP (qeos-<env>-<hash>): the FQDN is <label>.<scope hash>.<region>.cloudapp.azure.com.')
 param edgeDnsLabel string
 
 var roles = {

@@ -1,5 +1,5 @@
-// Azure Container Registry (spec 5.2): the kubelet pulls with AcrPull (no pull secret); the GitHub identity pushes with
-// AcrPush. No admin user, no anonymous pull. The untagged-manifest retention policy needs Premium; on Basic and Standard
+// Azure Container Registry (spec 5.2): the kubelet pulls with AcrPull (no pull secret); the GitHub build identity pushes
+// with AcrPush, and the GitHub deploy identity reads with AcrPull (it checks the images exist). No admin user, no anonymous pull. The untagged-manifest retention policy needs Premium; on Basic and Standard
 // the runbook's scheduled `acr purge` task removes old images instead.
 
 param location string
@@ -14,7 +14,10 @@ param sku string = 'Basic'
 @description('The AKS kubelet identity\'s object id.')
 param kubeletObjectId string
 
-@description('The GitHub deploy identity (service principal object id). Empty: no push role.')
+@description('The GitHub build identity (service principal object id): AcrPush. Empty: no push role.')
+param buildPrincipalId string = ''
+
+@description('The GitHub deploy identity (service principal object id): AcrPull, to check the images. Empty: none.')
 param deployPrincipalId string = ''
 
 var acrPull = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
@@ -51,11 +54,21 @@ resource kubeletPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-resource deployPush 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(deployPrincipalId)) {
-  name: guid(registry.id, deployPrincipalId, acrPush)
+resource buildPush 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(buildPrincipalId)) {
+  name: guid(registry.id, buildPrincipalId, acrPush)
   scope: registry
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPush)
+    principalId: buildPrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+resource deployPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(deployPrincipalId)) {
+  name: guid(registry.id, deployPrincipalId, acrPull)
+  scope: registry
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPull)
     principalId: deployPrincipalId
     principalType: 'ServicePrincipal'
   }
