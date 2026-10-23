@@ -86,3 +86,14 @@ def test_ci_checks_the_chart_copies_of_the_monitoring_files():
     job = helm_kind_job()
     render = job[job.index("- name: Chart render checks"):job.index("- name: Build the images")]
     assert 'bash "$CHART/tests/monitoring_files_test.sh"' in render
+
+
+def test_a_failed_query_never_equals_an_expected_value():
+    """An error answer or an empty body must not pass "no target down" (want ""): query() checks the HTTP status and
+    Prometheus's status field, and prints a failure line instead of nothing."""
+    body = re.search(r"^query\(\) \{\n(.*?)^\}", script(), re.M | re.S)
+    assert body, "no query() function"
+    text = body.group(1)
+    assert "%{http_code}" in text and '!= 200' in text
+    assert "'.status'" in text and "!= success" in text
+    assert 'echo "query failed:' in text

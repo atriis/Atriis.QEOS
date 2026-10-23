@@ -55,7 +55,18 @@ PROM="http://localhost:$PROM_PORT"
 AM="http://localhost:$AM_PORT"
 
 # query PROMQL YQ -- an instant query's JSON through the yq expression YQ
-query() { curl -s --max-time 10 -G --data-urlencode "query=$1" "$PROM/api/v1/query" | yq -p json -o yaml "$2" | tr -d '\r'; }
+# A failed request (no 200, or status not "success") prints "query failed: ..." instead, which no expected value
+# equals: an empty answer never passes a "nothing down" check
+query() {
+  local code status
+  code="$(curl -s -o "$TMP/query.json" -w '%{http_code}' --max-time 10 -G --data-urlencode "query=$1" "$PROM/api/v1/query")"
+  status="$(yq -p json -o yaml '.status' "$TMP/query.json" 2>/dev/null | tr -d '\r')"
+  if [ "$code" != 200 ] || [ "$status" != success ]; then
+    echo "query failed: HTTP ${code:-none}, status ${status:-none}"
+    return 1
+  fi
+  yq -p json -o yaml "$2" "$TMP/query.json" | tr -d '\r'
+}
 # eventually NAME WANT PROMQL YQ -- polls until the query gives WANT, at most WAIT_SECONDS after the script started
 eventually() {
   local got
