@@ -9,7 +9,8 @@
 # (SECRET, qeos-secrets) and never prints them. Needs kubectl, curl, base64 and yq (mikefarah, v4).
 #   bash scripts/check_k8s_monitoring.sh qeos [qeos-monitoring]
 # The forwards use local ports PROM_PORT (29090), AM_PORT (29093), GW_PORT (29080, the gateway), GF_PORT (29300,
-# Service grafana) and GF_DIRECT_PORT (29301, the Grafana pod's own 3000).
+# Service grafana), GF_DIRECT_PORT (29301, the Grafana pod's 3000, where nothing must answer) and GF_POD_PORT (29302,
+# the Grafana pod's 8080).
 set -uo pipefail
 
 if [ $# -lt 1 ]; then
@@ -23,6 +24,7 @@ AM_PORT="${AM_PORT:-29093}"
 GW_PORT="${GW_PORT:-29080}"
 GF_PORT="${GF_PORT:-29300}"
 GF_DIRECT_PORT="${GF_DIRECT_PORT:-29301}"
+GF_POD_PORT="${GF_POD_PORT:-29302}"
 # The CI Secret holding grafana-proxy-key and grafana-admin-password (values-ci.yaml, secrets.source kubernetes)
 SECRET="${SECRET:-qeos-secrets}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -181,11 +183,11 @@ secret_value() { kubectl -n "$NAMESPACE" get secret "$SECRET" -o "jsonpath={.dat
 [ "$(wc -c < "$TMP/key.header")" -gt 52 ] || fail "no grafana-proxy-key in Secret $SECRET"
 forward "$NAMESPACE" gateway "$GW_PORT" 8080 /health || exit 1
 forward "$NAMESPACE" grafana "$GF_PORT" 3000 /_health || exit 1
-# The break-glass path (deploy/azure/README.md): a port-forward to the pod's 3000 is Grafana itself, on its loopback
-forward "$NAMESPACE" deploy/grafana "$GF_DIRECT_PORT" 3000 /grafana/api/health || exit 1
+# The pod's own ports, as anyone allowed pods/portforward reaches them: the sidecar's 8080 only
+forward "$NAMESPACE" deploy/grafana "$GF_POD_PORT" 8080 /_health || exit 1
 GW="http://localhost:$GW_PORT"
 GF="http://localhost:$GF_PORT"
-GF_DIRECT="http://localhost:$GF_DIRECT_PORT"
+GF_POD="http://localhost:$GF_POD_PORT"
 
 # status_of NAME WANT URL [curl args...] -- the status (and, for a redirect, the Location) URL answers
 status_of() {
@@ -209,24 +211,38 @@ status_of "Service grafana without the key" 403 "$GF/grafana/api/health"
 grep -qxF '{"detail":"Forbidden"}' "$TMP/body" && pass "... answered {\"detail\":\"Forbidden\"}" || fail "... answered '$(head -c 200 "$TMP/body")'"
 status_of "Service grafana with a wrong key" 403 "$GF/grafana/api/health" -H "X-QEOS-Grafana-Key: ci-not-the-key-0123456789abcdefghijklmn"
 status_of "Service grafana with the key" 200 "$GF/grafana/api/health" -H @"$TMP/key.header"
-# The gateway's two headers: the key opens the sidecar, X-QEOS-User-Email reaches Grafana's auth proxy, which believes
-# it from 127.0.0.1 (the sidecar) and signs that user in
+# The gateway's two headers: the key opens the sidecar, X-QEOS-User-Email reaches Grafana's auth proxy over the unix
+# socket only the sidecar shares, and Grafana signs that user in
 status_of "the auth proxy signs in X-QEOS-User-Email through the sidecar" 200 "$GF/grafana/api/user" \
   -H @"$TMP/key.header" -H "X-QEOS-User-Email: qeos-k8s-check@example.com"
 got="$(yq -p json -o yaml '.email' "$TMP/body" 2>/dev/null | tr -d '\r')"
 [ "$got" = qeos-k8s-check@example.com ] && pass "... as qeos-k8s-check@example.com" || fail "... as '$got'"
 
-# Grafana itself, as the break-glass admin: Compose's dashboards provisioned, its data source reaching the cluster's
-# Prometheus (its NetworkPolicy admits Grafana's pods), and the five services up as the overview shows them
-status_of "break-glass: Grafana on the pod's 127.0.0.1:3000 answers without the key" 200 "$GF_DIRECT/grafana/api/health"
-status_of "break-glass: the admin signs in" 200 "$GF_DIRECT/grafana/api/search?type=dash-db" --netrc-file "$TMP/netrc"
+# A port-forward to the pod past the gateway signs nobody in: Grafana listens on no TCP port (its unix socket only),
+# so a forward to 3000 gets no HTTP answer, and the sidecar's 8080 wants the key whatever user header comes with it
+kubectl -n "$NAMESPACE" port-forward deploy/grafana "$GF_DIRECT_PORT:3000" >"$TMP/forward-3000.log" 2>&1 &
+forwards+=("$!")
+for _ in $(seq 15); do
+  grep -q "Forwarding from" "$TMP/forward-3000.log" && break
+  sleep 1
+done
+status_of "a port-forward to the pod's 3000 with a forged user header gets no HTTP answer (nothing listens)" 000 \
+  "http://localhost:$GF_DIRECT_PORT/grafana/api/user" -H "X-QEOS-User-Email: admin@example.com"
+status_of "a port-forward to the pod's 8080 with a forged user header, without the key" 403 "$GF_POD/grafana/api/user" \
+  -H "X-QEOS-User-Email: admin@example.com"
+
+# Grafana itself, as the admin through the sidecar: Compose's dashboards provisioned, its data source reaching the
+# cluster's Prometheus (its NetworkPolicy admits Grafana's pods), and the five services up as the overview shows them
+status_of "the admin signs in through the sidecar (with the key)" 200 "$GF/grafana/api/search?type=dash-db" \
+  -H @"$TMP/key.header" --netrc-file "$TMP/netrc"
 got="$(yq -p json -o yaml '[.[] | .folderTitle + "/" + .uid] | sort | join(" ")' "$TMP/body" 2>/dev/null | tr -d '\r')"
 want="$(for d in "$ROOT"/monitoring/grafana/dashboards/*.json; do printf 'QEOS/%s\n' "$(yq -p json -o yaml '.uid' "$d" | tr -d '\r')"; done | sort | xargs)"
 [ -n "$want" ] && [ "$got" = "$want" ] && pass "Grafana provisioned Compose's dashboards: $got" || fail "Grafana's dashboards are '$got', want '$want'"
-status_of "Grafana's data source reaches Prometheus" 200 "$GF_DIRECT/grafana/api/datasources/uid/prometheus/health" --netrc-file "$TMP/netrc"
+status_of "Grafana's data source reaches Prometheus" 200 "$GF/grafana/api/datasources/uid/prometheus/health" \
+  -H @"$TMP/key.header" --netrc-file "$TMP/netrc"
 got="$(yq -p json -o yaml '.status' "$TMP/body" 2>/dev/null | tr -d '\r')"
 [ "$got" = OK ] && pass "... status OK" || fail "... status '$got': $(head -c 200 "$TMP/body")"
-got="$(fetch "$by_job" "$GF_DIRECT/grafana/api/datasources/proxy/uid/prometheus/api/v1/query" --netrc-file "$TMP/netrc" -G \
+got="$(fetch "$by_job" "$GF/grafana/api/datasources/proxy/uid/prometheus/api/v1/query" -H @"$TMP/key.header" --netrc-file "$TMP/netrc" -G \
   --data-urlencode "query=count by (job) (up{namespace=\"$NAMESPACE\", job=~\"auth|organization|project|ingestion|test-management\"} == 1)")"
 [ "$got" = "auth=2 ingestion=2 organization=2 project=2 test-management=2" ] && pass "the five services up, through Grafana's data source: $got" \
   || fail "the services up through Grafana's data source: '$got'"

@@ -1,13 +1,12 @@
 # grafana-proxy: the sidecar in front of Grafana on Kubernetes (ADR-038 Stage 2, templates/grafana.yaml). Grafana
-# listens on the pod's 127.0.0.1:3000 and believes X-QEOS-User-Email from 127.0.0.1 only (GF_AUTH_PROXY_WHITELIST),
-# that is from this sidecar. The sidecar forwards only requests that carry the shared key the gateway sends as
-# X-QEOS-Grafana-Key (GRAFANA_PROXY_KEY, Key Vault grafana-proxy-key; gateway/grafana-on.conf), so a pod that reaches
-# Service grafana without the gateway's key never reaches Grafana. Pod IPs change, so Compose's fixed-address
-# whitelist has no equivalent here.
+# listens on no TCP port, only on the unix socket /var/run/grafana/grafana.sock in an emptyDir this sidecar alone
+# shares, and its auth proxy believes X-QEOS-User-Email from whoever reaches that socket. The sidecar forwards only
+# requests that carry the shared key the gateway sends as X-QEOS-Grafana-Key (GRAFANA_PROXY_KEY, Key Vault
+# grafana-proxy-key; gateway/grafana-on.conf), so neither a pod that reaches Service grafana nor a kubectl port-forward
+# gets to Grafana without the gateway's key. Pod IPs change, so Compose's fixed-address whitelist has no equivalent here.
 # nginx's entrypoint renders this file into NGINX_ENVSUBST_OUTPUT_DIR, an emptyDir, substituting GRAFANA_PROXY_KEY
 # only (NGINX_ENVSUBST_FILTER), and nginx runs with it as its whole configuration (-c). The container's command has
-# checked the key first: 32 to 128 characters of [A-Za-z0-9_-], so it is a plain regular expression here and nothing
-# in it can end the map's entry.
+# checked the key first: 32 to 128 characters of [A-Za-z0-9_-], so nothing in it can end the quoted string below.
 
 # A few administrators: one worker is plenty ("auto" would start one per node CPU)
 worker_processes 1;
@@ -29,26 +28,30 @@ http {
     access_log /dev/stdout;
     server_tokens off;
     default_type application/json;
-
-    # 1 only for the exact key, case included (a regular expression: plain map strings ignore case)
-    map $http_x_qeos_grafana_key $qeos_grafana_key_ok {
-        default 0;
-        "~^${GRAFANA_PROXY_KEY}$" 1;
-    }
+    # As the gateway's /grafana/ location (gateway/nginx.conf.template): bodies up to 10m (a large dashboard saved),
+    # 3 s to connect, 30 s to read, 60 s to send
+    client_max_body_size 10m;
+    proxy_connect_timeout 3s;
+    proxy_read_timeout 30s;
+    proxy_send_timeout 60s;
 
     server {
-        # The Service's target (port http); Grafana itself is on 127.0.0.1:3000
+        # The Service's target (port http)
         listen 8080;
 
-        # Grafana's own health, for the kubelet's probes: no key, nothing but /api/health. The gateway never proxies
-        # this path (only /grafana/), so no client reaches it
+        # Grafana's own health, for the sidecar's readiness: no key, nothing but /api/health. The gateway never proxies
+        # this path (only /grafana/), and neither header a client sent reaches Grafana
         location = /_health {
             access_log off;
-            proxy_pass http://127.0.0.1:3000/grafana/api/health;
+            proxy_set_header X-QEOS-Grafana-Key "";
+            proxy_set_header X-QEOS-User-Email "";
+            proxy_pass http://unix:/var/run/grafana/grafana.sock:/grafana/api/health;
         }
 
         location / {
-            if ($qeos_grafana_key_ok = 0) {
+            # The exact key, case included: an `if` string comparison (a map's plain strings ignore case, and a
+            # regular expression would be built from the secret)
+            if ($http_x_qeos_grafana_key != "${GRAFANA_PROXY_KEY}") {
                 return 403 '{"detail":"Forbidden"}';
             }
             # As received from the gateway, X-QEOS-User-Email included (Grafana's auth proxy signs that user in), but
@@ -59,7 +62,7 @@ http {
             proxy_set_header Host $http_host;
             proxy_set_header X-QEOS-Grafana-Key "";
             proxy_redirect off;
-            proxy_pass http://127.0.0.1:3000;
+            proxy_pass http://unix:/var/run/grafana/grafana.sock:;
         }
     }
 }

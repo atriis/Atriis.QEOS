@@ -1,13 +1,14 @@
 {{- /* Grafana (monitoring.enabled), as Compose's: grafana/grafana with Compose's settings, its data source (the cluster's
 Prometheus, monitoring.prometheusUrl) and Compose's dashboards and dashboard provider (files/monitoring/grafana, copies).
 Users are signed in by the gateway (ADR-027): it checks the qeos_grafana cookie with auth-service and sends
-X-QEOS-User-Email, which Grafana's auth proxy believes from 127.0.0.1 only. On Compose that is the gateway's fixed
-address; pod IPs change, so here Grafana listens on the pod's 127.0.0.1:3000 and the grafana-proxy sidecar (the gateway's
-nginx-unprivileged image) answers Service grafana: it forwards only requests carrying the shared key the gateway sends
-as X-QEOS-Grafana-Key (Key Vault grafana-proxy-key, files/grafana-proxy.conf.template) and drops that header. Only the
-gateway reaches the sidecar (networkpolicies.yaml). One replica; /var/lib/grafana is an emptyDir, so users and
-preferences start again after a restart, as everything else comes from the repository. Break-glass:
-`kubectl port-forward deploy/grafana 3000:3000` reaches Grafana itself on the pod's loopback (deploy/azure/README.md) */ -}}
+X-QEOS-User-Email, which Grafana's auth proxy believes. On Compose only the gateway's fixed address may send it; pod IPs
+change, so here Grafana listens on no TCP port at all but on a unix socket in an emptyDir that only the grafana-proxy
+sidecar (the gateway's nginx-unprivileged image) shares. The sidecar answers Service grafana and forwards only requests
+carrying the shared key the gateway sends as X-QEOS-Grafana-Key (Key Vault grafana-proxy-key,
+files/grafana-proxy.conf.template), with that header removed. A kubectl port-forward reaches TCP ports only, so it
+meets the sidecar and its key too; only the gateway reaches the sidecar over the network (networkpolicies.yaml). One
+replica; /var/lib/grafana is an emptyDir, so users and preferences start again after a restart, as everything else
+comes from the repository. Break-glass: kubectl exec into the grafana container (deploy/azure/README.md) */ -}}
 {{- if .Values.monitoring.enabled }}
 {{- $name := "grafana" }}
 {{- $svc := get (include "qeos.monitoringWorkloads" . | fromJson) $name }}
@@ -16,6 +17,9 @@ preferences start again after a restart, as everything else comes from the repos
 {{- $images := .Values.monitoring.images }}
 {{- $datasources := include "qeos.grafanaDatasources" . }}
 {{- $proxyConf := .Files.Get "files/grafana-proxy.conf.template" }}
+{{- $provider := .Files.Get "files/monitoring/grafana/provisioning/dashboards/qeos.yml" }}
+{{- /* Grafana's socket: files/grafana-proxy.conf.template proxies to this path (tests/render_test.sh compares) */}}
+{{- $socket := "/var/run/grafana/grafana.sock" }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -26,7 +30,7 @@ metadata:
 data:
   # monitoring/grafana/provisioning/dashboards/qeos.yml (a copy)
   dashboards.yml: |
-    {{- .Files.Get "files/monitoring/grafana/provisioning/dashboards/qeos.yml" | nindent 4 }}
+    {{- $provider | nindent 4 }}
   datasources.yml: |
     {{- $datasources | nindent 4 }}
 ---
@@ -88,8 +92,9 @@ spec:
         admits on 9090 (deploy/monitoring) */}}
         {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" "monitoring") | nindent 8 }}
       annotations:
-        # Provisioning is read at start (the dashboards every 60 s): a new data source or proxy rule restarts the pod
-        checksum/config: {{ printf "%s%s" $datasources $proxyConf | sha256sum }}
+        # Provisioning is read at start (the dashboards themselves every 60 s): a new data source, dashboard provider or
+        # proxy rule restarts the pod. A key rotated in Key Vault does not (deploy/azure/README.md)
+        checksum/config: {{ printf "%s%s%s" $datasources $provider $proxyConf | sha256sum }}
     spec:
       serviceAccountName: {{ printf "qeos-%s" $svc.identity }}
       {{- /* The image's own user, grafana (472); the sidecar runs as nginx (101) */}}
@@ -107,14 +112,20 @@ spec:
               echo 'grafana: the Key Vault secret grafana-admin-password is empty' >&2; exit 1; fi;
               exec /run.sh
           env:
-            # Compose's settings (docker-compose.yml, service grafana), but the root URL, the listen address and the
-            # auth proxy's whitelist: the sidecar, on the pod's loopback, is the only client Grafana believes
+            # Compose's settings (docker-compose.yml, service grafana), but the root URL, the unix socket in place of
+            # TCP, and the auth proxy's whitelist
             - name: GF_SERVER_ROOT_URL
               value: {{ printf "%s/grafana/" (include "qeos.publicUrl" $) | quote }}
             - name: GF_SERVER_SERVE_FROM_SUB_PATH
               value: "true"
-            - name: GF_SERVER_HTTP_ADDR
-              value: 127.0.0.1
+            # No TCP listener: only the sidecar, which shares the socket's emptyDir (group 472, the pod's fsGroup,
+            # mode 0660), reaches Grafana
+            - name: GF_SERVER_PROTOCOL
+              value: socket
+            - name: GF_SERVER_SOCKET
+              value: {{ $socket }}
+            - name: GF_SERVER_SOCKET_MODE
+              value: "0660"
             - name: GF_SECURITY_ADMIN_USER
               value: admin
             - name: GF_SECURITY_ADMIN_PASSWORD
@@ -149,20 +160,21 @@ spec:
               value: "true"
             - name: GF_USERS_AUTO_ASSIGN_ORG_ROLE
               value: Admin
+            # Empty: no address check. Grafana 12 refuses every unix socket peer when a whitelist is set (the peer has
+            # no IP; checked in docker), and the socket is the whitelist here: only this pod's sidecar can reach it
             - name: GF_AUTH_PROXY_WHITELIST
-              value: 127.0.0.1
-          # Grafana answers on 127.0.0.1 only, so the kubelet probes it through the sidecar's /_health (8080)
+              value: ""
+          # Its own probes, over the socket with the image's curl: a broken sidecar (say, a malformed rotated key) must
+          # not restart a healthy Grafana and lose the users in its emptyDir
           startupProbe:
-            httpGet:
-              path: /_health
-              port: 8080
+            exec:
+              command: ["curl", "-sf", "-o", "/dev/null", "-m", "2", "--unix-socket", {{ $socket | quote }}, "http://localhost/grafana/api/health"]
             periodSeconds: 5
             timeoutSeconds: 3
             failureThreshold: 60
           livenessProbe:
-            httpGet:
-              path: /_health
-              port: 8080
+            exec:
+              command: ["curl", "-sf", "-o", "/dev/null", "-m", "2", "--unix-socket", {{ $socket | quote }}, "http://localhost/grafana/api/health"]
             periodSeconds: 15
             timeoutSeconds: 3
             failureThreshold: 4
@@ -182,7 +194,8 @@ spec:
             - name: dashboards
               mountPath: /etc/qeos/grafana/dashboards
               readOnly: true
-            {{- include "qeos.secretsMount" $ctx | nindent 12 }}
+            - name: socket
+              mountPath: {{ dir $socket }}
         - name: grafana-proxy
           image: {{ $images.grafanaProxy }}
           imagePullPolicy: IfNotPresent
@@ -220,7 +233,7 @@ spec:
               port: http
             periodSeconds: 10
             timeoutSeconds: 3
-          # nginx itself: a Grafana that is down restarts Grafana (its liveness probe), not the sidecar
+          # nginx itself: a Grafana that is down restarts Grafana (its own probe), not the sidecar
           livenessProbe:
             tcpSocket:
               port: http
@@ -243,6 +256,12 @@ spec:
               mountPath: /etc/nginx/rendered
             - name: proxy-tmp
               mountPath: /tmp
+            - name: socket
+              mountPath: {{ dir $socket }}
+            {{- /* Key Vault: the CSI volume that makes the driver sync qeos-secrets-grafana (one mounting container per
+            pod is enough). Here, not in Grafana, whose process must never read grafana-proxy-key; Grafana reads its
+            admin password from the synced Secret as an env var */}}
+            {{- include "qeos.secretsMount" $ctx | nindent 12 }}
       volumes:
         # Grafana's database (users the auth proxy signs up, preferences) and downloaded plugins: lost on a restart
         - name: data
@@ -273,5 +292,10 @@ spec:
         - name: proxy-tmp
           emptyDir:
             sizeLimit: 64Mi
+        # Grafana's unix socket, shared by the two containers only
+        - name: socket
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
         {{- include "qeos.secretsVolume" $ctx | nindent 8 }}
 {{- end }}

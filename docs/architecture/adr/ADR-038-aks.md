@@ -114,15 +114,18 @@ must keep working unchanged.
   kube-prometheus-stack's CRDs the render stops, naming `deploy/monitoring/install.sh`, so nothing is half applied.
 - **Grafana trusts a header secret, not an address** (Stage 2; `deploy/helm/README.md`, "Monitoring"). Compose's
   Grafana believes the gateway's `X-QEOS-User-Email` from the gateway's fixed IP; pod IPs change. The chart's Grafana
-  (Compose's image, settings, dashboards and provider; the data source on the cluster's Prometheus) listens on its
-  pod's `127.0.0.1:3000` and believes the header from `127.0.0.1` only. A `grafana-proxy` sidecar (the gateway's
-  nginx-unprivileged image and digest) answers Service `grafana:3000` on its port 8080 and forwards only requests whose
-  `X-QEOS-Grafana-Key` equals the Key Vault secret `grafana-proxy-key` (the gateway sends it, overwriting any client
-  value), removing it; anything else is 403. Only the gateway reaches the sidecar (NetworkPolicy). The key reaches
-  both sides as env vars, so rotating it means restarting both, with 403s in between (`deploy/azure/README.md`,
-  section 3.3). Break-glass is a port-forward to the pod's 3000, as `admin` with `grafana-admin-password`; the right to
-  port-forward in the namespace therefore amounts to Grafana admin. Grafana's database is an emptyDir: signed-up
-  users and preferences reset on a restart, everything else is provisioned.
+  (Compose's image, settings, dashboards and provider; the data source on the cluster's Prometheus) listens on no
+  TCP port, only on a unix socket in an emptyDir it shares with a `grafana-proxy` sidecar (the gateway's
+  nginx-unprivileged image and digest), so its auth proxy needs no address whitelist (Grafana 12 refuses socket peers
+  when one is set) and a `kubectl port-forward`, which reaches TCP ports only, cannot sign anyone in. The sidecar
+  answers Service `grafana:3000` on its port 8080 and forwards only requests whose `X-QEOS-Grafana-Key` equals the Key
+  Vault secret `grafana-proxy-key` exactly (the gateway sends it, overwriting any client value), removing it;
+  anything else is 403. Only the gateway reaches the sidecar (NetworkPolicy). Grafana has its own probes over the
+  socket, so a broken sidecar never restarts it. The key reaches both sides as env vars, so rotating it means
+  restarting both, with 403s in between (`deploy/azure/README.md`, section 3.3). Break-glass is `kubectl exec` into
+  the grafana container (the socket, `admin` with `grafana-admin-password`); `pods/exec` on that pod amounts to
+  Grafana admin, `pods/portforward` does not. Grafana's database is an emptyDir: signed-up users and preferences
+  reset on a restart, everything else is provisioned.
 - Per-process limits in ingestion (8 storage calls, a 60 s pending-deletion cache) become per pod.
 - Staging stopped during the Sunday window misses its upgrade; documented.
 
@@ -144,8 +147,9 @@ Nothing here can be proved without a real subscription:
 - kube-prometheus-stack on AKS: node-exporter in the privileged `qeos-monitoring` namespace, Prometheus's 20Gi
   `managed-csi` volume, its NetworkPolicy under Cilium (Grafana in the QEOS namespace admitted, other pods refused; on
   kind `scripts/check_k8s_policies.sh` proves it), and the default rules quiet on a healthy cluster.
-- Grafana on AKS: the kubelet's probes through the sidecar on 8080 under Cilium's default deny, the gateway's pods
-  reaching the sidecar, and a superuser's sign-in through the edge opening the five dashboards.
+- Grafana on AKS: the sidecar's readiness probe on 8080 under Cilium's default deny, the gateway's pods reaching the
+  sidecar, Key Vault syncing `qeos-secrets-grafana` with the CSI volume mounted by the sidecar only, and a
+  superuser's sign-in through the edge opening the dashboards.
 - Monitoring on AKS: Kubernetes RBAC Admin at namespace scope also covers `monitoring.coreos.com` (ServiceMonitor,
   PrometheusRule); Flexible Server's admin holds `pg_monitor` WITH ADMIN OPTION and may create `pg_stat_statements`
   (db-init with monitoring on; CI's server gives its admin the same rights by hand). Without ADMIN OPTION db-init

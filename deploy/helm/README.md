@@ -194,9 +194,9 @@ token and no service-link variables (`enableServiceLinks: false`: a Service name
 
 Probes: readiness and liveness on `/health` (the APIs' own; the gateway answers it itself). The dashboard is ready on
 `/config.js`, which exists only once its start-up script ran, and alive on `/health` (its SPA fallback). Grafana
-listens on its pod's loopback only, so the kubelet probes it through the sidecar's `/_health` (Grafana's
-`/api/health`): the sidecar is ready on it, Grafana starts (5 minutes at most) and stays alive on it, and the sidecar
-is alive while nginx accepts connections. Loop jobs listen on no port and have none. `terminationGracePeriodSeconds: 30` and a `preStop`
+listens on a unix socket only, so its startup (5 minutes at most) and liveness probes run the image's `curl` against
+that socket's `/api/health`: a broken sidecar never restarts a healthy Grafana. The sidecar is ready on its own
+`/_health` (Grafana's health through it) and alive while nginx accepts connections. Loop jobs listen on no port and have none. `terminationGracePeriodSeconds: 30` and a `preStop`
 sleep of 5 s let in-flight requests and in-API background tasks finish while the endpoints drop the pod.
 
 ## Values
@@ -301,7 +301,9 @@ roles the deploy identity does not have). Prometheus itself is that release's; e
 - Secrets follow the per-workload pattern ("Secrets" below): SecretProviderClasses `qeos-postgres-exporter`,
   `qeos-alertmanager` and `qeos-grafana` on `monitoring.identity` (`services`); Alertmanager's only when the vault
   holds one of its keys (staging lists the webhooks and the SMTP login in `keyvault.absent` for now). In Grafana's
-  pod, Grafana reads `grafana-admin-password` only and the sidecar `grafana-proxy-key` only.
+  pod, Grafana's process sees `grafana-admin-password` only (an env var from the synced Secret); the sidecar reads
+  `grafana-proxy-key` and holds the CSI volume (one mounting container per pod is all the driver needs to sync), so
+  the key is never a file Grafana can read.
 
 - **Grafana** (`grafana/grafana:12.0.2`, 1 replica, Deployment and Service `grafana`): Compose's settings, entrypoint
   (no start without the admin password) and provisioning: the dashboards and their provider are copies
@@ -312,24 +314,32 @@ roles the deploy identity does not have). Prometheus itself is that release's; e
   auth proxy signed up and their preferences start again after a restart; everything else comes from the repository.
   Users still come through the gateway's `/grafana/` (ADR-027): it checks the `qeos_grafana` cookie with auth-service
   and sends `X-QEOS-User-Email`, which Grafana's auth proxy believes. Compose believes it from the gateway's fixed
-  address; pod IPs change, so here Grafana listens on its pod's `127.0.0.1:3000` (`GF_SERVER_HTTP_ADDR`,
-  `GF_AUTH_PROXY_WHITELIST=127.0.0.1`) and the sidecar `grafana-proxy` (the gateway's nginx-unprivileged image and
-  digest, `files/grafana-proxy.conf.template`) answers Service `grafana` on 3000 (its port 8080): it forwards to
-  Grafana only a request whose `X-QEOS-Grafana-Key` equals the key the gateway sends (`grafana-proxy-key`, compared
-  with a `map`, case included), with that header removed and `X-QEOS-User-Email` and `Host` as the gateway sent them;
-  anything else gets 403 `{"detail":"Forbidden"}`. `/_health` (Grafana's `/api/health`, for the probes) needs no key;
-  the gateway never proxies that path. nginx's entrypoint renders the template, the key substituted, into a
+  address only; pod IPs change, so here Grafana listens on no TCP port at all but on a unix socket
+  (`GF_SERVER_PROTOCOL=socket`, `/var/run/grafana/grafana.sock`, mode 0660 for the pod's group 472) in a memory
+  emptyDir that only the sidecar `grafana-proxy` shares. A `kubectl port-forward` reaches TCP ports only, so it finds
+  nothing on 3000 and meets the sidecar's key on 8080. The auth proxy has no whitelist: Grafana 12 refuses every
+  socket peer when one is set (it has no IP), and the socket is the whitelist. The sidecar (the gateway's
+  nginx-unprivileged image and digest, `files/grafana-proxy.conf.template`) answers Service `grafana` on 3000 (its port
+  8080): it forwards to Grafana only a request whose `X-QEOS-Grafana-Key` equals the key the gateway sends
+  (`grafana-proxy-key`, an exact, case-sensitive string comparison), with that header removed and `X-QEOS-User-Email`
+  and `Host` as the gateway sent them; anything else gets 403 `{"detail":"Forbidden"}`. Its limits match the
+  gateway's `/grafana/` location (bodies up to 10m, 30 s to read, 60 s to send). `/_health` (Grafana's
+  `/api/health`, the sidecar's readiness) needs no key and passes neither header; the gateway never proxies that
+  path. nginx's entrypoint renders the template, the key substituted, into a
   memory-backed emptyDir (`NGINX_ENVSUBST_OUTPUT_DIR`), never a ConfigMap or a log, and the container's command first
   refuses a key that is not 32 to 128 characters of `[A-Za-z0-9_-]` (as the gateway does) without printing it.
   `grafana-ingress` admits the gateway only, so no other pod reaches even the sidecar.
   `tests/grafana_proxy_test.sh` runs the rendered sidecar in docker in front of a stub Grafana;
   `scripts/check_k8s_policies.sh` and `scripts/check_k8s_monitoring.sh` check it on kind: `/grafana/` through the
   gateway without the cookie is a 302 to `/monitoring?next=`, forged key and user headers included; Service `grafana`
-  without the key is 403, with it 200; a stranger pod reaches neither Grafana nor Prometheus while the gateway's pod
-  reaches Grafana and Grafana's pod Prometheus; the five dashboards are provisioned and the data source answers.
+  without the key is 403, with it 200; a port-forward to the pod with a forged user header gets no answer on 3000 and
+  403 on 8080; a stranger pod reaches neither Grafana nor Prometheus while the gateway's pod reaches Grafana and
+  Grafana's pod Prometheus; the dashboards are provisioned and the data source answers.
   Break-glass and key rotation: `deploy/azure/README.md`. Both secrets are env vars, read at start: after changing
   `grafana-admin-password` in Key Vault, wait for the CSI rotation (2 minutes) and
-  `kubectl -n <namespace> rollout restart deployment/grafana` (each start creates the admin in a new database).
+  `kubectl -n <namespace> rollout restart deployment/grafana` (each start creates the admin in a new database). The
+  pod's `checksum/config` covers the data source, the dashboard provider and the sidecar's template, never a Key Vault
+  value.
 
 ## The edge (AKS)
 

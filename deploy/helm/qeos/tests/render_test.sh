@@ -748,14 +748,36 @@ for env in ci staging; do
     ci) root="https://localhost/grafana/"; secret=qeos-secrets ;;
     *) root="https://$STAGING_HOST/grafana/"; secret=qeos-secrets-grafana ;;
   esac
-  got="$(gfenv GF_SERVER_ROOT_URL .value)|$(gfenv GF_AUTH_PROXY_WHITELIST .value)|$(gfenv GF_SERVER_HTTP_ADDR .value)"
-  [ "$got" = "$root|127.0.0.1|127.0.0.1" ] \
-    && pass "$env: grafana listens on 127.0.0.1 and believes the auth proxy header from 127.0.0.1 only; root $root" \
-    || fail "$env: grafana's root, whitelist and address are '$got'"
+  # No TCP listener (a port-forward reaches TCP ports only): a unix socket on an emptyDir only the sidecar shares, which
+  # is why the auth proxy needs no whitelist (Grafana 12 refuses every socket peer when one is set)
+  socket="$(gfenv GF_SERVER_SOCKET .value)"
+  got="$(gfenv GF_SERVER_ROOT_URL .value)|$(gfenv GF_SERVER_PROTOCOL .value)|$(gfenv GF_SERVER_SOCKET_MODE .value)"
+  got="$got|$(gf grafana '[.env[] | select(.name == "GF_AUTH_PROXY_WHITELIST")] | length')=$(gfenv GF_AUTH_PROXY_WHITELIST .value)"
+  got="$got|$(gf grafana '[.env[] | select(.name == "GF_SERVER_HTTP_ADDR" or .name == "GF_SERVER_HTTP_PORT")] | length')"
+  [ "$got" = "$root|socket|0660|1=|0" ] && [[ "$socket" == /*.sock ]] \
+    && pass "$env: grafana serves on the unix socket $socket only (mode 0660), no auth proxy whitelist; root $root" \
+    || fail "$env: grafana's root, protocol, socket mode, whitelist and TCP settings are '$got', socket '$socket'"
+  sockvol="$(gf grafana ".volumeMounts[] | select(.mountPath == \"${socket%/*}\") | .name")"
+  got="$(dep grafana "[.spec.template.spec.containers[] | select(.volumeMounts[] | .name == \"$sockvol\") | .name] | join(\" \")")"
+  got="$got|$(dep grafana ".spec.template.spec.volumes[] | select(.name == \"$sockvol\") | (.emptyDir != null) | tostring")"
+  [ -n "$sockvol" ] && [ "$got" = "grafana grafana-proxy|true" ] \
+    && pass "$env: the socket's directory is an emptyDir shared by grafana and grafana-proxy only" \
+    || fail "$env: the socket's volume '$sockvol' is mounted by and emptyDir: '$got'"
+  grep -qF "proxy_pass http://unix:$socket:" "$CHART/files/grafana-proxy.conf.template" \
+    && pass "$env: grafana-proxy proxies to that socket" || fail "$env: files/grafana-proxy.conf.template does not proxy to unix:$socket"
   got="$(gfenv GF_SECURITY_ADMIN_PASSWORD '.valueFrom.secretKeyRef.name + "/" + .valueFrom.secretKeyRef.key + ":" + ((.valueFrom.secretKeyRef.optional // false) | tostring)')"
   [ "$got" = "$secret/grafana-admin-password:false" ] && pass "$env: grafana's admin password is $secret/grafana-admin-password" \
     || fail "$env: GF_SECURITY_ADMIN_PASSWORD is '$got'"
-  # Each container sees only its own secret: the key in the sidecar, the admin password in Grafana
+  # Grafana's process sees the admin password only: the key reaches the sidecar alone (env), and with Key Vault the CSI
+  # volume, whose files hold both secrets, is mounted in the sidecar, never in Grafana
+  got="$(gf grafana '[.volumeMounts[] | select(.name == "secrets-store")] | length')"
+  case "$env" in
+    ci) want="0|0" ;;
+    *) want="0|1" ;;
+  esac
+  got="$got|$(gf grafana-proxy '[.volumeMounts[] | select(.name == "secrets-store")] | length')"
+  [ "$got" = "$want" ] && pass "$env: the Key Vault CSI volume is the sidecar's only (Grafana|sidecar: $got)" \
+    || fail "$env: secrets-store mounts (Grafana|sidecar) are '$got', want '$want'"
   got="$(gf grafana '[.env[] | select(.valueFrom.secretKeyRef) | .valueFrom.secretKeyRef.key] | join(" ")')"
   got="$got|$(gf grafana-proxy '[.env[] | select(.valueFrom.secretKeyRef) | .name + ":" + .valueFrom.secretKeyRef.name + "/" + .valueFrom.secretKeyRef.key] | join(" ")')"
   [ "$got" = "grafana-admin-password|GRAFANA_PROXY_KEY:$secret/grafana-proxy-key" ] \
@@ -764,23 +786,28 @@ for env in ci staging; do
   c="$(gf grafana '.command | join(" ")')"
   [[ "$c" == *'[ -z "$GF_SECURITY_ADMIN_PASSWORD" ]'*"exit 1"*"exec /run.sh"* ]] && pass "$env: grafana refuses to start without the admin password" \
     || fail "$env: grafana's command is '$c'"
-  got="$(gf grafana '[.volumeMounts[] | select(.name != "secrets-store") | .mountPath + ((.readOnly // false) | tostring)] | sort | join(" ")')"
-  [ "$got" = "/etc/qeos/grafana/dashboardstrue /etc/qeos/grafana/provisioningtrue /tmpfalse /var/lib/grafanafalse" ] \
+  got="$(gf grafana '[.volumeMounts[] | .mountPath + ((.readOnly // false) | tostring)] | sort | join(" ")')"
+  [ "$got" = "/etc/qeos/grafana/dashboardstrue /etc/qeos/grafana/provisioningtrue /tmpfalse /var/lib/grafanafalse ${socket%/*}false" ] \
     && pass "$env: grafana mounts the dashboards and provisioning read-only where Compose does, /var/lib/grafana and /tmp writable" \
     || fail "$env: grafana mounts '$got'"
   got="$(dep grafana '[.spec.template.spec.volumes[] | select(.name == "data" or .name == "tmp") | .name + ":" + ((.emptyDir != null) | tostring)] | sort | join(" ")')"
   [ "$got" = "data:true tmp:true" ] && pass "$env: /var/lib/grafana and /tmp are emptyDirs" || fail "$env: grafana's writable volumes are '$got'"
-  # The Service: port 3000, to the sidecar's port only (Grafana's own 3000 is on the pod's loopback)
+  # The Service: port 3000, to the sidecar's port only (Grafana has no port)
   s="$(q "$f" 'select(.kind == "Service" and .metadata.name == "grafana") | (.spec.ports | length | tostring) + " " + (.spec.ports[0].port | tostring) + " " + .spec.ports[0].targetPort')"
   pp="$(gf grafana-proxy '[.ports[] | .name + "=" + (.containerPort | tostring)] | join(" ")')"
   gp="$(gf grafana '[(.ports // [])[] | .name] | join(" ")')"
   [ "$s" = "1 3000 http" ] && [ "$pp" = "http=8080" ] && [ -z "$gp" ] \
     && pass "$env: Service grafana port 3000 targets grafana-proxy's http (8080), never Grafana" \
     || fail "$env: Service grafana is '$s', grafana-proxy's ports '$pp', grafana's '$gp'"
-  # Probes through the sidecar's /_health
+  # Probes: the sidecar is ready on its /_health; Grafana starts and stays alive on its own socket, so a broken sidecar
+  # never restarts a healthy Grafana
   got="$(gf grafana-proxy '.readinessProbe.httpGet.path + " " + (.readinessProbe.httpGet.port | tostring)')"
-  got="$got|$(gf grafana '.livenessProbe.httpGet.path + " " + (.livenessProbe.httpGet.port | tostring)')"
-  [ "$got" = "/_health http|/_health 8080" ] && pass "$env: grafana-proxy is ready, and grafana alive, on the sidecar's /_health" \
+  for probe in startupProbe livenessProbe; do
+    got="$got|$(gf grafana ".$probe | ((.httpGet != null) | tostring) + \" \" + (.exec.command | join(\" \"))")"
+  done
+  want="curl -sf -o /dev/null -m 2 --unix-socket $socket http://localhost/grafana/api/health"
+  [ "$got" = "/_health http|false $want|false $want" ] \
+    && pass "$env: grafana-proxy is ready on /_health; grafana starts and lives on its own socket (curl)" \
     || fail "$env: grafana's probes are '$got'"
   # The sidecar: nginx renders its template into an emptyDir (NGINX_ENVSUBST_OUTPUT_DIR), substituting GRAFANA_PROXY_KEY only
   out="$(gf grafana-proxy '.env[] | select(.name == "NGINX_ENVSUBST_OUTPUT_DIR") | .value')"
@@ -805,7 +832,7 @@ for env in ci staging; do
     [ "$(cm qeos-grafana-dashboards "${d##*/}" | tr -d '\r')" = "$(tr -d '\r' < "$d")" ] || bad="$bad ${d##*/}"
   done
   extra="$(q "$f" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-grafana-dashboards") | .data | keys | length')"
-  [ "$n" = 5 ] && [ "$extra" = 5 ] && [ -z "$bad" ] && pass "$env: ConfigMap qeos-grafana-dashboards holds Compose's five dashboards" \
+  [ "$n" -gt 0 ] && [ "$extra" = "$n" ] && [ -z "$bad" ] && pass "$env: ConfigMap qeos-grafana-dashboards holds Compose's $n dashboards" \
     || fail "$env: dashboards: $n files, $extra keys, differing:$bad"
   [ "$(cm qeos-grafana-provisioning dashboards.yml)" = "$(tr -d '\r' < "$MONITORING/grafana/provisioning/dashboards/qeos.yml")" ] \
     && pass "$env: the dashboards provider is Compose's" || fail "$env: the dashboards provider differs from Compose's qeos.yml"
@@ -889,6 +916,21 @@ fi
 render ci-promurl -f "$CHART/values-ci.yaml" "${CRDS[@]}" --set monitoring.prometheusUrl=http://prom.example:9090
 u="$(q "$OUT/ci-promurl.yaml" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-grafana-provisioning") | .data["datasources.yml"]' | yq '.datasources[0].url' | tr -d '\r')"
 [ "$u" = http://prom.example:9090 ] && pass "monitoring.prometheusUrl is Grafana's data source" || fail "monitoring.prometheusUrl gives '$u'"
+# Grafana's checksum/config covers the data source, the dashboard provider and the sidecar's template: a change to any
+# of them restarts the pod (a copy of the chart with one file changed at a time)
+gfsum() { q "$1" 'select(.kind == "Deployment" and .metadata.name == "grafana") | .spec.template.metadata.annotations["checksum/config"]'; }
+base="$(gfsum "$OUT/ci.yaml")"
+bad=""
+for changed in files/monitoring/grafana/provisioning/dashboards/qeos.yml files/grafana-proxy.conf.template; do
+  rm -rf "$OUT/chartcopy" && cp -r "$CHART" "$OUT/chartcopy" && printf '# changed\n' >> "$OUT/chartcopy/$changed"
+  helm template qeos "$OUT/chartcopy" --namespace "$NAMESPACE" -f "$CHART/values-ci.yaml" "${CRDS[@]}" > "$OUT/sum.yaml" 2>/dev/null
+  s="$(gfsum "$OUT/sum.yaml")"
+  { [ -n "$s" ] && [ "$s" != "$base" ]; } || bad="$bad $changed"
+done
+s="$(gfsum "$OUT/ci-promurl.yaml")"
+{ [ -n "$s" ] && [ "$s" != "$base" ]; } || bad="$bad prometheusUrl"
+[ -n "$base" ] && [ -z "$bad" ] && pass "grafana's checksum/config changes with the provider, the proxy template and the data source" \
+  || fail "grafana's checksum/config ignores:$bad"
 # The threshold: a number of GB, as Compose's entrypoint.sh takes it
 if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" "${CRDS[@]}" --set monitoring.postgresDbSizeAlertGb=abc >/dev/null 2>"$OUT/gb.err"; then
   fail "monitoring.postgresDbSizeAlertGb=abc renders"

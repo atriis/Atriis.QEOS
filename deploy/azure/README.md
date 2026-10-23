@@ -231,23 +231,34 @@ Deleting needs User Access Administrator (or Owner) on the resource group, as th
 ### 3.3 Grafana: break-glass sign-in and key rotation (monitoring on)
 
 Users reach Grafana only through the gateway's `/grafana/`, signed in by auth-service (ADR-027). Inside its pod,
-Grafana listens on `127.0.0.1:3000`, and the `grafana-proxy` sidecar in front of it forwards only requests carrying
-the gateway's `X-QEOS-Grafana-Key` (`deploy/helm/README.md`, "Monitoring").
+Grafana listens on a unix socket only (no TCP port), and the `grafana-proxy` sidecar in front of it forwards only
+requests carrying the gateway's `X-QEOS-Grafana-Key` (`deploy/helm/README.md`, "Monitoring"). A `kubectl
+port-forward` therefore reaches nothing on 3000 and the sidecar's key check on 8080.
 
-**Break-glass** (auth-service down, or no superuser can sign in): a port-forward to the pod's 3000 is Grafana itself,
-on the pod's loopback, past the sidecar. Sign in as `admin` with the Key Vault secret `grafana-admin-password`:
+**Break-glass** (auth-service down, or no superuser can sign in), as `admin` with the Key Vault secret
+`grafana-admin-password`. With `pods/exec`, over the socket from inside the grafana container (Grafana's HTTP API;
+the password never leaves the pod):
 
 ```bash
-kubectl -n qeos port-forward deploy/grafana 3000:3000
-# then http://localhost:3000/grafana/ in a browser, user admin
+kubectl -n qeos exec deploy/grafana -c grafana -- sh -c \
+  'curl -s --unix-socket /var/run/grafana/grafana.sock -u "admin:$GF_SECURITY_ADMIN_PASSWORD" http://localhost/grafana/api/search'
+```
+
+For the web interface, go through the sidecar with the key: forward the Service, have the browser send
+`X-QEOS-Grafana-Key` (a header-setting extension, local only), and sign in on the login form as `admin`:
+
+```bash
+kubectl -n qeos port-forward svc/grafana 3000:3000
+# then http://localhost:3000/grafana/login, with the header set to:
+az keyvault secret show --vault-name <keyVaultName> --name grafana-proxy-key --query value -o tsv
 az keyvault secret show --vault-name <keyVaultName> --name grafana-admin-password --query value -o tsv
 ```
 
-Anyone allowed `pods/portforward` in the namespace can do this, and Grafana's auth proxy also believes an
-`X-QEOS-User-Email` header sent that way (it comes from 127.0.0.1): that right is Grafana admin, as it already reaches
-every pod's ports past the NetworkPolicies.
+`pods/exec` on the grafana pod amounts to Grafana admin (the container's environment holds the admin password);
+`pods/portforward` alone does not.
 
-**Rotating `grafana-proxy-key`**: the gateway and the sidecar read it as env vars, which never reload.
+**Rotating `grafana-proxy-key`**: the gateway and the sidecar read it as env vars, which never reload, and no pod
+checksum can see a Key Vault value, so a deploy does not restart them either: restart both by hand.
 
 ```bash
 # 32 to 128 characters of [A-Za-z0-9_-] (the gateway and the sidecar refuse anything else)
