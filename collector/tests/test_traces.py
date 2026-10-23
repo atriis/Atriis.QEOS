@@ -573,3 +573,119 @@ def test_the_run_body_never_carries_the_private_trace_files(tmp_path):
     result = json.loads(part.body)["results"][0]
     assert "_artifacts" not in result and result["artifacts"][0]["sha256"] == sha(ZIP_A)
     assert "_artifacts" in row  # the caller's row is left alone
+
+
+# --- 0.14.1 -------------------------------------------------------------------------------------------------------
+
+
+def test_no_key_check_when_no_trace_is_readable(platform, workdir, capsys, monkeypatch):
+    def never(*args, **kwargs):
+        raise AssertionError("the key was checked with no trace to send")
+
+    monkeypatch.setattr("qeos_collector.cli.check_key", never)
+    report = cucumber_report(workdir, [reference({"kind": "trace", "path": "test-results/gone.zip"}),
+                                       reference({"kind": "video", "path": "test-results/v.webm"})])
+    platform.key_check = TRACES_ON
+    (row,) = upload_run(platform, report)
+    assert platform.blob_requests == [] and "artifacts" not in row
+    assert trace_lines(capsys) == ["qeos: traces: 0 stored (0.0 MB), 2 skipped (1 missing, 1 video (not sent yet))"]
+
+
+def test_two_files_with_the_same_bytes_go_up_once(platform, tmp_path):
+    a, copy = trace_file(tmp_path, ZIP_A, "a.zip"), trace_file(tmp_path, ZIP_A, "copy.zip")
+    b = trace_file(tmp_path, ZIP_B, "b.zip")
+    notes = []
+    assert upload_artifacts(platform.url, KEY, [a, copy, b], warn=notes.append) == {sha(ZIP_A), sha(ZIP_B)}
+    assert (a.sha256, copy.sha256) == (sha(ZIP_A), sha(ZIP_A))  # each keeps its reference
+    requests = sorted((r["method"], r["sha"]) for r in platform.blob_requests)
+    assert requests == sorted([("HEAD", sha(ZIP_A)), ("PUT", sha(ZIP_A)), ("HEAD", sha(ZIP_B)), ("PUT", sha(ZIP_B))])
+    assert notes == []
+
+
+def test_a_copy_goes_up_when_the_first_file_with_its_bytes_changed(platform, tmp_path, monkeypatch):
+    a, copy = trace_file(tmp_path, ZIP_A, "a.zip"), trace_file(tmp_path, ZIP_A, "copy.zip")
+    real_digest = TraceFile.digest
+
+    def digest_then_change(self, *args):
+        value = real_digest(self, *args)
+        if self is a:
+            write(tmp_path / "a.zip", ZIP_B)  # same size, other bytes, after the hash
+        return value
+
+    monkeypatch.setattr(TraceFile, "digest", digest_then_change)
+    notes = []
+    assert upload_artifacts(platform.url, KEY, [a, copy], warn=notes.append) == {sha(ZIP_A)}
+    # the copy took over: its own HEAD (the fake keeps whatever a PUT answered 201 for, so it may find a's cut body)
+    assert [r["method"] for r in platform.blob_requests if r["method"] == "HEAD"] == ["HEAD", "HEAD"]
+    assert notes == ["1 changed since the report was read"]
+
+
+def test_a_playwright_and_a_cucumber_reference_to_the_same_bytes_upload_once(platform, workdir, capsys):
+    pw = write(workdir / "test-results" / "pw.zip", ZIP_A)
+    write(workdir / "test-results" / "traces" / "pays.zip", ZIP_A)
+    pw_report = playwright_report(workdir, [zip_attachment(pw)])
+    cucumber = cucumber_report(workdir, [reference({"kind": "trace", "path": "test-results/traces/pays.zip"})])
+    platform.key_check = TRACES_ON
+    platform.reply(201, RECEIPT)
+    assert main(["upload", pw_report, cucumber, "--no-changes"], {"QEOS_URL": platform.url, "QEOS_API_KEY": KEY},
+                sleep=lambda seconds: None) == 0
+    assert [r["method"] for r in platform.blob_requests] == ["HEAD", "PUT"]
+    (run,) = [r for r in platform.requests if r["path"] == "/api/v1/collect/runs"]
+    rows = json.loads(run["body"])["results"]
+    assert sorted(row["artifacts"][0]["name"] for row in rows) == ["pays.zip", "trace"]
+    assert all(row["artifacts"][0]["sha256"] == sha(ZIP_A) for row in rows)
+
+
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_a_tls_connection_cut_while_sending_counts_as_dropped(tmp_path, monkeypatch, wrapped):
+    import ssl
+
+    ref = trace_file(tmp_path, ZIP_A)
+    puts = []
+
+    def fake_send(url, body, headers, context, method=None, timeout=None):
+        if method == "HEAD":
+            return 404, b"", {}
+        puts.append(b"".join(body))
+        cut = ssl.SSLEOFError(8, "EOF occurred in violation of protocol")
+        raise urllib.error.URLError(cut) if wrapped else cut
+
+    monkeypatch.setattr(upload, "_send", fake_send)
+    notes = []
+    assert upload_artifacts("http://127.0.0.1:1", KEY, [ref], warn=notes.append, sleep=lambda s: None) == set()
+    assert len(puts) == 2
+    assert notes == ["1 refused by the platform"]
+
+
+def test_only_a_cut_tls_connection_is_dropped_not_a_certificate_failure():
+    import ssl
+
+    assert upload._is_dropped(ssl.SSLEOFError(8, "EOF"))
+    assert upload._is_dropped(urllib.error.URLError(ssl.SSLEOFError(8, "EOF")))
+    assert not upload._is_dropped(urllib.error.URLError(ssl.SSLCertVerificationError(1, "bad certificate")))
+    assert not upload._is_dropped(ssl.SSLError(1, "handshake failure"))
+
+
+def test_a_dry_run_says_what_would_be_sent_and_the_budget(traced_report, capsys):
+    assert main(["upload", traced_report, "--no-changes", "--dry-run"], {}) == 0
+    lines = [line for line in capsys.readouterr().err.splitlines() if line.startswith("qeos: traces")]
+    assert lines == ["qeos: traces: 1 would be sent (0.0 MB) within the 300 s budget, 1 skipped "
+                     "(1 video (not sent yet))"]
+
+
+def test_a_dry_run_keeps_the_upload_budget(workdir, capsys):
+    files = [write(workdir / "test-results" / f"{n}.zip", b"PK\x03\x04" + bytes([n]) * 8) for n in range(6)]
+    report = playwright_report(workdir, *[[zip_attachment(path)] for path in files])
+    now = [0.0]
+
+    def clock():  # every look at the clock costs 100 s: the 300 s budget runs out after a few traces
+        now[0] += 100.0
+        return now[0]
+
+    assert main(["upload", report, "--no-changes", "--dry-run"], {}, clock=clock) == 0
+    captured = capsys.readouterr()
+    (line,) = [line for line in captured.err.splitlines() if line.startswith("qeos: traces")]
+    sent = int(line.split("traces: ", 1)[1].split(" ", 1)[0])
+    assert 0 < sent < len(files)
+    assert "within the 300 s budget" in line and "out of time after 300 s" in line
+    assert captured.out.count('"kind":"trace"') + captured.out.count('"kind": "trace"') == sent

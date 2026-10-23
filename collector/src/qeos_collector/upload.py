@@ -254,23 +254,42 @@ def upload_artifacts(
     """Hashes each trace (one TraceFile per resolved path), then stores it with HEAD, and a PUT streamed from disk
     when missing, on /collect/artifacts/{sha256}, after the screenshots and before the run (spec 2026-10-21 §4.2).
     Returns the sha256s QEOS holds; each TraceFile hashed carries its sha256 and size, and the caller drops every
-    other reference. Hashing counts against the budget and the per-run cap. Best effort and bounded like
-    upload_images, with its own budget, which also cuts off a PUT still streaming. A file that changed since the
-    report was read is left out (never uploaded with other bytes)."""
+    other reference. Hashing counts against the budget and the per-run cap. Files with the same bytes go up once
+    (0.14.1): the first one hashed sends them, the others wait for it and take over only when it changed. Best
+    effort and bounded like upload_images, with its own budget, which also cuts off a PUT still streaming. A file
+    that changed since the report was read is left out (never uploaded with other bytes)."""
     prefix = base_url.strip().rstrip("/") + ARTIFACTS_PATH
     headers = {"Authorization": f"Bearer {key}", "User-Agent": f"qeos-collector/{__version__}"}
     lock = threading.Lock()
     left_out = {"changed": 0, "refused": 0}
     by_path = {trace.path: trace for trace in artifacts}
     held: Set[str] = set()
+    claims = _Claims()
 
     def store(path: str, deadline: float, first: bool) -> bool:
         trace = by_path[path]
-        outcome = _store_artifact(prefix, headers, trace, context, deadline, first=first,
-                                  clock=clock, sleep=sleep, rand=rand)
-        if outcome is True:
+        owned: List[str] = []
+
+        def claim(sha: str) -> bool:
+            if claims.take(sha, deadline, clock):
+                owned.append(sha)
+                return True
+            return False
+
+        outcome: "Union[bool, str]" = "late"  # out of time or the phase stopped: the copies waiting give up too
+        try:
+            outcome = _store_artifact(prefix, headers, trace, context, deadline, first=first,
+                                      clock=clock, sleep=sleep, rand=rand, claim=claim)
+            if outcome is True:
+                with lock:
+                    held.add(trace.sha256)  # before its copies are told it finished
+        finally:
+            if owned:
+                claims.finish(owned[0], outcome)
+        if outcome == _COPY:
             with lock:
-                held.add(trace.sha256)
+                return trace.sha256 in held
+        if outcome is True:
             return True
         if outcome in left_out:
             with lock:
@@ -284,6 +303,40 @@ def upload_artifacts(
         warn(f"{left_out['refused']} refused by the platform")
     with lock:
         return set(held)
+
+
+_COPY = "copy"  # _store_artifact: another file with the same bytes was sent instead
+
+
+class _Claims:
+    """Which file sends each content (sha256) of the trace phase: the first hashed; a copy waits for it to finish and
+    takes over only when it changed (its bytes were not the ones hashed any more)."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._owners: Dict[str, list] = {}  # sha256 -> [finished Event, outcome]
+
+    def take(self, sha: str, deadline: float, clock: Callable[[], float]) -> bool:
+        """True when the caller sends these bytes (then it must `finish`), False when another file did."""
+        while True:
+            with self._lock:
+                entry = self._owners.get(sha)
+                if entry is None or entry[1] == "changed":
+                    self._owners[sha] = [threading.Event(), None]
+                    return True
+                finished = entry[0]
+                if finished.is_set():
+                    return False
+            left = deadline - clock()
+            if left <= 0:
+                raise _OutOfTime()
+            finished.wait(min(left, 1.0))
+
+    def finish(self, sha: str, outcome: object) -> None:
+        with self._lock:
+            entry = self._owners[sha]
+            entry[1] = outcome
+            entry[0].set()
 
 
 def _each(shas: list, most: int, store_one: Callable[[str, float, bool], bool], budget_seconds: float, workers: int,
@@ -374,17 +427,20 @@ def _stop_on(status: int, what: str) -> None:
 
 def _store_artifact(prefix: str, headers: Mapping[str, str], trace: TraceFile, context: Optional[ssl.SSLContext],
                     deadline: float, *, first: bool, clock: Callable[[], float], sleep: Callable[[float], None],
-                    rand: Callable[[], float]) -> "Union[bool, str]":
+                    rand: Callable[[], float],
+                    claim: Optional[Callable[[str], bool]] = None) -> "Union[bool, str]":
     """Hashes the trace, then True when QEOS holds it: already there (HEAD 200) or stored now (PUT 200/201); else
-    False, "changed" (the file is not the one the report named any more) or "refused" (400, 413, or a connection the
-    platform dropped while the body was sent, twice: this trace only). Raises _OutOfTime at the deadline, also in the
-    middle of hashing or streaming."""
+    False, "changed" (the file is not the one the report named any more), "refused" (400, 413, or a connection the
+    platform dropped while the body was sent, twice: this trace only) or _COPY (`claim(sha256)` said another file with
+    the same bytes is sent instead). Raises _OutOfTime at the deadline, also in the middle of hashing or streaming."""
     try:
         sha = trace.digest(deadline, clock)
     except TraceTimeout:
         raise _OutOfTime() from None
     except TraceChanged:
         return "changed"
+    if claim is not None and not claim(sha):
+        return _COPY
     url = prefix + sha
     status = _blob_request(url, "HEAD", None, headers, context, deadline, first, clock, sleep, rand)
     if status == 200:
@@ -455,9 +511,10 @@ _DROPPED = -1  # _blob_request: the platform dropped a streamed upload twice
 
 
 def _is_dropped(exc: BaseException) -> bool:
-    """A connection the other side reset or closed while the body was being sent."""
+    """A connection the other side reset or closed while the body was being sent; over TLS, a cut connection is an
+    SSLEOFError (0.14.1). Other TLS errors (a certificate QEOS cannot trust) are not."""
     reason = exc.reason if isinstance(exc, urllib.error.URLError) else exc
-    return isinstance(reason, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError))
+    return isinstance(reason, (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, ssl.SSLEOFError))
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
