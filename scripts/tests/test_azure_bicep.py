@@ -67,7 +67,8 @@ def chart_identities() -> set[str]:
 
 def monitoring_workloads() -> dict[str, dict]:
     """With monitoring on: the chart's own workload entries (helper qeos.monitoringWorkloads in _helpers.tpl:
-    postgres-exporter and Alertmanager, on monitoring.identity), and the gateway's GRAFANA_PROXY_KEY (qeos.secretRefs)."""
+    postgres-exporter, Alertmanager and Grafana, on monitoring.identity), and the gateway's GRAFANA_PROXY_KEY
+    (qeos.secretRefs)."""
     helpers = text(CHART / "templates" / "_helpers.tpl")
     block = re.search(r'define "qeos\.monitoringWorkloads".*?\{\{- end -\}\}\n\{\{- toJson', helpers, re.S)
     assert block, "qeos.monitoringWorkloads moved"
@@ -75,7 +76,7 @@ def monitoring_workloads() -> dict[str, dict]:
     for name, body in re.findall(r'set \$workloads "([a-z-]+)" \(dict (.*?)\)\) -\}\}', block.group(0), re.S):
         workloads[name] = {"identity": staging("monitoring", "identity"),
                            "secretEnv": dict(re.findall(r'"([A-Z_]+)" "([a-z0-9-]+)"', body))}
-    assert set(workloads) == {"postgres-exporter", "alertmanager"}, workloads
+    assert set(workloads) == {"postgres-exporter", "alertmanager", "grafana"}, workloads
     gateway = re.search(r'set \$refs "GRAFANA_PROXY_KEY" "([a-z0-9-]+)"', helpers)
     assert gateway, "the gateway's GRAFANA_PROXY_KEY moved"
     workloads["gateway (monitoring)"] = {"identity": VALUES["services"]["gateway"]["identity"],
@@ -126,7 +127,7 @@ def chart_secret_keys(monitoring: "bool | None" = None) -> set[str]:
 # Monitoring keys the chart reads with monitoring.enabled that Bicep and init-secrets.sh do not make yet: Task 7 of AKS
 # Stage 2 adds them (and turns monitoring on in values-staging.yaml). Empty this set then; the test below fails as soon
 # as a key here is provided, or a new one is missing
-MISSING_UNTIL_TASK_7 = {"monitoring-db-password", "grafana-proxy-key"}
+MISSING_UNTIL_TASK_7 = {"monitoring-db-password", "grafana-proxy-key", "grafana-admin-password"}
 
 
 def bicep_secret_readers() -> dict[str, set[str]]:

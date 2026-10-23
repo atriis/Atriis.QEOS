@@ -1,0 +1,65 @@
+# grafana-proxy: the sidecar in front of Grafana on Kubernetes (ADR-038 Stage 2, templates/grafana.yaml). Grafana
+# listens on the pod's 127.0.0.1:3000 and believes X-QEOS-User-Email from 127.0.0.1 only (GF_AUTH_PROXY_WHITELIST),
+# that is from this sidecar. The sidecar forwards only requests that carry the shared key the gateway sends as
+# X-QEOS-Grafana-Key (GRAFANA_PROXY_KEY, Key Vault grafana-proxy-key; gateway/grafana-on.conf), so a pod that reaches
+# Service grafana without the gateway's key never reaches Grafana. Pod IPs change, so Compose's fixed-address
+# whitelist has no equivalent here.
+# nginx's entrypoint renders this file into NGINX_ENVSUBST_OUTPUT_DIR, an emptyDir, substituting GRAFANA_PROXY_KEY
+# only (NGINX_ENVSUBST_FILTER), and nginx runs with it as its whole configuration (-c). The container's command has
+# checked the key first: 32 to 128 characters of [A-Za-z0-9_-], so it is a plain regular expression here and nothing
+# in it can end the map's entry.
+
+# A few administrators: one worker is plenty ("auto" would start one per node CPU)
+worker_processes 1;
+error_log /dev/stderr warn;
+# Non-root with a read-only root filesystem: the pid and every temporary file in /tmp
+pid /tmp/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    client_body_temp_path /tmp/client_temp;
+    proxy_temp_path /tmp/proxy_temp;
+    fastcgi_temp_path /tmp/fastcgi_temp;
+    uwsgi_temp_path /tmp/uwsgi_temp;
+    scgi_temp_path /tmp/scgi_temp;
+    # nginx's combined format: no request header, so never the key
+    access_log /dev/stdout;
+    server_tokens off;
+    default_type application/json;
+
+    # 1 only for the exact key, case included (a regular expression: plain map strings ignore case)
+    map $http_x_qeos_grafana_key $qeos_grafana_key_ok {
+        default 0;
+        "~^${GRAFANA_PROXY_KEY}$" 1;
+    }
+
+    server {
+        # The Service's target (port http); Grafana itself is on 127.0.0.1:3000
+        listen 8080;
+
+        # Grafana's own health, for the kubelet's probes: no key, nothing but /api/health. The gateway never proxies
+        # this path (only /grafana/), so no client reaches it
+        location = /_health {
+            access_log off;
+            proxy_pass http://127.0.0.1:3000/grafana/api/health;
+        }
+
+        location / {
+            if ($qeos_grafana_key_ok = 0) {
+                return 403 '{"detail":"Forbidden"}';
+            }
+            # As received from the gateway, X-QEOS-User-Email included (Grafana's auth proxy signs that user in), but
+            # the key: it ends here and never reaches Grafana. Host stays the public one, so Grafana sees the same
+            # request as on Compose
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host $http_host;
+            proxy_set_header X-QEOS-Grafana-Key "";
+            proxy_redirect off;
+            proxy_pass http://127.0.0.1:3000;
+        }
+    }
+}

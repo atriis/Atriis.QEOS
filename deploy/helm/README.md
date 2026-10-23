@@ -12,18 +12,19 @@ use it.
 | `values-staging.yaml` | AKS staging | Key Vault secrets, Azure Blob, the edge (Gateway API, TLS), email, the NetworkPolicies; monitoring off until the vault holds its keys (Task 7 of Stage 2); Bicep's outputs come with `--set` from the deploy workflow |
 
 kind runs with `monitoring.enabled` ("Monitoring" below); staging keeps it off until Key Vault holds
-`monitoring-db-password` and `grafana-proxy-key` and `deploy-aks.yml` checks for kube-prometheus-stack (Task 7 of
-Stage 2): with it on, that deploy would fail its mounts or its render and roll back. Monitoring needs the cluster's
+`monitoring-db-password`, `grafana-admin-password` and `grafana-proxy-key` and `deploy-aks.yml` checks for
+kube-prometheus-stack (Task 7 of Stage 2): with it on, that deploy would fail its mounts or its render and roll back. Monitoring needs the cluster's
 kube-prometheus-stack (`deploy/monitoring/install.sh`) installed first: without its CRDs `helm template`, `install`
 and `upgrade` stop with a message naming that script, and nothing is applied.
 
 ```bash
 # Render and check (needs helm 3 and yq v4; no cluster; the renders pass --api-versions for the monitoring CRDs); the
 # chart's copies of Compose's monitoring files; db-init's secret handling (stub psql) and, with docker, qeos_monitor on
-# a real PostgreSQL 16
+# a real PostgreSQL 16; with docker, Grafana's grafana-proxy sidecar as rendered, in front of a stub Grafana
 bash deploy/helm/qeos/tests/render_test.sh
 bash deploy/helm/qeos/tests/monitoring_files_test.sh
 bash deploy/helm/qeos/tests/db_init_test.sh
+bash deploy/helm/qeos/tests/grafana_proxy_test.sh
 
 # kind (CI job helm-kind; "Testing locally with kind" below): the namespace (Pod Security restricted), the Secret, the install
 kubectl create namespace qeos --dry-run=client -o yaml | kubectl apply -f -
@@ -131,9 +132,9 @@ back with `kubectl config use-context <yours>`.
   exposed outside the cluster by these; the edge (below) sends traffic to the `gateway` Service.
 - One **ConfigMap** per workload, `qeos-<service>-env`, with its non-secret settings; secrets reach the pods only as
   `secretKeyRef`s (below). A change to the settings rolls the pods (`checksum/env` annotation).
-- **Monitoring** (when `monitoring.enabled`, "Monitoring" below): Deployments `postgres-exporter` and `alertmanager`
-  (1 replica each, Services of the same names on 9187 and 9093), four ServiceMonitors and three PrometheusRules for
-  the cluster's kube-prometheus-stack.
+- **Monitoring** (when `monitoring.enabled`, "Monitoring" below): Deployments `postgres-exporter`, `alertmanager`
+  and `grafana` (1 replica each, Services of the same names on 9187, 9093 and 3000), four ServiceMonitors and three
+  PrometheusRules for the cluster's kube-prometheus-stack.
 - **ServiceAccounts** `qeos-services`, `qeos-ingestion`, `qeos-ingestion-retention` (and the hook's `qeos-migrate`):
   with Key Vault each carries its managed identity's client id (workload identity). Only the pods that call Azure with
   the SDK (`azureSdk: true`: ingestion and retention, for Blob) carry the label `azure.workload.identity/use`. The
@@ -161,6 +162,8 @@ back with `kubectl config use-context <yours>`.
     with monitoring off nothing outside the namespace reaches them.
   - `postgres-exporter-ingress` and `alertmanager-ingress` (monitoring on): the same Prometheus pods only, on 9187
     and 9093 (scrapes, and the alerts Prometheus sends); no pod of the namespace reaches either.
+  - `grafana-ingress` (monitoring on): the gateway only, on 8080, the `grafana-proxy` sidecar's port behind Service
+    `grafana`'s 3000 (a policy names the pod's port). Prometheus does not scrape Grafana, as on Compose.
   - `ci-backing-ingress` (kind only): PostgreSQL on 5432 for every workload with a `database`, the migration hook and
     postgres-exporter, MinIO on 9000 for those with `artifacts` and the bucket Job.
   The loop jobs listen on nothing and get no policy of their own: the default deny closes them. Egress stays open:
@@ -172,18 +175,23 @@ back with `kubectl config use-context <yours>`.
 Everything the chart renders is namespaced and lands in the release namespace (no ClusterRole, ClusterIssuer,
 GatewayClass or Namespace): the deploy identity administers that namespace only. `tests/render_test.sh` checks it.
 
-Every container runs as its image's non-root user (uid 10001 for the Python images, 101 for nginx, 999 for the CI
-PostgreSQL, whose `PGDATA` is on its emptyDir, 65534 for postgres-exporter and Alertmanager) with a read-only root filesystem, no privilege escalation, all
+Every container runs as its image's non-root user (uid 10001 for the Python images, 101 for nginx and Grafana's
+sidecar, 999 for the CI PostgreSQL, whose `PGDATA` is on its emptyDir, 65534 for postgres-exporter and Alertmanager,
+472 for Grafana) with a read-only root filesystem, no privilege escalation, all
 capabilities dropped and the RuntimeDefault seccomp profile: what Pod Security `restricted` asks, which the kind
 namespace enforces (`tests/render_test.sh` checks every container and init container of every pod spec). Writable
-directories are emptyDirs: `/tmp` everywhere, and `/var/cache/nginx` for the dashboard and the gateway. The gateway
+directories are emptyDirs: `/tmp` everywhere, `/var/cache/nginx` for the dashboard and the gateway, and
+`/var/lib/grafana` for Grafana. The gateway
 renders its configuration into `/tmp/nginx` (`NGINX_RENDER_DIR`); its pid and temporary files are in `/tmp` already
 (`gateway/nginx.conf.template`), and the dashboard writes `config.js` to `/tmp/qeos-config`. Pods get no Kubernetes API
 token and no service-link variables (`enableServiceLinks: false`: a Service named `postgres` would otherwise inject
 `POSTGRES_*` variables next to the settings of the same prefix).
 
 Probes: readiness and liveness on `/health` (the APIs' own; the gateway answers it itself). The dashboard is ready on
-`/config.js`, which exists only once its start-up script ran, and alive on `/health` (its SPA fallback). Loop jobs listen on no port and have none. `terminationGracePeriodSeconds: 30` and a `preStop`
+`/config.js`, which exists only once its start-up script ran, and alive on `/health` (its SPA fallback). Grafana
+listens on its pod's loopback only, so the kubelet probes it through the sidecar's `/_health` (Grafana's
+`/api/health`): the sidecar is ready on it, Grafana starts (5 minutes at most) and stays alive on it, and the sidecar
+is alive while nginx accepts connections. Loop jobs listen on no port and have none. `terminationGracePeriodSeconds: 30` and a `preStop`
 sleep of 5 s let in-flight requests and in-API background tasks finish while the endpoints drop the pod.
 
 ## Values
@@ -209,14 +217,16 @@ sleep of 5 s let in-flight requests and in-API background tasks finish while the
 | `artifacts.s3.endpoint`, `.bucket` | `""`, `qeos-artifacts` | `ARTIFACTS_S3_*`; the keys are secrets |
 | `artifacts.azure.accountUrl`, `.container` | `""`, `qeos-artifacts` | `ARTIFACTS_AZURE_*` (workload identity, no key) |
 | `smtp.host`, `.port`, `.tls`, `.fromEmail`, `.fromName` | empty host: no email | the non-secret SMTP settings; with Key Vault, `SMTP_HOST` stays empty while `smtp-user` or `smtp-password` is in `keyvault.absent` (a server that wants a sign-in would refuse every message, and the links would be neither sent nor logged). `smtp.requireLogin` (default `true`, `SMTP_REQUIRE_LOGIN`): the services themselves treat empty SMTP credentials as no email and log the links |
-| `monitoring.enabled` | `false` (on in `values-ci.yaml`; staging after Task 7) | `MONITORING_ENABLED` for auth and the gateway; the ServiceMonitors, PrometheusRules, postgres-exporter and Alertmanager ("Monitoring" below); db-init's role `qeos_monitor`. Needs kube-prometheus-stack's CRDs (`deploy/monitoring/install.sh`) and the keys `monitoring-db-password` and `grafana-proxy-key` (a render with either in `keyvault.absent` stops). With it on, the gateway also reads the Key Vault secret `grafana-proxy-key` as `GRAFANA_PROXY_KEY` (a `SecretProviderClass` `qeos-gateway` and the `qeos-services` identity, or the `qeos-secrets` key with `secrets.source: kubernetes`) and sends it to Grafana as `X-QEOS-Grafana-Key`; with it off the gateway has no secrets at all |
+| `monitoring.enabled` | `false` (on in `values-ci.yaml`; staging after Task 7) | `MONITORING_ENABLED` for auth and the gateway; the ServiceMonitors, PrometheusRules, postgres-exporter, Alertmanager and Grafana ("Monitoring" below); db-init's role `qeos_monitor`. Needs kube-prometheus-stack's CRDs (`deploy/monitoring/install.sh`) and the keys `monitoring-db-password`, `grafana-admin-password` and `grafana-proxy-key` (a render with any of them in `keyvault.absent` stops). With it on, the gateway also reads the Key Vault secret `grafana-proxy-key` as `GRAFANA_PROXY_KEY` (a `SecretProviderClass` `qeos-gateway` and the `qeos-services` identity, or the `qeos-secrets` key with `secrets.source: kubernetes`) and sends it to Grafana as `X-QEOS-Grafana-Key`; with it off the gateway has no secrets at all |
 | `monitoring.prometheusUrl` | `""` | Grafana's data source; empty: `http://qeos-monitoring-prometheus.<networkPolicy.prometheus.namespace>.svc.cluster.local:9090` |
 | `monitoring.skipRuleGroups` | `[qeos-host, qeos-containers]` | groups of Compose's `alerts.yml` left out ("Monitoring" below) |
 | `monitoring.postgresDbSizeAlertGb` | `20` | `PostgresDatabaseGrowing`'s threshold per database, in GB (Compose: `POSTGRES_DB_SIZE_ALERT_GB`); a number or the render stops |
 | `monitoring.alertEmailTo` | `""` | Alertmanager's `ALERT_EMAIL_TO`, sent through `smtp.*`; empty: no email |
-| `monitoring.identity` | `services` | the workload identity of postgres-exporter's and Alertmanager's SecretProviderClasses |
-| `monitoring.images.alertmanager`, `.postgresExporter` | `prom/alertmanager:v0.28.1`, `quay.io/prometheuscommunity/postgres-exporter:v0.17.1` | as `docker-compose.yml` pins them (`tests/render_test.sh` compares) |
+| `monitoring.identity` | `services` | the workload identity of postgres-exporter's, Alertmanager's and Grafana's SecretProviderClasses |
+| `monitoring.images.alertmanager`, `.postgresExporter`, `.grafana` | `prom/alertmanager:v0.28.1`, `quay.io/prometheuscommunity/postgres-exporter:v0.17.1`, `grafana/grafana:12.0.2` | as `docker-compose.yml` pins them (`tests/render_test.sh` compares) |
+| `monitoring.images.grafanaProxy` | `nginxinc/nginx-unprivileged:1.30-alpine@sha256:f511...` | Grafana's sidecar: the gateway's base image and digest (`gateway/Dockerfile`; `tests/render_test.sh` compares, so a Dependabot bump of one fails until the other follows) |
 | `monitoring.resources.alertmanager`, `.postgres-exporter` | 10m/32Mi, limit 200m/64Mi | limits from Compose's `mem_limit` (64m each) |
+| `monitoring.resources.grafana`, `.grafana-proxy` | 50m/128Mi, limit 500m/256Mi; 10m/16Mi, limit 200m/64Mi | Grafana's limit is Compose's `mem_limit` (256m) |
 | `gateway.trustedProxies` | required | the edge's address range (`GATEWAY_TRUSTED_PROXIES`); real client IPs and per-IP limits depend on it |
 | `gateway.rates.*` | `auth 3r/s`, `api 10r/s`, `collect 5r/s`, `collectBlobs 25r/s`, `collectArtifacts 5r/s` | `RATE_*`, per pod: half of Compose's, as two pods serve |
 | `gateway.importMaxBody` | `25m` | `GATEWAY_IMPORT_MAX_BODY` |
@@ -283,12 +293,38 @@ roles the deploy identity does not have). Prometheus itself is that release's; e
   after changing a webhook URL or the SMTP login in Key Vault, wait for the CSI driver's rotation (2 minutes), then
   `kubectl -n <namespace> rollout restart deployment/alertmanager` (a values change, such as `monitoring.alertEmailTo`,
   restarts it by itself: `checksum/config`).
-- Secrets follow the per-workload pattern ("Secrets" below): SecretProviderClasses `qeos-postgres-exporter` and
-  `qeos-alertmanager` on `monitoring.identity` (`services`); Alertmanager's only when the vault holds one of its keys
-  (staging lists the webhooks and the SMTP login in `keyvault.absent` for now).
+- Secrets follow the per-workload pattern ("Secrets" below): SecretProviderClasses `qeos-postgres-exporter`,
+  `qeos-alertmanager` and `qeos-grafana` on `monitoring.identity` (`services`); Alertmanager's only when the vault
+  holds one of its keys (staging lists the webhooks and the SMTP login in `keyvault.absent` for now). In Grafana's
+  pod, Grafana reads `grafana-admin-password` only and the sidecar `grafana-proxy-key` only.
 
-Grafana (with its proxy sidecar) is Stage 2's next step; until then the gateway's `/grafana/` has no upstream with
-monitoring on (a signed-in request gets 502), and `scripts/smoke_k8s.sh` does not use it.
+- **Grafana** (`grafana/grafana:12.0.2`, 1 replica, Deployment and Service `grafana`): Compose's settings, entrypoint
+  (no start without the admin password) and provisioning: the dashboards and their provider are copies
+  (`files/monitoring/grafana/`, ConfigMaps `qeos-grafana-dashboards` and `qeos-grafana-provisioning`, mounted where
+  Compose mounts them); the data source keeps Compose's uid `prometheus` with `monitoring.prometheusUrl` (default the
+  cluster's `qeos-monitoring-prometheus`, whose NetworkPolicy admits this release's Grafana pods only, by
+  `app.kubernetes.io/name: grafana` and `app.kubernetes.io/instance`). `/var/lib/grafana` is an emptyDir: the users the
+  auth proxy signed up and their preferences start again after a restart; everything else comes from the repository.
+  Users still come through the gateway's `/grafana/` (ADR-027): it checks the `qeos_grafana` cookie with auth-service
+  and sends `X-QEOS-User-Email`, which Grafana's auth proxy believes. Compose believes it from the gateway's fixed
+  address; pod IPs change, so here Grafana listens on its pod's `127.0.0.1:3000` (`GF_SERVER_HTTP_ADDR`,
+  `GF_AUTH_PROXY_WHITELIST=127.0.0.1`) and the sidecar `grafana-proxy` (the gateway's nginx-unprivileged image and
+  digest, `files/grafana-proxy.conf.template`) answers Service `grafana` on 3000 (its port 8080): it forwards to
+  Grafana only a request whose `X-QEOS-Grafana-Key` equals the key the gateway sends (`grafana-proxy-key`, compared
+  with a `map`, case included), with that header removed and `X-QEOS-User-Email` and `Host` as the gateway sent them;
+  anything else gets 403 `{"detail":"Forbidden"}`. `/_health` (Grafana's `/api/health`, for the probes) needs no key;
+  the gateway never proxies that path. nginx's entrypoint renders the template, the key substituted, into a
+  memory-backed emptyDir (`NGINX_ENVSUBST_OUTPUT_DIR`), never a ConfigMap or a log, and the container's command first
+  refuses a key that is not 32 to 128 characters of `[A-Za-z0-9_-]` (as the gateway does) without printing it.
+  `grafana-ingress` admits the gateway only, so no other pod reaches even the sidecar.
+  `tests/grafana_proxy_test.sh` runs the rendered sidecar in docker in front of a stub Grafana;
+  `scripts/check_k8s_policies.sh` and `scripts/check_k8s_monitoring.sh` check it on kind: `/grafana/` through the
+  gateway without the cookie is a 302 to `/monitoring?next=`, forged key and user headers included; Service `grafana`
+  without the key is 403, with it 200; a stranger pod reaches neither Grafana nor Prometheus while the gateway's pod
+  reaches Grafana and Grafana's pod Prometheus; the five dashboards are provisioned and the data source answers.
+  Break-glass and key rotation: `deploy/azure/README.md`. Both secrets are env vars, read at start: after changing
+  `grafana-admin-password` in Key Vault, wait for the CSI rotation (2 minutes) and
+  `kubectl -n <namespace> rollout restart deployment/grafana` (each start creates the admin in a new database).
 
 ## The edge (AKS)
 
@@ -417,7 +453,8 @@ through `secretKeyRef`s only; the hook reads them as files.
 | `tm-secrets-key` (optional) | test-management (`TM_SECRETS_KEY`) |
 | `smtp-user`, `smtp-password` (optional) | auth, ingestion and its jobs; Alertmanager (its email's login) |
 | `monitoring-db-password` (monitoring on) | postgres-exporter (`DATA_SOURCE_PASS`, role `qeos_monitor`); the hook's db-init, which sets it |
-| `grafana-proxy-key` (monitoring on) | the gateway (`GRAFANA_PROXY_KEY`) |
+| `grafana-proxy-key` (monitoring on) | the gateway (`GRAFANA_PROXY_KEY`, sent as `X-QEOS-Grafana-Key`) and Grafana's `grafana-proxy` sidecar, which checks it |
+| `grafana-admin-password` (monitoring on) | Grafana (`GF_SECURITY_ADMIN_PASSWORD`, the break-glass `admin`) |
 | `alert-slack-webhook-url`, `alert-teams-webhook-url` (optional, monitoring on) | Alertmanager (`ALERT_SLACK_WEBHOOK_URL`, `ALERT_TEAMS_WEBHOOK_URL`) |
 | `artifacts-s3-access-key`, `artifacts-s3-secret-key` | ingestion and ingestion-retention with `artifacts.backend: s3` (and MinIO in CI) |
 

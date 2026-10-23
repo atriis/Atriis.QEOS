@@ -112,6 +112,17 @@ must keep working unchanged.
   `ServiceDown` fires per job, so one replica down is not the service down), postgres-exporter as `qeos_monitor` (`pg_monitor` only; db-init creates it) and Alertmanager
   rendered by Compose's `render.sh`, with the null receiver when no channel is configured. Without
   kube-prometheus-stack's CRDs the render stops, naming `deploy/monitoring/install.sh`, so nothing is half applied.
+- **Grafana trusts a header secret, not an address** (Stage 2; `deploy/helm/README.md`, "Monitoring"). Compose's
+  Grafana believes the gateway's `X-QEOS-User-Email` from the gateway's fixed IP; pod IPs change. The chart's Grafana
+  (Compose's image, settings, dashboards and provider; the data source on the cluster's Prometheus) listens on its
+  pod's `127.0.0.1:3000` and believes the header from `127.0.0.1` only. A `grafana-proxy` sidecar (the gateway's
+  nginx-unprivileged image and digest) answers Service `grafana:3000` on its port 8080 and forwards only requests whose
+  `X-QEOS-Grafana-Key` equals the Key Vault secret `grafana-proxy-key` (the gateway sends it, overwriting any client
+  value), removing it; anything else is 403. Only the gateway reaches the sidecar (NetworkPolicy). The key reaches
+  both sides as env vars, so rotating it means restarting both, with 403s in between (`deploy/azure/README.md`,
+  section 3.3). Break-glass is a port-forward to the pod's 3000, as `admin` with `grafana-admin-password`; the right to
+  port-forward in the namespace therefore amounts to Grafana admin. Grafana's database is an emptyDir: signed-up
+  users and preferences reset on a restart, everything else is provisioned.
 - Per-process limits in ingestion (8 storage calls, a 60 s pending-deletion cache) become per pod.
 - Staging stopped during the Sunday window misses its upgrade; documented.
 
@@ -132,7 +143,9 @@ Nothing here can be proved without a real subscription:
   is proved in CI), and Prometheus reaches the APIs from `networkPolicy.prometheus`.
 - kube-prometheus-stack on AKS: node-exporter in the privileged `qeos-monitoring` namespace, Prometheus's 20Gi
   `managed-csi` volume, its NetworkPolicy under Cilium (Grafana in the QEOS namespace admitted, other pods refused; on
-  kind it is proved by hand), and the default rules quiet on a healthy cluster.
+  kind `scripts/check_k8s_policies.sh` proves it), and the default rules quiet on a healthy cluster.
+- Grafana on AKS: the kubelet's probes through the sidecar on 8080 under Cilium's default deny, the gateway's pods
+  reaching the sidecar, and a superuser's sign-in through the edge opening the five dashboards.
 - Monitoring on AKS: Kubernetes RBAC Admin at namespace scope also covers `monitoring.coreos.com` (ServiceMonitor,
   PrometheusRule); Flexible Server's admin holds `pg_monitor` WITH ADMIN OPTION and may create `pg_stat_statements`
   (db-init with monitoring on; CI's server gives its admin the same rights by hand). Without ADMIN OPTION db-init
@@ -156,7 +169,8 @@ Nothing here can be proved without a real subscription:
 - **Entra database authentication** on Flexible Server with workload identity, so no service holds a database
   password (NEXT_STEPS).
 - **Stage 2, hardening and monitoring:** NetworkPolicies beyond the one the edge needs, kube-prometheus-stack with
-  QEOS's rules and dashboards, the Grafana proxy sidecar (header secret, replacing IP trust), Container Insights.
+  QEOS's rules and dashboards, the Grafana proxy sidecar (header secret, replacing IP trust; in the chart, above),
+  Container Insights.
 - **Stage 3, production:** the production cluster, the approval-gated deploy, the restore drill that proves the
   recovery targets, the CI switch-over checklist, a self-hosted runner if required.
 - Migrating data from an existing install; Front Door or WAF; a corporate landing zone.

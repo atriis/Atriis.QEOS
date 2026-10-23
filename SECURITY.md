@@ -270,7 +270,21 @@ details.
   `X-QEOS-Grafana-Key` (`GRAFANA_PROXY_KEY`, Key Vault `grafana-proxy-key`,
   validated at start-up and never logged), which the proxy sidecar in front of
   Grafana requires. The header is overwritten on every proxied request, so a
-  client-sent one never passes, and it is empty on the check's subrequest. The
+  client-sent one never passes, and it is empty on the check's subrequest.
+  Pod IPs change, so on Kubernetes Grafana listens on its pod's `127.0.0.1`
+  only and believes `X-QEOS-User-Email` from `127.0.0.1` only: from the
+  `grafana-proxy` sidecar in its pod, which forwards a request only when
+  `X-QEOS-Grafana-Key` equals the key exactly (a case-sensitive `map`), drops
+  that header, and answers anything else 403; a NetworkPolicy lets only the
+  gateway's pods reach the sidecar, and only Grafana's pods reach the cluster's
+  Prometheus. The sidecar refuses to start with a key that is not 32 to 128
+  characters of `[A-Za-z0-9_-]`, without printing it, and renders its
+  configuration (which holds the key) into a memory-backed emptyDir, never a
+  ConfigMap or a log. A `kubectl port-forward` to the pod's 3000 is the
+  break-glass path (the `admin` password from Key Vault): it reaches Grafana
+  on its loopback, where the auth proxy header would be believed too, so
+  `pods/portforward` in that namespace amounts to Grafana admin (as it already
+  reaches every pod past the NetworkPolicies). The
   gateway also removes `Authorization` toward Grafana, so the
   QEOS access token never reaches it, and strips the `qeos_grafana` cookie from
   the `Cookie` header it forwards (Grafana keeps its own cookies). A hand-made

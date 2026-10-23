@@ -613,7 +613,8 @@ jobs:
           version: v3.16.4
 
       # helm lint and template with each values file, no secret in any manifest; the chart's copies of Compose's
-      # monitoring files; db-init's secret handling (stub psql) and qeos_monitor on a real PostgreSQL 16 (docker).
+      # monitoring files; db-init's secret handling (stub psql) and qeos_monitor on a real PostgreSQL 16 (docker);
+      # Grafana's grafana-proxy sidecar as rendered, in docker, in front of a stub Grafana.
       # yq (mikefarah v4) is on the runner image
       - name: Chart render checks
         env:
@@ -624,6 +625,7 @@ jobs:
           bash "$CHART/tests/render_test.sh"
           bash "$CHART/tests/monitoring_files_test.sh"
           bash "$CHART/tests/db_init_test.sh"
+          bash "$CHART/tests/grafana_proxy_test.sh"
           bash deploy/monitoring/tests/install_test.sh
 
       - name: Build the images
@@ -716,8 +718,9 @@ jobs:
 
       # The cluster's Prometheus scrapes every replica under Compose's job names and loads Compose's rules (qeos-host
       # left out), the ingestion scrape keeps honor_labels in the namespace, postgres-exporter connects as qeos_monitor,
-      # and Alertmanager holds Watchdog with no channel configured
-      - name: Monitoring through Prometheus and Alertmanager
+      # Alertmanager holds Watchdog with no channel configured, and Grafana answers the gateway's key only, with
+      # Compose's dashboards and a data source that reaches Prometheus
+      - name: Monitoring through Prometheus, Alertmanager and Grafana
         run: bash scripts/check_k8s_monitoring.sh "$NAMESPACE"
 
       # Each service's image with an `alembic` that starts and exits 1: the realistic failed migration. FROM the :kind

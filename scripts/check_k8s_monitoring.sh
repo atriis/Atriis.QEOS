@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# The QEOS chart's monitoring on kind (ADR-038 Stage 2), seen from the cluster's Prometheus and from Alertmanager:
+# The QEOS chart's monitoring on kind (ADR-038 Stage 2), seen from the cluster's Prometheus, Alertmanager and Grafana:
 # every scrape target up with Compose's job names, Compose's rule groups loaded (qeos-host left out), the ingestion
 # scrape keeping honor_labels with its series still in the QEOS namespace, postgres-exporter connected as qeos_monitor,
-# and Watchdog in Alertmanager with no channel configured (the null receiver, Review Focus 4). Read only: it
-# port-forwards Prometheus and Alertmanager and queries their APIs. Needs kubectl, curl and yq (mikefarah, v4).
+# Watchdog in Alertmanager with no channel configured (the null receiver, Review Focus 4), and Grafana behind the
+# gateway's sign-in and the grafana-proxy sidecar's key (Review Focus 3), with Compose's dashboards and a data source
+# that reaches Prometheus. It port-forwards and queries APIs; the only write is the Grafana user its auth proxy check
+# signs in (qeos-k8s-check@example.com). It reads grafana-proxy-key and grafana-admin-password from the CI Secret
+# (SECRET, qeos-secrets) and never prints them. Needs kubectl, curl, base64 and yq (mikefarah, v4).
 #   bash scripts/check_k8s_monitoring.sh qeos [qeos-monitoring]
-# The forwards use local ports PROM_PORT (29090) and AM_PORT (29093).
+# The forwards use local ports PROM_PORT (29090), AM_PORT (29093), GW_PORT (29080, the gateway), GF_PORT (29300,
+# Service grafana) and GF_DIRECT_PORT (29301, the Grafana pod's own 3000).
 set -uo pipefail
 
 if [ $# -lt 1 ]; then
@@ -16,6 +20,12 @@ NAMESPACE="$1"
 MONITORING="${2:-qeos-monitoring}"
 PROM_PORT="${PROM_PORT:-29090}"
 AM_PORT="${AM_PORT:-29093}"
+GW_PORT="${GW_PORT:-29080}"
+GF_PORT="${GF_PORT:-29300}"
+GF_DIRECT_PORT="${GF_DIRECT_PORT:-29301}"
+# The CI Secret holding grafana-proxy-key and grafana-admin-password (values-ci.yaml, secrets.source kubernetes)
+SECRET="${SECRET:-qeos-secrets}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # Scrapes every 15 s, rules every 30 s, alerts sent to Alertmanager after their first evaluation: 3 minutes is plenty
 WAIT_SECONDS="${WAIT_SECONDS:-180}"
 
@@ -38,15 +48,18 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# forward NAMESPACE SERVICE LOCAL REMOTE READY_PATH -- a port-forward, once READY_PATH answers 200
+# forward NAMESPACE TARGET LOCAL REMOTE READY_PATH -- a port-forward to a Service (or to TARGET kind/name, such as
+# deploy/grafana), once READY_PATH answers 200
 forward() {
-  kubectl -n "$1" port-forward "svc/$2" "$3:$4" >"$TMP/forward-$2.log" 2>&1 &
+  local target="svc/$2" log="$TMP/forward-${2//\//-}.log"
+  case "$2" in */*) target="$2" ;; esac
+  kubectl -n "$1" port-forward "$target" "$3:$4" >"$log" 2>&1 &
   forwards+=("$!")
-  for _ in $(seq 30); do
+  for _ in $(seq 60); do
     [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 "http://localhost:$3$5")" = 200 ] && return 0
     sleep 1
   done
-  fail "no answer from $2 through localhost:$3: $(head -c 300 "$TMP/forward-$2.log")"
+  fail "no answer from $2 through localhost:$3: $(head -c 300 "$log")"
   return 1
 }
 forward "$MONITORING" qeos-monitoring-prometheus "$PROM_PORT" 9090 /-/ready || exit 1
@@ -139,6 +152,67 @@ done
   || fail "Watchdog in Alertmanager: '$got', want '$NAMESPACE null'"
 channels="$(curl -s --max-time 10 "$AM/api/v2/status" | yq -p json -o yaml '.config.original' | grep -c -E '(email|slack|msteamsv2)_configs')"
 [ "$channels" = 0 ] && pass "Alertmanager runs with no channel configured" || fail "Alertmanager's configuration has $channels channel(s)"
+
+# ---- Grafana: behind the gateway's sign-in, and behind the grafana-proxy sidecar's key (Review Focus 3) ----
+# The key and the admin password come from the CI Secret (secrets.source kubernetes) into files only this user reads;
+# curl reads them from there, so neither is ever on a command line or printed
+umask 077
+secret_value() { kubectl -n "$NAMESPACE" get secret "$SECRET" -o "jsonpath={.data.$1}" | base64 -d; }
+{ printf 'X-QEOS-Grafana-Key: '; secret_value grafana-proxy-key; printf '\n'; } > "$TMP/key.header"
+{ printf 'machine localhost login admin password '; secret_value grafana-admin-password; printf '\n'; } > "$TMP/netrc"
+[ "$(wc -c < "$TMP/key.header")" -gt 52 ] || fail "no grafana-proxy-key in Secret $SECRET"
+forward "$NAMESPACE" gateway "$GW_PORT" 8080 /health || exit 1
+forward "$NAMESPACE" grafana "$GF_PORT" 3000 /_health || exit 1
+# The break-glass path (deploy/azure/README.md): a port-forward to the pod's 3000 is Grafana itself, on its loopback
+forward "$NAMESPACE" deploy/grafana "$GF_DIRECT_PORT" 3000 /grafana/api/health || exit 1
+GW="http://localhost:$GW_PORT"
+GF="http://localhost:$GF_PORT"
+GF_DIRECT="http://localhost:$GF_DIRECT_PORT"
+
+# status_of NAME WANT URL [curl args...] -- the status (and, for a redirect, the Location) URL answers
+status_of() {
+  local name="$1" want="$2" url="$3" got
+  shift 3
+  got="$(curl -s -o "$TMP/body" -D "$TMP/headers" -w '%{http_code}' --max-time 10 "$@" "$url")"
+  if [ "${got:0:1}" = 3 ]; then
+    got="$got $(sed -n 's/^[Ll]ocation: *//p' "$TMP/headers" | tr -d '\r')"
+  fi
+  case "$got" in
+    $want) pass "$name: $got" ;;
+    *) fail "$name: got '$got', want '$want'" ;;
+  esac
+}
+# Through the gateway, nobody reaches Grafana without the qeos_grafana cookie, whatever headers the client forges
+status_of "/grafana/ through the gateway without a cookie" "302 /monitoring?next=*" "$GW/grafana/"
+status_of "/grafana/ through the gateway with a forged key and user header" "302 /monitoring?next=*" "$GW/grafana/" \
+  -H @"$TMP/key.header" -H "X-QEOS-User-Email: admin@example.com"
+# Service grafana is the sidecar: the key or a 403
+status_of "Service grafana without the key" 403 "$GF/grafana/api/health"
+grep -qxF '{"detail":"Forbidden"}' "$TMP/body" && pass "... answered {\"detail\":\"Forbidden\"}" || fail "... answered '$(head -c 200 "$TMP/body")'"
+status_of "Service grafana with a wrong key" 403 "$GF/grafana/api/health" -H "X-QEOS-Grafana-Key: ci-not-the-key-0123456789abcdefghijklmn"
+status_of "Service grafana with the key" 200 "$GF/grafana/api/health" -H @"$TMP/key.header"
+# The gateway's two headers: the key opens the sidecar, X-QEOS-User-Email reaches Grafana's auth proxy, which believes
+# it from 127.0.0.1 (the sidecar) and signs that user in
+status_of "the auth proxy signs in X-QEOS-User-Email through the sidecar" 200 "$GF/grafana/api/user" \
+  -H @"$TMP/key.header" -H "X-QEOS-User-Email: qeos-k8s-check@example.com"
+got="$(yq -p json -o yaml '.email' "$TMP/body" 2>/dev/null | tr -d '\r')"
+[ "$got" = qeos-k8s-check@example.com ] && pass "... as qeos-k8s-check@example.com" || fail "... as '$got'"
+
+# Grafana itself, as the break-glass admin: Compose's dashboards provisioned, its data source reaching the cluster's
+# Prometheus (its NetworkPolicy admits Grafana's pods), and the five services up as the overview shows them
+status_of "break-glass: Grafana on the pod's 127.0.0.1:3000 answers without the key" 200 "$GF_DIRECT/grafana/api/health"
+status_of "break-glass: the admin signs in" 200 "$GF_DIRECT/grafana/api/search?type=dash-db" --netrc-file "$TMP/netrc"
+got="$(yq -p json -o yaml '[.[] | .folderTitle + "/" + .uid] | sort | join(" ")' "$TMP/body" 2>/dev/null | tr -d '\r')"
+want="$(for d in "$ROOT"/monitoring/grafana/dashboards/*.json; do printf 'QEOS/%s\n' "$(yq -p json -o yaml '.uid' "$d" | tr -d '\r')"; done | sort | xargs)"
+[ -n "$want" ] && [ "$got" = "$want" ] && pass "Grafana provisioned Compose's dashboards: $got" || fail "Grafana's dashboards are '$got', want '$want'"
+status_of "Grafana's data source reaches Prometheus" 200 "$GF_DIRECT/grafana/api/datasources/uid/prometheus/health" --netrc-file "$TMP/netrc"
+got="$(yq -p json -o yaml '.status' "$TMP/body" 2>/dev/null | tr -d '\r')"
+[ "$got" = OK ] && pass "... status OK" || fail "... status '$got': $(head -c 200 "$TMP/body")"
+got="$(curl -s --max-time 10 --netrc-file "$TMP/netrc" -G --data-urlencode \
+  "query=count by (job) (up{namespace=\"$NAMESPACE\", job=~\"auth|organization|project|ingestion|test-management\"} == 1)" \
+  "$GF_DIRECT/grafana/api/datasources/proxy/uid/prometheus/api/v1/query" | yq -p json -o yaml "$by_job" 2>/dev/null | tr -d '\r')"
+[ "$got" = "auth=2 ingestion=2 organization=2 project=2 test-management=2" ] && pass "the five services up, through Grafana's data source: $got" \
+  || fail "the services up through Grafana's data source: '$got'"
 
 if [ "$failures" -eq 0 ]; then
   echo "all monitoring checks passed"

@@ -103,9 +103,10 @@ chart's values, or the APIs refuse Prometheus's scrapes on 8000 (they time out);
   an Egress policy type, which would stop scraping) admits 9090 only from the QEOS chart's Grafana (pods
   `app.kubernetes.io/name: grafana` and `app.kubernetes.io/instance: <--qeos-release>` in the QEOS namespace, so not
   any pod someone labels grafana) and from the monitoring namespace (the operator, Prometheus itself), and the config reloader's 8080
-  from the monitoring namespace (Prometheus scrapes it). It is ingress only: scraping is outbound. Checked by hand on
-  kind with kindnet: a Grafana-labelled pod in `qeos` and a pod in `qeos-monitoring` get 200, any other pod in `qeos`
-  or a pod in `default` times out.
+  from the monitoring namespace (Prometheus scrapes it). It is ingress only: scraping is outbound. On kind with
+  kindnet, `scripts/check_k8s_policies.sh` checks it in CI: the QEOS chart's Grafana pod gets an answer, a pod with no
+  workload's labels in `qeos` and one with a loop job's labels time out (checked by hand too: a pod in
+  `qeos-monitoring` gets 200, a pod in `default` times out).
 
 ## The pin
 

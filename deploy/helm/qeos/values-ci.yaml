@@ -63,3 +63,5 @@ ciSecrets:
   monitoring-db-password: ci-dummy-monitoring-db-6b1d93fe
   # The gateway's check needs 32 to 128 characters of [A-Za-z0-9_-]
   grafana-proxy-key: ci-dummy-grafana-proxy-key-5c0e7a92d4f8
+  # Grafana's break-glass admin (scripts/check_k8s_monitoring.sh signs in with it)
+  grafana-admin-password: ci-dummy-grafana-admin-1e6f0b3c

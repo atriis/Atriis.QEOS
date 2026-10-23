@@ -81,8 +81,9 @@ smtp:
 
 # Monitoring (ADR-027, ADR-038 Stage 2): ServiceMonitors and PrometheusRules for the cluster's kube-prometheus-stack
 # (deploy/monitoring, installed first by a cluster admin; without its CRDs a render with monitoring on fails),
-# postgres-exporter and Alertmanager, as Compose's monitoring profile. The Prometheus pods' namespace and labels are
-# networkPolicy.prometheus's. Needs the Key Vault key monitoring-db-password (and grafana-proxy-key for the gateway)
+# postgres-exporter, Alertmanager and Grafana, as Compose's monitoring profile. The Prometheus pods' namespace and labels
+# are networkPolicy.prometheus's. Needs the Key Vault keys monitoring-db-password, grafana-admin-password and
+# grafana-proxy-key (the gateway sends it, Grafana's grafana-proxy sidecar checks it)
 monitoring:
   enabled: false
   # Grafana's data source; empty: http://qeos-monitoring-prometheus.<networkPolicy.prometheus.namespace>.svc.cluster.local:9090
@@ -99,14 +100,30 @@ monitoring:
   # Alertmanager's email channel (Compose: ALERT_EMAIL_TO), sent through smtp.*; empty: no email. Slack and Teams are
   # the optional Key Vault keys alert-slack-webhook-url and alert-teams-webhook-url. No channel: the null receiver
   alertEmailTo: ""
-  # The workload identity of postgres-exporter's and Alertmanager's SecretProviderClasses (keyvault.clientIds)
+  # The workload identity of postgres-exporter's, Alertmanager's and Grafana's SecretProviderClasses (keyvault.clientIds)
   identity: services
-  # Exactly as docker-compose.yml pins them
+  # Exactly as docker-compose.yml pins them; grafanaProxy is the gateway's base image and digest (gateway/Dockerfile)
   images:
     alertmanager: prom/alertmanager:v0.28.1
     postgresExporter: quay.io/prometheuscommunity/postgres-exporter:v0.17.1
-  # Limits start from Compose's mem_limit (64m each)
+    grafana: grafana/grafana:12.0.2
+    grafanaProxy: nginxinc/nginx-unprivileged:1.30-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
+  # Limits start from Compose's mem_limit (64m for Alertmanager and postgres-exporter, 256m for Grafana)
   resources:
+    grafana:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    grafana-proxy:
+      requests:
+        cpu: 10m
+        memory: 16Mi
+      limits:
+        cpu: 200m
+        memory: 64Mi
     alertmanager:
       requests:
         cpu: 10m

@@ -93,7 +93,8 @@ spec:
 {{- end }}
 {{- end }}
 {{- /* The monitoring workloads (monitoring.enabled): postgres-exporter and Alertmanager answer the Prometheus pods only
-(scrapes, and alerts sent to Alertmanager); no pod of the namespace calls them */}}
+(scrapes, and alerts sent to Alertmanager); no pod of the namespace calls them. Grafana answers its callers only: the
+gateway, on the grafana-proxy sidecar's port (Compose does not scrape Grafana either) */}}
 {{- range $name, $w := include "qeos.monitoringWorkloads" . | fromJson }}
 ---
 apiVersion: networking.k8s.io/v1
@@ -110,10 +111,18 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
+        {{- if $w.callers }}
+        {{- range $caller := sortAlpha $w.callers }}
+        - podSelector:
+            matchLabels:
+              {{- include "qeos.selector" (dict "ctx" $ "name" $caller) | nindent 14 }}
+        {{- end }}
+        {{- else }}
         {{- include "qeos.prometheusPeer" $ | nindent 8 }}
+        {{- end }}
       ports:
         - protocol: TCP
-          port: {{ $w.port }}
+          port: {{ default $w.port $w.podPort }}
 {{- end }}
 {{- if .Values.ci.backing }}
 {{- /* kind only: PostgreSQL for every workload with a database, the migration hook (which runs on every upgrade, when

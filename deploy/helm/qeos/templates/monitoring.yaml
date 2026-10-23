@@ -12,7 +12,7 @@ never match, hence monitoring.skipRuleGroups. Without the operator's CRDs nothin
 {{- end }}
 {{- /* Keys without which a monitoring workload never starts: a clear failure rather than CreateContainerConfigError */}}
 {{- if eq .Values.secrets.source "keyvault" }}
-{{- range $key := list "monitoring-db-password" "grafana-proxy-key" }}
+{{- range $key := list "monitoring-db-password" "grafana-admin-password" "grafana-proxy-key" }}
 {{- if has $key $.Values.keyvault.absent }}
 {{- fail (printf "%s is required with monitoring.enabled: put it in Key Vault (deploy/azure/init-secrets.sh) and remove it from keyvault.absent" $key) }}
 {{- end }}

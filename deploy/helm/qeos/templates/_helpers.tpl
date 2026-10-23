@@ -338,6 +338,22 @@ helm.sh/hook-weight: {{ .weight | quote }}
 {{- end -}}
 {{- end -}}
 
+{{/* Grafana's data source: monitoring/grafana/provisioning/datasources/prometheus.yml (uid prometheus, which the
+dashboards name), on the cluster's Prometheus (grafana.yaml) */}}
+{{- define "qeos.grafanaDatasources" -}}
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: {{ include "qeos.prometheusUrl" . }}
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s
+{{- end -}}
+
 {{/* A NetworkPolicy source: the Prometheus pods (networkPolicy.prometheus), by namespace name and pod labels */}}
 {{- define "qeos.prometheusPeer" -}}
 {{- $prometheus := .Values.networkPolicy.prometheus | default dict -}}
@@ -355,7 +371,8 @@ helm.sh/hook-weight: {{ .weight | quote }}
 
 {{/* JSON: the monitoring workloads (empty with monitoring off), shaped like .Values.services entries so the secret
 helpers (qeos.secretRefs, qeos.vaultKeys, qeos.secretEnv) and secretproviderclass.yaml treat them alike. port: their
-Service's, which only Prometheus reaches */}}
+Service's; podPort: the pod's port behind it (default port). The Prometheus pods reach them there, or, with callers,
+those workloads of the release only (networkpolicies.yaml) */}}
 {{- define "qeos.monitoringWorkloads" -}}
 {{- $workloads := dict -}}
 {{- if .Values.monitoring.enabled -}}
@@ -365,6 +382,10 @@ Service's, which only Prometheus reaches */}}
 {{- $_ := set $workloads "alertmanager" (dict "kind" "alertmanager" "identity" $identity "port" 9093 "smtp" true
   "secretEnv" (dict "ALERT_SLACK_WEBHOOK_URL" "alert-slack-webhook-url" "ALERT_TEAMS_WEBHOOK_URL" "alert-teams-webhook-url"
     "SMTP_USER" "smtp-user" "SMTP_PASSWORD" "smtp-password")) -}}
+{{- /* Grafana's Service is its grafana-proxy sidecar (8080), which only the gateway reaches; Grafana reads the admin
+password, the sidecar the key (grafana.yaml) */ -}}
+{{- $_ := set $workloads "grafana" (dict "kind" "grafana" "identity" $identity "port" 3000 "podPort" 8080 "callers" (list "gateway")
+  "secretEnv" (dict "GF_SECURITY_ADMIN_PASSWORD" "grafana-admin-password" "GRAFANA_PROXY_KEY" "grafana-proxy-key")) -}}
 {{- end -}}
 {{- toJson $workloads -}}
 {{- end -}}

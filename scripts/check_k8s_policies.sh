@@ -3,6 +3,7 @@
 # 5.3). A port-forward bypasses NetworkPolicies, so smoke_k8s.sh cannot see them: this script runs throwaway pods in the
 # namespace (curl, the restricted security context) and calls the Services from there. kind only.
 #   bash scripts/check_k8s_policies.sh qeos [release]
+# MONITORING_NAMESPACE (qeos-monitoring) is the cluster Prometheus's namespace, checked when the release runs Grafana.
 # Each check is one line of CHECKS below: FROM URL EXPECT.
 #   FROM    stranger: a pod with no workload's labels, which no policy admits; or a workload WITHOUT a Service (a loop
 #           job) whose selector labels the pod borrows, so the policies treat it as that workload. Never a workload
@@ -56,6 +57,16 @@ for target in postgres-exporter:9187/ alertmanager:9093/-/healthy; do
     CHECKS+=("stranger http://$target blocked" "ingestion-retention http://$target blocked")
   fi
 done
+# Grafana (monitoring.enabled) answers the gateway only; the cluster's Prometheus answers Grafana's pods only
+# (deploy/monitoring), not any other pod of the namespace. The two allowed paths run from the real pods (REAL below)
+PROMETHEUS="http://qeos-monitoring-prometheus.${MONITORING_NAMESPACE:-qeos-monitoring}.svc.cluster.local:9090/-/ready"
+REAL=()
+if "${KUBECTL[@]}" get service grafana >/dev/null 2>&1; then
+  CHECKS+=("stranger http://grafana:3000/_health blocked" "ingestion-retention http://grafana:3000/_health blocked"
+    "stranger $PROMETHEUS blocked" "ingestion-retention $PROMETHEUS blocked")
+  # DEPLOYMENT CONTAINER URL: the gateway has curl, Grafana's image busybox wget
+  REAL+=("gateway gateway http://grafana:3000/_health" "grafana grafana $PROMETHEUS")
+fi
 
 failures=0
 pass() { printf 'ok    %s\n' "$1"; }
@@ -159,6 +170,22 @@ for check in "${CHECKS[@]}"; do
   else
     [ "$rc" = 0 ] && [ "$code" = "$expect" ] && pass "$from -> $url answers $code" \
       || fail "$from -> $url: curl exit $rc, HTTP ${code:-none}, want $expect"
+  fi
+done
+
+# The allowed paths that a throwaway pod cannot borrow (both workloads have a Service): from the real pods, which only
+# read. A 2xx answer within 5 seconds passes
+for real in "${REAL[@]}"; do
+  read -r deploy container url <<< "$real"
+  if [ "$container" = grafana ]; then
+    cmd='wget -q -O /dev/null -T 5 "$1"'
+  else
+    cmd='curl -sf -o /dev/null -m 5 "$1"'
+  fi
+  if "${KUBECTL[@]}" exec "deploy/$deploy" -c "$container" -- sh -c "$cmd" check "$url" >/dev/null 2>&1; then
+    pass "$deploy (its own pod) -> $url answers"
+  else
+    fail "$deploy (its own pod) -> $url: no 2xx answer within 5 seconds"
   fi
 done
 

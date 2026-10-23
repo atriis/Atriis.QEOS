@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The chart's copies of Compose's monitoring files (files/monitoring/) are byte for byte the originals (ADR-038): Helm
-# reads files inside the chart only, so the rules and Alertmanager's renderer are copied, and an edit to an original
-# that misses its copy fails here. Copy the original over the copy to fix it:
+# reads files inside the chart only, so the rules, Alertmanager's renderer and Grafana's dashboards are copied, and an
+# edit to an original that misses its copy fails here. Copy the original over the copy to fix it:
 #   cp monitoring/prometheus/alerts.yml deploy/helm/qeos/files/monitoring/prometheus/alerts.yml
 #   bash deploy/helm/qeos/tests/monitoring_files_test.sh
 set -uo pipefail
@@ -19,7 +19,12 @@ PAIRS=(
   "prometheus/recording.yml:monitoring/prometheus/recording.yml"
   "alertmanager/alertmanager.yml.template:monitoring/alertmanager/alertmanager.yml.template"
   "alertmanager/render.sh:monitoring/alertmanager/render.sh"
+  # Grafana's dashboards and their provider (the data source is rendered by the chart: its URL differs)
+  "grafana/provisioning/dashboards/qeos.yml:monitoring/grafana/provisioning/dashboards/qeos.yml"
 )
+for dashboard in "$ROOT"/monitoring/grafana/dashboards/*.json; do
+  PAIRS+=("grafana/dashboards/${dashboard##*/}:monitoring/grafana/dashboards/${dashboard##*/}")
+done
 
 listed=""
 for pair in "${PAIRS[@]}"; do

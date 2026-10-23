@@ -713,6 +713,108 @@ for env in ci staging; do
     [ "$(q "$f" "select(.kind == \"ConfigMap\" and .metadata.name == \"qeos-alertmanager\") | .data[\"$file\"]")" = "$(cat "$CHART/files/monitoring/alertmanager/$file")" ] \
       && pass "$env: ConfigMap qeos-alertmanager carries $file" || fail "$env: ConfigMap qeos-alertmanager's $file differs from the chart's copy"
   done
+  # ---- Grafana (Task 6): Compose's grafana, on 127.0.0.1:3000 behind the grafana-proxy sidecar ----
+  gf() { dep grafana ".spec.template.spec.containers[] | select(.name == \"$1\") | $2"; }
+  gfenv() { gf grafana ".env[] | select(.name == \"$1\") | $2"; }
+  [ "$(dep grafana .spec.replicas)" = 1 ] && pass "$env: grafana has 1 replica" || fail "$env: grafana has replicas '$(dep grafana .spec.replicas)'"
+  got="$(dep grafana '[.spec.template.spec.containers[].name] | join(" ")')"
+  [ "$got" = "grafana grafana-proxy" ] && pass "$env: grafana's pod runs grafana and the grafana-proxy sidecar" \
+    || fail "$env: grafana's containers are '$got'"
+  img="$(yq '.services.grafana.image' "$COMPOSE" | tr -d '\r')"
+  [ -n "$img" ] && [ "$(gf grafana .image)" = "$img" ] && pass "$env: grafana runs $img, as Compose" \
+    || fail "$env: grafana runs '$(gf grafana .image)', Compose '$img'"
+  img="$(sed -n 's/^FROM //p' "$CHART/../../../gateway/Dockerfile" | tr -d '\r')"
+  [[ "$img" == *@sha256:* ]] && [ "$(gf grafana-proxy .image)" = "$img" ] && pass "$env: grafana-proxy runs the gateway's image and digest" \
+    || fail "$env: grafana-proxy runs '$(gf grafana-proxy .image)', the gateway '$img'"
+  # Every setting of Compose's grafana, with Compose's value but for those Kubernetes changes
+  bad=""
+  while IFS='=' read -r key value; do
+    [ -n "$key" ] || continue
+    case "$key" in GF_SERVER_ROOT_URL|GF_SECURITY_ADMIN_PASSWORD|GF_AUTH_PROXY_WHITELIST) continue ;; esac
+    [ "$(gfenv "$key" .value)" = "$value" ] || bad="$bad $key"
+  done < <(yq '.services.grafana.environment | to_entries | .[] | .key + "=" + .value' "$COMPOSE" | tr -d '\r')
+  [ -z "$bad" ] && pass "$env: grafana has every Compose setting, with Compose's value" || fail "$env: grafana's settings differ from Compose's:$bad"
+  case "$env" in
+    ci) root="https://localhost/grafana/"; secret=qeos-secrets ;;
+    *) root="https://$STAGING_HOST/grafana/"; secret=qeos-secrets-grafana ;;
+  esac
+  got="$(gfenv GF_SERVER_ROOT_URL .value)|$(gfenv GF_AUTH_PROXY_WHITELIST .value)|$(gfenv GF_SERVER_HTTP_ADDR .value)"
+  [ "$got" = "$root|127.0.0.1|127.0.0.1" ] \
+    && pass "$env: grafana listens on 127.0.0.1 and believes the auth proxy header from 127.0.0.1 only; root $root" \
+    || fail "$env: grafana's root, whitelist and address are '$got'"
+  got="$(gfenv GF_SECURITY_ADMIN_PASSWORD '.valueFrom.secretKeyRef.name + "/" + .valueFrom.secretKeyRef.key + ":" + ((.valueFrom.secretKeyRef.optional // false) | tostring)')"
+  [ "$got" = "$secret/grafana-admin-password:false" ] && pass "$env: grafana's admin password is $secret/grafana-admin-password" \
+    || fail "$env: GF_SECURITY_ADMIN_PASSWORD is '$got'"
+  # Each container sees only its own secret: the key in the sidecar, the admin password in Grafana
+  got="$(gf grafana '[.env[] | select(.valueFrom.secretKeyRef) | .valueFrom.secretKeyRef.key] | join(" ")')"
+  got="$got|$(gf grafana-proxy '[.env[] | select(.valueFrom.secretKeyRef) | .name + ":" + .valueFrom.secretKeyRef.name + "/" + .valueFrom.secretKeyRef.key] | join(" ")')"
+  [ "$got" = "grafana-admin-password|GRAFANA_PROXY_KEY:$secret/grafana-proxy-key" ] \
+    && pass "$env: grafana reads the admin password only, grafana-proxy the key only" || fail "$env: grafana's and grafana-proxy's secrets are '$got'"
+  # Compose's entrypoint: no start without the admin password (an empty one would mean admin/admin)
+  c="$(gf grafana '.command | join(" ")')"
+  [[ "$c" == *'[ -z "$GF_SECURITY_ADMIN_PASSWORD" ]'*"exit 1"*"exec /run.sh"* ]] && pass "$env: grafana refuses to start without the admin password" \
+    || fail "$env: grafana's command is '$c'"
+  got="$(gf grafana '[.volumeMounts[] | select(.name != "secrets-store") | .mountPath + ((.readOnly // false) | tostring)] | sort | join(" ")')"
+  [ "$got" = "/etc/qeos/grafana/dashboardstrue /etc/qeos/grafana/provisioningtrue /tmpfalse /var/lib/grafanafalse" ] \
+    && pass "$env: grafana mounts the dashboards and provisioning read-only where Compose does, /var/lib/grafana and /tmp writable" \
+    || fail "$env: grafana mounts '$got'"
+  got="$(dep grafana '[.spec.template.spec.volumes[] | select(.name == "data" or .name == "tmp") | .name + ":" + ((.emptyDir != null) | tostring)] | sort | join(" ")')"
+  [ "$got" = "data:true tmp:true" ] && pass "$env: /var/lib/grafana and /tmp are emptyDirs" || fail "$env: grafana's writable volumes are '$got'"
+  # The Service: port 3000, to the sidecar's port only (Grafana's own 3000 is on the pod's loopback)
+  s="$(q "$f" 'select(.kind == "Service" and .metadata.name == "grafana") | (.spec.ports | length | tostring) + " " + (.spec.ports[0].port | tostring) + " " + .spec.ports[0].targetPort')"
+  pp="$(gf grafana-proxy '[.ports[] | .name + "=" + (.containerPort | tostring)] | join(" ")')"
+  gp="$(gf grafana '[(.ports // [])[] | .name] | join(" ")')"
+  [ "$s" = "1 3000 http" ] && [ "$pp" = "http=8080" ] && [ -z "$gp" ] \
+    && pass "$env: Service grafana port 3000 targets grafana-proxy's http (8080), never Grafana" \
+    || fail "$env: Service grafana is '$s', grafana-proxy's ports '$pp', grafana's '$gp'"
+  # Probes through the sidecar's /_health
+  got="$(gf grafana-proxy '.readinessProbe.httpGet.path + " " + (.readinessProbe.httpGet.port | tostring)')"
+  got="$got|$(gf grafana '.livenessProbe.httpGet.path + " " + (.livenessProbe.httpGet.port | tostring)')"
+  [ "$got" = "/_health http|/_health 8080" ] && pass "$env: grafana-proxy is ready, and grafana alive, on the sidecar's /_health" \
+    || fail "$env: grafana's probes are '$got'"
+  # The sidecar: nginx renders its template into an emptyDir (NGINX_ENVSUBST_OUTPUT_DIR), substituting GRAFANA_PROXY_KEY only
+  out="$(gf grafana-proxy '.env[] | select(.name == "NGINX_ENVSUBST_OUTPUT_DIR") | .value')"
+  vol="$(gf grafana-proxy ".volumeMounts[] | select(.mountPath == \"$out\") | .name")"
+  ed="$(dep grafana ".spec.template.spec.volumes[] | select(.name == \"$vol\") | (.emptyDir != null) | tostring")"
+  [ -n "$out" ] && [ "$ed" = true ] && pass "$env: grafana-proxy renders its configuration into an emptyDir ($out)" \
+    || fail "$env: NGINX_ENVSUBST_OUTPUT_DIR '$out' is on '$vol' (emptyDir: $ed)"
+  [ "$(gf grafana-proxy '.env[] | select(.name == "NGINX_ENVSUBST_FILTER") | .value')" = '^GRAFANA_PROXY_KEY$' ] \
+    && pass "$env: grafana-proxy substitutes GRAFANA_PROXY_KEY only" || fail "$env: grafana-proxy's NGINX_ENVSUBST_FILTER is wrong"
+  c="$(gf grafana-proxy '.command | join(" ")')"
+  [[ "$c" == *'GRAFANA_PROXY_KEY'*"exit 1"*"exec /docker-entrypoint.sh nginx"* ]] && [[ "$c" != *'echo "$GRAFANA_PROXY_KEY'* ]] \
+    && pass "$env: grafana-proxy checks the key before nginx starts" || fail "$env: grafana-proxy's command is '$c'"
+  [[ "$c" == *"nginx -c $out/grafana-proxy.conf "* ]] && pass "$env: nginx runs with the rendered template alone ($out/grafana-proxy.conf)" \
+    || fail "$env: grafana-proxy's nginx does not run $out/grafana-proxy.conf: '$c'"
+  # The configuration: the dashboards and their provider are Compose's (files/monitoring/grafana, byte copies); the data
+  # source is Compose's with the cluster's Prometheus; the sidecar's template is files/grafana-proxy.conf.template
+  cm() { q "$f" "select(.kind == \"ConfigMap\" and .metadata.name == \"$1\") | .data[\"$2\"]"; }
+  bad=""
+  n=0
+  for d in "$MONITORING"/grafana/dashboards/*.json; do
+    n=$((n + 1))
+    [ "$(cm qeos-grafana-dashboards "${d##*/}" | tr -d '\r')" = "$(tr -d '\r' < "$d")" ] || bad="$bad ${d##*/}"
+  done
+  extra="$(q "$f" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-grafana-dashboards") | .data | keys | length')"
+  [ "$n" = 5 ] && [ "$extra" = 5 ] && [ -z "$bad" ] && pass "$env: ConfigMap qeos-grafana-dashboards holds Compose's five dashboards" \
+    || fail "$env: dashboards: $n files, $extra keys, differing:$bad"
+  [ "$(cm qeos-grafana-provisioning dashboards.yml)" = "$(tr -d '\r' < "$MONITORING/grafana/provisioning/dashboards/qeos.yml")" ] \
+    && pass "$env: the dashboards provider is Compose's" || fail "$env: the dashboards provider differs from Compose's qeos.yml"
+  a="$(yq -o json -I0 '.datasources[0] | del(.url)' "$MONITORING/grafana/provisioning/datasources/prometheus.yml" | tr -d '\r')"
+  b="$(cm qeos-grafana-provisioning datasources.yml | yq -o json -I0 '.datasources[0] | del(.url)' | tr -d '\r')"
+  u="$(cm qeos-grafana-provisioning datasources.yml | yq '.datasources[0].url + " " + (.datasources | length | tostring)' | tr -d '\r')"
+  [ -n "$a" ] && [ "$a" = "$b" ] && [ "$u" = "http://qeos-monitoring-prometheus.qeos-monitoring.svc.cluster.local:9090 1" ] \
+    && pass "$env: the data source is Compose's (uid prometheus), on the cluster's Prometheus" || fail "$env: the data source is '$b' at '$u'"
+  [ "$(cm qeos-grafana-proxy grafana-proxy.conf.template)" = "$(tr -d '\r' < "$CHART/files/grafana-proxy.conf.template")" ] \
+    && pass "$env: ConfigMap qeos-grafana-proxy carries files/grafana-proxy.conf.template" || fail "$env: qeos-grafana-proxy differs from the template"
+  # Only the gateway reaches it, on the sidecar's port; Prometheus does not scrape it (Compose does not either)
+  o="$(outside grafana-ingress)|$(callers grafana-ingress 8080)|$(ports grafana-ingress)"
+  [ "$o" = "|gateway|TCP/8080" ] && pass "$env: grafana-ingress admits only the gateway, on the sidecar's 8080" || fail "$env: grafana-ingress is '$o'"
+  bad="$(q "$f" '[select(.kind == "Deployment" and .metadata.name == "grafana") | .spec.template.spec.containers[]
+    | select(.resources.requests.cpu == null or .resources.requests.memory == null or .resources.limits.cpu == null or .resources.limits.memory == null)
+    | .name] | join(" ")')"
+  [ -z "$bad" ] && [ "$(gf grafana .resources.limits.memory)" = 256Mi ] \
+    && pass "$env: grafana's containers have requests and limits (Grafana's memory: Compose's mem_limit, 256m)" \
+    || fail "$env: grafana's resources: missing on '$bad', Grafana's memory limit '$(gf grafana .resources.limits.memory)'"
   # db-init creates qeos_monitor
   v="$(q "$f" 'select(.kind == "Job" and .metadata.name == "qeos-migrate") | .spec.template.spec.initContainers[] | select(.name == "db-init") | .env[] | select(.name == "MONITORING_ENABLED") | .value')"
   [ "$v" = true ] && pass "$env: db-init creates qeos_monitor (MONITORING_ENABLED)" || fail "$env: db-init MONITORING_ENABLED is '$v'"
@@ -723,6 +825,11 @@ spc() { q "$OUT/$1.yaml" "select(.kind == \"SecretProviderClass\" and .metadata.
   || fail "staging: qeos-postgres-exporter holds '$(spc staging qeos-postgres-exporter)'"
 [[ " $(q "$st" 'select(.kind == "SecretProviderClass" and .metadata.name == "qeos-migrate") | .spec.parameters.objects') " == *"objectName: monitoring-db-password"* ]] \
   && pass "staging: the migration hook reads monitoring-db-password" || fail "staging: qeos-migrate lacks monitoring-db-password"
+# Grafana: its own SecretProviderClass with the admin password and the sidecar's key, mounted by the pod
+[ "$(spc staging qeos-grafana)" = "grafana-admin-password grafana-proxy-key" ] && pass "staging: qeos-grafana holds grafana-admin-password and grafana-proxy-key only" \
+  || fail "staging: qeos-grafana holds '$(spc staging qeos-grafana)'"
+v="$(q "$st" 'select(.kind == "Deployment" and .metadata.name == "grafana") | .spec.template.spec | .serviceAccountName + " " + ([.volumes[] | select(.csi) | .csi.volumeAttributes.secretProviderClass] | join(","))')"
+[ "$v" = "qeos-services qeos-grafana" ] && pass "staging: grafana runs as qeos-services and mounts qeos-grafana" || fail "staging: grafana's account and CSI volume are '$v'"
 # Staging's vault holds no webhook and no SMTP login yet (keyvault.absent): Alertmanager mounts nothing; once it has them
 # (staging-email treats every optional key but tm-secrets-key as present) its own SecretProviderClass holds exactly those
 n="$(q "$st" '[select(.kind == "SecretProviderClass" and .metadata.name == "qeos-alertmanager")] | length')/$(q "$st" '[select(.kind == "Deployment" and .metadata.name == "alertmanager") | .spec.template.spec.volumes[] | select(.csi)] | length')"
@@ -733,8 +840,8 @@ v="$(q "$OUT/staging-email.yaml" 'select(.kind == "Deployment" and .metadata.nam
 [ "$v" = smtp.azurecomm.net ] && pass "staging (email): Alertmanager sends through smtp.host" || fail "staging (email): Alertmanager's SMTP_HOST is '$v'"
 # Monitoring off: none of it, and db-init leaves qeos_monitor alone
 f="$OUT/ci-off.yaml"
-n="$(q "$f" '[select(.kind == "ServiceMonitor" or .kind == "PrometheusRule" or (.metadata.name // "" | test("alertmanager|postgres-exporter")))] | length')"
-[ "$n" = 0 ] && pass "ci-off: monitoring off renders no ServiceMonitor, PrometheusRule, Alertmanager or postgres-exporter" || fail "ci-off: $n monitoring objects rendered"
+n="$(q "$f" '[select(.kind == "ServiceMonitor" or .kind == "PrometheusRule" or (.metadata.name // "" | test("alertmanager|postgres-exporter|grafana")))] | length')"
+[ "$n" = 0 ] && pass "ci-off: monitoring off renders no ServiceMonitor, PrometheusRule, Alertmanager, postgres-exporter or Grafana" || fail "ci-off: $n monitoring objects rendered"
 v="$(q "$f" '[select(.kind == "Job" and .metadata.name == "qeos-migrate") | .spec.template.spec.initContainers[] | select(.name == "db-init") | (.env[] | select(.name == "MONITORING_ENABLED") | .value), (.volumeMounts[] | select(.mountPath == "/mnt/secrets/monitoring-db-password") | .mountPath)] | join(" ")')"
 [ "$v" = false ] && pass "ci-off: db-init neither creates qeos_monitor nor sees its password" || fail "ci-off: db-init has '$v'"
 n="$(q "$f" '[select(.kind == "Service") | select(.metadata.labels["qeos.io/metrics-job"] != null)] | length')"
@@ -760,6 +867,18 @@ else
   grep -q "monitoring-db-password" "$OUT/nomonpw.err" && pass "monitoring-db-password in keyvault.absent is refused" \
     || fail "absent monitoring-db-password failed for another reason: $(tail -n 2 "$OUT/nomonpw.err")"
 fi
+# So is grafana-admin-password (Grafana refuses to start without it)
+if helm template qeos "$CHART" -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" "${CRDS[@]}" \
+    --set 'keyvault.absent={tm-secrets-key,smtp-user,smtp-password,grafana-admin-password}' >/dev/null 2>"$OUT/nogfpw.err"; then
+  fail "grafana-admin-password in keyvault.absent renders (Grafana could never start)"
+else
+  grep -q "grafana-admin-password is required" "$OUT/nogfpw.err" && pass "grafana-admin-password in keyvault.absent is refused" \
+    || fail "absent grafana-admin-password failed for another reason: $(tail -n 2 "$OUT/nogfpw.err")"
+fi
+# monitoring.prometheusUrl replaces the data source's URL
+render ci-promurl -f "$CHART/values-ci.yaml" "${CRDS[@]}" --set monitoring.prometheusUrl=http://prom.example:9090
+u="$(q "$OUT/ci-promurl.yaml" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-grafana-provisioning") | .data["datasources.yml"]' | yq '.datasources[0].url' | tr -d '\r')"
+[ "$u" = http://prom.example:9090 ] && pass "monitoring.prometheusUrl is Grafana's data source" || fail "monitoring.prometheusUrl gives '$u'"
 # The threshold: a number of GB, as Compose's entrypoint.sh takes it
 if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" "${CRDS[@]}" --set monitoring.postgresDbSizeAlertGb=abc >/dev/null 2>"$OUT/gb.err"; then
   fail "monitoring.postgresDbSizeAlertGb=abc renders"

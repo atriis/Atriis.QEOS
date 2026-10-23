@@ -179,6 +179,7 @@ so the secrets `init-secrets.sh` generates are granted by the deploy after it:
 | `smtp-user` | Bicep, once the SMTP application exists (section 4.1) |
 | `smtp-password` | `init-secrets.sh` with `SMTP_PASSWORD` set (section 4.1) |
 | `tm-secrets-key` | not in staging yet: `values-staging.yaml` lists it in `keyvault.absent` |
+| `monitoring-db-password`, `grafana-admin-password`, `grafana-proxy-key` | not yet: the chart reads them with `monitoring.enabled`, which staging turns on once Bicep and `init-secrets.sh` provide them (Task 7 of AKS Stage 2); `grafana-proxy-key` must be 32 to 128 characters of `[A-Za-z0-9_-]` |
 
 ```bash
 KEYVAULT_NAME=<keyVaultName> bash deploy/azure/init-secrets.sh
@@ -226,6 +227,38 @@ az role assignment delete --assignee "$QEOS_DEPLOY_PRINCIPAL_ID" --scope "$acr_i
 ```
 
 Deleting needs User Access Administrator (or Owner) on the resource group, as the Bicep deploy itself does.
+
+### 3.3 Grafana: break-glass sign-in and key rotation (monitoring on)
+
+Users reach Grafana only through the gateway's `/grafana/`, signed in by auth-service (ADR-027). Inside its pod,
+Grafana listens on `127.0.0.1:3000`, and the `grafana-proxy` sidecar in front of it forwards only requests carrying
+the gateway's `X-QEOS-Grafana-Key` (`deploy/helm/README.md`, "Monitoring").
+
+**Break-glass** (auth-service down, or no superuser can sign in): a port-forward to the pod's 3000 is Grafana itself,
+on the pod's loopback, past the sidecar. Sign in as `admin` with the Key Vault secret `grafana-admin-password`:
+
+```bash
+kubectl -n qeos port-forward deploy/grafana 3000:3000
+# then http://localhost:3000/grafana/ in a browser, user admin
+az keyvault secret show --vault-name <keyVaultName> --name grafana-admin-password --query value -o tsv
+```
+
+Anyone allowed `pods/portforward` in the namespace can do this, and Grafana's auth proxy also believes an
+`X-QEOS-User-Email` header sent that way (it comes from 127.0.0.1): that right is Grafana admin, as it already reaches
+every pod's ports past the NetworkPolicies.
+
+**Rotating `grafana-proxy-key`**: the gateway and the sidecar read it as env vars, which never reload.
+
+```bash
+# 32 to 128 characters of [A-Za-z0-9_-] (the gateway and the sidecar refuse anything else)
+az keyvault secret set --vault-name <keyVaultName> --name grafana-proxy-key \
+  --value "$(openssl rand -base64 48 | tr '+/' '-_' | tr -d '=')" -o none
+# Wait for the CSI driver's rotation (every 2 minutes) to update the synced Secrets, then restart both
+kubectl -n qeos rollout restart deploy/grafana deploy/gateway
+```
+
+Between the two restarts one side still has the old key: Grafana answers 403 until both run with the new one. Rotate
+`grafana-admin-password` the same way and restart `deploy/grafana` only.
 
 ## 4. One-time steps Bicep cannot do
 
