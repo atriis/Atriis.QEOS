@@ -125,18 +125,16 @@ def test_a_tag_never_builds_or_pushes_the_sha():
 
 def test_build_runs_queue_and_the_azure_check_is_written_once():
     build = load(WORKFLOWS / "build-platform.yml")
-    # Master's builds run one at a time, never cancelled
-    # Only runs that really build share the master group: the same guard as the config job's workflow_run branch, so a
-    # failed CI run or a fork's PR (each in a group of its own) never replaces a pending real build
-    guard = ("github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && "
-             "github.event.workflow_run.event == 'push' && "
-             "github.event.workflow_run.head_repository.full_name == github.repository")
-    assert build["concurrency"] == {
-        "group": f"build-platform-${{{{ ({guard}) && 'master' || github.run_id }}}}",
-        "cancel-in-progress": False,
-    }
-    config_if = " ".join(build["jobs"]["config"]["if"].split())
-    assert f"github.event_name == 'workflow_run' && {guard.split(' && ', 1)[1]}" in config_if
+    # On the jobs, never the workflow: a run whose guard fails skips them and never joins a group, so the guard lives in
+    # config's `if` alone. Per image on master (a matrix job's group is its own); per tag for the release
+    assert "concurrency" not in build
+    assert build["jobs"]["images"]["concurrency"] == {"group": "build-platform-master-${{ matrix.image }}",
+                                                      "cancel-in-progress": False}
+    assert build["jobs"]["release"]["concurrency"] == {"group": "build-platform-release-${{ github.ref }}",
+                                                       "cancel-in-progress": False}
+    assert "workflow_run.conclusion" in build["jobs"]["config"]["if"]
+    for job in ("images", "release"):
+        assert "workflow_run.conclusion" not in build["jobs"][job]["if"]
     text = (WORKFLOWS / "build-platform.yml").read_text(encoding="utf-8")
     assert text.count("Check that Azure is configured") == 1
     for job in ("images", "release"):

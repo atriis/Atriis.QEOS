@@ -83,7 +83,7 @@ The chart's `keyvault.tenantId` is the tenant, the same as the repository variab
    | Used by | `build-platform.yml`: images on master, the `release` job on `platform-v*` tags | `deploy-aks.yml`, its `deploy` job only |
    | Federated credentials (subject) | `repo:<org>/Atriis.QEOS:ref:refs/heads/master`, and one per release tag (below) | `repo:<org>/Atriis.QEOS:environment:staging` only (`environment:production` in Stage 3) |
    | Object id for Bicep | `QEOS_BUILD_PRINCIPAL_ID` | `QEOS_DEPLOY_PRINCIPAL_ID` |
-   | Roles Bicep gives it | AcrPush on the registry, nothing else | AcrPull on the registry (it checks the images exist); on the cluster Azure Kubernetes Service Cluster User Role (kubeconfig) and Azure Kubernetes Service Contributor Role (adding its runner to the authorised IP ranges for a run); Azure Kubernetes Service RBAC Admin on the chart's namespace only (`<cluster>/namespaces/qeos`: helm) |
+   | Roles Bicep gives it | AcrPush on the registry, nothing else | AcrPull on the registry (it checks the images exist); on the cluster Azure Kubernetes Service Cluster User Role (kubeconfig) and Azure Kubernetes Service Contributor Role (adding its runner to the authorised IP ranges for a run); Azure Kubernetes Service RBAC Admin on the chart's namespace only (`<cluster>/namespaces/<namespace>`, main.bicep's `namespace`, default `qeos`: helm) |
 
    Nothing cluster-wide: the namespace and cert-manager are a cluster admin's one-time step (section 4.5).
 
@@ -206,9 +206,11 @@ once now on an environment created before the split, check, from the repository 
 
 ```bash
 export QEOS_BUILD_PRINCIPAL_ID=<build sp object id> QEOS_DEPLOY_PRINCIPAL_ID=<deploy sp object id>
-# --namespace: main.bicep's namespace parameter (the default, qeos, may be left out)
-bash deploy/azure/check-role-assignments.sh rg-qeos-staging --namespace qeos            # lists them; exit 1 if any is stale
-bash deploy/azure/check-role-assignments.sh rg-qeos-staging --namespace qeos --delete   # removes the stale ones
+# The namespace comes from the parameter file the environment was deployed with (else main.bicep's default, qeos);
+# --namespace <name> overrides both. The script prints which one it used
+p=deploy/azure/staging.bicepparam
+bash deploy/azure/check-role-assignments.sh rg-qeos-staging --params "$p"            # lists them; exit 1 if any is stale
+bash deploy/azure/check-role-assignments.sh rg-qeos-staging --params "$p" --delete   # removes the stale ones
 ```
 
 It reads every assignment of the two service principals (`az role assignment list --assignee <id> --all`), keeps

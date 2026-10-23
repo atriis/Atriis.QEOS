@@ -276,7 +276,7 @@ CURRENT = {
 }
 
 
-def check_roles(tmp_path, assignments: dict, *args: str):
+def check_roles(tmp_path, assignments: dict, *args: str, rg: str | None = "rg-qeos-staging"):
     bash = shutil.which("bash")
     if not bash or "system32" in bash.lower():
         pytest.skip("no bash")
@@ -292,7 +292,7 @@ def check_roles(tmp_path, assignments: dict, *args: str):
     (stubs / "az").chmod(0o755)
     env = dict(os.environ, PATH=f"{stubs}{os.pathsep}{os.environ['PATH']}", DIR=tmp_path.as_posix(),
                QEOS_BUILD_PRINCIPAL_ID="build-id", QEOS_DEPLOY_PRINCIPAL_ID="deploy-id", MSYS_NO_PATHCONV="1")
-    out = subprocess.run([bash, ROLE_CHECK.as_posix(), "rg-qeos-staging", *args], env=env, capture_output=True,
+    out = subprocess.run([bash, ROLE_CHECK.as_posix(), *([rg] if rg else []), *args], env=env, capture_output=True,
                          text=True)
     deleted = (tmp_path / "deleted").read_text().split() if (tmp_path / "deleted").exists() else []
     return out, deleted
@@ -321,10 +321,45 @@ def test_role_check_takes_the_namespace_bicep_was_given(tmp_path):
              "deploy": CURRENT["deploy"][:3] + [("a5", "Azure Kubernetes Service RBAC Admin", f"{AKS}/namespaces/qeos-b")]}
     out, _ = check_roles(tmp_path, other)
     assert out.returncode == 1 and "STALE  deploy  Azure Kubernetes Service RBAC Admin" in out.stdout
+    assert f"namespace: {bicep_string(MAIN, r'^param namespace string')} (from main.bicep's default)" in out.stdout
     out, _ = check_roles(tmp_path, other, "--namespace", "qeos-b")
     assert out.returncode == 0, out.stdout + out.stderr
-    assert bicep_string(MAIN, r"^param namespace string") == "qeos"
-    assert "namespace=qeos\n" in text(ROLE_CHECK)
+    assert "namespace: qeos-b (from --namespace)" in out.stdout
+
+
+def test_role_check_reads_the_namespace_of_the_parameter_file(tmp_path):
+    other = {"build": CURRENT["build"],
+             "deploy": CURRENT["deploy"][:3] + [("a5", "Azure Kubernetes Service RBAC Admin", f"{AKS}/namespaces/qeos-b")]}
+    params = tmp_path / "env.bicepparam"
+    params.write_text("using 'main.bicep'\n\nparam environmentName = 'staging'\nparam namespace = 'qeos-b'\n")
+    out, _ = check_roles(tmp_path, other, "--params", params.as_posix())
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert f"namespace: qeos-b (from {params.as_posix()})" in out.stdout
+    # --namespace wins over the file
+    out, _ = check_roles(tmp_path, other, "--params", params.as_posix(), "--namespace", "qeos")
+    assert out.returncode == 1 and "namespace: qeos (from --namespace)" in out.stdout
+    # staging.bicepparam sets none: main.bicep's default
+    out, _ = check_roles(tmp_path, CURRENT, "--params", (AZURE / "staging.bicepparam").as_posix())
+    assert out.returncode == 0 and "namespace: qeos (from main.bicep's default)" in out.stdout
+
+
+@pytest.mark.parametrize("args", [[], ["--delete"], ["-x"], ["rg-qeos-staging", "--namespace"],
+                                  ["rg-qeos-staging", "--bogus"], ["rg-qeos-staging", "--params", "no-such.bicepparam"]])
+def test_role_check_usage_errors_exit_2_before_any_az_call(tmp_path, args):
+    # A missing resource group or one that looks like an option never runs (nothing would be judged)
+    out, deleted = check_roles(tmp_path, CURRENT, *args, rg=None)
+    assert out.returncode == 2, out.stdout + out.stderr
+    assert "usage:" in out.stderr and out.stdout == "" and deleted == []
+
+
+@pytest.mark.parametrize("name, ok", [("a" * 63, True), ("a" * 64, False), ("Qeos", False), ("qeos-", False),
+                                      ("-qeos", False), ("q", True), ("q.eos", False)])
+def test_role_check_namespace_is_a_dns_label(tmp_path, name, ok):
+    out, _ = check_roles(tmp_path, CURRENT, "--namespace", name)
+    if ok:
+        assert out.returncode in (0, 1) and f"namespace: {name} (from --namespace)" in out.stdout
+    else:
+        assert out.returncode == 2 and "not a Kubernetes namespace name" in out.stderr
 
 
 def test_role_check_knows_the_roles_bicep_assigns():

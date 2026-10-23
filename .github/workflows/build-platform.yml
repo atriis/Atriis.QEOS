@@ -16,14 +16,6 @@ on:
 permissions:
   contents: read
 
-# Master's builds run one at a time, in the order their CI runs finished (a newer pending run replaces an older pending
-# one, never a running one); deploy-aks.yml also refuses to deploy a commit older than the one deployed. The group is
-# keyed on the config job's guard: a run that builds nothing (a failed or cancelled CI run, a fork's PR) gets a group of
-# its own, so it can never replace a pending real build. Tags: their own group too
-concurrency:
-  group: build-platform-${{ (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository) && 'master' || github.run_id }}
-  cancel-in-progress: false
-
 jobs:
   # Once for both paths: is Azure configured, and the image list (deploy/images.txt, the commit's own) as the matrix
   config:
@@ -85,6 +77,14 @@ jobs:
     name: Image (${{ matrix.image }})
     needs: config
     if: github.event_name == 'workflow_run' && needs.config.outputs.configured == 'true'
+    # Master's builds of an image run one at a time, in the order their CI runs finished (a newer pending one replaces an
+    # older pending one, never a running one); deploy-aks.yml also never deploys a commit older than the one deployed.
+    # On the job, not the workflow: a run that builds nothing (a failed CI run, a fork's PR) skips this job and never
+    # joins the group, so the guard stays in one place, config's `if`. Per image: a matrix job's group is its own, and
+    # seven jobs sharing one group would cancel each other's pending places
+    concurrency:
+      group: build-platform-master-${{ matrix.image }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -152,6 +152,10 @@ jobs:
     name: Tag the release
     needs: config
     if: github.event_name == 'push' && github.ref_type == 'tag' && needs.config.outputs.configured == 'true'
+    # Two runs for the same tag (a re-push, a rerun) queue rather than race their retags
+    concurrency:
+      group: build-platform-release-${{ github.ref }}
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
