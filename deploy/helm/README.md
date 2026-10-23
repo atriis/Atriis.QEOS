@@ -42,7 +42,7 @@ helm upgrade --install qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-
 The CI job `helm-kind` (`.github/workflows/ci.yml`) does this on every push: the render checks, the seven images, a
 kind cluster, kube-prometheus-stack (`deploy/monitoring/install.sh`), the install into a namespace that enforces Pod Security `restricted`, `scripts/smoke_k8s.sh`,
 `scripts/check_k8s_policies.sh` (the NetworkPolicies from inside the cluster), `scripts/check_k8s_monitoring.sh`
-(Prometheus and Alertmanager), and two failed upgrades. The same steps on a workstation with Docker
+(Prometheus, Alertmanager and Grafana), and two failed upgrades. The same steps on a workstation with Docker
 (Desktop), kind, kubectl, helm 3 and yq v4:
 
 ```bash
@@ -104,15 +104,20 @@ must time out on every Service (the APIs, the dashboard, the gateway, PostgreSQL
 time out on auth-service and the dashboard. It also checks that the namespace enforces `restricted` and that a pod
 without the settings is refused. Each check is one line of its `CHECKS` list (`FROM URL EXPECT`); a new workload adds
 its own. Like the smoke, it runs against a `kind-*` context only (it borrows a workload's labels). With monitoring on
-it also checks that neither the stranger nor `ingestion-retention` reaches postgres-exporter or Alertmanager.
+it also checks that neither the stranger nor `ingestion-retention` reaches postgres-exporter, Alertmanager, Grafana or
+the cluster's Prometheus, while the gateway's own pod reaches Grafana and Grafana's own pod reaches Prometheus
+(`kubectl exec`; both have a Service, so no throwaway pod may borrow their labels).
 
 `check_k8s_monitoring.sh` port-forwards the cluster's Prometheus and the chart's Alertmanager and waits up to 3 minutes
 for: `count by (job) (up{namespace="qeos"} == 1)` to be auth 2, organization 2, project 2, ingestion 2,
 test-management 2, postgres 1, alertmanager 1 and nothing down; `build_info` to carry the services' own `service`
 label (no `exported_service`); the ingestion scrape job to have `honor_labels: true` in `/api/v1/status/config` while
 its series keep `namespace="qeos"`; `pg_up` 1 and the recording rules' `postgresql_database_size_bytes`; the rule
-groups to include `qeos-services` and `qeos-thresholds` and not `qeos-host`, none in error; and Alertmanager to hold
-`Watchdog`, routed to the `null` receiver, with no channel configured. Read only, `kind-*` contexts only.
+groups to include `qeos-services` and `qeos-thresholds` and neither `qeos-host` nor `qeos-containers`, none in error;
+Alertmanager to hold `Watchdog`, routed to the `null` receiver, with no channel configured; and Grafana as "Monitoring"
+below describes. Every API read goes through one helper that fails on anything but a 200 with a JSON body (and, from
+Prometheus, `status: success`), so a dropped port-forward fails a check instead of passing it with an empty answer.
+`kind-*` contexts only; its one write is the Grafana user its auth proxy check signs in.
 
 `kind create cluster` makes `kind-qeos-kind` the current kubectl context; `kind delete cluster` removes it, so switch
 back with `kubectl config use-context <yours>`.

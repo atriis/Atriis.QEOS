@@ -67,19 +67,31 @@ forward "$NAMESPACE" alertmanager "$AM_PORT" 9093 /-/ready || exit 1
 PROM="http://localhost:$PROM_PORT"
 AM="http://localhost:$AM_PORT"
 
-# query PROMQL YQ -- an instant query's JSON through the yq expression YQ
-# A failed request (no 200, or status not "success") prints "query failed: ..." instead, which no expected value
-# equals: an empty answer never passes a "nothing down" check
-query() {
-  local code status
-  code="$(curl -s -o "$TMP/query.json" -w '%{http_code}' --max-time 10 -G --data-urlencode "query=$1" "$PROM/api/v1/query")"
-  status="$(yq -p json -o yaml '.status' "$TMP/query.json" 2>/dev/null | tr -d '\r')"
-  if [ "$code" != 200 ] || [ "$status" != success ]; then
-    echo "query failed: HTTP ${code:-none}, status ${status:-none}"
+# fetch YQ URL [curl args...] -- a GET's JSON answer through the yq expression YQ; every API read goes through it.
+# A failed request (no 200, an empty or non-JSON body, or from a Prometheus /api/v1/ endpoint a status that is not
+# "success") prints "fetch failed: ..." and returns 1 instead, which no expected value equals: a dropped port-forward
+# never passes a "nothing down" or "no rule in error" check
+fetch() {
+  local expr="$1" url="$2" code status
+  shift 2
+  code="$(curl -s -o "$TMP/fetch.json" -w '%{http_code}' --max-time 10 "$@" "$url")"
+  if [ "$code" != 200 ] || [ ! -s "$TMP/fetch.json" ] || ! yq -p json -o yaml '.' "$TMP/fetch.json" >/dev/null 2>&1; then
+    echo "fetch failed: HTTP ${code:-none} from $url"
     return 1
   fi
-  yq -p json -o yaml "$2" "$TMP/query.json" | tr -d '\r'
+  case "$url" in
+    */api/v1/*)
+      status="$(yq -p json -o yaml '.status' "$TMP/fetch.json" 2>/dev/null | tr -d '\r')"
+      if [ "$status" != success ]; then
+        echo "fetch failed: status ${status:-none} from $url"
+        return 1
+      fi
+      ;;
+  esac
+  yq -p json -o yaml "$expr" "$TMP/fetch.json" | tr -d '\r'
 }
+# query PROMQL YQ -- an instant query's JSON through YQ (fetch: a failed query prints "fetch failed: ...")
+query() { fetch "$2" "$PROM/api/v1/query" -G --data-urlencode "query=$1"; }
 # eventually NAME WANT PROMQL YQ -- polls until the query gives WANT, at most WAIT_SECONDS after the script started
 eventually() {
   local got
@@ -95,8 +107,8 @@ by_job='[.data.result[] | .metric.job + "=" + .value[1]] | sort | join(" ")'
 # ---- the scrape targets: Compose's job names, every replica up ----
 want="alertmanager=1 auth=2 ingestion=2 organization=2 postgres=1 project=2 test-management=2"
 if ! eventually "targets up in $NAMESPACE, by job" "$want" "count by (job) (up{namespace=\"$NAMESPACE\"} == 1)" "$by_job"; then
-  curl -s --max-time 10 "$PROM/api/v1/targets" | yq -p json -o yaml \
-    ".data.activeTargets[] | select(.labels.namespace == \"$NAMESPACE\") | .labels.job + \" \" + .health + \" \" + .lastError"
+  fetch "[.data.activeTargets[] | select(.labels.namespace == \"$NAMESPACE\") | .labels.job + \" \" + .health + \" \" + .lastError] | .[]" \
+    "$PROM/api/v1/targets"
 fi
 eventually "no target of $NAMESPACE down" "" "up{namespace=\"$NAMESPACE\"} == 0" "$by_job"
 
@@ -109,7 +121,7 @@ got="$(query '{exported_service=~".+"}' '.data.result | length')"
   || fail "$got series carry exported_service"
 
 # ---- the ingestion scrape: honor_labels (the loop jobs' heartbeats carry their own job), namespace still enforced ----
-curl -s --max-time 10 "$PROM/api/v1/status/config" | yq -p json -o yaml '.data.yaml' > "$TMP/config.yaml"
+fetch '.data.yaml' "$PROM/api/v1/status/config" > "$TMP/config.yaml" || fail "Prometheus's configuration: $(cat "$TMP/config.yaml")"
 job="serviceMonitor/$NAMESPACE/qeos-ingestion/0"
 honor="$(yq "[.scrape_configs[] | select(.job_name == \"$job\")] | .[0].honor_labels" "$TMP/config.yaml" | tr -d '\r')"
 [ "$honor" = true ] && pass "$job has honor_labels: true" || fail "$job's honor_labels is '$honor'"
@@ -134,24 +146,30 @@ eventually "pg_up (postgres-exporter reaches PostgreSQL)" 1 "pg_up{namespace=\"$
 eventually "postgresql_database_size_bytes (qeos-recording) for auth_db" 1 \
   "count(postgresql_database_size_bytes{datname=\"auth_db\", namespace=\"$NAMESPACE\"})" '.data.result[0].value[1]'
 
-# ---- the rules: Compose's groups, without qeos-host ----
-groups="$(curl -s --max-time 10 "$PROM/api/v1/rules" | yq -p json -o yaml '[.data.groups[].name | select(test("^qeos-"))] | sort | join(" ")' | tr -d '\r')"
-[[ " $groups " == *" qeos-services "* && " $groups " == *" qeos-thresholds "* && " $groups " != *" qeos-host "* ]] \
-  && pass "rule groups: $groups (qeos-host left out)" || fail "rule groups are '$groups'"
-bad="$(curl -s --max-time 10 "$PROM/api/v1/rules" | yq -p json -o yaml '[.data.groups[] | select(.name | test("^qeos-")) | .rules[] | select(.health == "err") | .name + ": " + .lastError] | join("; ")' | tr -d '\r')"
+# ---- the rules: Compose's groups, without monitoring.skipRuleGroups' qeos-host and qeos-containers ----
+groups="$(fetch '[.data.groups[].name | select(test("^qeos-"))] | sort | join(" ")' "$PROM/api/v1/rules")"
+[[ " $groups " == *" qeos-services "* && " $groups " == *" qeos-thresholds "* && " $groups " != *" qeos-host "* \
+    && " $groups " != *" qeos-containers "* ]] \
+  && pass "rule groups: $groups (qeos-host and qeos-containers left out)" || fail "rule groups are '$groups'"
+bad="$(fetch '[.data.groups[] | select(.name | test("^qeos-")) | .rules[] | select(.health == "err") | .name + ": " + .lastError] | join("; ")' \
+  "$PROM/api/v1/rules")"
 [ -z "$bad" ] && pass "no QEOS rule fails to evaluate" || fail "rules in error: $bad"
 
 # ---- Alertmanager: Watchdog arrives, with no channel configured (the null receiver) ----
 while :; do
-  got="$(curl -s --max-time 10 "$AM/api/v2/alerts" | yq -p json -o yaml \
-    '[.[] | select(.labels.alertname == "Watchdog") | .labels.namespace + " " + ([.receivers[].name] | join(","))] | join(";")' | tr -d '\r')"
-  [ -n "$got" ] || [ "$SECONDS" -ge "$WAIT_SECONDS" ] && break
+  got="$(fetch '[.[] | select(.labels.alertname == "Watchdog") | .labels.namespace + " " + ([.receivers[].name] | join(","))] | join(";")' \
+    "$AM/api/v2/alerts")"
+  { [ -n "$got" ] && [[ "$got" != "fetch failed"* ]]; } || [ "$SECONDS" -ge "$WAIT_SECONDS" ] && break
   sleep 5
 done
 [ "$got" = "$NAMESPACE null" ] && pass "Alertmanager holds Watchdog (namespace $NAMESPACE), routed to the null receiver" \
   || fail "Watchdog in Alertmanager: '$got', want '$NAMESPACE null'"
-channels="$(curl -s --max-time 10 "$AM/api/v2/status" | yq -p json -o yaml '.config.original' | grep -c -E '(email|slack|msteamsv2)_configs')"
-[ "$channels" = 0 ] && pass "Alertmanager runs with no channel configured" || fail "Alertmanager's configuration has $channels channel(s)"
+if config="$(fetch '.config.original' "$AM/api/v2/status")"; then
+  channels="$(printf '%s\n' "$config" | grep -c -E '(email|slack|msteamsv2)_configs')"
+  [ "$channels" = 0 ] && pass "Alertmanager runs with no channel configured" || fail "Alertmanager's configuration has $channels channel(s)"
+else
+  fail "Alertmanager's configuration: $config"
+fi
 
 # ---- Grafana: behind the gateway's sign-in, and behind the grafana-proxy sidecar's key (Review Focus 3) ----
 # The key and the admin password come from the CI Secret (secrets.source kubernetes) into files only this user reads;
@@ -208,9 +226,8 @@ want="$(for d in "$ROOT"/monitoring/grafana/dashboards/*.json; do printf 'QEOS/%
 status_of "Grafana's data source reaches Prometheus" 200 "$GF_DIRECT/grafana/api/datasources/uid/prometheus/health" --netrc-file "$TMP/netrc"
 got="$(yq -p json -o yaml '.status' "$TMP/body" 2>/dev/null | tr -d '\r')"
 [ "$got" = OK ] && pass "... status OK" || fail "... status '$got': $(head -c 200 "$TMP/body")"
-got="$(curl -s --max-time 10 --netrc-file "$TMP/netrc" -G --data-urlencode \
-  "query=count by (job) (up{namespace=\"$NAMESPACE\", job=~\"auth|organization|project|ingestion|test-management\"} == 1)" \
-  "$GF_DIRECT/grafana/api/datasources/proxy/uid/prometheus/api/v1/query" | yq -p json -o yaml "$by_job" 2>/dev/null | tr -d '\r')"
+got="$(fetch "$by_job" "$GF_DIRECT/grafana/api/datasources/proxy/uid/prometheus/api/v1/query" --netrc-file "$TMP/netrc" -G \
+  --data-urlencode "query=count by (job) (up{namespace=\"$NAMESPACE\", job=~\"auth|organization|project|ingestion|test-management\"} == 1)")"
 [ "$got" = "auth=2 ingestion=2 organization=2 project=2 test-management=2" ] && pass "the five services up, through Grafana's data source: $got" \
   || fail "the services up through Grafana's data source: '$got'"
 

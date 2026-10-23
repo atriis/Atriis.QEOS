@@ -89,11 +89,31 @@ def test_ci_checks_the_chart_copies_of_the_monitoring_files():
 
 
 def test_a_failed_query_never_equals_an_expected_value():
-    """An error answer or an empty body must not pass "no target down" (want ""): query() checks the HTTP status and
-    Prometheus's status field, and prints a failure line instead of nothing."""
-    body = re.search(r"^query\(\) \{\n(.*?)^\}", script(), re.M | re.S)
-    assert body, "no query() function"
+    """An error answer or an empty body must not pass "no target down" (want ""): fetch() checks the HTTP status, a
+    non-empty JSON body and Prometheus's status field, and prints a failure line instead of nothing."""
+    body = re.search(r"^fetch\(\) \{\n(.*?)^\}", script(), re.M | re.S)
+    assert body, "no fetch() function"
     text = body.group(1)
-    assert "%{http_code}" in text and '!= 200' in text
+    assert "%{http_code}" in text and '!= 200' in text and '! -s ' in text
     assert "'.status'" in text and "!= success" in text
-    assert 'echo "query failed:' in text
+    assert 'echo "fetch failed:' in text
+    assert re.search(r'^query\(\) \{ fetch ', script(), re.M), "query() goes through fetch()"
+
+
+def test_every_api_read_goes_through_fetch():
+    """A bare curl piped into yq turns a dropped port-forward into an empty answer, which passes "no rule in error":
+    curl appears only in fetch(), in forward()'s readiness poll and in status_of(), which checks the HTTP status."""
+    text = script()
+    assert not re.search(r"curl[^\n]*\|\s*yq", text), "curl piped straight into yq"
+    allowed = {"fetch", "forward", "status_of"}
+    for match in re.finditer(r"^[^#\n]*\bcurl\s", text, re.M):
+        before = text[:match.start()]
+        func = re.findall(r"^(\w+)\(\) \{$", before, re.M)
+        closed = before.rfind("\n}\n") > before.rfind(f"{func[-1]}() {{") if func else True
+        assert func and not closed and func[-1] in allowed, f"curl outside fetch/forward/status_of: {match.group(0)}"
+
+
+def test_rule_groups_check_leaves_out_both_skipped_groups():
+    text = script()
+    assert '" qeos-host "*' in text and '" qeos-containers "*' in text
+    assert "qeos-host and qeos-containers left out" in text
