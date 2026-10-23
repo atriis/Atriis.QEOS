@@ -2,13 +2,15 @@
 groups:
   - name: qeos-services
     rules:
+      # Per job: every target of it down. On Compose a job has one target; on Kubernetes one per replica, and one
+      # replica down while another serves is not the service down (kube-prometheus-stack's pod alerts cover it)
       - alert: ServiceDown
-        expr: label_replace(up == 0, "service", "$1", "job", "(.*)")
+        expr: label_replace(sum by (job) (up) == 0, "service", "$1", "job", "(.*)")
         for: 2m
         labels:
           severity: critical
         annotations:
-          summary: "{{ $labels.service }} is down ({{ $labels.instance }})"
+          summary: "{{ $labels.service }} is down: no target of job {{ $labels.job }} answers"
 
       - alert: High5xxRate
         expr: |

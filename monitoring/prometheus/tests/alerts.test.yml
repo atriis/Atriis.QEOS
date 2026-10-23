@@ -45,8 +45,27 @@ tests:
       - eval_time: 4m
         alertname: ServiceDown
         exp_alerts:
-          - exp_labels: {severity: critical, job: project, instance: "project-service:8000", service: project}
-            exp_annotations: {summary: "project is down (project-service:8000)"}
+          - exp_labels: {severity: critical, job: project, service: project}
+            exp_annotations: {summary: "project is down: no target of job project answers"}
+
+  # Per job, not per target: on Kubernetes a job has a target per replica, and one replica down while the other serves
+  # is not "the service is down" (nor a reason to inhibit its 5xx and latency alerts)
+  - name: ServiceDown waits until every target of the job is down
+    interval: 1m
+    input_series:
+      - series: 'up{job="auth",instance="10.0.0.1:8000"}'
+        values: '1 0 0 0 0 0 0 0'
+      - series: 'up{job="auth",instance="10.0.0.2:8000"}'
+        values: '1 1 1 1 1 0 0 0'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ServiceDown
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: ServiceDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: auth, service: auth}
+            exp_annotations: {summary: "auth is down: no target of job auth answers"}
 
   - name: High5xxRate needs a 5% share and at least 20 requests
     interval: 1m
