@@ -191,7 +191,7 @@ sleep of 5 s let in-flight requests and in-API background tasks finish while the
 | `edge.acme.email` | required with `edge.enabled` | Let's Encrypt's contact (expiry notices) |
 | `edge.acme.server` | Let's Encrypt production | the ACME directory; `https://acme-staging-v02.api.letsencrypt.org/directory` for untrusted test certificates |
 | `networkPolicy.enabled` | `true` | renders the NetworkPolicies (`default-deny-ingress` and one per Service) |
-| `networkPolicy.prometheus.namespace`, `.podLabels` | `qeos-monitoring`, `app.kubernetes.io/name: prometheus` | the Prometheus pods the APIs admit on 8000, with `monitoring.enabled` only (and required then); the single source of the monitoring namespace. Empty `podLabels` is refused (it would admit the whole namespace) |
+| `networkPolicy.prometheus.namespace`, `.podLabels` | `qeos-monitoring`, `app.kubernetes.io/name: prometheus` | the Prometheus pods the APIs admit on 8000, with `monitoring.enabled` only (and required then); the single source of the monitoring namespace, which must equal `deploy/monitoring/install.sh`'s `--namespace` (the chart cannot look it up; the script prints a note when it is not the default). Empty `podLabels` is refused (it would admit the whole namespace) |
 | `migrate.order` | the five APIs | the hook's migration order, after db-init |
 | `migrate.imageTag` | `""` | the migration images' tag; empty: `image.tag` |
 | `migrate.activeDeadlineSeconds`, `.backoffLimit` | `900`, `0` | a longer or failed migration fails the release; Helm's `--timeout` must be longer (20m) |

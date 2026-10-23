@@ -6,6 +6,9 @@ kube-prometheus-stack:
   fullnameOverride: qeos-monitoring
   # Set by install.sh (--qeos-namespace): the namespace the QEOS chart runs in, for the NetworkPolicy below
   qeosNamespace: ""
+  # Set by install.sh (--qeos-release): the QEOS chart's release, so only its Grafana (app.kubernetes.io/instance)
+  # reaches Prometheus, not any pod labelled grafana
+  qeosRelease: ""
 
   # Grafana and Alertmanager run from the QEOS chart, with Compose's provisioning and routing (ADR-038)
   grafana:
@@ -127,6 +130,7 @@ kube-prometheus-stack:
                 podSelector:
                   matchLabels:
                     app.kubernetes.io/name: grafana
+                    app.kubernetes.io/instance: '{{ required "qeosRelease is set by deploy/monitoring/install.sh" .Values.qeosRelease }}'
               - namespaceSelector:
                   matchLabels:
                     kubernetes.io/metadata.name: "{{ .Release.Namespace }}"

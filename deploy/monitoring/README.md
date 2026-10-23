@@ -23,9 +23,11 @@ bash deploy/monitoring/tests/install_test.sh
 
 ## What install.sh does
 
-`install.sh --env ci|staging|production --context <kubectl context> [--qeos-namespace qeos] [--namespace
-qeos-monitoring] [--enforce-restricted] [--allow-downgrade] [--template]`; exit 2 for a usage error (an unknown
-environment, no `--context`, a namespace that is not a DNS label, the same namespace twice), 1 when a step fails.
+`install.sh --env ci|staging|production --context <kubectl context> [--qeos-namespace qeos] [--qeos-release qeos]
+[--namespace qeos-monitoring] [--enforce-restricted] [--allow-downgrade] [--template]`; exit 2 for a usage error (an
+unknown environment, no `--context`, a namespace that is not a DNS label or is Kubernetes' own (`default`,
+`kube-system`, `kube-public`, `kube-node-lease`), the same namespace twice, a release name that is not a DNS label of
+at most 53 characters), 1 when a step fails.
 
 0. **The cluster.** `--context` is required and every `kubectl` and `helm` call uses it, never the current context: an
    admin signed in to another cluster would otherwise change that one. An unknown context stops the script. Before
@@ -38,8 +40,10 @@ environment, no `--context`, a namespace that is not a DNS label, the same names
    (node-exporter needs the host's network, PID namespace and file systems); the QEOS namespace `enforce=baseline`,
    `warn=restricted`, `audit=restricted`, or `enforce=restricted` with `--enforce-restricted` (CI). A QEOS namespace
    that already enforces `restricted` is never lowered silently: without `--enforce-restricted` the script stops (exit
-   1, before any change) unless `--allow-downgrade` is given. This is the only
-   place either namespace is created; the CI step that creates the QEOS namespace does so only if it is missing.
+   1, before any change) unless `--allow-downgrade` is given. Likewise the monitoring namespace: the script labels the
+   one it creates `qeos.atriis.com/monitoring=true`, and an existing namespace without that label (someone else's, or
+   a typo in `--namespace`) is not made privileged unless `--allow-downgrade` is given. This is the only place either
+   namespace is created; the CI step that creates the QEOS namespace does so only if it is missing.
 3. **CRDs**, from the verified archive, with `kubectl apply --server-side --force-conflicts`: Helm installs CRDs once and
    never upgrades them, so a version bump would otherwise leave the old ones.
 4. **The release:** `helm upgrade --install qeos-monitoring deploy/monitoring --skip-crds --atomic --wait`, then waits
@@ -60,7 +64,12 @@ There is no `values-production.yaml` yet, so `--env production` is refused: prod
 
 Everything that depends on the namespaces comes from `install.sh`, never from a values file, so `--qeos-namespace` and
 `--namespace` change all of it: the Alertmanager endpoint, the namespace selectors, the enforcement exclusions and the
-NetworkPolicy's sources. A plain `helm install` without the script fails on `qeosNamespace`.
+NetworkPolicy's sources (with `--qeos-release`). A plain `helm install` without the script fails on `qeosNamespace`.
+
+**The monitoring namespace is named twice.** The QEOS chart cannot look it up (its deploy identity sees its own
+namespace only), so it names it in `networkPolicy.prometheus.namespace` (`deploy/helm/README.md`), whose default is
+`qeos-monitoring`, this script's default. With another `--namespace`, set that value to the same name in the QEOS
+chart's values, or the APIs refuse Prometheus's scrapes on 8000 (they time out); `install.sh` prints a note saying so.
 
 - `fullnameOverride: qeos-monitoring`: the Prometheus Service is `qeos-monitoring-prometheus:9090`, its pods are
   labelled `app.kubernetes.io/name: prometheus` (the QEOS chart's `networkPolicy.prometheus` admits them).
@@ -83,8 +92,9 @@ NetworkPolicy's sources. A plain `helm install` without the script fails on `qeo
   privilege escalation, all capabilities dropped, the RuntimeDefault seccomp profile. node-exporter has them too, but
   still needs the host's namespaces, hence the privileged namespace.
 - **Prometheus is not open to the cluster.** A NetworkPolicy (in `extraManifests`; the chart's own option always adds
-  an Egress policy type, which would stop scraping) admits 9090 only from pods `app.kubernetes.io/name: grafana` in the
-  QEOS namespace and from the monitoring namespace (the operator, Prometheus itself), and the config reloader's 8080
+  an Egress policy type, which would stop scraping) admits 9090 only from the QEOS chart's Grafana (pods
+  `app.kubernetes.io/name: grafana` and `app.kubernetes.io/instance: <--qeos-release>` in the QEOS namespace, so not
+  any pod someone labels grafana) and from the monitoring namespace (the operator, Prometheus itself), and the config reloader's 8080
   from the monitoring namespace (Prometheus scrapes it). It is ingress only: scraping is outbound. Checked by hand on
   kind with kindnet: a Grafana-labelled pod in `qeos` and a pod in `qeos-monitoring` get 200, any other pod in `qeos`
   or a pod in `default` times out.

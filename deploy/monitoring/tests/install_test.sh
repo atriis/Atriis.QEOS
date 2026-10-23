@@ -41,6 +41,13 @@ usage_error "a QEOS namespace that is not a DNS label" "not a Kubernetes namespa
 usage_error "a monitoring namespace that is not a DNS label" "not a Kubernetes namespace name: '-mon'" \
   --env ci --namespace -mon
 usage_error "the same namespace twice" "must differ" --env ci --namespace qeos
+# Kubernetes' own namespaces are never relabelled
+for ns in default kube-system kube-public kube-node-lease; do
+  usage_error "--namespace $ns is refused" "'$ns' is Kubernetes' own namespace" --env ci --namespace "$ns"
+  usage_error "--qeos-namespace $ns is refused" "'$ns' is Kubernetes' own namespace" --env ci --qeos-namespace "$ns"
+done
+usage_error "a QEOS release that is not a release name" "not a Helm release name: 'Qeos'" --env ci --qeos-release Qeos
+usage_error "--qeos-release without a value" "--qeos-release needs a value" --env ci --qeos-release
 usage_error "production before its values file exists" "production arrives in Stage 3.*values-production.yaml" \
   --env production --context kind-qeos-kind
 # Never the current context
@@ -49,8 +56,9 @@ usage_error "--context without a value" "--context needs a value" --env ci --con
 usage_error "a context that is not a context name" "not a kubectl context name: 'a b'" --env ci --context "a b"
 
 # ---- against a cluster: a kubectl stub on PATH (and a helm stub, so nothing is downloaded or installed) ----
-# The stub knows one context, stub-ctx; it answers the API server and the QEOS namespace's enforce label
-# ($STUB_ENFORCE), and logs every other call to $OUT/kubectl.log
+# The stub knows one context, stub-ctx; it answers the API server, the monitoring namespace's
+# <name>/<qeos.atriis.com/monitoring label> ($STUB_MARKER, empty: no such namespace) and the QEOS namespace's enforce
+# label ($STUB_ENFORCE), and logs every other call to $OUT/kubectl.log
 mkdir -p "$OUT/stub"
 cat >"$OUT/stub/kubectl" <<'EOF'
 #!/usr/bin/env bash
@@ -58,6 +66,7 @@ case "$*" in
   "config get-contexts stub-ctx") exit 0 ;;
   "config get-contexts "*) exit 1 ;;
   "--context stub-ctx config view --minify "*) echo https://stub.example:443 ;;
+  "--context stub-ctx get namespace "*"qeos\.atriis\.com/monitoring"*) echo "${STUB_MARKER:-}" ;;
   "--context stub-ctx get namespace "*) echo "${STUB_ENFORCE:-}" ;;
   *) echo "$*" >>"$STUB_LOG" ;;
 esac
@@ -68,12 +77,14 @@ chmod +x "$OUT/stub/kubectl" "$OUT/stub/helm"
 # A copy without a downloaded chart: past the checks, the script stops at the archive the helm stub never fetched
 cp -r "$DIR" "$OUT/clean"
 rm -rf "$OUT/clean/charts"
-# stubbed STATUS PATTERN ENFORCE ARGS...: install.sh ARGS against the stub, the QEOS namespace enforcing ENFORCE
+# stubbed STATUS PATTERN ENFORCE ARGS...: install.sh ARGS against the stub, the QEOS namespace enforcing ENFORCE (and
+# the monitoring namespace as $marker says)
+marker=""
 stubbed() {
   local want="$1" pattern="$2" enforce="$3" status=0
   shift 3
   : >"$OUT/kubectl.log"
-  STUB_LOG="$OUT/kubectl.log" STUB_ENFORCE="$enforce" PATH="$OUT/stub:$PATH" bash "$OUT/clean/install.sh" "$@" \
+  STUB_LOG="$OUT/kubectl.log" STUB_ENFORCE="$enforce" STUB_MARKER="$marker" PATH="$OUT/stub:$PATH" bash "$OUT/clean/install.sh" "$@" \
     >"$OUT/stub.out" 2>"$OUT/stub.err" || status=$?
   [ "$status" = "$want" ] && grep -qE -- "$pattern" "$OUT/stub.err"
 }
@@ -95,6 +106,17 @@ check "--enforce-restricted keeps it" stubbed 1 "left no .*kube-prometheus-stack
   --env staging --context stub-ctx --enforce-restricted
 check "a baseline namespace needs no flag" stubbed 1 "left no .*kube-prometheus-stack" baseline \
   --env staging --context stub-ctx
+# The monitoring namespace becomes privileged: only one install.sh created (its label), unless --allow-downgrade
+marker=qeos-monitoring/
+check "an existing namespace install.sh did not create is not made privileged" \
+  stubbed 1 "qeos-monitoring exists and was not created by install.sh .*--allow-downgrade" "" --env staging --context stub-ctx
+check "... and nothing was changed" [ ! -s "$OUT/kubectl.log" ]
+check "... unless --allow-downgrade" stubbed 1 "left no .*kube-prometheus-stack" "" \
+  --env staging --context stub-ctx --allow-downgrade
+marker=qeos-monitoring/true
+check "the namespace install.sh created is reused" stubbed 1 "left no .*kube-prometheus-stack" "" \
+  --env staging --context stub-ctx
+marker=""
 
 # ---- render ----
 # render NAME ARGS...: install.sh --template ARGS into $OUT/NAME.yaml
@@ -110,14 +132,18 @@ render() {
 }
 render ci --env ci
 render staging --env staging
-render custom --env ci --qeos-namespace qa --namespace mon
+render custom --env ci --qeos-namespace qa --namespace mon --qeos-release qa-rel
+# The QEOS chart names the monitoring namespace itself: another one needs its value set
+check "another monitoring namespace: a note names the QEOS chart's value" \
+  grep -q "set networkPolicy.prometheus.namespace=mon in the QEOS chart's values" "$OUT/custom.err"
+check "the default monitoring namespace: no note" [ "$(grep -c "networkPolicy.prometheus.namespace" "$OUT/ci.err")" = 0 ]
 
 # q FILE EXPR: yq over every document of FILE
 q() { yq ea "$2" "$1"; }
 
-# checks_for NAME QEOS_NAMESPACE MONITORING_NAMESPACE
+# checks_for NAME QEOS_NAMESPACE MONITORING_NAMESPACE QEOS_RELEASE
 checks_for() {
-  local name="$1" qns="$2" mns="$3" f="$OUT/$1.yaml"
+  local name="$1" qns="$2" mns="$3" release="$4" f="$OUT/$1.yaml"
   local prom='select(.kind == "Prometheus")'
   check "$name: exactly one Prometheus" [ "$(q "$f" "[$prom] | length")" = 1 ]
   check "$name: the Prometheus is in $mns" [ "$(q "$f" "$prom | .metadata.namespace")" = "$mns" ]
@@ -174,11 +200,13 @@ checks_for() {
   check "$name: the NetworkPolicy is ingress only (scraping is outbound)" \
     [ "$(q "$f" "$np | .spec.policyTypes | join(\",\")")" = Ingress ]
   # Each source as <namespace>/<pod name label>, * for any pod
-  check "$name: 9090 admits exactly Grafana in $qns and the namespace $mns" [ "$(q "$f" "$np | .spec.ingress[]
+  # Each source as <namespace>/<pod name label>@<pod instance label>, * for any; Grafana only of release $release
+  check "$name: 9090 admits exactly $release's Grafana in $qns and the namespace $mns" [ "$(q "$f" "$np | .spec.ingress[]
     | select(.ports[].port == 9090) | .from[]
     | ((.namespaceSelector.matchLabels.\"kubernetes.io/metadata.name\" // \"-\") + \"/\"
-      + (.podSelector.matchLabels.\"app.kubernetes.io/name\" // \"*\"))" | sort | paste -sd, -)" \
-    = "$(printf '%s\n' "$mns/*" "$qns/grafana" | sort | paste -sd, -)" ]
+      + (.podSelector.matchLabels.\"app.kubernetes.io/name\" // \"*\") + \"@\"
+      + (.podSelector.matchLabels.\"app.kubernetes.io/instance\" // \"*\"))" | sort | paste -sd, -)" \
+    = "$(printf '%s\n' "$mns/*@*" "$qns/grafana@$release" | sort | paste -sd, -)" ]
   check "$name: no rule admits everyone" \
     [ "$(q "$f" "[$np | .spec.ingress[] | select((.from // []) | length == 0)] | length")" = 0 ]
 
@@ -200,9 +228,9 @@ checks_for() {
   check "$name: the Prometheus pod is restricted at pod level" [ "$(q "$f" "$prom | .spec.securityContext
     | (.runAsNonRoot == true and .seccompProfile.type == \"RuntimeDefault\")")" = true ]
 }
-checks_for ci qeos qeos-monitoring
-checks_for staging qeos qeos-monitoring
-checks_for custom qa mon
+checks_for ci qeos qeos-monitoring qeos
+checks_for staging qeos qeos-monitoring qeos
+checks_for custom qa mon qa-rel
 
 # ---- per environment ----
 prom='select(.kind == "Prometheus")'

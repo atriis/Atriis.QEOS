@@ -5,13 +5,17 @@
 # it too.
 #
 # Usage: bash deploy/monitoring/install.sh --env ci|staging|production --context <kubectl context>
-#          [--qeos-namespace <name>] [--namespace <name>] [--enforce-restricted] [--allow-downgrade] [--template]
+#          [--qeos-namespace <name>] [--qeos-release <name>] [--namespace <name>] [--enforce-restricted]
+#          [--allow-downgrade] [--template]
 # --context names the cluster: every kubectl and helm call uses it, never the current context, and it is printed with
 # its API server before anything changes.
 # It creates or labels both namespaces for Pod Security: the monitoring namespace (--namespace, default
 # qeos-monitoring) privileged, for node-exporter; the QEOS namespace (--qeos-namespace, default qeos) enforce baseline,
 # warn and audit restricted, or enforce restricted with --enforce-restricted. A QEOS namespace that already enforces
-# restricted is not lowered to baseline unless --allow-downgrade is given. Then it applies the pinned chart's CRDs
+# restricted is not lowered to baseline, and an existing namespace this script did not create (no
+# qeos.atriis.com/monitoring=true label) is not made the privileged monitoring namespace, unless --allow-downgrade is
+# given; Kubernetes' own namespaces (default, kube-*) never. --qeos-release (default qeos) is the QEOS chart's release:
+# only its Grafana pods reach Prometheus. Then it applies the pinned chart's CRDs
 # server side (Helm never upgrades CRDs) and runs helm upgrade --install. --template prints what would be installed
 # (helm template) and touches no cluster (no --context needed).
 # Needs: helm 3, kubectl signed in as a cluster admin (not with --template), sha256sum or shasum, network access to the
@@ -19,12 +23,13 @@
 # Exit status: 0 when installed (or rendered), 1 when a step failed, 2 for a usage error.
 set -euo pipefail
 
-usage="usage: install.sh --env ci|staging|production --context <kubectl context> [--qeos-namespace <name>] [--namespace <name>] [--enforce-restricted] [--allow-downgrade] [--template]"
+usage="usage: install.sh --env ci|staging|production --context <kubectl context> [--qeos-namespace <name>] [--qeos-release <name>] [--namespace <name>] [--enforce-restricted] [--allow-downgrade] [--template]"
 die_usage() { echo "install.sh: $1" >&2; echo "$usage" >&2; exit 2; }
 die() { echo "install.sh: $1" >&2; exit 1; }
 env=""
 context=""
 qeos_namespace=qeos
+qeos_release=qeos
 namespace=qeos-monitoring
 enforce=baseline
 template=""
@@ -34,6 +39,7 @@ while [ "$#" -gt 0 ]; do
     --env) [ "$#" -ge 2 ] || die_usage "--env needs a value"; env="$2"; shift ;;
     --context) [ "$#" -ge 2 ] || die_usage "--context needs a value"; context="$2"; shift ;;
     --qeos-namespace) [ "$#" -ge 2 ] || die_usage "--qeos-namespace needs a value"; qeos_namespace="$2"; shift ;;
+    --qeos-release) [ "$#" -ge 2 ] || die_usage "--qeos-release needs a value"; qeos_release="$2"; shift ;;
     --namespace) [ "$#" -ge 2 ] || die_usage "--namespace needs a value"; namespace="$2"; shift ;;
     --enforce-restricted) enforce=restricted ;;
     --template) template=1 ;;
@@ -51,10 +57,21 @@ esac
 # two, 1 to 63 characters
 for ns in "$qeos_namespace" "$namespace"; do
   [[ "$ns" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || die_usage "not a Kubernetes namespace name: '$ns'"
+  # Kubernetes' own: relabelling them (privileged, or restricted for the QEOS one) would change the whole cluster
+  case "$ns" in
+    default|kube-system|kube-public|kube-node-lease) die_usage "'$ns' is Kubernetes' own namespace: choose another" ;;
+  esac
 done
+# A Helm release name: a DNS label of at most 53 characters
+[[ "$qeos_release" =~ ^[a-z0-9]([a-z0-9-]{0,51}[a-z0-9])?$ ]] || die_usage "not a Helm release name: '$qeos_release'"
 [ "$qeos_namespace" != "$namespace" ] \
   || die_usage "--qeos-namespace and --namespace must differ (Pod Security: restricted QEOS, privileged node-exporter)"
 # Never the current context: an admin signed in to another cluster would change that one
+# The QEOS chart cannot look the monitoring namespace up (its deploy identity sees its own namespace only): it names it
+# in networkPolicy.prometheus.namespace, whose default is this script's
+if [ "$namespace" != qeos-monitoring ]; then
+  echo "install.sh: NOTE: set networkPolicy.prometheus.namespace=$namespace in the QEOS chart's values, or its APIs refuse Prometheus's scrapes on 8000" >&2
+fi
 if [ -z "$template" ]; then
   [ -n "$context" ] || die_usage "--context is required (the kubectl context of the cluster to install into)"
   [[ "$context" =~ ^[A-Za-z0-9][A-Za-z0-9._:@/-]*$ ]] || die_usage "not a kubectl context name: '$context'"
@@ -74,7 +91,13 @@ if [ -z "$template" ]; then
   server="$("${kc[@]}" config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
   echo "context: $context" >&2
   echo "API server: $server" >&2
-  echo "monitoring namespace: $namespace (Pod Security privileged); QEOS namespace: $qeos_namespace (enforce $enforce)" >&2
+  echo "monitoring namespace: $namespace (Pod Security privileged); QEOS namespace: $qeos_namespace (enforce $enforce), release $qeos_release" >&2
+  # The monitoring namespace becomes privileged: only one this script made, never someone else's by a typo
+  marker="$("${kc[@]}" get namespace "$namespace" --ignore-not-found \
+    -o jsonpath='{.metadata.name}/{.metadata.labels.qeos\.atriis\.com/monitoring}')"
+  if [ -n "$marker" ] && [ "$marker" != "$namespace/true" ] && [ -z "$allow_downgrade" ]; then
+    die "$namespace exists and was not created by install.sh (no label qeos.atriis.com/monitoring=true); it would become Pod Security privileged: pass --allow-downgrade if that is intended"
+  fi
   # Pod Security is never lowered by accident: a re-run without --enforce-restricted on a restricted namespace
   current="$("${kc[@]}" get namespace "$qeos_namespace" --ignore-not-found \
     -o jsonpath='{.metadata.labels.pod-security\.kubernetes\.io/enforce}')"
@@ -122,6 +145,7 @@ got_sha="$(sha256 "$archive")"
 cat >"$tmp/namespaces.yaml" <<EOF
 kube-prometheus-stack:
   qeosNamespace: $qeos_namespace
+  qeosRelease: $qeos_release
   prometheus:
     prometheusSpec:
       # The QEOS chart's Alertmanager
@@ -155,7 +179,8 @@ fi
 for ns in "$namespace" "$qeos_namespace"; do
   "${kc[@]}" create namespace "$ns" --dry-run=client -o yaml | "${kc[@]}" apply -f -
 done
-"${kc[@]}" label namespace "$namespace" --overwrite pod-security.kubernetes.io/enforce=privileged
+"${kc[@]}" label namespace "$namespace" --overwrite pod-security.kubernetes.io/enforce=privileged \
+  qeos.atriis.com/monitoring=true
 "${kc[@]}" label namespace "$qeos_namespace" --overwrite pod-security.kubernetes.io/enforce="$enforce" \
   pod-security.kubernetes.io/warn=restricted pod-security.kubernetes.io/audit=restricted
 
