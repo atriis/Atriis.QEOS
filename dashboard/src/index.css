@@ -799,8 +799,8 @@ label.button:hover { background: var(--hover-strong); }
    text keeps its width (the block scrolls sideways) and a mark follows it */
 .gherkin:not(.numbered) .gk-line { display: grid; grid-template-columns: max-content auto; justify-content: start; column-gap: var(--space-3); align-items: start; padding-inline-start: var(--space-2); border-radius: 2px; }
 /* A step's screenshot button sits on the left, in a column every line of the block reserves: the steps stay aligned */
-.gherkin { --gk-gutter: 52px; }
-@media (pointer: coarse) { .gherkin { --gk-gutter: 56px; } }
+.gherkin { --gk-gutter: 36px; }
+@media (pointer: coarse) { .gherkin { --gk-gutter: 48px; } }
 .gherkin.numbered.has-gutter .gk-line { grid-template-columns: 4ch var(--gk-gutter) minmax(0, 1fr) auto; }
 .gherkin.has-gutter:not(.numbered) .gk-line { grid-template-columns: var(--gk-gutter) max-content auto; }
 .gk-gutter { display: flex; align-items: center; min-height: 1.6em; user-select: none; }
