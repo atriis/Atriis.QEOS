@@ -671,14 +671,16 @@ jobs:
           done
           kind load docker-image --name qeos-kind "${images[@]}"
 
-      # The Secret the chart reads with secrets.source kubernetes, from values-ci.yaml's dummy values
+      # The Secret the chart reads with secrets.source kubernetes, from values-ci.yaml's dummy values. The namespace
+      # enforces Pod Security restricted; created only if missing (deploy/monitoring/install.sh may create it first)
       - name: Create the namespace and the qeos-secrets Secret
         run: |
           # Dummy values, but never printed: masked before anything (the failure dump's pod logs included) could show one
           while IFS= read -r value; do
             echo "::add-mask::$value"
           done < <(yq '.ciSecrets[]' "$CHART/values-ci.yaml")
-          kubectl create namespace "$NAMESPACE"
+          kubectl create namespace "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f -
+          kubectl label namespace "$NAMESPACE" --overwrite pod-security.kubernetes.io/enforce=restricted
           mapfile -t literals < <(yq '.ciSecrets | to_entries | .[] | "--from-literal=" + .key + "=" + .value' "$CHART/values-ci.yaml")
           kubectl -n "$NAMESPACE" create secret generic qeos-secrets "${literals[@]}"
 
@@ -697,6 +699,12 @@ jobs:
           bash scripts/smoke_k8s.sh http://localhost:28080 "$NAMESPACE" || status=$?
           kill "$pf"
           exit "$status"
+
+      # A port-forward bypasses NetworkPolicies: throwaway pods in the namespace call the Services instead. One with no
+      # workload's labels reaches nothing; one with a loop job's labels reaches its callees only; and a pod without the
+      # restricted settings is refused
+      - name: NetworkPolicies and Pod Security from inside the cluster
+        run: bash scripts/check_k8s_policies.sh "$NAMESPACE"
 
       # Each service's image with an `alembic` that starts and exits 1: the realistic failed migration. FROM the :kind
       # images, so only the shim differs; ahead of /usr/local/bin on PATH, outside /tmp (an emptyDir in the hook)
@@ -772,7 +780,7 @@ jobs:
         if: failure()
         run: |
           helm history qeos -n "$NAMESPACE" || true
-          kubectl -n "$NAMESPACE" get all,jobs -o wide || true
+          kubectl -n "$NAMESPACE" get all,jobs,networkpolicies -o wide || true
           kubectl -n "$NAMESPACE" get events --sort-by=.lastTimestamp || true
           kubectl -n "$NAMESPACE" describe job qeos-migrate || true
           for pod in $(kubectl -n "$NAMESPACE" get pods -o name); do

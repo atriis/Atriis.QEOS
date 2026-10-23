@@ -31,9 +31,9 @@ gateway:
   # Placeholder: kind's pod range. On AKS this is the edge's range
   trustedProxies: 10.244.0.0/16
 
-# kind's default network plugin does not enforce NetworkPolicies
+# kindnet enforces NetworkPolicies (kind 0.24 and later): the CI job checks them (scripts/check_k8s_policies.sh)
 networkPolicy:
-  enabled: false
+  enabled: true
 
 migrate:
   activeDeadlineSeconds: 300

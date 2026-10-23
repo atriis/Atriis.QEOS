@@ -68,32 +68,3 @@ spec:
             sizeLimit: 64Mi
 {{- end }}
 {{- end }}
-{{- if .Values.networkPolicy.enabled }}
----
-# Only the edge reaches the gateway (spec 5.3): the proxy pods the add-on runs for the Gateway qeos-edge, in the Gateway's
-# namespace. Istio's gateway template (kube-gateway.yaml in istio-discovery), which the add-on uses, labels them
-# gateway.networking.k8s.io/gateway-name (its own selector, so every revision sets it); the Gateway's name in that
-# namespace identifies them. The rest of the namespace's policies come in Stage 2
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: gateway-ingress
-  labels:
-    {{- include "qeos.labels" (dict "ctx" $ "name" "gateway" "component" "gateway") | nindent 4 }}
-spec:
-  podSelector:
-    matchLabels:
-      {{- include "qeos.selector" (dict "ctx" $ "name" "gateway") | nindent 6 }}
-  policyTypes: [Ingress]
-  ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ include "qeos.edgeNamespace" . }}
-          podSelector:
-            matchLabels:
-              gateway.networking.k8s.io/gateway-name: qeos-edge
-      ports:
-        - protocol: TCP
-          port: 8080
-{{- end }}

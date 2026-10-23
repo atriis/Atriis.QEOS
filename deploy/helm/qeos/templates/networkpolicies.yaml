@@ -1,0 +1,140 @@
+{{- /* Ingress NetworkPolicies (spec 5.3, ADR-038). default-deny-ingress closes every pod of the release (the label
+app.kubernetes.io/instance: never another release's pods, nor the edge's); each policy below opens one workload to its
+callers. A workload's callers are those whose services.<x>.urls name it (qeos.callers), and the gateway, which proxies
+to every API and the dashboard. Egress stays open: Blob, Entra and Key Vault have no stable addresses without Cilium
+FQDN policies (ADR-038). Policies are additive, so a workload added later (the monitoring workloads) needs one entry
+here; without it, the default deny leaves it unreachable */ -}}
+{{- if .Values.networkPolicy.enabled }}
+{{- $prometheus := .Values.networkPolicy.prometheus }}
+{{- $gateways := list }}
+{{- range $name, $svc := .Values.services }}
+{{- if eq $svc.kind "gateway" }}
+{{- $gateways = append $gateways $name }}
+{{- end }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "default-deny-ingress" "component" "network-policy") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress]
+---
+# Only the edge reaches the gateway (spec 5.3): the proxy pods the add-on runs for the Gateway qeos-edge, in the Gateway's
+# namespace. Istio's gateway template (kube-gateway.yaml in istio-discovery), which the add-on uses, labels them
+# gateway.networking.k8s.io/gateway-name (its own selector, so every revision sets it); the Gateway's name in that
+# namespace identifies them
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gateway-ingress
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "gateway" "component" "gateway") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "qeos.selector" (dict "ctx" $ "name" "gateway") | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ include "qeos.edgeNamespace" . }}
+          podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: qeos-edge
+      ports:
+        - protocol: TCP
+          port: 8080
+{{- range $name, $svc := .Values.services }}
+{{- if has $svc.kind (list "api" "dashboard") }}
+{{- $callers := concat (include "qeos.callers" (dict "ctx" $ "name" $name) | fromJsonArray) $gateways | uniq | sortAlpha }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-ingress" $name }}
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" $svc.kind) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "qeos.selector" (dict "ctx" $ "name" $name) | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    {{- /* A rule with no sources would admit everyone: only rendered with at least one caller */}}
+    {{- if $callers }}
+    - from:
+        {{- range $caller := $callers }}
+        - podSelector:
+            matchLabels:
+              {{- include "qeos.selector" (dict "ctx" $ "name" $caller) | nindent 14 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ if eq $svc.kind "api" }}8000{{ else }}8080{{ end }}
+    {{- end }}
+    {{- if eq $svc.kind "api" }}
+    # Prometheus scrapes /metrics (networkPolicy.prometheus)
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ required "networkPolicy.prometheus.namespace is required" $prometheus.namespace }}
+          podSelector:
+            matchLabels:
+              {{- /* Empty labels would admit every pod of that namespace */}}
+              {{- if not $prometheus.podLabels }}
+              {{- fail "networkPolicy.prometheus.podLabels is required: the Prometheus pods' labels" }}
+              {{- end }}
+              {{- toYaml $prometheus.podLabels | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8000
+    {{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.ci.backing }}
+{{- /* kind only: PostgreSQL for every workload with a database and the migration hook (which runs on every upgrade,
+when this policy exists), MinIO for those that store artifacts and the bucket Job */}}
+{{- $postgres := list "qeos-migrate" }}
+{{- $minio := list "minio-init" }}
+{{- range $name, $svc := .Values.services }}
+{{- if $svc.database }}
+{{- $postgres = append $postgres $name }}
+{{- end }}
+{{- if $svc.artifacts }}
+{{- $minio = append $minio $name }}
+{{- end }}
+{{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: ci-backing-ingress
+  labels:
+    {{- include "qeos.ciLabels" (dict "ctx" $ "name" "ci-backing-ingress") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: ci-backing
+  policyTypes: [Ingress]
+  ingress:
+    {{- range $rule := list (dict "port" 5432 "from" $postgres) (dict "port" 9000 "from" $minio) }}
+    - from:
+        {{- range $caller := sortAlpha $rule.from }}
+        - podSelector:
+            matchLabels:
+              {{- include "qeos.selector" (dict "ctx" $ "name" $caller) | nindent 14 }}
+        {{- end }}
+      ports:
+        - protocol: TCP
+          port: {{ $rule.port }}
+    {{- end }}
+{{- end }}
+{{- end }}

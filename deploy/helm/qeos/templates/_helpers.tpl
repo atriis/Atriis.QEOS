@@ -35,6 +35,18 @@
 {{- default .Release.Namespace .Values.edge.namespace -}}
 {{- end -}}
 
+{{/* qeos.callers (dict "ctx" $ "name" "<service>") -- JSON list, sorted: the workloads whose services.<x>.urls name
+the service. The gateway, which proxies to every API and the dashboard, has no urls: networkpolicies.yaml adds it */}}
+{{- define "qeos.callers" -}}
+{{- $callers := list -}}
+{{- range $name, $svc := .ctx.Values.services -}}
+{{- if has $.name (values ($svc.urls | default dict)) -}}
+{{- $callers = append $callers $name -}}
+{{- end -}}
+{{- end -}}
+{{- toJson (sortAlpha $callers) -}}
+{{- end -}}
+
 {{/* qeos.labels (dict "ctx" $ "name" "<service>" "component" "<kind>") */}}
 {{- define "qeos.labels" -}}
 app.kubernetes.io/name: {{ .name }}

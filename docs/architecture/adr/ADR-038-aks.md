@@ -94,6 +94,11 @@ must keep working unchanged.
   `production` environments only, so each must allow deployments from `master` only (production also `platform-v*`
   tags). Bicep and
   the workflow cannot set this; an admin must (`deploy/azure/README.md`, section 5.1).
+- **NetworkPolicies are ingress only** (Stage 2; `deploy/helm/README.md`). Every pod of the release is denied by
+  default and each Service admits its callers alone, but egress stays open (residual): Blob, Entra ID and Key Vault
+  have no stable addresses, and restricting them needs Cilium's FQDN policies (CiliumNetworkPolicy `toFQDNs`), which
+  the chart does not use yet. A compromised pod can therefore still reach the internet and anything outside the
+  namespace that has no policy of its own; inside it, only the Services that admit it.
 - Per-process limits in ingestion (8 storage calls, a 60 s pending-deletion cache) become per pod.
 - Staging stopped during the Sunday window misses its upgrade; documented.
 
@@ -110,6 +115,8 @@ Nothing here can be proved without a real subscription:
 - The Gateway's static-IP annotations (`azure-pip-name`, `azure-load-balancer-resource-group`).
 - Real client IPs reach the gateway (`externalTrafficPolicy: Local`) and the trusted-proxy range matches.
 - The add-on's proxy pods and the probe annotations; the namespace the edge pods run in.
+- With the NetworkPolicies under Cilium: kubelet probes and the edge's proxy pods still reach the pods (kind's kindnet
+  is proved in CI), and Prometheus reaches the APIs from `networkPolicy.prometheus`.
 - `pg_stat_statements` preloaded on Flexible Server; `db-init` with Flexible Server's admin (CI's kind job already
   runs it on PostgreSQL 16 as a `CREATEROLE CREATEDB` admin that is not a superuser, which needs the role granted
   `WITH INHERIT TRUE, SET TRUE`).

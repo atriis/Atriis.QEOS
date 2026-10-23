@@ -60,6 +60,9 @@ render ci -f "$CHART/values-ci.yaml"
 render staging -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}"
 # Once the ACS SMTP application exists, its secrets are in the vault and keyvault.absent drops them
 render staging-email -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" --set 'keyvault.absent={tm-secrets-key}'
+render ci-nopolicy -f "$CHART/values-ci.yaml" --set networkPolicy.enabled=false
+render ci-prometheus -f "$CHART/values-ci.yaml" --set networkPolicy.prometheus.namespace=mon \
+  --set-json 'networkPolicy.prometheus.podLabels={"app.kubernetes.io/name":null,"app":"prom"}'
 # values.yaml alone holds no environment: a render must stop on the settings each environment has to give
 if helm template qeos "$CHART" --namespace "$NAMESPACE" >/dev/null 2>"$OUT/defaults.err"; then
   fail "values.yaml alone renders: the required settings are not enforced"
@@ -79,17 +82,81 @@ for env in ci staging; do
   f="$OUT/$env.yaml"
   [ -s "$f" ] || continue
 
-  # ---- security context on every container, init containers included ----
-  bad="$(q "$f" '[select(.kind == "Deployment" or .kind == "Job") | .spec.template.spec as $s
+  # ---- security context on every container of every pod spec, init containers included (PSA restricted) ----
+  bad="$(q "$f" '[select(.spec.template.spec != null) | .spec.template.spec as $s
     | (($s.containers // []) + ($s.initContainers // []))[]
     | select(.securityContext.runAsNonRoot != true or .securityContext.readOnlyRootFilesystem != true
         or .securityContext.allowPrivilegeEscalation != false
-        or ((.securityContext.capabilities.drop // []) | contains(["ALL"]) | not))
+        or ((.securityContext.capabilities.drop // []) | contains(["ALL"]) | not)
+        or (.securityContext.seccompProfile.type // $s.securityContext.seccompProfile.type // "") != "RuntimeDefault")
     | .name] | join(" ")')"
-  [ -z "$bad" ] && pass "$env: every container is non-root, read-only, no escalation, no capabilities" \
+  [ -z "$bad" ] && pass "$env: every container is non-root, read-only, no escalation, no capabilities, RuntimeDefault seccomp" \
     || fail "$env: containers without the required securityContext: $bad"
-  count="$(q "$f" '[select(.kind == "Deployment" or .kind == "Job")] | length')"
-  [ "$count" -gt 0 ] || fail "$env: no Deployment or Job rendered"
+  count="$(q "$f" '[select(.spec.template.spec != null)] | length')"
+  [ "$count" -gt 0 ] || fail "$env: no pod spec rendered"
+
+  # ---- NetworkPolicies (spec 5.3): every pod of the release denied by default, each Service open to its callers ----
+  d="$(q "$f" 'select(.kind == "NetworkPolicy" and .metadata.name == "default-deny-ingress") | .spec
+    | (.podSelector.matchLabels | to_entries | map(.key + "=" + .value) | join(",")) + " " + (.policyTypes | join(","))
+      + " " + ((.ingress // []) | length | tostring)')"
+  [ "$d" = "app.kubernetes.io/instance=qeos Ingress 0" ] && pass "$env: default-deny-ingress closes every pod of the release" \
+    || fail "$env: default-deny-ingress is '$d'"
+  bad="$(q "$f" '[select(.kind == "NetworkPolicy") | select(.spec.podSelector.matchLabels["app.kubernetes.io/instance"] != "qeos")
+    | .metadata.name] | join(" ")')"
+  [ -z "$bad" ] && pass "$env: every NetworkPolicy selects this release's pods only" || fail "$env: policies beyond the release: $bad"
+  # A source with no pod labels, an address block or a namespace selector naming no namespace would open a workload to
+  # more than its callers
+  bad=""
+  for p in $(q "$f" '[select(.kind == "NetworkPolicy") | .metadata.name] | join(" ")'); do
+    n="$(q "$f" "select(.kind == \"NetworkPolicy\" and .metadata.name == \"$p\") | ([.spec.ingress[] | select(.from == null)] | length)
+      + ([.spec.ingress[].from[] | select(.ipBlock != null or (.podSelector.matchLabels // {} | length) == 0
+          or (.namespaceSelector == null and .podSelector.matchLabels[\"app.kubernetes.io/instance\"] != \"qeos\")
+          or (.namespaceSelector != null and (.namespaceSelector.matchLabels[\"kubernetes.io/metadata.name\"] // \"\") == \"\"))] | length)")"
+    [ "$n" = 0 ] || bad="$bad $p"
+  done
+  [ -z "$bad" ] && pass "$env: every allowed source is a labelled pod of this release, or of one named namespace" \
+    || fail "$env: policies with an open or unlabelled source: $bad"
+  # callers POLICY PORT -- the in-namespace pods a policy admits on PORT, sorted
+  callers() { q "$f" "[select(.kind == \"NetworkPolicy\" and .metadata.name == \"$1\") | .spec.ingress[]
+    | select(.ports | map(.protocol + \"/\" + (.port | tostring)) | contains([\"TCP/$2\"])) | .from[]
+    | select(.namespaceSelector == null) | .podSelector.matchLabels[\"app.kubernetes.io/name\"]] | sort | join(\" \")"; }
+  # ports POLICY -- every protocol/port it opens
+  ports() { q "$f" "[select(.kind == \"NetworkPolicy\" and .metadata.name == \"$1\") | .spec.ingress[].ports[] | .protocol + \"/\" + (.port | tostring)] | unique | join(\" \")"; }
+  # outside POLICY -- its sources in other namespaces: "<namespace> <pod labels>"
+  outside() { q "$f" "[select(.kind == \"NetworkPolicy\" and .metadata.name == \"$1\") | .spec.ingress[].from[] | select(.namespaceSelector != null)
+    | .namespaceSelector.matchLabels[\"kubernetes.io/metadata.name\"] + \" \" + (.podSelector.matchLabels | to_entries | map(.key + \"=\" + .value) | sort | join(\",\"))] | unique | join(\";\")"; }
+  # From services.<x>.urls, and the gateway, which proxies to every API and the dashboard
+  for pair in "auth-service:gateway organization-service" \
+      "organization-service:auth-service gateway project-service" \
+      "project-service:analytics-rollup gateway impact-rollup ingestion-retention ingestion-service test-management-service weekly-summary" \
+      "ingestion-service:gateway" \
+      "test-management-service:gateway ingestion-retention"; do
+    name="${pair%%:*}"
+    want="${pair#*:}"
+    got="$(callers "$name-ingress" 8000)"
+    [ "$got" = "$want" ] && pass "$env: $name-ingress admits exactly its callers ($want)" \
+      || fail "$env: $name-ingress admits '$got', want '$want'"
+    [ "$(ports "$name-ingress")" = TCP/8000 ] && pass "$env: $name-ingress opens TCP 8000 only" \
+      || fail "$env: $name-ingress opens '$(ports "$name-ingress")'"
+    # Prometheus scrapes /metrics from its own namespace (networkPolicy.prometheus)
+    [ "$(outside "$name-ingress")" = "qeos-monitoring app.kubernetes.io/name=prometheus" ] \
+      && pass "$env: $name-ingress admits Prometheus from qeos-monitoring" || fail "$env: $name-ingress admits from outside: '$(outside "$name-ingress")'"
+  done
+  got="$(callers dashboard-ingress 8080)|$(ports dashboard-ingress)|$(outside dashboard-ingress)"
+  [ "$got" = "gateway|TCP/8080|" ] && pass "$env: dashboard-ingress admits the gateway on TCP 8080 only" \
+    || fail "$env: dashboard-ingress is '$got'"
+  # Every Service the chart renders has a policy beyond the default deny that selects its pods
+  for svc in $(q "$f" '[select(.kind == "Service") | .metadata.name] | join(" ")'); do
+    labels=" $(q "$f" "select(.kind == \"Deployment\" and .metadata.name == \"$svc\") | .spec.template.metadata.labels | to_entries | map(.key + \"=\" + .value) | join(\" \")") "
+    covered=""
+    for p in $(q "$f" '[select(.kind == "NetworkPolicy" and .metadata.name != "default-deny-ingress") | .metadata.name] | join(" ")'); do
+      sel="$(q "$f" "select(.kind == \"NetworkPolicy\" and .metadata.name == \"$p\") | .spec.podSelector.matchLabels | to_entries | map(.key + \"=\" + .value) | join(\" \")")"
+      ok=true
+      for l in $sel; do case "$labels" in *" $l "*) ;; *) ok=false ;; esac; done
+      [ "$ok" = true ] && covered="$p"
+    done
+    [ -n "$covered" ] && pass "$env: Service $svc's pods are opened by $covered" || fail "$env: Service $svc has no NetworkPolicy beyond the default deny"
+  done
 
   # ---- replicas (Global Constraints) and a PDB for every 2-replica Deployment ----
   for name in $APIS $WEB; do
@@ -246,7 +313,34 @@ backend() { q "$OUT/$1.yaml" 'select(.kind == "ConfigMap" and .metadata.name == 
 [ "$(backend ci)" = s3 ] && pass "ci: artifacts on S3 (MinIO)" || fail "ci: ARTIFACTS_BACKEND is '$(backend ci)'"
 [ "$(backend staging)" = azure ] && pass "staging: artifacts on Azure Blob" || fail "staging: ARTIFACTS_BACKEND is '$(backend staging)'"
 np() { q "$OUT/$1.yaml" '[select(.kind == "NetworkPolicy")] | length'; }
-[ "$(np ci)" = 0 ] && pass "ci: no NetworkPolicy (kind does not enforce them)" || fail "ci: $(np ci) NetworkPolicy rendered"
+# kindnet enforces NetworkPolicies (kind 0.24 and later): CI runs with them
+[ "$(np ci)" -gt 0 ] && pass "ci: NetworkPolicies rendered ($(np ci); kindnet enforces them)" || fail "ci: no NetworkPolicy rendered"
+[ "$(np ci-nopolicy)" = 0 ] && pass "networkPolicy.enabled=false renders no NetworkPolicy" || fail "networkPolicy.enabled=false renders $(np ci-nopolicy)"
+ns="$(q "$OUT/ci-prometheus.yaml" '[select(.kind == "NetworkPolicy" and .metadata.name == "auth-service-ingress") | .spec.ingress[].from[]
+  | select(.namespaceSelector != null) | .namespaceSelector.matchLabels["kubernetes.io/metadata.name"] + " "
+  + (.podSelector.matchLabels | to_entries | map(.key + "=" + .value) | join(","))] | join(";")')"
+[ "$ns" = "mon app=prom" ] && pass "networkPolicy.prometheus sets the scraper's namespace and pod labels" \
+  || fail "networkPolicy.prometheus override gives '$ns'"
+if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" --set networkPolicy.prometheus.podLabels=null >/dev/null 2>"$OUT/promlabels.err"; then
+  fail "empty networkPolicy.prometheus.podLabels renders (it would admit every pod of that namespace)"
+else
+  grep -q "podLabels" "$OUT/promlabels.err" && pass "empty networkPolicy.prometheus.podLabels is refused" \
+    || fail "empty podLabels failed for another reason: $(tail -n 2 "$OUT/promlabels.err")"
+fi
+# The CI backing services: PostgreSQL for every workload with a database and the migration hook, MinIO for those
+# that store artifacts (and the bucket Job); nothing else, and not on AKS
+bk() { q "$OUT/ci.yaml" "[select(.kind == \"NetworkPolicy\" and .metadata.name == \"ci-backing-ingress\") | .spec.ingress[]
+  | select(.ports[0].port == $1) | .from[].podSelector.matchLabels[\"app.kubernetes.io/name\"]] | sort | join(\" \")"; }
+want="analytics-rollup auth-service impact-rollup ingestion-retention ingestion-service organization-service project-service qeos-migrate test-management-service weekly-summary"
+[ "$(bk 5432)" = "$want" ] && pass "ci: postgres admits the workloads with a database and the migration hook" \
+  || fail "ci: postgres admits '$(bk 5432)', want '$want'"
+[ "$(bk 9000)" = "ingestion-retention ingestion-service minio-init" ] && pass "ci: MinIO admits ingestion, retention and the bucket Job" \
+  || fail "ci: MinIO admits '$(bk 9000)'"
+sel="$(q "$OUT/ci.yaml" 'select(.kind == "NetworkPolicy" and .metadata.name == "ci-backing-ingress") | .spec.podSelector.matchLabels | to_entries | map(.key + "=" + .value) | sort | join(",")')"
+[ "$sel" = "app.kubernetes.io/component=ci-backing,app.kubernetes.io/instance=qeos" ] && pass "ci: ci-backing-ingress selects the CI backing pods" \
+  || fail "ci: ci-backing-ingress selects '$sel'"
+n="$(q "$OUT/staging.yaml" '[select(.kind == "NetworkPolicy" and .metadata.name == "ci-backing-ingress")] | length')"
+[ "$n" = 0 ] && pass "staging: no ci-backing-ingress" || fail "staging: ci-backing-ingress rendered"
 # The add-on runs the Gateway's proxy pods in the Gateway's namespace, labelled by Istio's gateway template
 src="$(q "$OUT/staging.yaml" 'select(.kind == "NetworkPolicy" and .metadata.name == "gateway-ingress") | .spec.ingress as $i
   | ($i | length | tostring) + " " + ($i[0].from | length | tostring) + " "
@@ -342,6 +436,12 @@ pguser="$(q "$OUT/ci.yaml" 'select(.kind == "Job" and .metadata.name == "qeos-mi
 [ "$super" = postgres ] && [ "$admin" = qeosadmin ] && [ "$pguser" = qeosadmin ] \
   && pass "ci: db-init connects as qeosadmin, which the init script creates; the superuser is postgres" \
   || fail "ci: superuser '$super', init script admin '$admin', db-init PGUSER '$pguser'"
+# Non-root under PSA restricted: the image's postgres user (999) owns the data directory, which lives on an emptyDir
+pg="$(q "$OUT/ci.yaml" "$pgdeploy | (.securityContext.runAsUser | tostring) + \" \" + (.securityContext.fsGroup | tostring) + \" \"
+  + (.containers[0].env[] | select(.name == \"PGDATA\") | .value)")"
+data="$(q "$OUT/ci.yaml" "$pgdeploy | (.containers[0].volumeMounts[] | select(.name == \"data\") | .mountPath) + \" \" + (.volumes[] | select(.name == \"data\") | .emptyDir != null | tostring)")"
+[ "${pg% *}" = "999 999" ] && [[ "${pg##* }/" == "${data% *}"/* ]] && [ "${data#* }" = true ] \
+  && pass "ci: postgres runs as uid 999 (fsGroup 999) with PGDATA on its emptyDir" || fail "ci: postgres is '$pg', data '$data'"
 mnt="$(q "$OUT/ci.yaml" "$pgdeploy | (.containers[0].volumeMounts[] | select(.name == \"init\") | .mountPath) + \" \" + (.volumes[] | select(.name == \"init\") | .configMap.name)")"
 [ "$mnt" = "/docker-entrypoint-initdb.d postgres-init" ] && pass "ci: the init script is mounted for the entrypoint" \
   || fail "ci: the init volume is '$mnt'"

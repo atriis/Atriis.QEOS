@@ -113,8 +113,16 @@ edge:
     # Let's Encrypt production; https://acme-staging-v02.api.letsencrypt.org/directory for untrusted test certificates
     server: https://acme-v02.api.letsencrypt.org/directory
 
+# Ingress NetworkPolicies (templates/networkpolicies.yaml): every pod of the release denied by default, each Service
+# open to its callers only (services.<x>.urls, and the gateway to the APIs and the dashboard). Egress stays open
 networkPolicy:
   enabled: true
+  # The Prometheus pods that scrape the APIs on 8000 (kube-prometheus-stack, deploy/monitoring): their namespace, by
+  # name, and their pod labels. The single source of the monitoring namespace
+  prometheus:
+    namespace: qeos-monitoring
+    podLabels:
+      app.kubernetes.io/name: prometheus
 
 migrate:
   # The order the hook Job runs each service's migrations in, after db-init

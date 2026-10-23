@@ -8,16 +8,17 @@ use it.
 | Values file | Where | What it adds |
 |---|---|---|
 | `values.yaml` | always | defaults only: no hostname, no secret, no environment |
-| `values-ci.yaml` | kind in CI | images loaded as `qeos/<service>:kind`, in-cluster PostgreSQL and MinIO, secrets from the `qeos-secrets` Secret |
-| `values-staging.yaml` | AKS staging | Key Vault secrets, Azure Blob, the edge (Gateway API, TLS), email, the NetworkPolicy; Bicep's outputs come with `--set` from the deploy workflow |
+| `values-ci.yaml` | kind in CI | images loaded as `qeos/<service>:kind`, in-cluster PostgreSQL and MinIO, secrets from the `qeos-secrets` Secret; the NetworkPolicies on (kindnet enforces them) |
+| `values-staging.yaml` | AKS staging | Key Vault secrets, Azure Blob, the edge (Gateway API, TLS), email, the NetworkPolicies; Bicep's outputs come with `--set` from the deploy workflow |
 
 ```bash
 # Render and check (needs helm 3 and yq v4; no cluster), and db-init's secret handling (stub psql)
 bash deploy/helm/qeos/tests/render_test.sh
 bash deploy/helm/qeos/tests/db_init_test.sh
 
-# kind (CI job helm-kind; "Testing locally with kind" below): create the Secret, then install
-kubectl create namespace qeos
+# kind (CI job helm-kind; "Testing locally with kind" below): the namespace (Pod Security restricted), the Secret, the install
+kubectl create namespace qeos --dry-run=client -o yaml | kubectl apply -f -
+kubectl label namespace qeos --overwrite pod-security.kubernetes.io/enforce=restricted
 kubectl -n qeos create secret generic qeos-secrets $(yq '.ciSecrets | to_entries | .[] | "--from-literal=" + .key + "=" + .value' deploy/helm/qeos/values-ci.yaml)
 helm install qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-ci.yaml --wait --timeout 10m
 
@@ -29,7 +30,8 @@ helm upgrade --install qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-
 ## Testing locally with kind
 
 The CI job `helm-kind` (`.github/workflows/ci.yml`) does this on every push: the render checks, the seven images, a
-kind cluster, the install, `scripts/smoke_k8s.sh`, and two failed upgrades. The same steps on a workstation with Docker
+kind cluster, the install into a namespace that enforces Pod Security `restricted`, `scripts/smoke_k8s.sh`,
+`scripts/check_k8s_policies.sh` (the NetworkPolicies from inside the cluster), and two failed upgrades. The same steps on a workstation with Docker
 (Desktop), kind, kubectl, helm 3 and yq v4:
 
 ```bash
@@ -52,6 +54,7 @@ kind load docker-image --name qeos-kind qeos/auth-service:kind qeos/organization
 pip install ./collector                       # qeos-collector, for the upload
 kubectl -n qeos port-forward svc/gateway 28080:8080 &
 bash scripts/smoke_k8s.sh http://localhost:28080 qeos     # ends with "all k8s checks passed"
+bash scripts/check_k8s_policies.sh qeos                   # ends with "all policy checks passed"
 
 # 5. A failed migration fails the upgrade; the release keeps serving. First one that starts and exits 1: each image
 #    with an `alembic` shim (the CI step "Build and load the broken-migration images" builds them), so the Job fails
@@ -78,6 +81,14 @@ checks). A failed check prints the status and at most 300 bytes of the body with
 the raw body. In CI the `ciSecrets` dummy values are masked (`::add-mask::`) before the Secret is created, so the pod
 logs printed on a failure cannot show them either.
 
+A port-forward bypasses NetworkPolicies, so the smoke cannot see them. `check_k8s_policies.sh` runs throwaway curl pods
+(`curlimages/curl` pinned by digest, the restricted security context) in the namespace: one with no workload's labels
+must time out on every Service (the APIs, the dashboard, the gateway, PostgreSQL and MinIO); one with the labels of
+`ingestion-retention`, a loop job with no Service, must reach project-service, test-management-service and MinIO and
+time out on auth-service and the dashboard. It also checks that the namespace enforces `restricted` and that a pod
+without the settings is refused. Each check is one line of its `CHECKS` list (`FROM URL EXPECT`); a new workload adds
+its own. Like the smoke, it runs against a `kind-*` context only (it borrows a workload's labels).
+
 `kind create cluster` makes `kind-qeos-kind` the current kubectl context; `kind delete cluster` removes it, so switch
 back with `kubectl config use-context <yours>`.
 
@@ -101,16 +112,31 @@ back with `kubectl config use-context <yours>`.
 - The **edge** (when `edge.enabled`, AKS): the Gateway `qeos-edge`, the HTTPRoutes `qeos` and `qeos-https-redirect`,
   the ConfigMap `qeos-edge-options`, the cert-manager `Issuer` `qeos-letsencrypt` and `Certificate` `qeos-edge` ("The
   edge" below). Off in `values-ci.yaml`: the smoke reaches the gateway through a port-forward.
-- The **NetworkPolicy** `gateway-ingress` (when `networkPolicy.enabled`): the gateway's pods accept traffic only from
-  the edge's proxy pods: those labelled `gateway.networking.k8s.io/gateway-name: qeos-edge` (Istio's own selector for
-  a Gateway's pods) in `edge.namespace` (empty, also in staging: the release namespace, where the add-on runs them). The other policies of spec 5.3 come in Stage 2. It is off in `values-ci.yaml`: kind's
-  default network plugin does not enforce policies.
+- **NetworkPolicies** (when `networkPolicy.enabled`, `templates/networkpolicies.yaml`), ingress only:
+  - `default-deny-ingress` selects every pod of the release (`app.kubernetes.io/instance`, so never another release's
+    pods or the edge's) and admits nothing.
+  - `gateway-ingress`: the gateway's pods accept traffic only from the edge's proxy pods: those labelled
+    `gateway.networking.k8s.io/gateway-name: qeos-edge` (Istio's own selector for a Gateway's pods) in
+    `edge.namespace` (empty, also in staging: the release namespace, where the add-on runs them).
+  - `<api>-ingress` per API and `dashboard-ingress`: each admits its callers only, on its port (8000; the dashboard
+    8080). The callers are the workloads whose `services.<x>.urls` name it (helper `qeos.callers`) and the gateway,
+    which proxies to all of them; so a new `urls` entry opens the path by itself. The APIs also admit
+    `networkPolicy.prometheus` (Prometheus, by namespace name and pod labels) on 8000 for scraping.
+  - `ci-backing-ingress` (kind only): PostgreSQL on 5432 for every workload with a `database` and the migration hook,
+    MinIO on 9000 for those with `artifacts` and the bucket Job.
+  The loop jobs listen on nothing and get no policy of their own: the default deny closes them. Egress stays open:
+  Blob, Entra ID and Key Vault have no stable addresses without Cilium's FQDN policies (ADR-038). Kubelet probes still
+  reach the pods: kindnet admits the node's own traffic (the kind install becomes Ready with the policies on), and
+  Cilium on AKS does too by default (to confirm on the first deploy, ADR-038). On kind the policies are on: kindnet
+  enforces them, and `scripts/check_k8s_policies.sh` proves it.
 
 Everything the chart renders is namespaced and lands in the release namespace (no ClusterRole, ClusterIssuer,
 GatewayClass or Namespace): the deploy identity administers that namespace only. `tests/render_test.sh` checks it.
 
-Every container runs as its image's non-root user (uid 10001 for the Python images, 101 for nginx) with a read-only
-root filesystem, no privilege escalation, all capabilities dropped and the RuntimeDefault seccomp profile. Writable
+Every container runs as its image's non-root user (uid 10001 for the Python images, 101 for nginx, 999 for the CI
+PostgreSQL, whose `PGDATA` is on its emptyDir) with a read-only root filesystem, no privilege escalation, all
+capabilities dropped and the RuntimeDefault seccomp profile: what Pod Security `restricted` asks, which the kind
+namespace enforces (`tests/render_test.sh` checks every container and init container of every pod spec). Writable
 directories are emptyDirs: `/tmp` everywhere, and `/var/cache/nginx` for the dashboard and the gateway. The gateway
 renders its configuration into `/tmp/nginx` (`NGINX_RENDER_DIR`); its pid and temporary files are in `/tmp` already
 (`gateway/nginx.conf.template`), and the dashboard writes `config.js` to `/tmp/qeos-config`. Pods get no Kubernetes API
@@ -154,7 +180,8 @@ sleep of 5 s let in-flight requests and in-API background tasks finish while the
 | `edge.publicIp.name`, `.resourceGroup` | required with `edge.enabled` | Bicep's static public IP, `pip-<aksName>-edge` in the environment's resource group |
 | `edge.acme.email` | required with `edge.enabled` | Let's Encrypt's contact (expiry notices) |
 | `edge.acme.server` | Let's Encrypt production | the ACME directory; `https://acme-staging-v02.api.letsencrypt.org/directory` for untrusted test certificates |
-| `networkPolicy.enabled` | `true` | renders `gateway-ingress` |
+| `networkPolicy.enabled` | `true` | renders the NetworkPolicies (`default-deny-ingress` and one per Service) |
+| `networkPolicy.prometheus.namespace`, `.podLabels` | `qeos-monitoring`, `app.kubernetes.io/name: prometheus` | the Prometheus pods the APIs admit on 8000; the single source of the monitoring namespace. Empty `podLabels` is refused (it would admit the whole namespace) |
 | `migrate.order` | the five APIs | the hook's migration order, after db-init |
 | `migrate.imageTag` | `""` | the migration images' tag; empty: `image.tag` |
 | `migrate.activeDeadlineSeconds`, `.backoffLimit` | `900`, `0` | a longer or failed migration fails the release; Helm's `--timeout` must be longer (20m) |
