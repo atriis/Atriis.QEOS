@@ -1,13 +1,15 @@
 """Lints the provisioned Grafana dashboards (monitoring spec §8): valid JSON, the five expected uids, unique
 panel ids, the provisioned Prometheus data source on every panel, a query on every panel, and no retired
-metric names. Usage: python check_dashboards.py [DIR]; exits 1 on any problem."""
+metric names or Compose-only labels. Usage: python check_dashboards.py [DIR]; exits 1 on any problem."""
 import json
 import sys
 from pathlib import Path
 
 EXPECTED = {"qeos-overview", "qeos-service-detail", "qeos-jobs-uploads", "qeos-postgresql", "qeos-host-containers"}
 # Names the plan replaced with blueprint §11.2 names; a dashboard using one would show "No data"
-RETIRED = ("qeos_http_", "qeos_job_", "qeos_build_info", "http_request_duration_seconds")
+RETIRED = ("qeos_http_", "qeos_job_", "qeos_build_info", "http_request_duration_seconds",
+           # Compose-only label; the cadvisor job copies it into the platform-neutral `container` label
+           "container_label_com_docker_compose_service")
 
 
 def problems(path: Path):

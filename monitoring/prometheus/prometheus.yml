@@ -33,6 +33,12 @@ scrape_configs:
     static_configs: [{targets: ["node-exporter:9100"]}]
   - job_name: cadvisor
     static_configs: [{targets: ["cadvisor:8080"]}]
+    # Platform-neutral container name: Kubernetes cAdvisor already sets `container`; on Compose it comes from the
+    # service label (a container without the label gets none)
+    metric_relabel_configs:
+      - source_labels: [container_label_com_docker_compose_service]
+        regex: (.+)
+        target_label: container
   - job_name: postgres
     static_configs: [{targets: ["postgres-exporter:9187"]}]
   # Screenshot storage (ADR-036). No bearer token: docker-compose.yml sets MINIO_PROMETHEUS_AUTH_TYPE=public, and

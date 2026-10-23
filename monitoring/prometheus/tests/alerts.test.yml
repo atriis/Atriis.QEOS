@@ -235,14 +235,24 @@ tests:
   - name: MemoryPressure for a restarting container
     interval: 1m
     input_series:
-      - series: 'container_start_time_seconds{name="qeos-project-service-1",instance="cadvisor:8080",job="cadvisor"}'
+      - series: 'container_start_time_seconds{container="auth-service",name="qeos-auth-service-1",instance="cadvisor:8080",job="cadvisor"}'
         values: '100 200 300 400 500 500 500'
     alert_rule_test:
       - eval_time: 5m
         alertname: MemoryPressure
         exp_alerts:
-          - exp_labels: {severity: warning, kind: container, name: qeos-project-service-1, instance: "cadvisor:8080", job: cadvisor}
-            exp_annotations: {summary: "Container qeos-project-service-1 restarted more than 3 times in 15 minutes"}
+          - exp_labels: {severity: warning, kind: container, container: auth-service, name: qeos-auth-service-1, instance: "cadvisor:8080", job: cadvisor}
+            exp_annotations: {summary: "Container auth-service restarted more than 3 times in 15 minutes"}
+
+  - name: MemoryPressure stays quiet for a series without a container label
+    interval: 1m
+    input_series:
+      - series: 'container_start_time_seconds{container="",name="qeos-auth-service-1",instance="cadvisor:8080",job="cadvisor"}'
+        values: '100 200 300 400 500 500 500'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: MemoryPressure
+        exp_alerts: []
 
   - name: CadvisorNoContainers when cAdvisor is up but sees no compose container
     interval: 1m
@@ -264,7 +274,7 @@ tests:
     input_series:
       - series: 'up{instance="cadvisor:8080",job="cadvisor"}'
         values: '1+0x10 0+0x10'
-      - series: 'container_start_time_seconds{container_label_com_docker_compose_service="gateway",name="qeos-gateway-1",instance="cadvisor:8080",job="cadvisor"}'
+      - series: 'container_start_time_seconds{container="gateway",name="qeos-gateway-1",instance="cadvisor:8080",job="cadvisor"}'
         values: '100+0x10'
     alert_rule_test:
       - eval_time: 10m
