@@ -244,6 +244,20 @@ tests:
           - exp_labels: {severity: warning, kind: container, container: auth-service, name: qeos-auth-service-1, instance: "cadvisor:8080", job: cadvisor}
             exp_annotations: {summary: "Container auth-service restarted more than 3 times in 15 minutes"}
 
+  # promtool does not run relabelling: the cadvisor job's second metric_relabel_configs rule sets container from
+  # `name` for a container started without Compose labels, so the rule sees container="adhoc"
+  - name: MemoryPressure for a restarting container without Compose labels
+    interval: 1m
+    input_series:
+      - series: 'container_start_time_seconds{container="adhoc",name="adhoc",instance="cadvisor:8080",job="cadvisor"}'
+        values: '100 200 300 400 500 500 500'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: MemoryPressure
+        exp_alerts:
+          - exp_labels: {severity: warning, kind: container, container: adhoc, name: adhoc, instance: "cadvisor:8080", job: cadvisor}
+            exp_annotations: {summary: "Container adhoc restarted more than 3 times in 15 minutes"}
+
   - name: MemoryPressure stays quiet for a series without a container label
     interval: 1m
     input_series:

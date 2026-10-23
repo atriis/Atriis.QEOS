@@ -39,6 +39,12 @@ scrape_configs:
       - source_labels: [container_label_com_docker_compose_service]
         regex: (.+)
         target_label: container
+      # A container started without Compose labels (docker run) keeps its name: the rule applies only while
+      # `container` is still empty, since ";name" never matches "<container>;<name>"
+      - source_labels: [container, name]
+        separator: ";"
+        regex: ";(.+)"
+        target_label: container
   - job_name: postgres
     static_configs: [{targets: ["postgres-exporter:9187"]}]
   # Screenshot storage (ADR-036). No bearer token: docker-compose.yml sets MINIO_PROMETHEUS_AUTH_TYPE=public, and
