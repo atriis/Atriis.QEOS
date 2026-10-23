@@ -390,4 +390,7 @@ services:
     replicas: 2
     resources: *nginxResources
     monitoring: true
+    # Read only with monitoring.enabled (GRAFANA_PROXY_KEY <- grafana-proxy-key): the workload identity of its
+    # SecretProviderClass and ServiceAccount
+    identity: services
     env: {}

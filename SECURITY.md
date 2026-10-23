@@ -266,7 +266,12 @@ details.
   or without one, never chooses who Grafana signs in (verified live: a forged
   header for another address still shows the cookie owner). Grafana's auth
   proxy believes that header only from the gateway's fixed `grafana-front`
-  address. The gateway also removes `Authorization` toward Grafana, so the
+  address; on Kubernetes the gateway also sends a shared key in
+  `X-QEOS-Grafana-Key` (`GRAFANA_PROXY_KEY`, Key Vault `grafana-proxy-key`,
+  validated at start-up and never logged), which the proxy sidecar in front of
+  Grafana requires. The header is overwritten on every proxied request, so a
+  client-sent one never passes, and it is empty on the check's subrequest. The
+  gateway also removes `Authorization` toward Grafana, so the
   QEOS access token never reaches it, and strips the `qeos_grafana` cookie from
   the `Cookie` header it forwards (Grafana keeps its own cookies). A hand-made
   header the stripping cannot clean (a third copy, a space before `=`) is

@@ -3,6 +3,8 @@ its configuration into /tmp/nginx (NGINX_RENDER_DIR); the pid and temporary file
 {{- range $name, $svc := .Values.services }}
 {{- if eq $svc.kind "gateway" }}
 {{- $ctx := dict "ctx" $ "name" $name "svc" $svc "uid" 101 }}
+{{- /* Secrets only with monitoring on (GRAFANA_PROXY_KEY): the service account, env and CSI mount then come with them */ -}}
+{{- $keyed := gt (len (include "qeos.secretRefs" $ctx | fromJson)) 0 }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -23,6 +25,9 @@ spec:
       annotations:
         checksum/env: {{ include "qeos.env" $ctx | sha256sum }}
     spec:
+      {{- if $keyed }}
+      serviceAccountName: {{ printf "qeos-%s" (required (printf "services.%s.identity is required: it reads secrets" $name) $svc.identity) }}
+      {{- end }}
       {{- include "qeos.podCommon" $ctx | nindent 6 }}
       containers:
         - name: {{ $name }}
@@ -34,6 +39,10 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ printf "qeos-%s-env" $name }}
+          {{- if $keyed }}
+          env:
+            {{- include "qeos.secretEnv" $ctx | nindent 12 }}
+          {{- end }}
           # The gateway's own /health: nginx answers it without any upstream
           readinessProbe:
             httpGet:
@@ -59,6 +68,9 @@ spec:
               mountPath: /tmp
             - name: nginx-cache
               mountPath: /var/cache/nginx
+            {{- if $keyed }}
+            {{- include "qeos.secretsMount" $ctx | nindent 12 }}
+            {{- end }}
       volumes:
         - name: tmp
           emptyDir:
@@ -66,5 +78,8 @@ spec:
         - name: nginx-cache
           emptyDir:
             sizeLimit: 64Mi
+        {{- if $keyed }}
+        {{- include "qeos.secretsVolume" $ctx | nindent 8 }}
+        {{- end }}
 {{- end }}
 {{- end }}

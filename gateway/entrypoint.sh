@@ -52,6 +52,13 @@ valid "$UPSTREAM_SUFFIX" '(\.[A-Za-z0-9-]+)*' \
   || refuse UPSTREAM_SUFFIX "empty or a domain suffix starting with a dot" "$UPSTREAM_SUFFIX"
 valid "$GATEWAY_RESOLVER" '[A-Za-z0-9.:-]+' || refuse GATEWAY_RESOLVER "a host name or address" "$GATEWAY_RESOLVER"
 valid "$GRAFANA_UPSTREAM" '[A-Za-z0-9.-]+:[0-9]+' || refuse GRAFANA_UPSTREAM "host:port" "$GRAFANA_UPSTREAM"
+# The shared secret the Kubernetes sidecar in front of Grafana checks (X-QEOS-Grafana-Key, grafana-on.conf). Empty (compose):
+# no such header is sent. Unlike the settings above, a refusal never prints the value
+: "${GRAFANA_PROXY_KEY:=}"
+valid "$GRAFANA_PROXY_KEY" '([A-Za-z0-9_-]{32,128})?' || {
+  echo "qeos-gateway: GRAFANA_PROXY_KEY must be empty or 32 to 128 characters of A-Z, a-z, 0-9, _ and -" >&2
+  exit 1
+}
 # Each GATEWAY_TRUSTED_PROXIES entry becomes a set_real_ip_from directive (below): an IPv4 or IPv6 address or CIDR
 : "${GATEWAY_TRUSTED_PROXIES:=}"
 set -f
@@ -77,7 +84,7 @@ else
 fi
 
 export GATEWAY_HTTPS_PORT GATEWAY_IMPORT_MAX_BODY NGINX_RENDER_DIR NGINX_CERT_DIR GATEWAY_RESOLVER UPSTREAM_SUFFIX \
-  GRAFANA_UPSTREAM GATEWAY_PUBLIC_PORT RATE_API RATE_AUTH RATE_COLLECT RATE_COLLECT_BLOBS RATE_COLLECT_ARTIFACTS \
+  GRAFANA_UPSTREAM GRAFANA_PROXY_KEY GATEWAY_PUBLIC_PORT RATE_API RATE_AUTH RATE_COLLECT RATE_COLLECT_BLOBS RATE_COLLECT_ARTIFACTS \
   TLS_ONLY MAIN_LISTEN FORWARDED_PROTO
 mkdir -p "$NGINX_RENDER_DIR"
 
@@ -87,7 +94,7 @@ render() {
   # The pipe's status is sed's: a missing template must stop here
   [ -r "$GATEWAY_TEMPLATE_DIR/$1" ] || { echo "qeos-gateway: no template $GATEWAY_TEMPLATE_DIR/$1" >&2; exit 1; }
   envsubst '${GATEWAY_HTTPS_PORT} ${GATEWAY_IMPORT_MAX_BODY} ${NGINX_RENDER_DIR} ${NGINX_CERT_DIR}
-    ${GATEWAY_RESOLVER} ${UPSTREAM_SUFFIX} ${GRAFANA_UPSTREAM} ${GATEWAY_PUBLIC_PORT} ${RATE_API} ${RATE_AUTH}
+    ${GATEWAY_RESOLVER} ${UPSTREAM_SUFFIX} ${GRAFANA_UPSTREAM} ${GRAFANA_PROXY_KEY} ${GATEWAY_PUBLIC_PORT} ${RATE_API} ${RATE_AUTH}
     ${RATE_COLLECT} ${RATE_COLLECT_BLOBS} ${RATE_COLLECT_ARTIFACTS} ${TLS_ONLY} ${MAIN_LISTEN} ${FORWARDED_PROTO}' \
     < "$GATEWAY_TEMPLATE_DIR/$1" | sed '/^[[:space:]]*#%/d' > "$NGINX_RENDER_DIR/$2"
 }

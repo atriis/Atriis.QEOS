@@ -49,7 +49,10 @@ proxies to a service with no such route, or a row here names the wrong service.
     `nginx.conf.template`; Grafana's own cookies such as `grafana_session` pass unchanged). The check
     itself still receives the full `$http_cookie`. Fail closed: if a `qeos_grafana` is still in
     `$grafana_cookie` (only a hand-made header does that: a third copy, a space before `=`), the request
-    gets `400 {"detail":"Bad Request"}` and never reaches Grafana.
+    gets `400 {"detail":"Bad Request"}` and never reaches Grafana. The same location also **always
+    sets** `X-QEOS-Grafana-Key` to `GRAFANA_PROXY_KEY` (empty, so no header, on Compose), so a client-sent
+    one is replaced; the `/_qeos_grafana_check` subrequest sends it empty, so the key never reaches
+    auth-service.
   - 401: `302 /monitoring?next=<path>`. The dashboard's `/monitoring` page signs in if needed, mints the
     cookie and comes back. `next` is the path of the raw request line, still percent-encoded as the
     client sent it (`$grafana_next`, a map on `$request_uri`), never NGINX's decoded `$uri`: a decoded
@@ -119,6 +122,7 @@ that could end an NGINX directive (a `;`, a space, a line break) stops the gatew
 | `GATEWAY_RESOLVER` | `127.0.0.11` (Docker's DNS) | `kube-dns.kube-system.svc.cluster.local` | The DNS server that resolves the upstreams at request time |
 | `UPSTREAM_SUFFIX` | empty | `.<namespace>.svc.cluster.local` | Appended to every service name in `set $upstream http://<service>${UPSTREAM_SUFFIX}:<port>` (the dashboard and auth-service's Grafana check included) |
 | `GRAFANA_UPSTREAM` | `grafana${UPSTREAM_SUFFIX}:3000` (`grafana:3000`) | the default, unless Grafana runs in another namespace | Where `/grafana/` goes when monitoring is on |
+| `GRAFANA_PROXY_KEY` | empty | the Key Vault secret `grafana-proxy-key` (chart: gateway env, only with `monitoring.enabled`) | Sent to Grafana as `X-QEOS-Grafana-Key` on every proxied `/grafana/` request; the sidecar in front of Grafana on Kubernetes forwards only requests that carry it. Empty (Compose): nginx sends no such header and Grafana keeps trusting the gateway's fixed address. Empty or `[A-Za-z0-9_-]{32,128}`; anything else stops the gateway, and the refusal never prints the value |
 | `GATEWAY_TLS` | `on` | `off` | `off`: TLS ends at the edge. One server listens on 8080 over plain HTTP and serves every route; no 8443, no HTTP→HTTPS redirect server, no certificate generated |
 | `GATEWAY_PUBLIC_PORT` | `${GATEWAY_HTTPS_PORT}` (8443) | `443` | The port in `proxy_redirect` and in the HTTP→HTTPS redirect: the one clients reach |
 | `RATE_API` | `20r/s` | `10r/s` | The `api` zone (every `/api/v1` route, the dashboard, `/grafana/`) |

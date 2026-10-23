@@ -81,6 +81,10 @@ app.kubernetes.io/instance: {{ .ctx.Release.Name }}
 {{- range $env, $key := (.svc.secretEnv | default dict) -}}
 {{- $_ := set $refs $env $key -}}
 {{- end -}}
+{{- /* The shared key the Grafana sidecar checks (X-QEOS-Grafana-Key): the gateway sends it, so only with monitoring on */ -}}
+{{- if and (eq .svc.kind "gateway") .ctx.Values.monitoring.enabled -}}
+{{- $_ := set $refs "GRAFANA_PROXY_KEY" "grafana-proxy-key" -}}
+{{- end -}}
 {{- if .svc.database -}}
 {{- $_ := set $refs "POSTGRES_PASSWORD" (printf "%s-db-password" .svc.database) -}}
 {{- end -}}

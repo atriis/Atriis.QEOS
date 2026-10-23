@@ -50,6 +50,7 @@ KUBERNETES = {
     "RATE_COLLECT_ARTIFACTS": "5r/s",
 }
 SETTINGS = ["GATEWAY_HTTPS_PORT", "GATEWAY_IMPORT_MAX_BODY", "MONITORING_ENABLED", "GATEWAY_TRUSTED_PROXIES",
+            "GRAFANA_PROXY_KEY",
             "NGINX_RENDER_DIR", "NGINX_CERT_DIR", "GATEWAY_TEMPLATE_DIR", *KUBERNETES]
 
 
@@ -238,6 +239,42 @@ def test_bad_values_stop_the_gateway_naming_the_setting(tmp_path, name, value):
     result = render(tmp_path, **{name: value})
     assert result.returncode != 0
     assert name in result.stderr
+
+
+# ---- The Grafana proxy key (ADR-038): the header the Kubernetes sidecar in front of Grafana checks ----
+
+def whole_location(conf: str, opening: str) -> list[str]:
+    """Like location_block, for a location with nested blocks: up to the closing brace at column 0."""
+    start = conf.index(opening)
+    return active(conf[start:conf.index(chr(10) + "}", start) + 2])
+
+
+KEY = "k3Y_" + "ab-Z9" * 8 + "wxyz"  # 48 characters
+
+
+def test_the_proxy_key_header_is_empty_without_a_key_so_nginx_sends_none(tmp_path):
+    _, grafana_conf = ok(tmp_path, MONITORING_ENABLED="true")
+    block = whole_location(grafana_conf, "location ^~ /grafana/ {")
+    assert 'proxy_set_header X-QEOS-Grafana-Key "";' in block
+
+
+def test_the_proxy_key_is_sent_to_grafana_only(tmp_path):
+    assert len(KEY) == 48
+    _, grafana_conf = ok(tmp_path, MONITORING_ENABLED="true", GRAFANA_PROXY_KEY=KEY)
+    assert f'proxy_set_header X-QEOS-Grafana-Key "{KEY}";' in whole_location(grafana_conf, "location ^~ /grafana/ {")
+    # The check's subrequest goes to auth-service: no key there
+    check = whole_location(grafana_conf, "location = /_qeos_grafana_check {")
+    assert 'proxy_set_header X-QEOS-Grafana-Key "";' in check and KEY not in " ".join(check)
+    assert KEY not in rendered(tmp_path, "nginx.conf")
+
+
+@pytest.mark.parametrize("value", ["abc", "x;y" * 20, "a" * 31, "a" * 129, KEY + "\n" + KEY, KEY[:-1] + '"'])
+def test_a_bad_proxy_key_stops_the_gateway(tmp_path, value):
+    result = render(tmp_path, MONITORING_ENABLED="true", GRAFANA_PROXY_KEY=value)
+    assert result.returncode == 1
+    assert "GRAFANA_PROXY_KEY must be" in result.stderr
+    # A secret never goes into a log line
+    assert KEY[:-1] not in result.stderr and "x;y" not in result.stderr
 
 
 # ---- One-time links of the trace viewer (ADR-037) ----

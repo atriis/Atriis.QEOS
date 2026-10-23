@@ -61,6 +61,9 @@ render staging -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}"
 # Once the ACS SMTP application exists, its secrets are in the vault and keyvault.absent drops them
 render staging-email -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" --set 'keyvault.absent={tm-secrets-key}'
 render ci-nopolicy -f "$CHART/values-ci.yaml" --set networkPolicy.enabled=false
+# Monitoring on: the gateway gets the Grafana proxy key (ADR-038)
+render ci-monitoring -f "$CHART/values-ci.yaml" --set monitoring.enabled=true
+render staging-monitoring -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" --set monitoring.enabled=true
 render ci-prometheus -f "$CHART/values-ci.yaml" --set networkPolicy.prometheus.namespace=mon \
   --set-json 'networkPolicy.prometheus.podLabels={"app.kubernetes.io/name":null,"app":"prom"}'
 # values.yaml alone holds no environment: a render must stop on the settings each environment has to give
@@ -307,6 +310,23 @@ for name in $APIS $LOOPS; do
   [ "$vol|$refs" = "qeos-$name|qeos-secrets-$name" ] && pass "staging: $name mounts qeos-$name and reads qeos-secrets-$name" \
     || fail "staging: $name mounts '$vol' and reads '$refs'"
 done
+
+# ---- the Grafana proxy key: only the gateway, only with monitoring on ----
+gwkey() { q "$OUT/$1.yaml" 'select(.kind == "Deployment" and .metadata.name == "gateway") | .spec.template.spec.containers[0].env[] | select(.name == "GRAFANA_PROXY_KEY") | .valueFrom.secretKeyRef.name + "/" + .valueFrom.secretKeyRef.key'; }
+gwspc() { q "$OUT/$1.yaml" 'select(.kind == "SecretProviderClass" and .metadata.name == "qeos-gateway") | [.spec.secretObjects[0].data[].key] | join(" ")'; }
+for env in ci staging; do
+  [ -z "$(gwkey "$env")" ] && pass "$env: monitoring off, the gateway reads no GRAFANA_PROXY_KEY" || fail "$env: gateway reads '$(gwkey "$env")' with monitoring off"
+done
+[ -z "$(gwspc staging)" ] && pass "staging: monitoring off, no SecretProviderClass for the gateway" || fail "staging: qeos-gateway holds '$(gwspc staging)' with monitoring off"
+[ "$(gwkey ci-monitoring)" = "qeos-secrets/grafana-proxy-key" ] && pass "ci: monitoring on, the gateway reads grafana-proxy-key from qeos-secrets"   || fail "ci: gateway GRAFANA_PROXY_KEY is '$(gwkey ci-monitoring)'"
+[ "$(gwkey staging-monitoring)" = "qeos-secrets-gateway/grafana-proxy-key" ] && pass "staging: monitoring on, the gateway reads grafana-proxy-key from qeos-secrets-gateway"   || fail "staging: gateway GRAFANA_PROXY_KEY is '$(gwkey staging-monitoring)'"
+[ "$(gwspc staging-monitoring)" = grafana-proxy-key ] && pass "staging: monitoring on, qeos-gateway holds grafana-proxy-key only"   || fail "staging: qeos-gateway holds '$(gwspc staging-monitoring)'"
+v="$(q "$OUT/staging-monitoring.yaml" 'select(.kind == "Deployment" and .metadata.name == "gateway") | [.spec.template.spec.volumes[] | select(.csi) | .csi.volumeAttributes.secretProviderClass] | join(" ")')"
+[ "$v" = qeos-gateway ] && pass "staging: monitoring on, the gateway pod mounts qeos-gateway (the driver syncs its Secret)" || fail "staging: gateway mounts '$v'"
+v="$(q "$OUT/staging.yaml" 'select(.kind == "Deployment" and .metadata.name == "gateway") | [.spec.template.spec.volumes[] | select(.csi)] | length')"
+[ "$v" = 0 ] && pass "staging: monitoring off, the gateway mounts no secrets volume" || fail "staging: the gateway mounts $v CSI volumes with monitoring off"
+# A rendered ConfigMap never holds the key
+[ "$(q "$OUT/staging-monitoring.yaml" 'select(.kind == "ConfigMap") | .data | keys | .[] | select(. == "GRAFANA_PROXY_KEY")')" = "" ]   && pass "staging: GRAFANA_PROXY_KEY is in no ConfigMap" || fail "staging: a ConfigMap sets GRAFANA_PROXY_KEY"
 
 # ---- environment-specific choices ----
 backend() { q "$OUT/$1.yaml" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-ingestion-service-env") | .data.ARTIFACTS_BACKEND'; }
