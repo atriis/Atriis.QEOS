@@ -405,7 +405,8 @@ def test_s3_open_closes_the_body_when_the_reader_stops_early(s3):
                          {"Bucket": BUCKET, "Key": "artifacts/1/a"})
     chunks, _ = store.open("artifacts/1/a")
     next(chunks)
-    chunks.close()  # what the server does with a response it stops sending
+    # What the server does with a response it stops sending: it drops the iterator (Starlette never calls close())
+    del chunks
     assert _Watched.closed_calls == 1
 
 
@@ -431,3 +432,25 @@ def test_s3_open_closes_the_body_even_when_never_read(s3):
     del chunks
     gc.collect()
     assert _Watched.closed_calls == 1
+
+
+
+def test_s3_closing_iterator_that_failed_to_start_closes_its_body_once():
+    """iter_chunks failing in __init__: the body is closed then, and dropping the half-built iterator raises nothing."""
+    import gc
+
+    from src.ingestion.utils.artifact_store import _Closing
+
+    class Broken:
+        closed = 0
+
+        def iter_chunks(self, size):
+            raise OSError("reset")
+
+        def close(self):
+            Broken.closed += 1
+
+    with pytest.raises(OSError):
+        _Closing(Broken())
+    gc.collect()  # __del__ of the half-built object runs here; an error would surface as unraisable
+    assert Broken.closed == 1  # the body is closed once, by the failed start

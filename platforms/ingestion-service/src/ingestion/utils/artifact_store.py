@@ -190,9 +190,13 @@ class _Closing:
     The body is closed then, not left half-read for the garbage collector to find."""
 
     def __init__(self, body):
-        self._body = body
-        self._chunks = body.iter_chunks(READ_CHUNK)
         self._closed = False
+        self._body = body
+        try:
+            self._chunks = body.iter_chunks(READ_CHUNK)
+        except BaseException:
+            self.close()
+            raise
 
     def __iter__(self) -> "_Closing":
         return self
@@ -210,7 +214,9 @@ class _Closing:
             self._body.close()
 
     def __del__(self) -> None:
-        self.close()
+        # An __init__ that failed has closed the body already (close() runs once)
+        if getattr(self, "_body", None) is not None:
+            self.close()
 
 
 class S3ArtifactStore:

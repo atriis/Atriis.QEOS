@@ -284,3 +284,22 @@ test("a trace that is gone since the count closes the tab and says so", async ()
   expect(await screen.findByRole("alert")).toHaveTextContent("The trace could not be opened. Try again.");
   expect(tab.closed).toBe(true);
 });
+
+test("a failure after two saves still shows the several-files note; opening a trace clears it", async () => {
+  setAccessToken("acc");
+  const saved = stubSave();
+  stubTab();
+  server.use(
+    http.get(`${P}/runs/9/results/1/artifacts`, () => HttpResponse.json({ artifacts: [
+      { id: 5, kind: "trace", name: "a", bytes: 4 }, { id: 6, kind: "trace", name: "b", bytes: 4 }, { id: 7, kind: "trace", name: "c", bytes: 4 }] })),
+    http.get(`${P}/artifacts/:id`, ({ params }) => (params.id === "7" ? HttpResponse.json({ detail: "gone" }, { status: 404 }) : new HttpResponse("PK"))),
+    http.post(`${P}/artifacts/:id/link`, () => HttpResponse.json({ url: "/api/v1/artifact-links/t", expires_at: "2026-10-22T10:00:00Z" }, { status: 201 })),
+  );
+  render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={3} />);
+  await userEvent.click(screen.getByRole("button", { name: "Download traces for test_ok" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("The trace could not be downloaded. Try again.");
+  expect(saved).toEqual(["trace-5.zip", "trace-6.zip"]);
+  expect(screen.getByText("If the browser blocked any, allow this site to download several files.")).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Open trace 1 of 3 for test_ok in a new tab" }));
+  await waitFor(() => expect(screen.queryByText(/download several files/)).toBeNull());
+});

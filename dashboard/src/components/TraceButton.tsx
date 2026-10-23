@@ -57,6 +57,7 @@ export default function TraceButton({ projectId, runId, resultId, name, count, s
    */
   function open(index: number) {
     setError("");
+    setSavedSeveral(false);
     const tab = window.open("", "_blank");
     if (!tab) {
       setStatus("");
@@ -95,19 +96,22 @@ export default function TraceButton({ projectId, runId, resultId, name, count, s
     setError("");
     setSavedSeveral(false);
     setStatus("Downloading trace…");
+    // Files handed to the browser so far: from the second on, it may have held some back, even if a later one failed
+    let saves = 0;
     try {
       const { artifacts } = await listResultArtifacts(projectId, runId, resultId);
       const traces = artifacts.filter((x) => x.kind === "trace");
       for (const [i, a] of traces.entries()) {
         if (i > 0) await new Promise((r) => setTimeout(r, SAVE_GAP_MS));
         downloadBlob(`trace-${a.id}.zip`, await downloadArtifact(projectId, a.id));
+        saves += 1;
       }
       setStatus(traces.length > 1 ? `${traces.length} traces downloaded` : "Trace downloaded");
-      setSavedSeveral(traces.length > 1);
     } catch {
       setStatus("");
       setError("The trace could not be downloaded. Try again.");
     } finally {
+      setSavedSeveral(saves > 1);
       setBusy(false);
     }
   }
