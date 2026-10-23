@@ -3,8 +3,9 @@ its configuration into /tmp/nginx (NGINX_RENDER_DIR); the pid and temporary file
 {{- range $name, $svc := .Values.services }}
 {{- if eq $svc.kind "gateway" }}
 {{- $ctx := dict "ctx" $ "name" $name "svc" $svc "uid" 101 }}
-{{- /* Secrets only with monitoring on (GRAFANA_PROXY_KEY): the service account, env and CSI mount then come with them */ -}}
-{{- $keyed := gt (len (include "qeos.secretRefs" $ctx | fromJson)) 0 }}
+{{- /* Secrets only with monitoring on (GRAFANA_PROXY_KEY, qeos.secretRefs) or a secretEnv of its own: the service
+account, env and CSI mount then come with them */ -}}
+{{- $keyed := or $svc.secretEnv $.Values.monitoring.enabled }}
 ---
 apiVersion: apps/v1
 kind: Deployment
