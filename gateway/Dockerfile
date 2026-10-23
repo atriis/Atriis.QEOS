@@ -1,5 +1,5 @@
 # nginx 1.30.6 on Alpine 3.24.2 (stable), pinned by digest; Dependabot's docker ecosystem proposes the bumps
-FROM nginxinc/nginx-unprivileged:1.30-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
+FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e
 
 # Packages are installed as root; the image itself runs as nginx (uid 101) below
 USER root

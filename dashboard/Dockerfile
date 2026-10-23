@@ -1,4 +1,4 @@
-FROM node:24-alpine AS build
+FROM node:25-alpine AS build
 WORKDIR /app
 COPY dashboard/package.json dashboard/package-lock.json ./
 RUN npm ci
@@ -19,7 +19,7 @@ RUN npm run build
 # Non-root (ADR-038): nginx (uid 101) on port 8080, pid and temporary files in /tmp, so the root filesystem can be
 # read-only
 # nginx 1.30.6 on Alpine 3.24.2 (stable), pinned by digest; Dependabot's docker ecosystem proposes the bumps
-FROM nginxinc/nginx-unprivileged:1.30-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
+FROM nginxinc/nginx-unprivileged:1.31-alpine@sha256:b5047b9b76845eac124358373c6852377c52e4b05834a47647e955dd91cb8f1e
 # Stopgap between base image bumps: the base's patched packages (Trivy fails the build on fixable CRITICAL findings, ADR-038)
 USER root
 RUN apk upgrade --no-cache
