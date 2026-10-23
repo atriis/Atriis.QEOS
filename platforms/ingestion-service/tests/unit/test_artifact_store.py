@@ -416,3 +416,18 @@ def test_s3_open_range_closes_the_body_once_read(s3):
                          {"Bucket": BUCKET, "Key": "artifacts/1/a", "Range": "bytes=2-5"})
     assert b"".join(store.open_range("artifacts/1/a", 2, 5)) == b"2345"
     assert _Watched.closed_calls == 1
+
+
+def test_s3_open_closes_the_body_even_when_never_read(s3):
+    """A client gone before the first chunk was sent: the iterator is dropped unstarted, and the body still closes
+    (a generator's finally would not run then)."""
+    import gc
+
+    store, stubber = s3
+    _Watched.closed_calls = 0
+    stubber.add_response("get_object", {"Body": _Watched(io.BytesIO(b"abc"), 3), "ContentLength": 3},
+                         {"Bucket": BUCKET, "Key": "artifacts/1/a"})
+    chunks, _ = store.open("artifacts/1/a")
+    del chunks
+    gc.collect()
+    assert _Watched.closed_calls == 1

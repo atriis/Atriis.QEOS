@@ -184,14 +184,33 @@ class MemoryArtifactStore:
         return len(doomed)
 
 
-def _closing(body) -> Iterator[bytes]:
-    """An S3 object's bytes in chunks, its connection closed when the reading ends: read to the end, or stopped early
-    by a client that disconnects mid-download (the response drops the iterator, which closes it). The body is closed
-    then, not left half-read for the garbage collector to find."""
-    try:
-        yield from body.iter_chunks(READ_CHUNK)
-    finally:
-        body.close()
+class _Closing:
+    """An S3 object's bytes in chunks, its connection closed when the reading ends: read to the end, or dropped
+    early by a client that disconnected, even before the first chunk (a generator's finally would not run then).
+    The body is closed then, not left half-read for the garbage collector to find."""
+
+    def __init__(self, body):
+        self._body = body
+        self._chunks = body.iter_chunks(READ_CHUNK)
+        self._closed = False
+
+    def __iter__(self) -> "_Closing":
+        return self
+
+    def __next__(self) -> bytes:
+        try:
+            return next(self._chunks)
+        except BaseException:
+            self.close()
+            raise
+
+    def close(self) -> None:
+        if not self._closed:
+            self._closed = True
+            self._body.close()
+
+    def __del__(self) -> None:
+        self.close()
 
 
 class S3ArtifactStore:
@@ -278,7 +297,7 @@ class S3ArtifactStore:
             if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
                 raise ArtifactNotFound(key) from exc
             raise
-        return _closing(body["Body"]), int(body["ContentLength"])
+        return _Closing(body["Body"]), int(body["ContentLength"])
 
     def _ranged_body(self, key: str, start: int, end: int):
         from botocore.exceptions import ClientError
@@ -297,7 +316,7 @@ class S3ArtifactStore:
         return self._ranged_body(key, start, end).read()
 
     def open_range(self, key: str, start: int, end: int) -> Iterator[bytes]:
-        return _closing(self._ranged_body(key, start, end))
+        return _Closing(self._ranged_body(key, start, end))
 
     def list_older(self, prefix: str, older_than: datetime) -> List[str]:
         pages = self._client.get_paginator("list_objects_v2").paginate(Bucket=self._bucket, Prefix=prefix)
