@@ -5,7 +5,8 @@
 # reaches it. Checks what a cluster cannot show: the key opens it (case included), anything else is 403
 # {"detail":"Forbidden"}, the key never reaches Grafana while X-QEOS-User-Email and Host do, /_health needs no key and
 # passes neither header, bodies up to 10m pass and larger get 413, a malformed key stops it before nginx starts, and
-# the key is never logged. Needs helm 3, yq (mikefarah, v4), docker and curl; no cluster.
+# the key is never logged. Then Grafana itself, with its rendered command, must start again after a SIGKILL left its
+# socket behind. Needs helm 3, yq (mikefarah, v4), docker and curl; no cluster.
 #   bash deploy/helm/qeos/tests/grafana_proxy_test.sh
 set -uo pipefail
 
@@ -15,7 +16,7 @@ RUN="qeos-grafana-proxy-test-$$"
 containers=()
 cleanup() {
   [ "${#containers[@]}" -eq 0 ] || docker rm -f "${containers[@]}" >/dev/null 2>&1
-  docker volume rm -f "$RUN-socket" >/dev/null 2>&1
+  docker volume rm -f "$RUN-socket" "$RUN-gfsocket" >/dev/null 2>&1
   rm -rf "$OUT"
 }
 trap cleanup EXIT
@@ -172,6 +173,50 @@ if start_proxy "$name" "$(printf 'K%.0s' $(seq 128))" && [ "$(exited "$name")" =
   pass "a key of 128 characters starts"
 else
   fail "a key of 128 characters: $(docker logs "$name" 2>&1 | head -c 300)"
+fi
+
+# ---- Grafana itself (its rendered command and settings) starts again over the socket a SIGKILL left behind ----
+# The socket's emptyDir outlives a container restart (an OOM kill, a liveness kill past the grace period), and Grafana
+# does not remove a stale socket: without the command's rm it would crash-loop on "bind: address already in use".
+# Provisioning paths are left out (the ConfigMaps are not here); the admin password is a throwaway
+grafana='select(.kind == "Deployment" and .metadata.name == "grafana") | .spec.template.spec.containers[] | select(.name == "grafana")'
+GF_IMAGE="$(yq ea "$grafana | .image" "$OUT/ci.yaml" | tr -d '\r')"
+GF_SCRIPT="$(yq ea "$grafana | .command[2]" "$OUT/ci.yaml" | tr -d '\r')"
+GF_ENVS=()
+while IFS= read -r line; do
+  [ -n "$line" ] && GF_ENVS+=(-e "$line")
+done < <(yq ea "$grafana | .env[] | select(.value != null) | select(.name | test(\"^GF_(PATHS_PROVISIONING|DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH)$\") | not)
+  | .name + \"=\" + .value" "$OUT/ci.yaml" | tr -d '\r')
+G="$RUN-grafana"
+docker volume create "$RUN-gfsocket" >/dev/null
+docker run --rm --user 0 -v "$RUN-gfsocket:/socket" --entrypoint chmod "$IMAGE" 1777 /socket >/dev/null
+# gf_up -- Grafana answers /api/health on its socket within 90 s
+gf_up() {
+  for _ in $(seq 90); do
+    docker exec "$G" curl -sf -o /dev/null -m 2 --unix-socket "$SOCKET" http://localhost/grafana/api/health 2>/dev/null && return 0
+    [ "$(docker inspect -f '{{.State.Running}}' "$G" 2>/dev/null)" = true ] || return 1
+    sleep 1
+  done
+  return 1
+}
+if docker run -d --name "$G" --user 472:472 --read-only --cap-drop ALL --tmpfs /var/lib/grafana:mode=1777 \
+    --tmpfs /tmp:mode=1777 -v "$RUN-gfsocket:${SOCKET%/*}" "${GF_ENVS[@]}" -e GF_SECURITY_ADMIN_PASSWORD=throwaway-pw-1234 \
+    --entrypoint /bin/sh "$GF_IMAGE" -c "$GF_SCRIPT" >/dev/null; then
+  containers+=("$G")
+  if gf_up; then
+    docker kill -s KILL "$G" >/dev/null
+    docker run --rm -v "$RUN-gfsocket:/socket" --entrypoint ls "$IMAGE" /socket > "$OUT/left.txt" 2>&1
+    docker start "$G" >/dev/null
+    if gf_up; then
+      pass "Grafana starts again after a SIGKILL over the socket it left ($(tr '\n' ' ' < "$OUT/left.txt"))"
+    else
+      fail "Grafana does not start again after a SIGKILL (left: $(tr '\n' ' ' < "$OUT/left.txt")): $(docker logs --tail 5 "$G" 2>&1 | grep -i 'bind\|error' | head -c 300)"
+    fi
+  else
+    fail "Grafana does not start on its socket: $(docker logs --tail 5 "$G" 2>&1 | head -c 300)"
+  fi
+else
+  fail "could not start Grafana ($GF_IMAGE)"
 fi
 
 if [ "$failures" -gt 0 ]; then

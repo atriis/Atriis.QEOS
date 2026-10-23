@@ -20,7 +20,8 @@ and `upgrade` stop with a message naming that script, and nothing is applied.
 ```bash
 # Render and check (needs helm 3 and yq v4; no cluster; the renders pass --api-versions for the monitoring CRDs); the
 # chart's copies of Compose's monitoring files; db-init's secret handling (stub psql) and, with docker, qeos_monitor on
-# a real PostgreSQL 16; with docker, Grafana's grafana-proxy sidecar as rendered, in front of a stub Grafana
+# a real PostgreSQL 16; with docker, Grafana's grafana-proxy sidecar as rendered, in front of a stub Grafana, and
+# Grafana starting again after a SIGKILL
 bash deploy/helm/qeos/tests/render_test.sh
 bash deploy/helm/qeos/tests/monitoring_files_test.sh
 bash deploy/helm/qeos/tests/db_init_test.sh
@@ -329,7 +330,10 @@ roles the deploy identity does not have). Prometheus itself is that release's; e
   memory-backed emptyDir (`NGINX_ENVSUBST_OUTPUT_DIR`), never a ConfigMap or a log, and the container's command first
   refuses a key that is not 32 to 128 characters of `[A-Za-z0-9_-]` (as the gateway does) without printing it.
   `grafana-ingress` admits the gateway only, so no other pod reaches even the sidecar.
-  `tests/grafana_proxy_test.sh` runs the rendered sidecar in docker in front of a stub Grafana;
+  The socket's emptyDir outlives a container restart and Grafana does not remove a stale socket, so its start
+  command does (`rm -f "$GF_SERVER_SOCKET"`): after a SIGKILL (an OOM kill) it binds again instead of crash-looping.
+  `tests/grafana_proxy_test.sh` runs the rendered sidecar in docker in front of a stub Grafana, and the rendered
+  Grafana through a SIGKILL and a restart on the same socket volume;
   `scripts/check_k8s_policies.sh` and `scripts/check_k8s_monitoring.sh` check it on kind: `/grafana/` through the
   gateway without the cookie is a 302 to `/monitoring?next=`, forged key and user headers included; Service `grafana`
   without the key is 403, with it 200; a port-forward to the pod with a forged user header gets no answer on 3000 and

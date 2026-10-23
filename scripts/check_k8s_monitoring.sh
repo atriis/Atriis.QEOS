@@ -222,12 +222,26 @@ got="$(yq -p json -o yaml '.email' "$TMP/body" 2>/dev/null | tr -d '\r')"
 # so a forward to 3000 gets no HTTP answer, and the sidecar's 8080 wants the key whatever user header comes with it
 kubectl -n "$NAMESPACE" port-forward deploy/grafana "$GF_DIRECT_PORT:3000" >"$TMP/forward-3000.log" 2>&1 &
 forwards+=("$!")
+started=""
 for _ in $(seq 15); do
-  grep -q "Forwarding from" "$TMP/forward-3000.log" && break
+  grep -q "Forwarding from" "$TMP/forward-3000.log" && { started=1; break; }
   sleep 1
 done
-status_of "a port-forward to the pod's 3000 with a forged user header gets no HTTP answer (nothing listens)" 000 \
-  "http://localhost:$GF_DIRECT_PORT/grafana/api/user" -H "X-QEOS-User-Email: admin@example.com"
+# A forward that never started would answer 000 too: it must be up, and its log must show the pod refusing the
+# connection (nothing listens on 3000), not a 000 for any other reason
+if [ -z "$started" ]; then
+  fail "the port-forward to the pod's 3000 did not start: $(head -c 300 "$TMP/forward-3000.log")"
+else
+  status_of "a port-forward to the pod's 3000 with a forged user header gets no HTTP answer (nothing listens)" 000 \
+    "http://localhost:$GF_DIRECT_PORT/grafana/api/user" -H "X-QEOS-User-Email: admin@example.com"
+  for _ in $(seq 5); do
+    grep -qiE "connection refused|failed to connect" "$TMP/forward-3000.log" && break
+    sleep 1
+  done
+  grep -qiE "connection refused|failed to connect" "$TMP/forward-3000.log" \
+    && pass "... kubectl reports the pod refused the connection on 3000" \
+    || fail "... the forward's log shows no refused connection: $(tail -c 300 "$TMP/forward-3000.log")"
+fi
 status_of "a port-forward to the pod's 8080 with a forged user header, without the key" 403 "$GF_POD/grafana/api/user" \
   -H "X-QEOS-User-Email: admin@example.com"
 

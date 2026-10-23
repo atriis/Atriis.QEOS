@@ -103,13 +103,16 @@ spec:
         - name: grafana
           image: {{ $images.grafana }}
           imagePullPolicy: IfNotPresent
-          # Compose's entrypoint: no start without an admin password (an empty one would mean admin/admin)
+          # Compose's entrypoint: no start without an admin password (an empty one would mean admin/admin). Then the
+          # socket a killed Grafana left behind goes: its emptyDir outlives a container restart, and Grafana would
+          # otherwise fail to bind ("address already in use") until the pod is deleted
           command:
             - /bin/sh
             - -c
             - >-
               if [ -z "$GF_SECURITY_ADMIN_PASSWORD" ]; then
               echo 'grafana: the Key Vault secret grafana-admin-password is empty' >&2; exit 1; fi;
+              rm -f "$GF_SERVER_SOCKET";
               exec /run.sh
           env:
             # Compose's settings (docker-compose.yml, service grafana), but the root URL, the unix socket in place of

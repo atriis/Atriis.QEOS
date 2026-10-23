@@ -786,6 +786,9 @@ for env in ci staging; do
   c="$(gf grafana '.command | join(" ")')"
   [[ "$c" == *'[ -z "$GF_SECURITY_ADMIN_PASSWORD" ]'*"exit 1"*"exec /run.sh"* ]] && pass "$env: grafana refuses to start without the admin password" \
     || fail "$env: grafana's command is '$c'"
+  # A SIGKILL leaves the socket in its emptyDir: the command removes it before Grafana binds again
+  [[ "$c" == *'rm -f "$GF_SERVER_SOCKET";'*"exec /run.sh"* ]] && pass "$env: grafana removes a stale socket before it starts" \
+    || fail "$env: grafana's command keeps a stale socket: '$c'"
   got="$(gf grafana '[.volumeMounts[] | .mountPath + ((.readOnly // false) | tostring)] | sort | join(" ")')"
   [ "$got" = "/etc/qeos/grafana/dashboardstrue /etc/qeos/grafana/provisioningtrue /tmpfalse /var/lib/grafanafalse ${socket%/*}false" ] \
     && pass "$env: grafana mounts the dashboards and provisioning read-only where Compose does, /var/lib/grafana and /tmp writable" \

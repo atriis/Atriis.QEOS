@@ -117,3 +117,14 @@ def test_rule_groups_check_leaves_out_both_skipped_groups():
     text = script()
     assert '" qeos-host "*' in text and '" qeos-containers "*' in text
     assert "qeos-host and qeos-containers left out" in text
+
+
+def test_the_port_forward_to_3000_must_start_and_be_refused():
+    """A forward that never started also gives 000: the check fails unless kubectl printed "Forwarding from" and
+    then reports the pod refusing the connection."""
+    text = script()
+    block = text[text.index('port-forward deploy/grafana "$GF_DIRECT_PORT:3000"'):]
+    block = block[:block.index("# Grafana itself, as the admin")]
+    assert 'grep -q "Forwarding from"' in block and 'if [ -z "$started" ]; then' in block
+    assert 'fail "the port-forward to the pod' in block
+    assert "connection refused|failed to connect" in block and 'fail "... the forward' in block
