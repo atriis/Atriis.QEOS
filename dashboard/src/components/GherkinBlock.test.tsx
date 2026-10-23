@@ -202,3 +202,18 @@ test("Tab out of the tip skips hidden, inert and disabled elements after the blo
   await userEvent.tab();
   expect(document.activeElement).toBe(screen.getByRole("button", { name: "real next" }));
 });
+
+test("a blank line keeps its row (a <br>), so it shows and copies as a blank line", () => {
+  render(<GherkinBlock text={"Scenario: s\n\n  Given x"} />);
+  const rows = [...document.querySelectorAll("pre > .gk-line")];
+  expect(rows).toHaveLength(3);
+  expect(rows[1].querySelector(".gk-code br")).not.toBeNull();
+});
+
+test("the visible words of a mark are hidden from screen readers; the prefix says it once", () => {
+  render(<GherkinBlock text={"Scenario: s\n  Given x\n  When a"} passedThrough={2} failed={{ line: 3, tip: <span>boom</span> }} />);
+  expect(document.querySelector(".gk-passed-mark")).toHaveAttribute("aria-hidden", "true");
+  expect(document.querySelector(".gk-failed-mark")).toHaveAttribute("aria-hidden", "true");
+  expect(document.querySelector(".gk-passed")).toHaveTextContent("Passed step:");
+  expect(failedLine()).toHaveTextContent("Failed step:");
+});

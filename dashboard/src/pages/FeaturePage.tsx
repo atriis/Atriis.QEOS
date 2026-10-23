@@ -170,8 +170,8 @@ export default function FeaturePage() {
   useScrollToFailure(runId, anyFailure);
 
   // One card with step screenshots reserves the camera column on every card, so all the scenarios line up
-  const cardShots = new Map(cards.map(({ c, block }) => [c.number, shotsOf(c, block)]));
-  const anyShots = [...cardShots.values()].some((shots) => shots != null);
+  const shown = cards.map(({ c, block }) => ({ c, block, shots: shotsOf(c, block) }));
+  const anyShots = shown.some(({ shots }) => shots != null);
 
   return (
     <section>
@@ -209,11 +209,10 @@ export default function FeaturePage() {
           <GherkinBlock text={split.preamble.text} label="Feature" numbered startLine={split.preamble.start} />
         </div>
       )}
-      {cards.map(({ c, block }) => {
+      {shown.map(({ c, block, shots }) => {
         const failure = failureOf(c, block);
         const passedThrough = failure?.background != null ? undefined : passedThroughOf(resultOf(c)?.status, failure?.line);
         const result = resultOf(c);
-        const shots = cardShots.get(c.number) ?? null;
         return (
           <article key={c.number} className="card scenario-card" aria-label={`${c.key} ${c.title}`}>
             <div className="scenario-card-head">

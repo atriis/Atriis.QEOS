@@ -655,9 +655,10 @@ A failed test's Playwright trace reaches QEOS with its result, and opens there i
   left out), with a limit of 5 minutes of its own, the key check and hashing included; it also stops a trace still
   streaming. When it runs out the rest are skipped and the run goes without them. A trace problem never fails the run upload. One line sums it up:
   `traces: 3 stored (41.2 MB), 1 skipped`, with the reasons in brackets.
-- **From 0.14.1.** A trace whose bytes QEOS already holds (another file with the same content, sent earlier in the
-  run or by an earlier run) is skipped by its HEAD check: no PUT, and its result still references it.
-  When the reports name traces but none can be read, the key is not checked and the line says
+  A trace whose bytes QEOS already holds, from an earlier run or an earlier file of this one, gets a 200 to its HEAD
+  and no PUT; its result still references it. Two files with the same bytes sent at the same moment both upload, and
+  QEOS keeps one copy.
+- **From 0.14.1.** When the reports name traces but none can be read, the key is not checked and the line says
   `traces: none could be read, 2 skipped` with the reasons. `--dry-run` hashes the traces under the same 5 minutes
   and 500 per run and counts them as the upload does, saying
   `traces: 2 would be sent (12.3 MB) within the 300 s budget, 1 skipped`, so it never takes longer than the upload

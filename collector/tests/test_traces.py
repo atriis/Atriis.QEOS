@@ -670,3 +670,16 @@ def test_two_files_with_the_same_bytes_count_the_same_in_the_upload_and_the_dry_
     assert trace_lines(capsys) == ["qeos: traces: 2 stored (0.0 MB), 0 skipped"]
     assert main(["upload", report, "--no-changes", "--dry-run"], {}) == 0
     assert trace_lines(capsys) == ["qeos: traces: 2 would be sent (0.0 MB) within the 300 s budget, 0 skipped"]
+
+
+def test_a_dry_run_says_a_trace_that_changed_while_hashed_changed(workdir, capsys, monkeypatch):
+    trace = write(workdir / "test-results" / "a.zip", ZIP_A)
+    report = playwright_report(workdir, [zip_attachment(trace)])
+
+    def changed(self, *args):
+        raise traces.TraceChanged()
+
+    monkeypatch.setattr(TraceFile, "digest", changed)
+    assert main(["upload", report, "--no-changes", "--dry-run"], {}) == 0
+    assert trace_lines(capsys) == ["qeos: traces: 0 would be sent (0.0 MB) within the 300 s budget, 1 skipped "
+                                   "(1 changed since the report was read)"]

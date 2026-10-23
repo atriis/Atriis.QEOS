@@ -67,12 +67,14 @@ export function passedLines(lines: string[], through: number | undefined): Map<n
   return passed;
 }
 
-const tokens = (line: string) => tokenizeLine(line).map((t, j) => <span key={j} className={`gk-${t.kind}`}>{t.text}</span>);
+// An empty line holds a <br>: as a row with no line feed of its own it would otherwise have no height, and copying would drop it
+const tokens = (line: string) => (line === "" ? <br /> : tokenizeLine(line).map((t, j) => <span key={j} className={`gk-${t.kind}`}>{t.text}</span>));
 
 /** The marked line: focusable, marked in words and an icon as well as colour (red failed, yellow skipped); its tip is the shared FailedTipAnchor's. */
 function FailedLine({ numbered, n, tip, tone = "failed", children, lead, note }: { numbered: boolean; n: number; tip: ReactNode; tone?: StepTone; children: ReactNode; lead?: ReactNode; note?: ReactNode }) {
   const { className, srText, word, Icon } = MARK[tone];
-  const mark = <span className="gk-failed-mark"><Icon size={14} aria-hidden="true" /> {word}</span>;
+  // The visible word is hidden from screen readers: the prefix above already says it
+  const mark = <span className="gk-failed-mark" aria-hidden="true"><Icon size={14} /> {word}</span>;
   return (
     <FailedTipAnchor className={className} dataLine={numbered ? n : undefined} tip={tip}>
       <span className="sr-only">{srText}</span>
@@ -111,7 +113,7 @@ export default function GherkinBlock({ text, label = "Gherkin", numbered = false
         const ok = passed.get(n);
         // A passed step says so in a word and an icon as well as colour, like the failed one; its table rows and doc
         // string share the green but are not announced again
-        const mark = ok === "step" && <span className="gk-passed-mark"><CheckCircle2 size={14} aria-hidden="true" /> passed</span>;
+        const mark = ok === "step" && <span className="gk-passed-mark" aria-hidden="true"><CheckCircle2 size={14} /> passed</span>;
         return (
           <span key={i} className={ok ? "gk-line gk-passed" : "gk-line"} data-line={numbered ? i + startLine : undefined}>
             {ok === "step" && <span className="sr-only">Passed step: </span>}
