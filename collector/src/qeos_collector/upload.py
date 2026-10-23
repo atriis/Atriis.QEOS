@@ -254,76 +254,36 @@ def upload_artifacts(
     """Hashes each trace (one TraceFile per resolved path), then stores it with HEAD, and a PUT streamed from disk
     when missing, on /collect/artifacts/{sha256}, after the screenshots and before the run (spec 2026-10-21 §4.2).
     Returns the sha256s QEOS holds; each TraceFile hashed carries its sha256 and size, and the caller drops every
-    other reference. Hashing counts against the budget and the per-run cap. Files with the same bytes go up once
-    (0.14.1): the first one hashed sends them; a copy only records that and frees its worker, then keeps its reference
-    when those bytes were stored, else it is counted with that file's outcome. When that file changed, the worker
-    that sent it sends a copy next instead (within the same deadline), and so on. Best
-    effort and bounded like upload_images, with its own budget, which also cuts off a PUT still streaming. A file
-    that changed since the report was read is left out (never uploaded with other bytes)."""
+    other reference. Hashing counts against the budget and the per-run cap. Best effort and bounded like
+    upload_images, with its own budget, which also cuts off a PUT still streaming. A file that changed since the
+    report was read is left out (never uploaded with other bytes)."""
     prefix = base_url.strip().rstrip("/") + ARTIFACTS_PATH
     headers = {"Authorization": f"Bearer {key}", "User-Agent": f"qeos-collector/{__version__}"}
     lock = threading.Lock()
     left_out = {"changed": 0, "refused": 0}
     by_path = {trace.path: trace for trace in artifacts}
     held: Set[str] = set()
-    owners: Dict[str, list] = {}  # sha256 -> [the file sending those bytes, its outcome (None while it runs)]
-    copies: Dict[str, List[TraceFile]] = {}  # sha256 -> the files whose bytes another file sends
-
-    def claimer(trace: TraceFile, owned: List[str]) -> Callable[[str], bool]:
-        def claim(sha: str) -> bool:
-            """True when `trace` sends these bytes; False (recorded as a copy, never waiting) when another file
-            does. Bytes whose file changed are free again."""
-            with lock:
-                entry = owners.get(sha)
-                if entry is None or entry[0] is trace or entry[1] == "changed":
-                    owners[sha] = [trace, None]
-                    owned.append(sha)
-                    return True
-                copies.setdefault(sha, []).append(trace)
-                return False
-        return claim
 
     def store(path: str, deadline: float, first: bool) -> bool:
-        trace, handed = by_path[path], None  # handed: the sha256 this worker sends for a file that changed
-        while True:
-            owned: List[str] = []
-            outcome = _store_artifact(prefix, headers, trace, context, deadline, first=first,
-                                      clock=clock, sleep=sleep, rand=rand, claim=claimer(trace, owned))
-            if outcome == _COPY:
-                return False  # settled once every worker finished
+        trace = by_path[path]
+        outcome = _store_artifact(prefix, headers, trace, context, deadline, first=first,
+                                  clock=clock, sleep=sleep, rand=rand)
+        if outcome is True:
             with lock:
-                if outcome is True:
-                    held.add(trace.sha256)
-                elif outcome in left_out:
-                    left_out[outcome] += 1
-                for sha in owned:
-                    owners[sha][1] = outcome
-                if handed is not None and handed not in owned and owners[handed][0] is trace:
-                    owners[handed][1] = "changed"  # this copy does not hold those bytes any more either
-                # A changed file's bytes go up from one of its copies, in this worker: nobody waits for it
-                again = next((sha for sha in owned + ([handed] if handed else [])
-                              if owners[sha][1] == "changed" and copies.get(sha)), None)
-                if again is None:
-                    return outcome is True
-                trace, handed, first = copies[again].pop(0), again, False
-                owners[again] = [trace, None]
+                held.add(trace.sha256)
+            return True
+        if outcome in left_out:
+            with lock:
+                left_out[outcome] += 1
+        return False
 
     _each(list(by_path), MAX_ARTIFACTS_PER_RUN, store, budget_seconds, workers, warn=warn, clock=clock)
-    with lock:
-        # A copy keeps its reference when its bytes were stored, else is counted as the file that sent them went
-        for sha, waiting in copies.items():
-            outcome = owners[sha][1]
-            if sha not in held and isinstance(outcome, str) and outcome in left_out:
-                left_out[outcome] += len(waiting)
     if left_out["changed"]:
         warn(f"{left_out['changed']} changed since the report was read")
     if left_out["refused"]:
         warn(f"{left_out['refused']} refused by the platform")
     with lock:
         return set(held)
-
-
-_COPY = "copy"  # _store_artifact: another file with the same bytes is sent instead
 
 
 def _each(shas: list, most: int, store_one: Callable[[str, float, bool], bool], budget_seconds: float, workers: int,
@@ -414,20 +374,17 @@ def _stop_on(status: int, what: str) -> None:
 
 def _store_artifact(prefix: str, headers: Mapping[str, str], trace: TraceFile, context: Optional[ssl.SSLContext],
                     deadline: float, *, first: bool, clock: Callable[[], float], sleep: Callable[[float], None],
-                    rand: Callable[[], float],
-                    claim: Optional[Callable[[str], bool]] = None) -> "Union[bool, str]":
+                    rand: Callable[[], float]) -> "Union[bool, str]":
     """Hashes the trace, then True when QEOS holds it: already there (HEAD 200) or stored now (PUT 200/201); else
-    False, "changed" (the file is not the one the report named any more), "refused" (400, 413, or a connection the
-    platform dropped while the body was sent, twice: this trace only) or _COPY (`claim(sha256)` said another file with
-    the same bytes is sent instead). Raises _OutOfTime at the deadline, also in the middle of hashing or streaming."""
+    False, "changed" (the file is not the one the report named any more) or "refused" (400, 413, or a connection the
+    platform dropped while the body was sent, twice: this trace only). Raises _OutOfTime at the deadline, also in the
+    middle of hashing or streaming."""
     try:
         sha = trace.digest(deadline, clock)
     except TraceTimeout:
         raise _OutOfTime() from None
     except TraceChanged:
         return "changed"
-    if claim is not None and not claim(sha):
-        return _COPY
     url = prefix + sha
     status = _blob_request(url, "HEAD", None, headers, context, deadline, first, clock, sleep, rand)
     if status == 200:
