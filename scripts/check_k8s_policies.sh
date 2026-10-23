@@ -71,6 +71,8 @@ pod_labels() {
 # start_pod FROM -- a sleeping curl pod with the restricted settings; its name on stdout
 start_pod() {
   local name="qeos-policy-check-$1"
+  # A previous run's pod may still be terminating (the cleanup does not wait): gone first, or apply would patch it
+  "${KUBECTL[@]}" delete pod --ignore-not-found --wait=true --timeout=60s "$name" >/dev/null || return 1
   "${KUBECTL[@]}" apply -f - >/dev/null <<YAML || return 1
 apiVersion: v1
 kind: Pod
