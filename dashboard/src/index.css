@@ -796,13 +796,16 @@ label.button:hover { background: var(--hover-strong); }
 .gherkin.numbered { white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 0; counter-reset: none; }
 .gherkin.numbered .gk-line { display: grid; grid-template-columns: 4ch minmax(0, 1fr) auto; column-gap: var(--space-3); align-items: start; }
 /* Every line is a grid row, so a marked line (passed, failed) keeps its text where the others have theirs. Not numbered: the
-   text keeps its width (the block scrolls sideways) and a mark follows it */
-.gherkin:not(.numbered) .gk-line { display: grid; grid-template-columns: max-content auto; justify-content: start; column-gap: var(--space-3); align-items: start; padding-inline-start: var(--space-2); border-radius: 2px; }
+   text keeps its width (the block scrolls sideways) and the mark sits at the right edge, as on numbered blocks */
+/* The block is one column as wide as its widest line (at least the block): every row shares that width, so the marks
+   line up at one right edge even when a long line makes the block scroll sideways */
+.gherkin:not(.numbered) { display: grid; grid-template-columns: minmax(max-content, 1fr); }
+.gherkin:not(.numbered) .gk-line { display: grid; grid-template-columns: minmax(max-content, 1fr) auto; column-gap: var(--space-3); align-items: start; padding-inline: var(--space-2); border-radius: 2px; }
 /* A step's screenshot button sits on the left, in a column every line of the block reserves: the steps stay aligned */
 .gherkin { --gk-gutter: 34px; }
 @media (pointer: coarse) { .gherkin { --gk-gutter: 44px; } }
 .gherkin.numbered.has-gutter .gk-line { grid-template-columns: 4ch var(--gk-gutter) minmax(0, 1fr) auto; }
-.gherkin.has-gutter:not(.numbered) .gk-line { grid-template-columns: var(--gk-gutter) max-content auto; }
+.gherkin.has-gutter:not(.numbered) .gk-line { grid-template-columns: var(--gk-gutter) minmax(max-content, 1fr) auto; }
 .gk-gutter { display: flex; align-items: center; min-height: 1.6em; user-select: none; }
 .gherkin.has-gutter .gk-gutter .gk-note { margin: 0; }
 /* In the column the camera is a fixed 34px button: the icon and a count of at most two characters side by side (above
