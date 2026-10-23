@@ -99,6 +99,11 @@ must keep working unchanged.
   have no stable addresses, and restricting them needs Cilium's FQDN policies (CiliumNetworkPolicy `toFQDNs`), which
   the chart does not use yet. A compromised pod can therefore still reach the internet and anything outside the
   namespace that has no policy of its own; inside it, only the Services that admit it.
+- **kube-prometheus-stack is a cluster admin's release** (Stage 2; `deploy/monitoring/README.md`). It needs CRDs and
+  cluster roles the deploy identity cannot create, so `deploy/monitoring/install.sh` installs it (release and namespace
+  `qeos-monitoring`, Prometheus only: Grafana and Alertmanager come from the QEOS chart) once per cluster and after each
+  version bump; CI's kind job runs the same script. The version is pinned in a wrapper chart Dependabot bumps, and the
+  archive by its sha256. Prometheus admits 9090 from the QEOS chart's Grafana and its own namespace only.
 - Per-process limits in ingestion (8 storage calls, a 60 s pending-deletion cache) become per pod.
 - Staging stopped during the Sunday window misses its upgrade; documented.
 
@@ -117,6 +122,9 @@ Nothing here can be proved without a real subscription:
 - The add-on's proxy pods and the probe annotations; the namespace the edge pods run in.
 - With the NetworkPolicies under Cilium: kubelet probes and the edge's proxy pods still reach the pods (kind's kindnet
   is proved in CI), and Prometheus reaches the APIs from `networkPolicy.prometheus`.
+- kube-prometheus-stack on AKS: node-exporter in the privileged `qeos-monitoring` namespace, Prometheus's 20Gi
+  `managed-csi` volume, its NetworkPolicy under Cilium (Grafana in the QEOS namespace admitted, other pods refused; on
+  kind it is proved by hand), and the default rules quiet on a healthy cluster.
 - `pg_stat_statements` preloaded on Flexible Server; `db-init` with Flexible Server's admin (CI's kind job already
   runs it on PostgreSQL 16 as a `CREATEROLE CREATEDB` admin that is not a superuser, which needs the role granted
   `WITH INHERIT TRUE, SET TRUE`).

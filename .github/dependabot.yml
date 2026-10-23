@@ -67,6 +67,17 @@ updates:
       actions:
         patterns: ["*"]
 
+  # kube-prometheus-stack, pinned by deploy/monitoring's wrapper chart. A bump also needs Chart.yaml's sha256
+  # annotation updated by hand (install.sh refuses any other archive): deploy/monitoring/README.md
+  - package-ecosystem: "helm"
+    directory: "/deploy/monitoring"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 2
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+
   # Base images of every Dockerfile (the nginx images are pinned by digest, the Python ones by tag)
   - package-ecosystem: "docker"
     directories:

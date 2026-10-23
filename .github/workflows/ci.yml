@@ -622,6 +622,7 @@ jobs:
           yq --version
           bash "$CHART/tests/render_test.sh"
           bash "$CHART/tests/db_init_test.sh"
+          bash deploy/monitoring/tests/install_test.sh
 
       - name: Build the images
         run: |
@@ -670,6 +671,11 @@ jobs:
             images+=("qeos/$name:$TAG")
           done
           kind load docker-image --name qeos-kind "${images[@]}"
+
+      # The cluster's kube-prometheus-stack, as a cluster admin installs it on AKS (deploy/monitoring/README.md). It
+      # creates both namespaces and labels them for Pod Security (qeos: enforce restricted, as on kind below)
+      - name: Install kube-prometheus-stack
+        run: bash deploy/monitoring/install.sh --env ci --qeos-namespace "$NAMESPACE" --enforce-restricted
 
       # The Secret the chart reads with secrets.source kubernetes, from values-ci.yaml's dummy values. The namespace
       # enforces Pod Security restricted; created only if missing (deploy/monitoring/install.sh may create it first)

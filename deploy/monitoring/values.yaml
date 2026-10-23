@@ -1,0 +1,142 @@
+# kube-prometheus-stack for every environment (ADR-038, README.md here); values-<env>.yaml adds storage and sizes.
+# install.sh adds what depends on the namespaces (the QEOS namespace and this release's): the Alertmanager endpoint, the
+# namespace selectors, the enforcement exclusions and qeosNamespace below. Nothing here names a namespace.
+kube-prometheus-stack:
+  # Prometheus Service qeos-monitoring-prometheus:9090, which the QEOS chart's Grafana reads
+  fullnameOverride: qeos-monitoring
+  # Set by install.sh (--qeos-namespace): the namespace the QEOS chart runs in, for the NetworkPolicy below
+  qeosNamespace: ""
+
+  # Grafana and Alertmanager run from the QEOS chart, with Compose's provisioning and routing (ADR-038)
+  grafana:
+    enabled: false
+  alertmanager:
+    enabled: false
+
+  # Not scrapable on AKS (a managed control plane; kube-proxy's metrics bind to localhost)
+  kubeControllerManager:
+    enabled: false
+  kubeScheduler:
+    enabled: false
+  kubeEtcd:
+    enabled: false
+  kubeProxy:
+    enabled: false
+
+  # Every default rule reaches QEOS's Alertmanager, so the ones that would only be noise are off
+  defaultRules:
+    rules:
+      # The control plane's groups: nothing scrapes it on AKS (above), so they would never or always fire
+      etcd: false
+      kubeSchedulerAlerting: false
+      kubeControllerManager: false
+      kubeProxy: false
+    disabled:
+      # QEOS's own rules carry the Watchdog that proves the alert path works
+      Watchdog: true
+      InfoInhibitor: true
+      # Always true on a small node pool sized for its requests
+      KubeCPUOvercommit: true
+      KubeMemoryOvercommit: true
+
+  prometheus:
+    # The chart's own NetworkPolicy option always adds policyType Egress, which would cut off scraping; the one in
+    # extraManifests below is ingress only
+    networkPolicy:
+      enabled: false
+    prometheusSpec:
+      # Any ServiceMonitor, PodMonitor and PrometheusRule in the two namespaces install.sh names, whatever its labels
+      # (the QEOS chart's carry no release label)
+      serviceMonitorSelectorNilUsesHelmValues: false
+      podMonitorSelectorNilUsesHelmValues: false
+      ruleSelectorNilUsesHelmValues: false
+      # Series and alerts from the QEOS namespace's ServiceMonitors and rules get namespace=<their namespace>, whatever
+      # the target says; install.sh excludes this namespace's own (node, pod and kubelet series keep their namespace)
+      enforcedNamespaceLabel: namespace
+      retention: 15d
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 2000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
+
+  prometheusOperator:
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      runAsGroup: 65534
+      fsGroup: 65534
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: [ALL]
+
+  kube-state-metrics:
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      runAsGroup: 65534
+      fsGroup: 65534
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: [ALL]
+
+  # node-exporter needs the host's network and PID namespaces and its file systems (hence the monitoring namespace's
+  # Pod Security privileged); everything else restricted allows
+  prometheus-node-exporter:
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      runAsGroup: 65534
+      fsGroup: 65534
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: [ALL]
+
+  # Prometheus is not open to the cluster: 9090 from the QEOS chart's Grafana and from this namespace (the operator,
+  # Prometheus itself); the config reloader's metrics from this namespace. Ingress only: scraping is outbound
+  extraManifests:
+    - apiVersion: networking.k8s.io/v1
+      kind: NetworkPolicy
+      metadata:
+        name: qeos-monitoring-prometheus-ingress
+        namespace: "{{ .Release.Namespace }}"
+      spec:
+        podSelector:
+          matchLabels:
+            app.kubernetes.io/name: prometheus
+        policyTypes: [Ingress]
+        ingress:
+          - from:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: '{{ required "qeosNamespace is set by deploy/monitoring/install.sh" .Values.qeosNamespace }}'
+                podSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: grafana
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: "{{ .Release.Namespace }}"
+            ports:
+              - port: 9090
+                protocol: TCP
+          - from:
+              - namespaceSelector:
+                  matchLabels:
+                    kubernetes.io/metadata.name: "{{ .Release.Namespace }}"
+            ports:
+              - port: 8080
+                protocol: TCP

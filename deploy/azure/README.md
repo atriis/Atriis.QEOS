@@ -312,8 +312,11 @@ per cluster (and again after a cluster rebuild):
 az aks get-credentials --resource-group rg-qeos-staging --name aks-qeos-staging
 kubelogin convert-kubeconfig -l azurecli
 
-# The chart's namespace: the deploy identity's RBAC Admin role is scoped to it
-kubectl create namespace qeos
+# kube-prometheus-stack (Prometheus, its operator and CRDs, kube-state-metrics, node-exporter): release qeos-monitoring
+# in namespace qeos-monitoring. It also creates the chart's namespace qeos (the deploy identity's RBAC Admin role is
+# scoped to it) with its Pod Security labels. Again after every version bump of deploy/monitoring/Chart.yaml (it
+# upgrades the CRDs, which Helm never does). deploy/monitoring/README.md
+bash deploy/monitoring/install.sh --env staging
 
 # cert-manager with its CRDs and Gateway API support (the chart's Certificate and Issuer use it). Pin a current
 # release from https://cert-manager.io/docs/releases/
@@ -323,7 +326,8 @@ helm install cert-manager jetstack/cert-manager --namespace cert-manager --creat
 ```
 
 The chart brings its own namespaced `Issuer` (Let's Encrypt, HTTP-01 through the Gateway) and `Certificate`, so
-nothing else cluster-wide is needed. Upgrading cert-manager is the same `helm upgrade` by a cluster admin.
+nothing else cluster-wide is needed. Upgrading cert-manager is the same `helm upgrade` by a cluster admin; upgrading
+kube-prometheus-stack is the same `install.sh` run, after the Dependabot PR that bumps it is merged.
 
 ## 5. GitHub configuration
 

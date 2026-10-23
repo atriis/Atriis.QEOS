@@ -1,0 +1,16 @@
+# Staging on AKS: Prometheus keeps its 15 days on an Azure Disk (managed-csi, AKS's default CSI class)
+kube-prometheus-stack:
+  prometheus:
+    prometheusSpec:
+      storageSpec:
+        volumeClaimTemplate:
+          spec:
+            storageClassName: managed-csi
+            accessModes: [ReadWriteOnce]
+            resources:
+              requests:
+                storage: 20Gi
+      resources:
+        requests:
+          cpu: 100m
+          memory: 1Gi

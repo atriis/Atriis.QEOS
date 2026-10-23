@@ -1,0 +1,18 @@
+# The cluster's kube-prometheus-stack, installed once per cluster by a cluster admin with install.sh (ADR-038, README.md
+# here). A wrapper around one dependency so the pin lives in a manifest Dependabot's helm ecosystem bumps; the values
+# are nested under kube-prometheus-stack: in values*.yaml.
+apiVersion: v2
+name: qeos-monitoring
+description: kube-prometheus-stack for QEOS on AKS and kind (Prometheus, the operator, kube-state-metrics, node-exporter)
+type: application
+version: 0.1.0
+annotations:
+  # sha256 of kube-prometheus-stack-<version>.tgz as the repository's index.yaml publishes it: install.sh refuses a
+  # downloaded archive with any other digest, so CI and every admin install the same bytes. A version bump (Dependabot's
+  # PR included) updates it too; README.md, "Bumping the version"
+  qeos.atriis.com/kube-prometheus-stack-sha256: c1e5f19a80878991939aea37a7db80333551e55eb4b2a81ade95ef46cd793c85
+dependencies:
+  # Released 2026-10-08: the newest at least two weeks old on 2026-10-23 (README.md, "The pin")
+  - name: kube-prometheus-stack
+    version: 92.2.0
+    repository: https://prometheus-community.github.io/helm-charts

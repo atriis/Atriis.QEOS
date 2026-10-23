@@ -30,7 +30,7 @@ helm upgrade --install qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-
 ## Testing locally with kind
 
 The CI job `helm-kind` (`.github/workflows/ci.yml`) does this on every push: the render checks, the seven images, a
-kind cluster, the install into a namespace that enforces Pod Security `restricted`, `scripts/smoke_k8s.sh`,
+kind cluster, kube-prometheus-stack (`deploy/monitoring/install.sh`), the install into a namespace that enforces Pod Security `restricted`, `scripts/smoke_k8s.sh`,
 `scripts/check_k8s_policies.sh` (the NetworkPolicies from inside the cluster), and two failed upgrades. The same steps on a workstation with Docker
 (Desktop), kind, kubectl, helm 3 and yq v4:
 
@@ -48,15 +48,19 @@ kind create cluster --name qeos-kind --image kindest/node:v1.36.4@sha256:099e049
 kind load docker-image --name qeos-kind qeos/auth-service:kind qeos/organization-service:kind qeos/project-service:kind \
   qeos/ingestion-service:kind qeos/test-management-service:kind qeos/dashboard:kind qeos/gateway:kind
 
-# 3. The Secret and the install (above): about 4 minutes, most of it pulling PostgreSQL and MinIO
+# 3. The cluster's kube-prometheus-stack, as a cluster admin installs it on AKS (deploy/monitoring/README.md): it creates
+#    both namespaces and labels qeos enforce restricted. About 2 minutes
+bash deploy/monitoring/install.sh --env ci --enforce-restricted
 
-# 4. The smoke through a port-forward; the gateway runs GATEWAY_TLS=off, so it is plain HTTP
+# 4. The Secret and the install (above): about 4 minutes, most of it pulling PostgreSQL and MinIO
+
+# 5. The smoke through a port-forward; the gateway runs GATEWAY_TLS=off, so it is plain HTTP
 pip install ./collector                       # qeos-collector, for the upload
 kubectl -n qeos port-forward svc/gateway 28080:8080 &
 bash scripts/smoke_k8s.sh http://localhost:28080 qeos     # ends with "all k8s checks passed"
 bash scripts/check_k8s_policies.sh qeos                   # ends with "all policy checks passed"
 
-# 5. A failed migration fails the upgrade; the release keeps serving. First one that starts and exits 1: each image
+# 6. A failed migration fails the upgrade; the release keeps serving. First one that starts and exits 1: each image
 #    with an `alembic` shim (the CI step "Build and load the broken-migration images" builds them), so the Job fails
 #    at once (backoffLimit 0, reason BackoffLimitExceeded)
 helm upgrade qeos deploy/helm/qeos -n qeos -f deploy/helm/qeos/values-ci.yaml \

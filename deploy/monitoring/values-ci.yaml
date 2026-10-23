@@ -1,0 +1,23 @@
+# kind in CI (ci.yml's helm-kind job) and locally: no persistent storage (an emptyDir), small requests
+kube-prometheus-stack:
+  prometheus:
+    prometheusSpec:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 256Mi
+  prometheusOperator:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+  kube-state-metrics:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+  prometheus-node-exporter:
+    resources:
+      requests:
+        cpu: 10m
+        memory: 16Mi
