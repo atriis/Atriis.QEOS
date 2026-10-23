@@ -63,3 +63,27 @@ def test_history_is_recognised_next_to_its_own_tag_only():
     assert pins("qav-collector-v0.3.0 and collector-v0.15.0-rc1") == []
     # A pin ending a sentence is still a pin
     assert pins("Use collector-v0.1.0.") == [(1, "0.1.0", False)]
+
+
+# Documents that record history (plans, specs, decisions, the to-do list) may name any tag
+HISTORY_FILES = ("docs/superpowers/", "docs/architecture/adr/", "TODO.md", "IMPLEMENTATION_PLAN.md", "NEXT_STEPS.md")
+
+
+def test_no_file_outside_pinned_carries_the_current_pin():
+    """A file that starts carrying a pin is caught at the release that adds it: the current tag anywhere outside
+    PINNED (and the history documents) fails, so the file joins PINNED and is checked from then on."""
+    import subprocess
+
+    version = current_version()
+    names = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True).stdout.decode().split("\0")
+    strays = []
+    for name in filter(None, names):
+        if name in PINNED or name.startswith(HISTORY_FILES) or name == "scripts/tests/test_collector_pins.py":
+            continue
+        try:
+            text = (ROOT / name).read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue  # binary files and unreadable entries hold no pins to copy
+        if any(v == version and not old for _, v, old in pins(text)):
+            strays.append(name)
+    assert strays == [], "these files carry the collector pin: add them to PINNED"
