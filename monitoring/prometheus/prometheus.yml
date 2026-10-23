@@ -34,7 +34,7 @@ scrape_configs:
   - job_name: cadvisor
     static_configs: [{targets: ["cadvisor:8080"]}]
     # Platform-neutral container name: Kubernetes cAdvisor already sets `container`; on Compose it comes from the
-    # service label (a container without the label gets none)
+    # service label, and a container without that label falls back to its Docker name (second rule)
     metric_relabel_configs:
       - source_labels: [container_label_com_docker_compose_service]
         regex: (.+)
