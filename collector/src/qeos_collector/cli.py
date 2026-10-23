@@ -654,7 +654,8 @@ def _send_artifacts(results: List[dict], skips: dict, url: Optional[str], api_ke
     checked but not hashed while the reports were read) are hashed and streamed up only when the key check says the
     project keeps traces; each row then gets `artifacts: [{sha256, kind: "trace", name}]` for the traces QEOS holds.
     Every row loses its `_artifacts` here. `skips` counts the traces left out while reading the reports, by reason. With
-    no trace readable the key is not checked (0.14.1). A dry run (no url) hashes them under the same budget and
+    no trace readable the key is not checked (0.14.1), so the line says only that none could be read, with the skips
+    (whether the project keeps traces is unknown). A dry run (no url) hashes them under the same budget and
     per-run cap and keeps the references of those hashed, uploading nothing. Best effort with its own budget:
     whatever goes wrong is one line, and the run is still sent. When traces are off (here or on the platform) that
     line is all: no reasons per file."""
@@ -676,7 +677,7 @@ def _send_artifacts(results: List[dict], skips: dict, url: Optional[str], api_ke
         held = _dry_run_artifacts(list(files.values()), skips, say, clock)
     elif not files:
         if left_out:  # none readable: nothing to send, so no key check either
-            say(f"traces: 0 stored (0.0 MB), {left_out} skipped ({traces.reasons(skips)})")
+            say(f"traces: none could be read, {left_out} skipped ({traces.reasons(skips)})")
     else:
         notes: List[str] = []
         on = False
@@ -726,7 +727,8 @@ def _send_artifacts(results: List[dict], skips: dict, url: Optional[str], api_ke
 
 def _dry_run_artifacts(files: List["traces.TraceFile"], skips: dict, say: _Output, clock) -> set:
     """The dry run's trace phase: hashes what the real phase would, under its per-run cap and budget (so a dry run
-    never takes longer than the upload would), and says how many would be sent; returns their sha256s."""
+    never takes longer than the upload would), and says how many would be sent, counted per file as the upload's
+    `stored` is (MB per content); returns their sha256s."""
     left_out = sum(skips.values())
     if not files and not left_out:
         return set()
@@ -743,14 +745,15 @@ def _dry_run_artifacts(files: List["traces.TraceFile"], skips: dict, say: _Outpu
             break
         except traces.TraceChanged:
             traces.count(skips, "missing")
-    hashed = {trace.sha256: trace.size for trace in files if trace.sha256 is not None}
-    left = sum(1 for trace in files if trace.sha256 is None) + left_out
+    hashed = [trace for trace in files if trace.sha256 is not None]
+    sizes = {trace.sha256: trace.size for trace in hashed}
+    left = len(files) - len(hashed) + left_out
     if traces.reasons(skips):
         notes.insert(0, traces.reasons(skips))
-    megabytes = sum(hashed.values()) / (1024 * 1024)
+    megabytes = sum(sizes.values()) / (1024 * 1024)
     say(f"traces: {len(hashed)} would be sent ({megabytes:.1f} MB) within the {budget:g} s budget, {left} skipped"
         + (f" ({'; '.join(notes)})" if notes else ""))
-    return set(hashed)
+    return set(sizes)
 
 
 def _resend_spooled(spool_dir, endpoint, api_key, context, say: _Output, *, sleep, clock) -> None:

@@ -656,11 +656,12 @@ A failed test's Playwright trace reaches QEOS with its result, and opens there i
   streaming. When it runs out the rest are skipped and the run goes without them. A trace problem never fails the run upload. One line sums it up:
   `traces: 3 stored (41.2 MB), 1 skipped`, with the reasons in brackets.
 - **From 0.14.1.** Files with the same bytes (two paths, or a Playwright and a Cucumber reference) go up once, and
-  every result still references its own; when the reports name traces but none can be read, the key is not checked
-  (the line still counts the skips); a TLS connection cut while a trace is sent (`SSLEOFError`) is retried like a
-  reset one (a certificate problem still is not); and `--dry-run` hashes the traces under the same 5 minutes and 500
-  per run, saying `traces: 2 would be sent (12.3 MB) within the 300 s budget, 1 skipped`, so it never takes longer
-  than the upload would.
+  every result still references its own (a copy never holds up the other traces; it is counted as its bytes went).
+  When the reports name traces but none can be read, the key is not checked and the line says
+  `traces: none could be read, 2 skipped` with the reasons. `--dry-run` hashes the traces under the same 5 minutes
+  and 500 per run and counts them as the upload does, saying
+  `traces: 2 would be sent (12.3 MB) within the 300 s budget, 1 skipped`, so it never takes longer than the upload
+  would.
 - **Only when QEOS takes them.** The key check (`GET /api/v1/collect/key`) must say `artifacts: true`. Traces are off
   by default: a project owner or admin turns on **Keep traces from uploads** in Project Settings. When they are off,
   when QEOS predates traces, or when the key check fails, no trace is sent and the run goes without `artifacts`; the
