@@ -6,6 +6,7 @@ collector-vX.Y.Z in it must be the current version, except a tag a history phras
 `collector-v0.7.0`", "`@collector-v0.5.2` or later", "`collector-v0.3.0` and before"). A file that starts carrying a
 pin joins PINNED.
 """
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -76,29 +77,32 @@ THIS_FILE = Path(__file__).resolve().relative_to(ROOT).as_posix()
 
 
 def candidate_files() -> "list[str] | None":
-    """Tracked and untracked (not ignored) files that name a collector tag, so a new file is checked before it is
-    staged; None when there is no git checkout to ask."""
+    """Tracked files that name a collector tag (what CI sees; untracked clutter such as caches is not the repo's).
+    None only when there is no git checkout to ask; any other git failure fails the test with git's message."""
     try:
-        out = subprocess.run(["git", "grep", "-lzI", "--untracked", "-E", "collector-v[0-9]"], cwd=ROOT,
-                             capture_output=True)
+        out = subprocess.run(["git", "grep", "-lzI", "-E", "collector-v[0-9]"], cwd=ROOT, capture_output=True)
     except FileNotFoundError:
         return None
-    if out.returncode not in (0, 1):  # 1: no match
+    if out.returncode == 128 and b"not a git repository" in out.stderr:
         return None
+    assert out.returncode in (0, 1), out.stderr.decode("utf-8", "replace")  # 1: no match
     return [name for name in out.stdout.decode("utf-8").split("\0") if name]
 
 
 def test_no_file_outside_pinned_carries_a_collector_pin():
-    """A file that starts carrying a pin is caught when it is added, whatever tag it names: a pin anywhere outside
+    """A file that starts carrying a pin is caught when it is committed, whatever tag it names: a pin anywhere outside
     PINNED (and the history documents) fails, so the file joins PINNED and is checked from then on."""
     names = candidate_files()
     if names is None:
+        # CI always has its checkout: there the check must run, never skip quietly
+        if os.environ.get("CI"):
+            pytest.fail("the collector pin check needs git and a checkout")
         pytest.skip("not a git checkout")
     strays = []
     for name in names:
         if name in PINNED or name == THIS_FILE or name.startswith(HISTORY_DIRS) or name in HISTORY_ROOT_FILES:
             continue
-        text = (ROOT / name).read_text(encoding="utf-8", errors="replace")
+        text = (ROOT / name).read_text(encoding="utf-8")
         if any(not old for _, _, old in pins(text)):
             strays.append(name)
     assert strays == [], "these files carry a collector pin: add them to PINNED"
