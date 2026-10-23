@@ -16,7 +16,7 @@ import { locateFailedStep, matchesStep, scenarioSteps, stepLines } from "../lib/
 import { type Locate, placeScreenshots } from "../lib/screenshotLines";
 import ConfirmButton from "../components/ConfirmButton";
 import ErrorBanner from "../components/ErrorBanner";
-import GherkinBlock, { toneOf } from "../components/GherkinBlock";
+import GherkinBlock, { passedThroughOf, toneOf } from "../components/GherkinBlock";
 import ScreenshotButton, { useScreenshotViewer } from "../components/ScreenshotButton";
 import RunControl from "../components/RunControl";
 import RunPanel from "../components/RunPanel";
@@ -342,8 +342,11 @@ function CaseEditor() {
         {/* The result, its values and the Gherkin are read-only by nature: outside the disabled fieldset, so a viewer can still copy a value or open screenshots */}
           {imported ? (
             <>
-              <h2>Gherkin</h2>
-              {resultLine}
+              {/* The result on the right of the heading, as on the feature page's scenario cards */}
+              <div className="gherkin-head">
+                <h2>Gherkin</h2>
+                {resultLine}
+              </div>
               {key != null && latest.data != null && <LogValuesLine values={latest.data.values} projectId={id} />}
               <GherkinBlock
                 text={c?.gherkin ?? ""}
@@ -351,6 +354,7 @@ function CaseEditor() {
                 failed={failedLine != null && latest.data
                   ? { line: failedLine, tone: toneOf(latest.data), tip: <FailedStepTip projectId={id} result={latest.data} spread={spreadOf(latest.data)} /> }
                   : undefined}
+                passedThrough={latest.data ? passedThroughOf(latest.data.status, failedLine) : undefined}
               />
             </>
           ) : (

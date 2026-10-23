@@ -100,8 +100,13 @@ test("one card per scenario with its status, Background once", async () => {
   renderAt();
   const cards = await screen.findAllByRole("article");
   expect(cards).toHaveLength(2);
-  expect(await within(cards[0]).findByText(/Passed/)).toBeInTheDocument();
+  expect(await within(cards[0]).findByText(/Passed/, { ignore: "script, style, .sr-only" })).toBeInTheDocument();
   expect(within(cards[1]).getByText("No runs yet")).toBeInTheDocument();
+  // The passed scenario's steps are green; the scenario with no result has none
+  const green = [...cards[0].querySelectorAll(".gk-passed")];
+  expect(green.length).toBeGreaterThan(0);
+  expect(green.every((l) => /^\s*(Given|When|Then|And|But|\*|\|)/.test(l.querySelector(".gk-code")!.textContent!))).toBe(true);
+  expect(cards[1].querySelector(".gk-passed")).toBeNull();
   expect(screen.getByText("1 passed · 1 no runs")).toBeInTheDocument();
   // The preamble (tag, Feature line) is shown once, outside the cards
   expect(screen.getByLabelText("Feature")).toHaveTextContent("Feature: Login");
@@ -119,6 +124,8 @@ test("the failed step is red on its card, with the error", async () => {
   const failed = cards[1].querySelector(".gk-failed") as HTMLElement;
   expect(failed).toHaveTextContent("Then I see an error");
   expect(failed).toHaveAttribute("data-line", "8");
+  // Nothing ran before it in that scenario, and the other scenario has no result: no step is green
+  expect(document.querySelector(".gk-passed")).toBeNull();
   act(() => failed.focus());
   const tip = await screen.findByRole("tooltip");
   expect(tip).toHaveTextContent("expected an error banner");

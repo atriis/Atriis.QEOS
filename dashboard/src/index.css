@@ -795,6 +795,20 @@ label.button:hover { background: var(--hover-strong); }
 /* A whole .feature file: numbered lines (the number is drawn, never copied), long lines wrap under their text */
 .gherkin.numbered { white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 0; counter-reset: none; }
 .gherkin.numbered .gk-line { display: grid; grid-template-columns: 4ch minmax(0, 1fr) auto; column-gap: var(--space-3); align-items: start; }
+/* Every line is a grid row, so a marked line (passed, failed) keeps its text where the others have theirs. Not numbered: the
+   text keeps its width (the block scrolls sideways) and a mark follows it */
+.gherkin:not(.numbered) .gk-line { display: grid; grid-template-columns: max-content auto; justify-content: start; column-gap: var(--space-3); align-items: start; padding-inline-start: var(--space-2); border-radius: 2px; }
+/* A step's screenshot button sits on the left, in a column every line of the block reserves: the steps stay aligned */
+.gherkin { --gk-gutter: 52px; }
+@media (pointer: coarse) { .gherkin { --gk-gutter: 56px; } }
+.gherkin.numbered.has-gutter .gk-line { grid-template-columns: 4ch var(--gk-gutter) minmax(0, 1fr) auto; }
+.gherkin.has-gutter:not(.numbered) .gk-line { grid-template-columns: var(--gk-gutter) max-content auto; }
+.gk-gutter { display: flex; align-items: center; min-height: 1.6em; user-select: none; }
+.gk-gutter .gk-note { margin: 0; }
+/* A step that ran and passed: the green of the passed pill, as a wash and a left bar, like the failed step's red. Steps
+   that did not run stay plain; screen readers hear "Passed step:" */
+.gherkin .gk-passed { background: color-mix(in srgb, var(--status-passed) 12%, transparent); box-shadow: inset 3px 0 0 var(--status-passed); border-radius: 2px; }
+.gk-passed .sr-only { user-select: none; }
 .gherkin.numbered .gk-line::before { content: attr(data-line); text-align: right; color: var(--text-muted); user-select: none; font-variant-numeric: tabular-nums; }
 .gherkin.numbered .gk-note { display: inline-flex; align-items: center; gap: var(--space-2); font-family: var(--font-sans); user-select: none; white-space: nowrap; }
 .feature-source { padding: 0; overflow: hidden; }
@@ -803,7 +817,7 @@ label.button:hover { background: var(--hover-strong); }
 .case-chip { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--border-strong);
   background: var(--surface-1); color: var(--accent-text); font-family: var(--font-mono); font-size: 12px; font-weight: 600; }
 .case-chip:hover, .case-chip:focus-visible { background: var(--hover-strong); text-decoration: underline; }
-@media (max-width: 640px) { .gherkin.numbered .gk-line { grid-template-columns: 3ch minmax(0, 1fr); } .gherkin.numbered .gk-note { grid-column: 2; } }
+@media (max-width: 640px) { .gherkin.numbered .gk-line { grid-template-columns: 3ch minmax(0, 1fr); } .gherkin.numbered.has-gutter .gk-line { grid-template-columns: 3ch var(--gk-gutter) minmax(0, 1fr); } .gherkin.numbered .gk-line > .gk-note { grid-column: -2 / -1; } }
 /* Group by: a segmented pair of pressed buttons, sized like the fields beside it */
 .segmented-field { display: flex; flex-direction: column; gap: var(--space-1); }
 .segmented-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); }
@@ -1187,14 +1201,12 @@ button.switch.switch-compact { gap: var(--space-2); padding: var(--space-1) var(
 .run-stages { font-variant-numeric: tabular-nums; }
 
 /* Failed step: red wash + left bar + the word "failed" with an icon (never colour alone). The tip sits below the line, inside it, so the pointer can move onto it. */
-.gherkin .gk-failed { position: relative; display: block; background: color-mix(in srgb, var(--status-failed) 14%, transparent); box-shadow: inset 3px 0 0 var(--status-failed); border-radius: 2px; cursor: help; }
+.gherkin .gk-failed { position: relative; background: color-mix(in srgb, var(--status-failed) 14%, transparent); box-shadow: inset 3px 0 0 var(--status-failed); border-radius: 2px; cursor: help; }
 .gherkin .gk-failed:focus-visible { outline: 2px solid var(--status-failed); outline-offset: 1px; }
-.gherkin.numbered .gk-failed { display: grid; }
-.gherkin:not(.numbered) .gk-failed { padding-inline-start: var(--space-2); }
 .gk-failed .sr-only { user-select: none; }
 .gk-failed-mark { display: inline-flex; align-items: center; gap: 4px; margin-inline-start: var(--space-3); font-family: var(--font-sans); font-size: 12px; font-weight: 600; color: var(--danger-text); user-select: none; white-space: nowrap; }
-.gherkin.numbered .gk-failed .gk-failed-end { grid-column: 3; display: inline-flex; align-items: center; gap: var(--space-3); }
-.gherkin.numbered .gk-failed .gk-failed-mark { margin: 0; }
+.gherkin .gk-failed .gk-failed-end { display: inline-flex; align-items: center; gap: var(--space-3); }
+.gherkin .gk-failed .gk-failed-mark { margin: 0; }
 /* Skipped step: the same mark in the skipped yellow, with the word "skipped" and a dashed-circle icon (never colour alone) */
 .gherkin .gk-failed.gk-skipped { background: color-mix(in srgb, var(--status-skipped) 14%, transparent); box-shadow: inset 3px 0 0 var(--status-skipped); }
 .gherkin .gk-failed.gk-skipped:focus-visible { outline-color: var(--status-skipped); }
@@ -1202,7 +1214,7 @@ button.switch.switch-compact { gap: var(--space-2); padding: var(--space-1) var(
 .failed-tip { position: fixed; z-index: 70; width: max-content; max-width: min(420px, 90vw); padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: var(--space-1); background: var(--surface-1); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-sm); box-shadow: var(--shadow-2); font-family: var(--font-sans); font-size: 13px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; max-height: min(50vh, 320px); overflow: auto; cursor: auto; user-select: text; }
 .failed-tip-meta { color: var(--text-secondary); font-size: 12px; }
 .failed-tip-spread { font-size: 12.5px; }
-@media (max-width: 640px) { .gherkin.numbered .gk-failed .gk-failed-end { grid-column: 2; } }
+@media (max-width: 640px) { .gherkin.numbered .gk-failed .gk-failed-end { grid-column: -2 / -1; } }
 
 /* Feature page: one card per scenario (header row: case chip + title, then status + run strip) over its Gherkin */
 .feature-counts { margin: 0 0 var(--space-3); font-variant-numeric: tabular-nums; }
@@ -1283,6 +1295,10 @@ button.trace-number { font-variant-numeric: tabular-nums; font-weight: 600; }
 @media (pointer: coarse) { button.shot-button { min-width: 44px; min-height: 44px; } }
 .gherkin:not(.numbered) .gk-note { display: inline-flex; vertical-align: middle; margin-inline-start: var(--space-2); user-select: none; }
 .result-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); margin-bottom: var(--space-2); }
+/* A case's Gherkin heading with its result on the right, as on the feature page's scenario cards */
+.gherkin-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-4); margin-bottom: var(--space-2); }
+.gherkin-head h2 { margin: 0; }
+.gherkin-head .result-line { margin-bottom: 0; }
 /* A run's row: the Log button and the camera side by side, the opened log below them at full width */
 .result-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .result-tools > .log-panel { display: contents; }

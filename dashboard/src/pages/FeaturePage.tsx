@@ -11,7 +11,7 @@ import { featureLabel } from "../components/FeatureList";
 import FailedTipAnchor from "../components/FailedTipAnchor";
 import FailedStepTip from "../components/FailedStepTip";
 import { type StepSpread, useStepSpread } from "../lib/failedSteps";
-import GherkinBlock, { toneOf } from "../components/GherkinBlock";
+import GherkinBlock, { passedThroughOf, toneOf } from "../components/GherkinBlock";
 import LastResultPill from "../components/LastResultPill";
 import TraceButton from "../components/TraceButton";
 import LogValuesLine from "../components/LogValuesLine";
@@ -27,6 +27,7 @@ import { runParam, useScrollToFailure } from "../lib/runContext";
 import { useCanEdit } from "../lib/useCanEdit";
 
 const LATEST_BATCH = 500;
+const NO_NOTES = new Map<number, never>();
 const HEADING = /^\s*[^\s:#@|][^:#@|]*:/;
 
 /** The file as the cases hold it, for a file imported before raw files were stored: the Feature line, then
@@ -168,6 +169,9 @@ export default function FeaturePage() {
   const title = data ? featureLabel(data) : fileLabel(path) || "Feature";
   useScrollToFailure(runId, anyFailure);
 
+  // One card with step screenshots reserves the camera column on every card, so all the scenarios line up
+  const anyShots = cards.some(({ c, block }) => shotsOf(c, block) != null);
+
   return (
     <section>
       <PageHeader
@@ -206,6 +210,7 @@ export default function FeaturePage() {
       )}
       {cards.map(({ c, block }) => {
         const failure = failureOf(c, block);
+        const passedThrough = failure?.background != null ? undefined : passedThroughOf(resultOf(c)?.status, failure?.line);
         const result = resultOf(c);
         const shots = shotsOf(c, block);
         return (
@@ -228,7 +233,8 @@ export default function FeaturePage() {
             {failure?.background != null && <BackgroundFailure projectId={id} step={failure.background} result={failure.result} spread={spreadOf(failure.result)} />}
             <div className="feature-source">
               <GherkinBlock text={block.text} label={`${c.key} Gherkin`} numbered startLine={block.start}
-                annotations={shots ? new Map([...shots.byLine].map(([line, p]) => [line, <ScreenshotButton kind="step" count={p.count} onOpen={() => shotViewer.open({ ...shots.of, step: p.step })} />])) : undefined}
+                annotations={shots ? new Map([...shots.byLine].map(([line, p]) => [line, <ScreenshotButton kind="step" count={p.count} onOpen={() => shotViewer.open({ ...shots.of, step: p.step })} />])) : anyShots ? NO_NOTES : undefined}
+                passedThrough={passedThrough}
                 failed={failure?.line != null
                   ? { line: failure.line, tone: toneOf(failure.result), tip: <FailedStepTip projectId={id} result={failure.result} spread={spreadOf(failure.result)} /> }
                   : undefined} />

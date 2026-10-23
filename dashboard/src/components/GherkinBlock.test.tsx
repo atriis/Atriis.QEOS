@@ -89,12 +89,53 @@ test("the tip stays open while the pointer moves from the line onto it", async (
   await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
 });
 
-test("numbered: a failed line keeps its annotation next to the marker, and is announced as the failed step", () => {
+test("numbered: a failed line keeps its annotation on the left, in the column every line has, and is announced as the failed step", () => {
   render(<GherkinBlock numbered text={"Scenario: s\n  When a"} annotations={new Map([[2, <span>case 7</span>]])} failed={{ line: 2, tip: <span>boom</span> }} />);
   const end = document.querySelector(".gk-failed-end") as HTMLElement;
   expect(end).toHaveTextContent(/failed/);
-  expect(end).toHaveTextContent("case 7");
+  expect(end).not.toHaveTextContent("case 7");
+  const gutters = [...document.querySelectorAll(".gk-gutter")];
+  expect(gutters.map((g) => g.textContent)).toEqual(["", "case 7"]);
   expect(failedLine()).toHaveTextContent("Failed step:");
+});
+
+const SCENARIO = [
+  "Scenario: book",
+  "  Given a user",
+  "    | name |",
+  "    | ann  |",
+  "  When she books",
+  "  Then it is booked",
+  "  And a mail is sent",
+].join("\n");
+
+const passedRows = () => [...document.querySelectorAll(".gk-passed")].map((l) => l.querySelector(".gk-code")!.textContent!.trim());
+
+test("steps up to passedThrough are marked passed, with their table rows; headings and later steps are not", () => {
+  render(<GherkinBlock numbered text={SCENARIO} passedThrough={5} />);
+  expect(passedRows()).toEqual(["Given a user", "| name |", "| ann  |", "When she books"]);
+  expect(document.querySelector(".gk-passed")).toHaveTextContent("Passed step:");
+});
+
+test("a failed step ends the passed ones: the steps after it did not run and stay plain", () => {
+  render(<GherkinBlock text={SCENARIO} passedThrough={99} failed={{ line: 6, tip: <span>boom</span> }} />);
+  expect(passedRows()).toEqual(["Given a user", "| name |", "| ann  |", "When she books"]);
+  expect(failedLine()).toHaveTextContent("Then it is booked");
+  const lastStep = [...document.querySelectorAll(".gk-line")].at(-1)!;
+  expect(lastStep).toHaveTextContent("And a mail is sent");
+  expect(lastStep).not.toHaveClass("gk-passed");
+});
+
+test("without passedThrough no step is marked, and without annotations no column is reserved", () => {
+  render(<GherkinBlock text={SCENARIO} />);
+  expect(document.querySelector(".gk-passed")).toBeNull();
+  expect(document.querySelector(".gk-gutter")).toBeNull();
+});
+
+test("not numbered: the code keeps every line and its line feeds, so copying adds no blank line", () => {
+  render(<GherkinBlock text={SCENARIO} passedThrough={6} annotations={new Map([[5, <span>cam</span>]])} />);
+  const codes = [...document.querySelectorAll(".gk-code")].map((c) => c.textContent).join("");
+  expect(codes).toBe(SCENARIO);
 });
 
 function withNeighbours() {
