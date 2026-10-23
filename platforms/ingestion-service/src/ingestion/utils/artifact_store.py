@@ -184,6 +184,16 @@ class MemoryArtifactStore:
         return len(doomed)
 
 
+def _closing(body) -> Iterator[bytes]:
+    """An S3 object's bytes in chunks, its connection closed when the reading ends: read to the end, or stopped early
+    by a client that disconnects mid-download (the response drops the iterator, which closes it). The body is closed
+    then, not left half-read for the garbage collector to find."""
+    try:
+        yield from body.iter_chunks(READ_CHUNK)
+    finally:
+        body.close()
+
+
 class S3ArtifactStore:
     def __init__(self, endpoint: str, bucket: str, access_key: str, secret_key: str) -> None:
         import boto3
@@ -268,7 +278,7 @@ class S3ArtifactStore:
             if exc.response.get("Error", {}).get("Code") in ("NoSuchKey", "404"):
                 raise ArtifactNotFound(key) from exc
             raise
-        return body["Body"].iter_chunks(READ_CHUNK), int(body["ContentLength"])
+        return _closing(body["Body"]), int(body["ContentLength"])
 
     def _ranged_body(self, key: str, start: int, end: int):
         from botocore.exceptions import ClientError
@@ -287,7 +297,7 @@ class S3ArtifactStore:
         return self._ranged_body(key, start, end).read()
 
     def open_range(self, key: str, start: int, end: int) -> Iterator[bytes]:
-        return self._ranged_body(key, start, end).iter_chunks(READ_CHUNK)
+        return _closing(self._ranged_body(key, start, end))
 
     def list_older(self, prefix: str, older_than: datetime) -> List[str]:
         pages = self._client.get_paginator("list_objects_v2").paginate(Bucket=self._bucket, Prefix=prefix)

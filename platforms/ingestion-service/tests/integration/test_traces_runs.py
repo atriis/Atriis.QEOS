@@ -225,6 +225,8 @@ def test_download_never_reads_the_whole_object_at_once(client, auth, project_rol
     ("bytes=-22", len(ZIP) - 22, len(ZIP) - 1),
     ("bytes=1020-5000", 1020, len(ZIP) - 1),  # an end past the file is cut to it
     ("bytes=-5000", 0, len(ZIP) - 1),  # a suffix longer than the file is the whole file
+    ("Bytes=0-3", 0, 3),  # the unit is case-insensitive (RFC 9110 14.1)
+    ("BYTES=-22", len(ZIP) - 22, len(ZIP) - 1),
 ])
 def test_a_range_answers_206(client, auth, project_role, seed_run, db, store, header, start, end):
     project_role("viewer")

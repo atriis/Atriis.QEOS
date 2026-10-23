@@ -383,3 +383,36 @@ def test_s3_list_older_pages_and_filters_by_last_modified(s3):
         {"Bucket": BUCKET, "Prefix": "artifacts/1/incoming/", "ContinuationToken": "t"})
     assert store.list_older("artifacts/1/incoming/", cutoff) == ["artifacts/1/incoming/a", "artifacts/1/incoming/c"]
     stubber.assert_no_pending_responses()
+
+
+class _Watched(StreamingBody):
+    """A StreamingBody that records being closed."""
+
+    closed_calls = 0
+
+    def close(self):
+        type(self).closed_calls += 1
+        super().close()
+
+
+def test_s3_open_closes_the_body_when_the_reader_stops_early(s3):
+    """A client that disconnects mid-download stops reading: the object's connection is closed then, not left to the
+    garbage collector."""
+    store, stubber = s3
+    _Watched.closed_calls = 0
+    data = b"x" * (3 * 64 * 1024)
+    stubber.add_response("get_object", {"Body": _Watched(io.BytesIO(data), len(data)), "ContentLength": len(data)},
+                         {"Bucket": BUCKET, "Key": "artifacts/1/a"})
+    chunks, _ = store.open("artifacts/1/a")
+    next(chunks)
+    chunks.close()  # what the server does with a response it stops sending
+    assert _Watched.closed_calls == 1
+
+
+def test_s3_open_range_closes_the_body_once_read(s3):
+    store, stubber = s3
+    _Watched.closed_calls = 0
+    stubber.add_response("get_object", {"Body": _Watched(io.BytesIO(b"2345"), 4)},
+                         {"Bucket": BUCKET, "Key": "artifacts/1/a", "Range": "bytes=2-5"})
+    assert b"".join(store.open_range("artifacts/1/a", 2, 5)) == b"2345"
+    assert _Watched.closed_calls == 1

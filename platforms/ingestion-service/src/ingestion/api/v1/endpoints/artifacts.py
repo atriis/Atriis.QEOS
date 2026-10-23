@@ -143,7 +143,7 @@ async def _receive(sha256: str, request: Request, response: Response, db: Sessio
 
 # ---- download ----
 
-SINGLE_RANGE = re.compile(r"bytes=([0-9]*)-([0-9]*)")
+SINGLE_RANGE = re.compile(r"bytes=([0-9]*)-([0-9]*)", re.IGNORECASE)  # RFC 9110: the unit is case-insensitive
 MAX_RANGE_HEADER = 64  # two 20-digit numbers fit; a longer header is not a range this endpoint serves
 
 
