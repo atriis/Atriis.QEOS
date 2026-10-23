@@ -612,7 +612,8 @@ jobs:
         with:
           version: v3.16.4
 
-      # helm lint and template with each values file, no secret in any manifest; db-init's secret handling (stub psql).
+      # helm lint and template with each values file, no secret in any manifest; the chart's copies of Compose's
+      # monitoring files; db-init's secret handling (stub psql) and qeos_monitor on a real PostgreSQL 16 (docker).
       # yq (mikefarah v4) is on the runner image
       - name: Chart render checks
         env:
@@ -621,6 +622,7 @@ jobs:
         run: |
           yq --version
           bash "$CHART/tests/render_test.sh"
+          bash "$CHART/tests/monitoring_files_test.sh"
           bash "$CHART/tests/db_init_test.sh"
           bash deploy/monitoring/tests/install_test.sh
 
@@ -712,6 +714,12 @@ jobs:
       - name: NetworkPolicies and Pod Security from inside the cluster
         run: bash scripts/check_k8s_policies.sh "$NAMESPACE"
 
+      # The cluster's Prometheus scrapes every replica under Compose's job names and loads Compose's rules (qeos-host
+      # left out), the ingestion scrape keeps honor_labels in the namespace, postgres-exporter connects as qeos_monitor,
+      # and Alertmanager holds Watchdog with no channel configured
+      - name: Monitoring through Prometheus and Alertmanager
+        run: bash scripts/check_k8s_monitoring.sh "$NAMESPACE"
+
       # Each service's image with an `alembic` that starts and exits 1: the realistic failed migration. FROM the :kind
       # images, so only the shim differs; ahead of /usr/local/bin on PATH, outside /tmp (an emptyDir in the hook)
       - name: Build and load the broken-migration images
@@ -786,7 +794,7 @@ jobs:
         if: failure()
         run: |
           helm history qeos -n "$NAMESPACE" || true
-          kubectl -n "$NAMESPACE" get all,jobs,networkpolicies -o wide || true
+          kubectl -n "$NAMESPACE" get all,jobs,networkpolicies,servicemonitors,prometheusrules -o wide || true
           kubectl -n "$NAMESPACE" get events --sort-by=.lastTimestamp || true
           kubectl -n "$NAMESPACE" describe job qeos-migrate || true
           for pod in $(kubectl -n "$NAMESPACE" get pods -o name); do

@@ -49,6 +49,14 @@ case "$context" in
 esac
 KUBECTL=(kubectl -n "$NAMESPACE")
 
+# The monitoring workloads, with monitoring.enabled: they answer the Prometheus pods only, so neither a stranger nor a
+# workload of the namespace reaches them (scripts/check_k8s_monitoring.sh shows Prometheus does)
+for target in postgres-exporter:9187/ alertmanager:9093/-/healthy; do
+  if "${KUBECTL[@]}" get service "${target%%:*}" >/dev/null 2>&1; then
+    CHECKS+=("stranger http://$target blocked" "ingestion-retention http://$target blocked")
+  fi
+done
+
 failures=0
 pass() { printf 'ok    %s\n' "$1"; }
 fail() { printf 'FAIL  %s\n' "$1"; failures=$((failures + 1)); }

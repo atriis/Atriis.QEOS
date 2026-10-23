@@ -2,7 +2,9 @@
 
 Prometheus for QEOS on Kubernetes (ADR-038, Stage 2): the Prometheus operator and its CRDs, one Prometheus,
 kube-state-metrics and node-exporter, as the Helm release `qeos-monitoring` in the namespace `qeos-monitoring`. The QEOS
-chart (`deploy/helm/qeos`) brings the rest: its ServiceMonitors and PrometheusRules, Grafana and Alertmanager.
+chart (`deploy/helm/qeos`) brings the rest: its ServiceMonitors and PrometheusRules, postgres-exporter, Grafana and
+Alertmanager (`deploy/helm/README.md`, "Monitoring"); it refuses to render with `monitoring.enabled` until this
+release's CRDs exist.
 
 It needs CRDs and cluster roles, which the deploy identity (admin of the QEOS namespace only) cannot create, so it is a
 separate release that a cluster admin installs with `install.sh`: once per cluster, and again after every version bump.
@@ -81,7 +83,10 @@ chart's values, or the APIs refuse Prometheus's scrapes on 8000 (they time out);
   whatever its labels (the `*SelectorNilUsesHelmValues: false` settings), and nothing from other namespaces.
 - **`enforcedNamespaceLabel: namespace`:** series and alerts from the QEOS namespace's ServiceMonitors and rules carry
   `namespace=<the QEOS namespace>`, whatever a target sends. The monitoring namespace's own ServiceMonitors and rules are
-  excluded (they describe the whole cluster: a pod's or a node's series keep their own `namespace`).
+  excluded (they describe the whole cluster: a pod's or a node's series keep their own `namespace`). So a QEOS rule
+  only ever matches the QEOS namespace's series and can never match `node_*` ones: the chart leaves Compose's
+  `qeos-host` group out (`monitoring.skipRuleGroups`). The QEOS ingestion scrape's `honor_labels: true` does not
+  escape it (`scripts/check_k8s_monitoring.sh` checks both on kind).
 - **Retention 15 days**, the same as Compose's Prometheus.
 - **The control plane is not scraped** (`kubeControllerManager`, `kubeScheduler`, `kubeEtcd`, `kubeProxy` off): AKS
   manages it and exposes none of it.

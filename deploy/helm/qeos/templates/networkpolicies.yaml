@@ -3,8 +3,8 @@ app.kubernetes.io/instance: never another release's pods); each policy below ope
 policy selects the edge's proxy pods, even when they carry the Gateway's labels (qeos.notEdge). A workload's callers
 are those whose services.<x>.urls name it (qeos.callers), and the gateway, which proxies
 to every API and the dashboard. Egress stays open: Blob, Entra and Key Vault have no stable addresses without Cilium
-FQDN policies (ADR-038). Policies are additive, so a workload added later (the monitoring workloads) needs one entry
-here; without it, the default deny leaves it unreachable */ -}}
+FQDN policies (ADR-038). Policies are additive, so a workload added later needs one entry here; without it, the default
+deny leaves it unreachable. The monitoring workloads (monitoring.enabled) answer the Prometheus pods only */ -}}
 {{- if .Values.networkPolicy.enabled }}
 {{- $gateways := list }}
 {{- range $name, $svc := .Values.services }}
@@ -83,28 +83,41 @@ spec:
           port: {{ if eq $svc.kind "api" }}8000{{ else }}8080{{ end }}
     {{- end }}
     {{- if and (eq $svc.kind "api") $.Values.monitoring.enabled }}
-    {{- $prometheus := $.Values.networkPolicy.prometheus | default dict }}
     # Prometheus scrapes /metrics (networkPolicy.prometheus), with monitoring on only
     - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: {{ required "networkPolicy.prometheus.namespace is required" $prometheus.namespace }}
-          podSelector:
-            matchLabels:
-              {{- /* Empty labels would admit every pod of that namespace */}}
-              {{- if not $prometheus.podLabels }}
-              {{- fail "networkPolicy.prometheus.podLabels is required: the Prometheus pods' labels" }}
-              {{- end }}
-              {{- toYaml $prometheus.podLabels | nindent 14 }}
+        {{- include "qeos.prometheusPeer" $ | nindent 8 }}
       ports:
         - protocol: TCP
           port: 8000
     {{- end }}
 {{- end }}
 {{- end }}
+{{- /* The monitoring workloads (monitoring.enabled): postgres-exporter and Alertmanager answer the Prometheus pods only
+(scrapes, and alerts sent to Alertmanager); no pod of the namespace calls them */}}
+{{- range $name, $w := include "qeos.monitoringWorkloads" . | fromJson }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ printf "%s-ingress" $name }}
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" "monitoring") | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "qeos.selector" (dict "ctx" $ "name" $name) | nindent 6 }}
+    {{- include "qeos.notEdge" $ | nindent 4 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        {{- include "qeos.prometheusPeer" $ | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ $w.port }}
+{{- end }}
 {{- if .Values.ci.backing }}
-{{- /* kind only: PostgreSQL for every workload with a database and the migration hook (which runs on every upgrade,
-when this policy exists), MinIO for those that store artifacts and the bucket Job */}}
+{{- /* kind only: PostgreSQL for every workload with a database, the migration hook (which runs on every upgrade, when
+this policy exists) and postgres-exporter, MinIO for those that store artifacts and the bucket Job */}}
 {{- $postgres := list "qeos-migrate" }}
 {{- $minio := list "minio-init" }}
 {{- range $name, $svc := .Values.services }}
@@ -114,6 +127,9 @@ when this policy exists), MinIO for those that store artifacts and the bucket Jo
 {{- if $svc.artifacts }}
 {{- $minio = append $minio $name }}
 {{- end }}
+{{- end }}
+{{- if .Values.monitoring.enabled }}
+{{- $postgres = append $postgres "postgres-exporter" }}
 {{- end }}
 ---
 apiVersion: networking.k8s.io/v1

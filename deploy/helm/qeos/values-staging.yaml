@@ -17,6 +17,9 @@ keyvault:
     - tm-secrets-key
     - smtp-user
     - smtp-password
+    # Alertmanager's Slack and Teams channels: add a webhook to the vault, then remove its key here
+    - alert-slack-webhook-url
+    - alert-teams-webhook-url
 
 postgres:
   adminUser: qeosadmin
@@ -43,4 +46,9 @@ edge:
   enabled: true
 
 networkPolicy:
+  enabled: true
+
+# A cluster admin installs deploy/monitoring first (deploy/monitoring/README.md); Key Vault holds monitoring-db-password
+# and grafana-proxy-key (deploy/azure/init-secrets.sh)
+monitoring:
   enabled: true

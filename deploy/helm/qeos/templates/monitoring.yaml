@@ -1,0 +1,120 @@
+{{- /* What the cluster's kube-prometheus-stack (deploy/monitoring) reads from this release, with monitoring on (ADR-038 Stage
+2): ServiceMonitors in place of Compose's scrape jobs (monitoring/prometheus/prometheus.yml) and PrometheusRules from
+Compose's own rule files (copies in files/monitoring/, tests/monitoring_files_test.sh). Prometheus enforces
+namespace=<this namespace> on every series these scrapes yield and on every selector of these rules
+(enforcedNamespaceLabel), so a QEOS rule only ever sees this namespace's series: one on node_* series (qeos-host) could
+never match, hence monitoring.skipRuleGroups. Without the operator's CRDs nothing is applied: the render stops */ -}}
+{{- if .Values.monitoring.enabled }}
+{{- range $api := list "monitoring.coreos.com/v1/ServiceMonitor" "monitoring.coreos.com/v1/PrometheusRule" }}
+{{- if not ($.Capabilities.APIVersions.Has $api) }}
+{{- fail (printf "monitoring.enabled needs kube-prometheus-stack's CRDs and this cluster serves no %s: a cluster admin installs it first with deploy/monitoring/install.sh (deploy/monitoring/README.md), or set monitoring.enabled=false" $api) }}
+{{- end }}
+{{- end }}
+{{- /* Keys without which a monitoring workload never starts: a clear failure rather than CreateContainerConfigError */}}
+{{- if eq .Values.secrets.source "keyvault" }}
+{{- range $key := list "monitoring-db-password" "grafana-proxy-key" }}
+{{- if has $key $.Values.keyvault.absent }}
+{{- fail (printf "%s is required with monitoring.enabled: put it in Key Vault (deploy/azure/init-secrets.sh) and remove it from keyvault.absent" $key) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $gb := toString .Values.monitoring.postgresDbSizeAlertGb }}
+{{- if not (regexMatch "^[0-9]+(\\.[0-9]+)?$" $gb) }}
+{{- fail (printf "monitoring.postgresDbSizeAlertGb must be a number of GB, got %q" $gb) }}
+{{- end }}
+{{- /* The APIs, by Compose's job names (services.<x>.metricsJob, on each Service as qeos.io/metrics-job): one
+ServiceMonitor for those Prometheus labels itself, one each for those that keep their own labels (honorLabels) */}}
+{{- $plain := list }}
+{{- $honoring := list }}
+{{- range $name, $svc := .Values.services }}
+{{- if and (eq $svc.kind "api") $svc.metricsJob }}
+{{- if $svc.metricsHonorLabels }}
+{{- $honoring = append $honoring $svc.metricsJob }}
+{{- else }}
+{{- $plain = append $plain $svc.metricsJob }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- $monitors := list (dict "name" "qeos-apis" "jobs" (sortAlpha $plain) "honor" false) }}
+{{- range $job := sortAlpha $honoring }}
+{{- $monitors = append $monitors (dict "name" (printf "qeos-%s" $job) "jobs" (list $job) "honor" true) }}
+{{- end }}
+{{- $monitors = append $monitors (dict "name" "qeos-postgres" "jobs" (list "postgres") "honor" false) }}
+{{- $monitors = append $monitors (dict "name" "qeos-alertmanager" "jobs" (list "alertmanager") "honor" false) }}
+{{- range $m := $monitors }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $m.name }}
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" $m.name "component" "monitoring") | nindent 4 }}
+spec:
+  # Prometheus's job label: the Service's qeos.io/metrics-job, Compose's scrape job name
+  jobLabel: qeos.io/metrics-job
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+    matchExpressions:
+      - key: qeos.io/metrics-job
+        operator: In
+        values: {{ toJson $m.jobs }}
+  endpoints:
+    - port: http
+      path: /metrics
+      # Compose's scrape_interval
+      interval: 15s
+      {{- if $m.honor }}
+      # The loop jobs' heartbeat gauges carry job=<the loop job> (Compose: honor_labels: true on ingestion)
+      honorLabels: true
+      {{- end }}
+      relabelings:
+        # The operator labels every target with its Kubernetes Service (service="auth-service"), which would rename
+        # the services' own `service` label (service="auth", which the alerts and dashboards group by) to
+        # exported_service. Dropped, the series carry the same `service` as on Compose
+        - action: labeldrop
+          regex: service
+{{- end }}
+{{- $skip := .Values.monitoring.skipRuleGroups | default list }}
+{{- range $src := list "alerts" "recording" }}
+{{- $file := printf "files/monitoring/prometheus/%s.yml" $src }}
+{{- $rules := $.Files.Get $file | fromYaml }}
+{{- if or (hasKey $rules "Error") (not $rules.groups) }}
+{{- fail (printf "%s holds no rule groups: %v" $file (get $rules "Error")) }}
+{{- end }}
+{{- $groups := list }}
+{{- range $group := $rules.groups }}
+{{- if not (has $group.name $skip) }}
+{{- $groups = append $groups $group }}
+{{- end }}
+{{- end }}
+{{- if $groups }}
+---
+# monitoring/prometheus/{{ $src }}.yml, but monitoring.skipRuleGroups
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ printf "qeos-%s" $src }}
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" (printf "qeos-%s" $src) "component" "monitoring") | nindent 4 }}
+spec:
+  groups:
+    {{- toYaml $groups | nindent 4 }}
+{{- end }}
+{{- end }}
+---
+# What Compose's monitoring/prometheus/entrypoint.sh renders from POSTGRES_DB_SIZE_ALERT_GB (rule files cannot read the
+# environment): PostgresDatabaseGrowing's threshold
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: qeos-thresholds
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" "qeos-thresholds" "component" "monitoring") | nindent 4 }}
+spec:
+  groups:
+    - name: qeos-thresholds
+      rules:
+        - record: postgresql_database_size_alert_bytes
+          expr: {{ printf "vector(%s * 1e9)" $gb | quote }}
+{{- end }}

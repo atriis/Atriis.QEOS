@@ -3,11 +3,13 @@
 # database and its login role <db>_app, and makes that role the owner of its own database only. Idempotent: it runs
 # before every install and upgrade, and resets each role's password to the current secret.
 # Connection: PGHOST, PGUSER, PGSSLMODE from the environment; the passwords are files in SECRETS_DIR (the Key Vault CSI
-# mount or the qeos-secrets Secret): postgres-admin-password and <db>-db-password.
+# mount or the qeos-secrets Secret): postgres-admin-password and <db>-db-password. With MONITORING_ENABLED=true it also
+# makes postgres-exporter's role qeos_monitor, with the password monitoring-db-password.
 set -eu
 
 SECRETS_DIR="${SECRETS_DIR:-/mnt/secrets}"
 DATABASES="${DATABASES:-auth organization project ingestion testmgmt}"
+MONITORING_ENABLED="${MONITORING_ENABLED:-false}"
 
 # secret KEY -- the key's file content; exits (naming the key) when the file is missing or blank
 secret() {
@@ -22,6 +24,9 @@ PGPASSWORD="$(secret postgres-admin-password)"
 for db in $DATABASES; do
   secret "$db-db-password" >/dev/null
 done
+if [ "$MONITORING_ENABLED" = true ]; then
+  secret monitoring-db-password >/dev/null
+fi
 export PGPASSWORD
 export PGDATABASE=postgres
 
@@ -67,3 +72,23 @@ REVOKE ALL ON DATABASE :"db" FROM PUBLIC;
 SQL
   echo "db-init: database ${db}_db owned by ${db}_app"
 done
+
+# Monitoring on: postgres-exporter's login role qeos_monitor with pg_monitor only (statistics and settings, no table
+# data), as scripts/postgres-init.sh makes it for Compose, and pg_stat_statements in the postgres database for the
+# slowest-statements panel. Flexible Server lets its admin grant pg_monitor and create the extension, which Bicep allows
+# in azure.extensions; the CI server's init script gives its admin the same (files/ci-postgres-init.sh). With
+# monitoring off an existing qeos_monitor is left as it is
+if [ "$MONITORING_ENABLED" = true ]; then
+  ROLE_PASSWORD="$(secret monitoring-db-password)"
+  [ -n "$ROLE_PASSWORD" ] || { echo "db-init: secret monitoring-db-password is empty" >&2; exit 1; }
+  export ROLE_PASSWORD
+  psql -v ON_ERROR_STOP=1 -q <<'SQL'
+\getenv pw ROLE_PASSWORD
+SELECT 'CREATE ROLE qeos_monitor LOGIN' WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'qeos_monitor')\gexec
+-- a server running with log_statement=ddl or all would log this password; the default is none
+ALTER ROLE qeos_monitor WITH LOGIN PASSWORD :'pw';
+GRANT pg_monitor TO qeos_monitor;
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+SQL
+  echo "db-init: role qeos_monitor (pg_monitor) for postgres-exporter"
+fi

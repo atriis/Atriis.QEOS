@@ -1,0 +1,8 @@
+# The blueprint's PostgreSQL names (§11.2), published from postgres-exporter's; dashboards and alerts use these
+groups:
+  - name: qeos-recording
+    rules:
+      - record: postgresql_database_size_bytes
+        expr: sum by (datname) (pg_database_size_bytes)
+      - record: postgresql_connections
+        expr: sum by (state) (pg_stat_activity_count)

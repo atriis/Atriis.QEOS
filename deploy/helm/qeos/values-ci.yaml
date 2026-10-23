@@ -38,6 +38,11 @@ networkPolicy:
 migrate:
   activeDeadlineSeconds: 300
 
+# The CI job installs deploy/monitoring first (install.sh --env ci), so the ServiceMonitors, rules, postgres-exporter and
+# Alertmanager run here too (scripts/check_k8s_monitoring.sh)
+monitoring:
+  enabled: true
+
 ci:
   backing: true
 
@@ -55,3 +60,6 @@ ciSecrets:
   testmgmt-db-password: ci-dummy-testmgmt-db-e6127ad5
   artifacts-s3-access-key: ci-dummy-minio-user-3a9c
   artifacts-s3-secret-key: ci-dummy-minio-secret-8f2e4d61
+  monitoring-db-password: ci-dummy-monitoring-db-6b1d93fe
+  # The gateway's check needs 32 to 128 characters of [A-Za-z0-9_-]
+  grafana-proxy-key: ci-dummy-grafana-proxy-key-5c0e7a92d4f8

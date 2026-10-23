@@ -1,0 +1,145 @@
+# Alert rules (spec §5). Unit tests: tests/alerts.test.yml. Annotations hold no $value so tests stay exact.
+groups:
+  - name: qeos-services
+    rules:
+      - alert: ServiceDown
+        expr: label_replace(up == 0, "service", "$1", "job", "(.*)")
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.service }} is down ({{ $labels.instance }})"
+
+      - alert: High5xxRate
+        expr: |
+          (
+            sum by (service) (rate(api_requests_total{status_code=~"5.."}[5m]))
+              / sum by (service) (rate(api_requests_total[5m]))
+          ) > 0.05
+          and sum by (service) (increase(api_requests_total[5m])) >= 20
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.service }}: over 5% of requests answer 5xx"
+
+      - alert: SlowRequests
+        expr: |
+          histogram_quantile(0.95, sum by (service, le) (rate(http_requests_duration_seconds_bucket{endpoint!~".*/analytics/report.*"}[5m]))) > 2
+          or
+          histogram_quantile(0.95, sum by (service, le) (rate(http_requests_duration_seconds_bucket{endpoint=~".*/analytics/report.*"}[5m]))) > 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }}: 95th percentile response time over its limit"
+
+  - name: qeos-jobs-and-uploads
+    rules:
+      # 2x each job's interval: retention 24 h, rollup 6 h, weekly summary 30 min (Ruling 6), impact rollup 24 h
+      - alert: JobStale
+        expr: |
+          time() - job_last_success_timestamp_seconds{job="retention"} > 2 * 86400
+          or time() - job_last_success_timestamp_seconds{job="rollup"} > 12 * 3600
+          or time() - job_last_success_timestamp_seconds{job="weekly_summary"} > 3600
+          or time() - job_last_success_timestamp_seconds{job="impact_rollup"} > 2 * 86400
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Job {{ $labels.job }} has not succeeded for over twice its interval"
+
+      - alert: JobFailing
+        expr: job_last_error_timestamp_seconds > job_last_success_timestamp_seconds
+        for: 30m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Job {{ $labels.job }} failed on its last pass"
+
+      - alert: UploadsRejected
+        expr: |
+          sum(increase(qav_ingest_rejected_total[15m]))
+            / (sum(increase(qav_ingest_rejected_total[15m])) + sum(increase(qav_ingest_runs_total[15m]))) > 0.25
+          and (sum(increase(qav_ingest_rejected_total[15m])) + sum(increase(qav_ingest_runs_total[15m]))) >= 10
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Over 25% of collector uploads are rejected"
+
+  - name: qeos-host
+    rules:
+      - alert: DiskFillingUp
+        expr: |
+          (1 - node_filesystem_avail_bytes{fstype=~"ext[234]|xfs|btrfs|zfs"} / node_filesystem_size_bytes{fstype=~"ext[234]|xfs|btrfs|zfs"}) > 0.85
+          or predict_linear(node_filesystem_avail_bytes{fstype=~"ext[234]|xfs|btrfs|zfs"}[6h], 24 * 3600) < 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Disk {{ $labels.mountpoint }} is over 85% full or will fill within 24 hours"
+
+      - alert: MemoryPressure
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Less than 10% of the VM's memory is available"
+
+      # cAdvisor answers its scrape but sees no compose container: a socket mount is missing or wrong, and
+      # every container panel and the restart alert above go quiet. cAdvisor down is ServiceDown's job
+      - alert: CadvisorNoContainers
+        expr: up{job="cadvisor"} == 1 unless on() count(container_start_time_seconds{container!=""}) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "cAdvisor is up but reports no container metrics: check its Docker and containerd socket mounts"
+
+  - name: qeos-containers
+    rules:
+      # cAdvisor has no restart counter: a new start time is a restart
+      - alert: MemoryPressure
+        expr: changes(container_start_time_seconds{container!="", container!="POD"}[15m]) > 3
+        labels:
+          severity: warning
+          kind: container
+        annotations:
+          summary: "Container {{ $labels.container }} restarted more than 3 times in 15 minutes"
+
+  - name: qeos-postgres
+    rules:
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL is unreachable from the exporter"
+
+      - alert: PostgresTooManyConnections
+        expr: sum(postgresql_connections) / scalar(max(pg_settings_max_connections)) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "PostgreSQL connections above 80% of max_connections"
+
+      - alert: PostgresDatabaseGrowing
+        expr: postgresql_database_size_bytes > scalar(postgresql_database_size_alert_bytes)
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Database {{ $labels.datname }} is larger than POSTGRES_DB_SIZE_ALERT_GB"
+
+  - name: qeos-pipeline
+    rules:
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+        annotations:
+          summary: "Always firing: proves that rules are evaluated and alerts delivered"

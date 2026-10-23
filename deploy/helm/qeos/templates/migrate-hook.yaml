@@ -9,6 +9,10 @@ its own role's password and SECRET_KEY */ -}}
 {{- range $name := .Values.migrate.order }}
 {{- $hookKeys = append $hookKeys (printf "%s-db-password" (required (printf "services.%s.database is required" $name) (get $.Values.services $name).database)) }}
 {{- end }}
+{{- /* With monitoring on, db-init also creates postgres-exporter's role qeos_monitor */}}
+{{- if .Values.monitoring.enabled }}
+{{- $hookKeys = append $hookKeys "monitoring-db-password" }}
+{{- end }}
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -98,6 +102,9 @@ spec:
               value: {{ .Values.postgres.sslmode | quote }}
             - name: DATABASES
               value: {{ include "qeos.migrateDatabases" $ | quote }}
+            # The role qeos_monitor (pg_monitor) with the password monitoring-db-password, for postgres-exporter
+            - name: MONITORING_ENABLED
+              value: {{ .Values.monitoring.enabled | toString | quote }}
           securityContext:
             # The postgres image's own user
             runAsUser: 999
@@ -106,7 +113,8 @@ spec:
           resources:
             {{- toYaml .Values.migrate.resources | nindent 12 }}
           volumeMounts:
-            # The admin password and every role's password (it sets them); no migration container sees these
+            # The admin password and every role's password (it sets them, qeos_monitor's included); no migration container
+            # sees these
             {{- include "qeos.migrateMounts" (dict "keys" (without $hookKeys "secret-key")) | nindent 12 }}
         {{- range $name := .Values.migrate.order }}
         {{- $svc := get $.Values.services $name }}

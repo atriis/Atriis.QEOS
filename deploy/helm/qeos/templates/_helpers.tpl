@@ -320,3 +320,68 @@ app.kubernetes.io/component: ci-backing
 helm.sh/hook: pre-install
 helm.sh/hook-weight: {{ .weight | quote }}
 {{- end -}}
+
+{{/* ---- Monitoring (monitoring.enabled, ADR-038 Stage 2) ---- */}}
+
+{{/* The monitoring namespace: networkPolicy.prometheus.namespace, its single source */}}
+{{- define "qeos.prometheusNamespace" -}}
+{{- $prometheus := .Values.networkPolicy.prometheus | default dict -}}
+{{- required "networkPolicy.prometheus.namespace is required with monitoring.enabled: the Prometheus pods' namespace" $prometheus.namespace -}}
+{{- end -}}
+
+{{/* Grafana's data source: monitoring.prometheusUrl, or kube-prometheus-stack's Service in the monitoring namespace */}}
+{{- define "qeos.prometheusUrl" -}}
+{{- if .Values.monitoring.prometheusUrl -}}
+{{- .Values.monitoring.prometheusUrl -}}
+{{- else -}}
+{{- printf "http://qeos-monitoring-prometheus.%s.svc.cluster.local:9090" (include "qeos.prometheusNamespace" .) -}}
+{{- end -}}
+{{- end -}}
+
+{{/* A NetworkPolicy source: the Prometheus pods (networkPolicy.prometheus), by namespace name and pod labels */}}
+{{- define "qeos.prometheusPeer" -}}
+{{- $prometheus := .Values.networkPolicy.prometheus | default dict -}}
+- namespaceSelector:
+    matchLabels:
+      kubernetes.io/metadata.name: {{ include "qeos.prometheusNamespace" . }}
+  podSelector:
+    matchLabels:
+      {{- /* Empty labels would admit every pod of that namespace */}}
+      {{- if not $prometheus.podLabels }}
+      {{- fail "networkPolicy.prometheus.podLabels is required: the Prometheus pods' labels" }}
+      {{- end }}
+      {{- toYaml $prometheus.podLabels | nindent 6 }}
+{{- end -}}
+
+{{/* JSON: the monitoring workloads (empty with monitoring off), shaped like .Values.services entries so the secret
+helpers (qeos.secretRefs, qeos.vaultKeys, qeos.secretEnv) and secretproviderclass.yaml treat them alike. port: their
+Service's, which only Prometheus reaches */}}
+{{- define "qeos.monitoringWorkloads" -}}
+{{- $workloads := dict -}}
+{{- if .Values.monitoring.enabled -}}
+{{- $identity := required "monitoring.identity is required with monitoring.enabled" .Values.monitoring.identity -}}
+{{- $_ := set $workloads "postgres-exporter" (dict "kind" "postgres-exporter" "identity" $identity "port" 9187
+  "secretEnv" (dict "DATA_SOURCE_PASS" "monitoring-db-password")) -}}
+{{- $_ := set $workloads "alertmanager" (dict "kind" "alertmanager" "identity" $identity "port" 9093 "smtp" true
+  "secretEnv" (dict "ALERT_SLACK_WEBHOOK_URL" "alert-slack-webhook-url" "ALERT_TEAMS_WEBHOOK_URL" "alert-teams-webhook-url"
+    "SMTP_USER" "smtp-user" "SMTP_PASSWORD" "smtp-password")) -}}
+{{- end -}}
+{{- toJson $workloads -}}
+{{- end -}}
+
+{{/* qeos.vaultKeys (dict "ctx" $ "svc" $svc) -- JSON list, sorted: the Key Vault keys the workload's SecretProviderClass
+holds, those of its secrets that keyvault.absent does not list. Empty: no SecretProviderClass and no CSI volume */}}
+{{- define "qeos.vaultKeys" -}}
+{{- $keys := list -}}
+{{- range $env, $key := include "qeos.secretRefs" . | fromJson -}}
+{{- if not (has $key $.ctx.Values.keyvault.absent) -}}
+{{- $keys = append $keys $key -}}
+{{- end -}}
+{{- end -}}
+{{- toJson ($keys | uniq | sortAlpha) -}}
+{{- end -}}
+
+{{/* qeos.metricsLabels (dict "ctx" $ "job" "<job>") -- a scraped Service's label: Prometheus's job (ServiceMonitor jobLabel) */}}
+{{- define "qeos.metricsLabels" -}}
+qeos.io/metrics-job: {{ .job }}
+{{- end -}}

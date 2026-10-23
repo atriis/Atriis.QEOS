@@ -1,0 +1,155 @@
+{{- /* Alertmanager (monitoring.enabled), as Compose's: an init container runs Compose's render.sh (files/monitoring/alertmanager,
+a copy) into a memory-backed emptyDir, with ALERT_EMAIL_TO from monitoring.alertEmailTo, the SMTP settings from smtp.*
+and the webhook URLs and SMTP login from the synced Secret (all optional: a channel without its settings is left out,
+and with none every alert goes to the null receiver, Watchdog included). One replica, no clustering. The cluster's
+Prometheus sends it alerts (install.sh: Service alertmanager, port http) and scrapes it (job alertmanager); nothing
+else reaches it (networkpolicies.yaml) */ -}}
+{{- if .Values.monitoring.enabled }}
+{{- $name := "alertmanager" }}
+{{- $svc := get (include "qeos.monitoringWorkloads" . | fromJson) $name }}
+{{- $ctx := dict "ctx" $ "name" $name "svc" $svc "uid" 65534 }}
+{{- /* Key Vault: a SecretProviderClass only when the vault holds one of its keys (keyvault.absent) */}}
+{{- $keyed := and (eq .Values.secrets.source "keyvault") (gt (len (include "qeos.vaultKeys" $ctx | fromJsonArray)) 0) }}
+{{- $env := include "qeos.env" $ctx | fromJson }}
+{{- $_ := set $env "ALERT_EMAIL_TO" (toString .Values.monitoring.alertEmailTo) }}
+{{- $rendered := "/etc/alertmanager/rendered/alertmanager.yml" }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: qeos-alertmanager
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" "monitoring") | nindent 4 }}
+data:
+  render.sh: |
+    {{- .Files.Get "files/monitoring/alertmanager/render.sh" | nindent 4 }}
+  alertmanager.yml.template: |
+    {{- .Files.Get "files/monitoring/alertmanager/alertmanager.yml.template" | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" "monitoring") | nindent 4 }}
+    {{- include "qeos.metricsLabels" (dict "ctx" $ "job" "alertmanager") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "qeos.selector" $ctx | nindent 4 }}
+  ports:
+    # Named http: deploy/monitoring/install.sh points Prometheus's alertingEndpoints at this port name
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" "monitoring") | nindent 4 }}
+spec:
+  replicas: 1
+  # One copy at a time: a second would hold its own silences and notification log
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "qeos.selector" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" "monitoring") | nindent 8 }}
+      annotations:
+        # The configuration is rendered at start: a new template or setting restarts the pod
+        checksum/config: {{ printf "%s%s%s" (.Files.Get "files/monitoring/alertmanager/render.sh") (.Files.Get "files/monitoring/alertmanager/alertmanager.yml.template") (toJson $env) | sha256sum }}
+    spec:
+      serviceAccountName: {{ printf "qeos-%s" $svc.identity }}
+      {{- /* The image's own user, nobody */}}
+      {{- include "qeos.podCommon" $ctx | nindent 6 }}
+      initContainers:
+        - name: render-config
+          image: {{ .Values.monitoring.images.alertmanager }}
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "/etc/qeos/alertmanager/render.sh", {{ $rendered | quote }}]
+          env:
+            {{- range $var := keys $env | sortAlpha }}
+            - name: {{ $var }}
+              value: {{ get $env $var | quote }}
+            {{- end }}
+            {{- include "qeos.secretEnv" $ctx | nindent 12 }}
+          securityContext:
+            {{- include "qeos.containerSecurity" $ctx | nindent 12 }}
+          resources:
+            {{- toYaml (get .Values.monitoring.resources $name) | nindent 12 }}
+          volumeMounts:
+            - name: templates
+              mountPath: /etc/qeos/alertmanager
+              readOnly: true
+            - name: rendered
+              mountPath: /etc/alertmanager/rendered
+            - name: tmp
+              mountPath: /tmp
+            {{- if $keyed }}
+            {{- include "qeos.secretsMount" $ctx | nindent 12 }}
+            {{- end }}
+      containers:
+        - name: {{ $name }}
+          image: {{ .Values.monitoring.images.alertmanager }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - {{ printf "--config.file=%s" $rendered | quote }}
+            - --storage.path=/alertmanager
+            - {{ printf "--web.listen-address=:%v" $svc.port | quote }}
+            # One replica: no cluster peers to gossip with
+            - --cluster.listen-address=
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 4
+          {{- include "qeos.lifecycle" $ctx | nindent 10 }}
+          securityContext:
+            {{- include "qeos.containerSecurity" $ctx | nindent 12 }}
+          resources:
+            {{- toYaml (get .Values.monitoring.resources $name) | nindent 12 }}
+          volumeMounts:
+            - name: rendered
+              mountPath: /etc/alertmanager/rendered
+              readOnly: true
+            - name: data
+              mountPath: /alertmanager
+      volumes:
+        - name: templates
+          configMap:
+            name: qeos-alertmanager
+        # The rendered file holds the webhook URLs and the SMTP password: in memory, never on the node's disk
+        - name: rendered
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Mi
+        # Silences and the notification log; lost on a restart, as Compose keeps them only in its container
+        - name: data
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi
+        {{- if $keyed }}
+        {{- include "qeos.secretsVolume" $ctx | nindent 8 }}
+        {{- end }}
+{{- end }}

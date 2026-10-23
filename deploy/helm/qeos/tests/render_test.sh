@@ -34,14 +34,18 @@ STAGING_SET=(
 # GATEWAY_HTTPS_PORT by GATEWAY_PUBLIC_PORT (TLS ends at the edge). Anything else Compose sets must be set here too
 COMPOSE_ONLY="DATABASE_URL GATEWAY_HTTPS_PORT"
 COMPOSE="$CHART/../../../docker-compose.yml"
+# Monitoring on (values-ci.yaml and values-staging.yaml) needs kube-prometheus-stack's CRDs: on a cluster Helm finds them
+# itself; a render without a cluster is told they exist
+CRDS=(--api-versions monitoring.coreos.com/v1/ServiceMonitor --api-versions monitoring.coreos.com/v1/PrometheusRule)
 
 # ---- lint and render ----
-if helm lint "$CHART" -f "$CHART/values-ci.yaml" >"$OUT/lint-ci.txt" 2>&1; then
+# helm lint takes no --api-versions, so it sees no CRD and lints with monitoring off; the renders below cover monitoring
+if helm lint "$CHART" -f "$CHART/values-ci.yaml" --set monitoring.enabled=false >"$OUT/lint-ci.txt" 2>&1; then
   pass "helm lint (values-ci.yaml)"
 else
   fail "helm lint (values-ci.yaml): $(tail -n 5 "$OUT/lint-ci.txt")"
 fi
-if helm lint "$CHART" -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" >"$OUT/lint-staging.txt" 2>&1; then
+if helm lint "$CHART" -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" --set monitoring.enabled=false >"$OUT/lint-staging.txt" 2>&1; then
   pass "helm lint (values-staging.yaml)"
 else
   fail "helm lint (values-staging.yaml): $(tail -n 5 "$OUT/lint-staging.txt")"
@@ -56,15 +60,16 @@ render() {
     : >"$OUT/$name.yaml"
   fi
 }
-render ci -f "$CHART/values-ci.yaml"
-render staging -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}"
+# Both environments run with monitoring on (ADR-038 Stage 2)
+render ci -f "$CHART/values-ci.yaml" "${CRDS[@]}"
+render staging -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" "${CRDS[@]}"
 # Once the ACS SMTP application exists, its secrets are in the vault and keyvault.absent drops them
-render staging-email -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" --set 'keyvault.absent={tm-secrets-key}'
-render ci-nopolicy -f "$CHART/values-ci.yaml" --set networkPolicy.enabled=false
-# Monitoring on: the gateway gets the Grafana proxy key (ADR-038)
-render ci-monitoring -f "$CHART/values-ci.yaml" --set monitoring.enabled=true
-render staging-monitoring -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" --set monitoring.enabled=true
-render ci-prometheus -f "$CHART/values-ci.yaml" --set monitoring.enabled=true --set networkPolicy.prometheus.namespace=mon \
+render staging-email -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" "${CRDS[@]}" --set 'keyvault.absent={tm-secrets-key}'
+render ci-nopolicy -f "$CHART/values-ci.yaml" "${CRDS[@]}" --set networkPolicy.enabled=false
+# Monitoring off: Stage 1's release, which needs no CRD
+render ci-off -f "$CHART/values-ci.yaml" --set monitoring.enabled=false
+render staging-off -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" --set monitoring.enabled=false
+render ci-prometheus -f "$CHART/values-ci.yaml" "${CRDS[@]}" --set networkPolicy.prometheus.namespace=mon \
   --set-json 'networkPolicy.prometheus.podLabels={"app.kubernetes.io/name":null,"app":"prom"}'
 # values.yaml alone holds no environment: a render must stop on the settings each environment has to give
 if helm template qeos "$CHART" --namespace "$NAMESPACE" >/dev/null 2>"$OUT/defaults.err"; then
@@ -77,11 +82,12 @@ fi
 # q FILE EXPR -- yq over every document of a rendered file
 q() { yq ea "$2" "$1"; }
 
-# selects FILE POLICY "k=v ..." -- whether the NetworkPolicy's podSelector matches a pod with these labels: matchLabels
-# and matchExpressions (In, NotIn, Exists, DoesNotExist) evaluated as Kubernetes does, not compared as text
+# selects FILE NAME "k=v ..." [KIND SELECTOR] -- whether the NetworkPolicy's podSelector (or KIND's SELECTOR, such as a
+# ServiceMonitor's .spec.selector) matches an object with these labels: matchLabels and matchExpressions (In, NotIn,
+# Exists, DoesNotExist) evaluated as Kubernetes does, not compared as text
 selects() {
   local sel kind key op vals l found v
-  sel="$(q "$1" "select(.kind == \"NetworkPolicy\" and .metadata.name == \"$2\") | .spec.podSelector
+  sel="$(q "$1" "select(.kind == \"${4:-NetworkPolicy}\" and .metadata.name == \"$2\") | ${5:-.spec.podSelector}
     | ((.matchLabels // {}) | to_entries | map(\"L \" + .key + \" \" + .value))
       + ((.matchExpressions // []) | map(\"E \" + .key + \" \" + .operator + \" \" + ((.values // []) | join(\",\"))))
     | .[]")"
@@ -183,8 +189,9 @@ for env in ci staging; do
       || fail "$env: $name-ingress admits '$got', want '$want'"
     [ "$(ports "$name-ingress")" = TCP/8000 ] && pass "$env: $name-ingress opens TCP 8000 only" \
       || fail "$env: $name-ingress opens '$(ports "$name-ingress")'"
-    # Monitoring off: nothing from outside the namespace (Prometheus only with monitoring.enabled, below)
-    [ -z "$(outside "$name-ingress")" ] && pass "$env: monitoring off, $name-ingress admits nothing from outside the namespace" \
+    # From outside the namespace: Prometheus only (monitoring on in both environments; off below)
+    [ "$(outside "$name-ingress")" = "qeos-monitoring app.kubernetes.io/name=prometheus" ] \
+      && pass "$env: $name-ingress admits only Prometheus from outside the namespace" \
       || fail "$env: $name-ingress admits from outside: '$(outside "$name-ingress")'"
   done
   got="$(callers dashboard-ingress 8080)|$(ports dashboard-ingress)|$(outside dashboard-ingress)"
@@ -276,8 +283,8 @@ for env in ci staging; do
   # ---- the hook: each container sees only its own secret files ----
   mounts() { q "$f" "select(.kind == \"Job\" and .metadata.name == \"qeos-migrate\") | .spec.template.spec.initContainers[] | select(.name == \"$1\")
     | [.volumeMounts[] | select(.name == \"secrets\") | .mountPath] | sort | join(\" \")"; }
-  want="/mnt/secrets/auth-db-password /mnt/secrets/ingestion-db-password /mnt/secrets/organization-db-password /mnt/secrets/postgres-admin-password /mnt/secrets/project-db-password /mnt/secrets/testmgmt-db-password"
-  [ "$(mounts db-init)" = "$want" ] && pass "$env: db-init sees the admin and role passwords only" || fail "$env: db-init mounts '$(mounts db-init)'"
+  want="/mnt/secrets/auth-db-password /mnt/secrets/ingestion-db-password /mnt/secrets/monitoring-db-password /mnt/secrets/organization-db-password /mnt/secrets/postgres-admin-password /mnt/secrets/project-db-password /mnt/secrets/testmgmt-db-password"
+  [ "$(mounts db-init)" = "$want" ] && pass "$env: db-init sees the admin and role passwords only, qeos_monitor's included" || fail "$env: db-init mounts '$(mounts db-init)'"
   for pair in auth-service:auth organization-service:organization project-service:project ingestion-service:ingestion \
       test-management-service:testmgmt; do
     IFS=: read -r name db <<< "$pair"
@@ -291,7 +298,7 @@ for env in ci staging; do
   [ "$(gw UPSTREAM_SUFFIX)" = ".$NAMESPACE.svc.cluster.local" ] && pass "$env: gateway UPSTREAM_SUFFIX follows the namespace" \
     || fail "$env: gateway UPSTREAM_SUFFIX is '$(gw UPSTREAM_SUFFIX)'"
   [ "$(gw GATEWAY_TLS)|$(gw GATEWAY_PUBLIC_PORT)|$(gw GATEWAY_RESOLVER)|$(gw MONITORING_ENABLED)" \
-    = "off|443|kube-dns.kube-system.svc.cluster.local|false" ] && pass "$env: gateway TLS off, port 443, cluster DNS, monitoring off" \
+    = "off|443|kube-dns.kube-system.svc.cluster.local|true" ] && pass "$env: gateway TLS off, port 443, cluster DNS, monitoring on" \
     || fail "$env: gateway settings are '$(gw GATEWAY_TLS)|$(gw GATEWAY_PUBLIC_PORT)|$(gw GATEWAY_RESOLVER)|$(gw MONITORING_ENABLED)'"
   rates="$(gw RATE_AUTH) $(gw RATE_API) $(gw RATE_COLLECT) $(gw RATE_COLLECT_BLOBS) $(gw RATE_COLLECT_ARTIFACTS)"
   [ "$rates" = "3r/s 10r/s 5r/s 25r/s 5r/s" ] && pass "$env: gateway rates halved" || fail "$env: gateway rates are '$rates'"
@@ -354,18 +361,18 @@ done
 gwkey() { q "$OUT/$1.yaml" 'select(.kind == "Deployment" and .metadata.name == "gateway") | .spec.template.spec.containers[0].env[] | select(.name == "GRAFANA_PROXY_KEY") | .valueFrom.secretKeyRef.name + "/" + .valueFrom.secretKeyRef.key'; }
 gwspc() { q "$OUT/$1.yaml" 'select(.kind == "SecretProviderClass" and .metadata.name == "qeos-gateway") | [.spec.secretObjects[0].data[].key] | join(" ")'; }
 for env in ci staging; do
-  [ -z "$(gwkey "$env")" ] && pass "$env: monitoring off, the gateway reads no GRAFANA_PROXY_KEY" || fail "$env: gateway reads '$(gwkey "$env")' with monitoring off"
+  [ -z "$(gwkey "$env-off")" ] && pass "$env: monitoring off, the gateway reads no GRAFANA_PROXY_KEY" || fail "$env: gateway reads '$(gwkey "$env-off")' with monitoring off"
 done
-[ -z "$(gwspc staging)" ] && pass "staging: monitoring off, no SecretProviderClass for the gateway" || fail "staging: qeos-gateway holds '$(gwspc staging)' with monitoring off"
-[ "$(gwkey ci-monitoring)" = "qeos-secrets/grafana-proxy-key" ] && pass "ci: monitoring on, the gateway reads grafana-proxy-key from qeos-secrets"   || fail "ci: gateway GRAFANA_PROXY_KEY is '$(gwkey ci-monitoring)'"
-[ "$(gwkey staging-monitoring)" = "qeos-secrets-gateway/grafana-proxy-key" ] && pass "staging: monitoring on, the gateway reads grafana-proxy-key from qeos-secrets-gateway"   || fail "staging: gateway GRAFANA_PROXY_KEY is '$(gwkey staging-monitoring)'"
-[ "$(gwspc staging-monitoring)" = grafana-proxy-key ] && pass "staging: monitoring on, qeos-gateway holds grafana-proxy-key only"   || fail "staging: qeos-gateway holds '$(gwspc staging-monitoring)'"
-v="$(q "$OUT/staging-monitoring.yaml" 'select(.kind == "Deployment" and .metadata.name == "gateway") | [.spec.template.spec.volumes[] | select(.csi) | .csi.volumeAttributes.secretProviderClass] | join(" ")')"
+[ -z "$(gwspc staging-off)" ] && pass "staging: monitoring off, no SecretProviderClass for the gateway" || fail "staging: qeos-gateway holds '$(gwspc staging-off)' with monitoring off"
+[ "$(gwkey ci)" = "qeos-secrets/grafana-proxy-key" ] && pass "ci: monitoring on, the gateway reads grafana-proxy-key from qeos-secrets"   || fail "ci: gateway GRAFANA_PROXY_KEY is '$(gwkey ci)'"
+[ "$(gwkey staging)" = "qeos-secrets-gateway/grafana-proxy-key" ] && pass "staging: monitoring on, the gateway reads grafana-proxy-key from qeos-secrets-gateway"   || fail "staging: gateway GRAFANA_PROXY_KEY is '$(gwkey staging)'"
+[ "$(gwspc staging)" = grafana-proxy-key ] && pass "staging: monitoring on, qeos-gateway holds grafana-proxy-key only"   || fail "staging: qeos-gateway holds '$(gwspc staging)'"
+v="$(q "$OUT/staging.yaml" 'select(.kind == "Deployment" and .metadata.name == "gateway") | [.spec.template.spec.volumes[] | select(.csi) | .csi.volumeAttributes.secretProviderClass] | join(" ")')"
 [ "$v" = qeos-gateway ] && pass "staging: monitoring on, the gateway pod mounts qeos-gateway (the driver syncs its Secret)" || fail "staging: gateway mounts '$v'"
-v="$(q "$OUT/staging.yaml" 'select(.kind == "Deployment" and .metadata.name == "gateway") | [.spec.template.spec.volumes[] | select(.csi)] | length')"
+v="$(q "$OUT/staging-off.yaml" 'select(.kind == "Deployment" and .metadata.name == "gateway") | [.spec.template.spec.volumes[] | select(.csi)] | length')"
 [ "$v" = 0 ] && pass "staging: monitoring off, the gateway mounts no secrets volume" || fail "staging: the gateway mounts $v CSI volumes with monitoring off"
 # A rendered ConfigMap never holds the key
-[ "$(q "$OUT/staging-monitoring.yaml" 'select(.kind == "ConfigMap") | .data | keys | .[] | select(. == "GRAFANA_PROXY_KEY")')" = "" ]   && pass "staging: GRAFANA_PROXY_KEY is in no ConfigMap" || fail "staging: a ConfigMap sets GRAFANA_PROXY_KEY"
+[ "$(q "$OUT/staging.yaml" 'select(.kind == "ConfigMap") | .data | keys | .[] | select(. == "GRAFANA_PROXY_KEY")')" = "" ]   && pass "staging: GRAFANA_PROXY_KEY is in no ConfigMap" || fail "staging: a ConfigMap sets GRAFANA_PROXY_KEY"
 
 # ---- environment-specific choices ----
 backend() { q "$OUT/$1.yaml" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-ingestion-service-env") | .data.ARTIFACTS_BACKEND'; }
@@ -376,7 +383,7 @@ np() { q "$OUT/$1.yaml" '[select(.kind == "NetworkPolicy")] | length'; }
 [ "$(np ci)" -gt 0 ] && pass "ci: NetworkPolicies rendered ($(np ci); kindnet enforces them)" || fail "ci: no NetworkPolicy rendered"
 [ "$(np ci-nopolicy)" = 0 ] && pass "networkPolicy.enabled=false renders no NetworkPolicy" || fail "networkPolicy.enabled=false renders $(np ci-nopolicy)"
 # Monitoring on: each API admits Prometheus (networkPolicy.prometheus) on 8000, nothing else does
-for env in ci-monitoring staging-monitoring; do
+for env in ci staging; do
   for name in $APIS; do
     o="$(q "$OUT/$env.yaml" "[select(.kind == \"NetworkPolicy\" and .metadata.name == \"$name-ingress\") | .spec.ingress[] | select(.from[0].namespaceSelector != null)
       | .from[0].namespaceSelector.matchLabels[\"kubernetes.io/metadata.name\"] + \" \" + (.from[0].podSelector.matchLabels | to_entries | map(.key + \"=\" + .value) | join(\",\"))
@@ -388,8 +395,20 @@ for env in ci-monitoring staging-monitoring; do
     | .spec.ingress[].from[] | select(.namespaceSelector.matchLabels["kubernetes.io/metadata.name"] == "qeos-monitoring")] | length')"
   [ "$o" = 0 ] && pass "$env: Prometheus reaches the APIs only" || fail "$env: $o Prometheus sources on the dashboard or gateway"
 done
-# Monitoring off needs no Prometheus settings at all
-if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" --set networkPolicy.prometheus=null >/dev/null 2>"$OUT/promoff.err"; then
+# Monitoring off: no API admits anything from outside the namespace, the gateway's MONITORING_ENABLED is false, and
+# no Prometheus setting is needed at all
+for env in ci-off staging-off; do
+  f="$OUT/$env.yaml"
+  bad=""
+  for name in $APIS; do
+    n="$(q "$f" "[select(.kind == \"NetworkPolicy\" and .metadata.name == \"$name-ingress\") | .spec.ingress[].from[] | select(.namespaceSelector != null)] | length")"
+    [ "$n" = 0 ] || bad="$bad $name"
+  done
+  [ -z "$bad" ] && pass "$env: monitoring off, no API admits anything from outside the namespace" || fail "$env: outside sources on:$bad"
+  v="$(q "$f" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-gateway-env") | .data.MONITORING_ENABLED')"
+  [ "$v" = false ] && pass "$env: monitoring off, the gateway's MONITORING_ENABLED is false" || fail "$env: the gateway's MONITORING_ENABLED is '$v'"
+done
+if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" --set monitoring.enabled=false --set networkPolicy.prometheus=null >/dev/null 2>"$OUT/promoff.err"; then
   pass "monitoring off: networkPolicy.prometheus is not required"
 else
   fail "monitoring off still requires networkPolicy.prometheus: $(tail -n 2 "$OUT/promoff.err")"
@@ -399,7 +418,7 @@ ns="$(q "$OUT/ci-prometheus.yaml" '[select(.kind == "NetworkPolicy" and .metadat
   + (.podSelector.matchLabels | to_entries | map(.key + "=" + .value) | join(","))] | join(";")')"
 [ "$ns" = "mon app=prom" ] && pass "networkPolicy.prometheus sets the scraper's namespace and pod labels" \
   || fail "networkPolicy.prometheus override gives '$ns'"
-if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" --set monitoring.enabled=true --set networkPolicy.prometheus.podLabels=null >/dev/null 2>"$OUT/promlabels.err"; then
+if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" "${CRDS[@]}" --set networkPolicy.prometheus.podLabels=null >/dev/null 2>"$OUT/promlabels.err"; then
   fail "empty networkPolicy.prometheus.podLabels renders (it would admit every pod of that namespace)"
 else
   grep -q "podLabels" "$OUT/promlabels.err" && pass "empty networkPolicy.prometheus.podLabels is refused" \
@@ -409,8 +428,8 @@ fi
 # that store artifacts (and the bucket Job); nothing else, and not on AKS
 bk() { q "$OUT/ci.yaml" "[select(.kind == \"NetworkPolicy\" and .metadata.name == \"ci-backing-ingress\") | .spec.ingress[]
   | select(.ports[0].port == $1) | .from[].podSelector.matchLabels[\"app.kubernetes.io/name\"]] | sort | join(\" \")"; }
-want="analytics-rollup auth-service impact-rollup ingestion-retention ingestion-service organization-service project-service qeos-migrate test-management-service weekly-summary"
-[ "$(bk 5432)" = "$want" ] && pass "ci: postgres admits the workloads with a database and the migration hook" \
+want="analytics-rollup auth-service impact-rollup ingestion-retention ingestion-service organization-service postgres-exporter project-service qeos-migrate test-management-service weekly-summary"
+[ "$(bk 5432)" = "$want" ] && pass "ci: postgres admits the workloads with a database, the migration hook and postgres-exporter" \
   || fail "ci: postgres admits '$(bk 5432)', want '$want'"
 [ "$(bk 9000)" = "ingestion-retention ingestion-service minio-init" ] && pass "ci: MinIO admits ingestion, retention and the bucket Job" \
   || fail "ci: MinIO admits '$(bk 9000)'"
@@ -478,7 +497,7 @@ i="$(q "$st" 'select(.kind == "Issuer") | .spec.acme | .server + " " + .solvers[
   || fail "staging: Issuer is '$i'"
 # The deploy identity administers the namespace only: nothing cluster-scoped, nothing aimed at another namespace
 for env in ci staging; do
-  bad="$(q "$OUT/$env.yaml" '[select(.kind != null) | select((.kind | test("^(Deployment|Service|ConfigMap|ServiceAccount|Job|PodDisruptionBudget|NetworkPolicy|SecretProviderClass|Gateway|HTTPRoute|Issuer|Certificate)$") | not)
+  bad="$(q "$OUT/$env.yaml" '[select(.kind != null) | select((.kind | test("^(Deployment|Service|ConfigMap|ServiceAccount|Job|PodDisruptionBudget|NetworkPolicy|SecretProviderClass|Gateway|HTTPRoute|Issuer|Certificate|ServiceMonitor|PrometheusRule)$") | not)
     or (.metadata.namespace // "") != "") | .kind + "/" + .metadata.name] | join(" ")')"
   [ -z "$bad" ] && pass "$env: only namespaced kinds, none with a namespace of its own" || fail "$env: cluster-scoped or foreign: $bad"
 done
@@ -526,7 +545,7 @@ mnt="$(q "$OUT/ci.yaml" "$pgdeploy | (.containers[0].volumeMounts[] | select(.na
 w="$(q "$OUT/ci.yaml" 'select(.kind == "ConfigMap" and .metadata.name == "postgres-init") | .metadata.annotations["helm.sh/hook-weight"] + " " + (.data["ci-postgres-init.sh"] | test("CREATEROLE CREATEDB NOSUPERUSER") | tostring)')"
 [ "$w" = "-20 true" ] && pass "ci: the postgres-init ConfigMap is a hook with the server (-20) and creates a non-superuser admin" \
   || fail "ci: postgres-init is '$w'"
-if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" --set postgres.adminUser=postgres >/dev/null 2>"$OUT/super.err"; then
+if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" "${CRDS[@]}" --set postgres.adminUser=postgres >/dev/null 2>"$OUT/super.err"; then
   fail "ci: postgres.adminUser=postgres renders (db-init would run as the superuser)"
 else
   grep -q "must not be postgres" "$OUT/super.err" && pass "ci: postgres.adminUser=postgres is refused" \
@@ -535,6 +554,196 @@ fi
 # kind's images are tagged :kind, never Compose's :local: a local kind build must not replace the dev stack's images
 bad="$(q "$OUT/ci.yaml" '[.spec.template.spec | (.containers // []) + (.initContainers // []) | .[].image | select(test("^qeos/") and (test(":kind$") | not))] | unique | join(",")' | tr -d "[:space:]")"
 [ -z "$bad" ] && pass "ci: every qeos/ image is tagged :kind" || fail "ci: images not tagged :kind: $bad"
+
+# ---- monitoring (ADR-038 Stage 2): ServiceMonitors, PrometheusRules, postgres-exporter and Alertmanager ----
+MONITORING="$CHART/../../../monitoring"
+# The rule groups: Compose's alerts.yml and recording.yml without qeos-host (node-exporter's, Compose only), and the
+# threshold that Compose's entrypoint.sh renders from POSTGRES_DB_SIZE_ALERT_GB
+want_groups="$( { yq '.groups[].name' "$MONITORING/prometheus/alerts.yml"; yq '.groups[].name' "$MONITORING/prometheus/recording.yml";
+  echo qeos-thresholds; } | tr -d '\r' | grep -vx qeos-host | sort | xargs)"
+[[ " $want_groups " == *" qeos-services "* ]] || fail "monitoring/prometheus/alerts.yml was not read"
+# The Compose job names: Prometheus's job label of each scraped Service
+want_jobs="alertmanager=alertmanager auth-service=auth ingestion-service=ingestion organization-service=organization postgres-exporter=postgres project-service=project test-management-service=test-management"
+for env in ci staging; do
+  f="$OUT/$env.yaml"
+  [ -s "$f" ] || continue
+  got="$(q "$f" '[select(.kind == "PrometheusRule") | .spec.groups[].name] | sort | join(" ")')"
+  [ "$got" = "$want_groups" ] && pass "$env: the PrometheusRules hold Compose's groups but qeos-host, and qeos-thresholds" \
+    || fail "$env: PrometheusRule groups are '$got', want '$want_groups'"
+  [[ " $got " == *" qeos-services "* && " $got " != *" qeos-host "* ]] && pass "$env: qeos-services rendered, qeos-host left out" \
+    || fail "$env: qeos-services missing or qeos-host present: '$got'"
+  t="$(q "$f" 'select(.kind == "PrometheusRule") | .spec.groups[] | select(.name == "qeos-thresholds") | .rules[0].record + " " + .rules[0].expr')"
+  [ "$t" = "postgresql_database_size_alert_bytes vector(20 * 1e9)" ] && pass "$env: qeos-thresholds records vector(20 * 1e9)" \
+    || fail "$env: qeos-thresholds is '$t'"
+  # The rules themselves, unchanged: the chart's copies through fromYaml and back
+  for src in alerts recording; do
+    # Keys sorted on both sides: Helm's toYaml sorts them
+    a="$(yq -o json -I0 '.groups | map(select(.name != "qeos-host")) | sort_keys(..)' "$MONITORING/prometheus/$src.yml" | tr -d '\r')"
+    b="$(yq ea -o json -I0 "select(.kind == \"PrometheusRule\" and .metadata.name == \"qeos-$src\") | .spec.groups | sort_keys(..)" "$f" | tr -d '\r')"
+    [ -n "$a" ] && [ "$a" = "$b" ] && pass "$env: PrometheusRule qeos-$src equals monitoring/prometheus/$src.yml (but qeos-host)" \
+      || fail "$env: PrometheusRule qeos-$src differs from $src.yml"
+  done
+
+  # ServiceMonitors: the Compose job names from each Service's qeos.io/metrics-job label; ingestion honours its labels
+  # (the loop jobs' heartbeats carry their own job); every one drops the operator's `service` target label, which would
+  # otherwise rename the services' own `service` label to exported_service
+  got="$(q "$f" '[select(.kind == "ServiceMonitor") | .metadata.name + "=" + ((.spec.endpoints[0].honorLabels // false) | tostring)] | sort | join(" ")')"
+  [ "$got" = "qeos-alertmanager=false qeos-apis=false qeos-ingestion=true qeos-postgres=false" ] \
+    && pass "$env: ServiceMonitors qeos-apis, qeos-ingestion (honorLabels), qeos-postgres, qeos-alertmanager" \
+    || fail "$env: ServiceMonitors are '$got'"
+  got="$(q "$f" '[select(.kind == "ServiceMonitor") | .spec.jobLabel + " " + (.spec.endpoints | length | tostring) + " " + .spec.endpoints[0].port
+    + " " + (.spec.endpoints[0].path // "/metrics") + " " + ((.spec.endpoints[0].relabelings // []) | map(select(.action == "labeldrop") | .regex) | join(","))] | unique | join(";")')"
+  [ "$got" = "qeos.io/metrics-job 1 http /metrics service" ] \
+    && pass "$env: every ServiceMonitor takes job from qeos.io/metrics-job, scrapes port http /metrics and drops the service target label" \
+    || fail "$env: ServiceMonitor settings are '$got'"
+  got=""
+  for svc in $(q "$f" '[select(.kind == "Service") | .metadata.name] | join(" ")'); do
+    job="$(q "$f" "select(.kind == \"Service\" and .metadata.name == \"$svc\") | .metadata.labels[\"qeos.io/metrics-job\"] // \"\"")"
+    [ -n "$job" ] && got="$got $svc=$job"
+  done
+  got="$(printf '%s\n' $got | sort | xargs)"
+  [ "$got" = "$want_jobs" ] && pass "$env: the scraped Services carry Compose's job names" || fail "$env: qeos.io/metrics-job labels are '$got'"
+  for pair in "qeos-apis:auth-service organization-service project-service test-management-service" "qeos-ingestion:ingestion-service" \
+      "qeos-postgres:postgres-exporter" "qeos-alertmanager:alertmanager"; do
+    sm="${pair%%:*}"
+    picked=""
+    for svc in $(q "$f" '[select(.kind == "Service") | .metadata.name] | sort | join(" ")'); do
+      labels="$(q "$f" "select(.kind == \"Service\" and .metadata.name == \"$svc\") | .metadata.labels | to_entries | map(.key + \"=\" + .value) | join(\" \")")"
+      selects "$f" "$sm" "$labels" ServiceMonitor .spec.selector && picked="$picked $svc"
+    done
+    [ "${picked# }" = "${pair#*:}" ] && pass "$env: $sm scrapes exactly ${pair#*:}" || fail "$env: $sm selects '${picked# }', want '${pair#*:}'"
+  done
+
+  # The two workloads: one replica each, Compose's images, Services named as in Compose
+  dep() { q "$f" "select(.kind == \"Deployment\" and .metadata.name == \"$1\") | $2"; }
+  for pair in alertmanager:9093 postgres-exporter:9187; do
+    name="${pair%%:*}"
+    port="${pair#*:}"
+    [ "$(dep "$name" .spec.replicas)" = 1 ] && pass "$env: $name has 1 replica" || fail "$env: $name has replicas '$(dep "$name" .spec.replicas)'"
+    s="$(q "$f" "select(.kind == \"Service\" and .metadata.name == \"$name\") | .spec.ports[0].name + \":\" + (.spec.ports[0].port | tostring)")"
+    [ "$s" = "http:$port" ] && pass "$env: Service $name is port http $port" || fail "$env: Service $name is '$s'"
+    img="$(yq ".services[\"$name\"].image" "$COMPOSE" | tr -d '\r')"
+    imgs="$(dep "$name" '[.spec.template.spec | (.containers // []) + (.initContainers // []) | .[].image] | unique | join(" ")')"
+    [ -n "$img" ] && [ "$imgs" = "$img" ] && pass "$env: $name runs $img, as Compose" || fail "$env: $name runs '$imgs', Compose '$img'"
+    # Only Prometheus reaches it, on its own port
+    np="$name-ingress"
+    o="$(outside "$np")|$(callers "$np" "$port")|$(ports "$np")"
+    [ "$o" = "qeos-monitoring app.kubernetes.io/name=prometheus||TCP/$port" ] && pass "$env: $np admits only Prometheus, on $port" \
+      || fail "$env: $np is '$o'"
+  done
+  bad="$(q "$f" '[select(.kind == "Deployment" and (.metadata.name == "alertmanager" or .metadata.name == "postgres-exporter"))
+    | .spec.template.spec as $s | (($s.containers // []) + ($s.initContainers // []))[]
+    | select(.resources.requests.cpu == null or .resources.requests.memory == null or .resources.limits.cpu == null or .resources.limits.memory == null)
+    | .name] | join(" ")')"
+  [ -z "$bad" ] && pass "$env: alertmanager's and postgres-exporter's containers have cpu and memory requests and limits" \
+    || fail "$env: monitoring containers without full resources: $bad"
+  lim="$(dep alertmanager '.spec.template.spec.containers[0].resources.limits.memory') $(dep postgres-exporter '.spec.template.spec.containers[0].resources.limits.memory')"
+  [ "$lim" = "64Mi 64Mi" ] && pass "$env: memory limits start from Compose's mem_limit (64m each)" || fail "$env: memory limits are '$lim'"
+
+  # postgres-exporter: as Compose's, but to postgres.host with postgres.sslmode
+  a="$(dep postgres-exporter '.spec.template.spec.containers[0] | (.command // []) + (.args // []) | join(" ")')"
+  [[ " $a " == *" --collector.stat_statements "* ]] && pass "$env: postgres-exporter runs with --collector.stat_statements" \
+    || fail "$env: postgres-exporter runs '$a'"
+  pe() { dep postgres-exporter ".spec.template.spec.containers[0].env[] | select(.name == \"$1\") | $2"; }
+  case "$env" in
+    ci) uri="postgres:5432/postgres?sslmode=disable"; ref="qeos-secrets/monitoring-db-password" ;;
+    *) uri="pg-placeholder.postgres.database.azure.com:5432/postgres?sslmode=require"; ref="qeos-secrets-postgres-exporter/monitoring-db-password" ;;
+  esac
+  got="$(pe DATA_SOURCE_URI .value) $(pe DATA_SOURCE_USER .value) $(pe DATA_SOURCE_PASS '.valueFrom.secretKeyRef.name + "/" + .valueFrom.secretKeyRef.key')"
+  [ "$got" = "$uri qeos_monitor $ref" ] && pass "$env: postgres-exporter connects as qeos_monitor to $uri" || fail "$env: postgres-exporter's connection is '$got'"
+
+  # Alertmanager: render.sh in an init container writes the configuration the server reads; the channels' secrets from
+  # the synced Secret, optional (no channel: the null receiver)
+  init="$(dep alertmanager '.spec.template.spec.initContainers[0].command | join(" ")')"
+  cfg="$(dep alertmanager '.spec.template.spec.containers[0].args[] | select(test("^--config.file="))')"
+  [[ "$init" == "sh /etc/qeos/alertmanager/render.sh "* ]] && [ "--config.file=${init##* }" = "$cfg" ] \
+    && pass "$env: the init container renders ${init##* }, which Alertmanager reads" || fail "$env: init '$init', server '$cfg'"
+  am() { dep alertmanager ".spec.template.spec.initContainers[0].env[] | select(.name == \"$1\") | $2"; }
+  got=""
+  for var in ALERT_SLACK_WEBHOOK_URL:alert-slack-webhook-url ALERT_TEAMS_WEBHOOK_URL:alert-teams-webhook-url SMTP_USER:smtp-user SMTP_PASSWORD:smtp-password; do
+    got="$got $(am "${var%%:*}" '.valueFrom.secretKeyRef.key + ":" + (.valueFrom.secretKeyRef.optional | tostring)')"
+  done
+  [ "$got" = " alert-slack-webhook-url:true alert-teams-webhook-url:true smtp-user:true smtp-password:true" ] \
+    && pass "$env: Alertmanager's webhooks and SMTP login are optional secret references" || fail "$env: Alertmanager's secret env is '$got'"
+  got="$(am ALERT_EMAIL_TO .value)|$(am SMTP_PORT .value)|$(am SMTP_TLS .value)"
+  [ "$got" = "|587|true" ] && pass "$env: ALERT_EMAIL_TO empty by default, SMTP settings from smtp" || fail "$env: Alertmanager's settings are '$got'"
+  v="$(dep alertmanager '.spec.template.spec.containers[0].args | join(" ")')"
+  [[ " $v " == *" --cluster.listen-address= "* ]] && pass "$env: Alertmanager runs without clustering (one replica)" || fail "$env: Alertmanager args '$v'"
+  for file in render.sh alertmanager.yml.template; do
+    [ "$(q "$f" "select(.kind == \"ConfigMap\" and .metadata.name == \"qeos-alertmanager\") | .data[\"$file\"]")" = "$(cat "$CHART/files/monitoring/alertmanager/$file")" ] \
+      && pass "$env: ConfigMap qeos-alertmanager carries $file" || fail "$env: ConfigMap qeos-alertmanager's $file differs from the chart's copy"
+  done
+  # db-init creates qeos_monitor
+  v="$(q "$f" 'select(.kind == "Job" and .metadata.name == "qeos-migrate") | .spec.template.spec.initContainers[] | select(.name == "db-init") | .env[] | select(.name == "MONITORING_ENABLED") | .value')"
+  [ "$v" = true ] && pass "$env: db-init creates qeos_monitor (MONITORING_ENABLED)" || fail "$env: db-init MONITORING_ENABLED is '$v'"
+done
+st="$OUT/staging.yaml"
+spc() { q "$OUT/$1.yaml" "select(.kind == \"SecretProviderClass\" and .metadata.name == \"$2\") | [.spec.secretObjects[0].data[].key] | join(\" \")"; }
+[ "$(spc staging qeos-postgres-exporter)" = monitoring-db-password ] && pass "staging: qeos-postgres-exporter holds monitoring-db-password only" \
+  || fail "staging: qeos-postgres-exporter holds '$(spc staging qeos-postgres-exporter)'"
+[[ " $(q "$st" 'select(.kind == "SecretProviderClass" and .metadata.name == "qeos-migrate") | .spec.parameters.objects') " == *"objectName: monitoring-db-password"* ]] \
+  && pass "staging: the migration hook reads monitoring-db-password" || fail "staging: qeos-migrate lacks monitoring-db-password"
+# Staging's vault holds no webhook and no SMTP login yet (keyvault.absent): Alertmanager mounts nothing; once it has them
+# (staging-email treats every optional key but tm-secrets-key as present) its own SecretProviderClass holds exactly those
+n="$(q "$st" '[select(.kind == "SecretProviderClass" and .metadata.name == "qeos-alertmanager")] | length')/$(q "$st" '[select(.kind == "Deployment" and .metadata.name == "alertmanager") | .spec.template.spec.volumes[] | select(.csi)] | length')"
+[ "$n" = 0/0 ] && pass "staging: no Alertmanager secret in the vault, no SecretProviderClass and no CSI volume" || fail "staging: Alertmanager SPC/CSI is $n"
+[ "$(spc staging-email qeos-alertmanager)" = "alert-slack-webhook-url alert-teams-webhook-url smtp-password smtp-user" ] \
+  && pass "staging (email): qeos-alertmanager holds the webhooks and the SMTP login only" || fail "staging (email): qeos-alertmanager holds '$(spc staging-email qeos-alertmanager)'"
+v="$(q "$OUT/staging-email.yaml" 'select(.kind == "Deployment" and .metadata.name == "alertmanager") | .spec.template.spec.initContainers[0].env[] | select(.name == "SMTP_HOST") | .value')"
+[ "$v" = smtp.azurecomm.net ] && pass "staging (email): Alertmanager sends through smtp.host" || fail "staging (email): Alertmanager's SMTP_HOST is '$v'"
+# Monitoring off: none of it, and db-init leaves qeos_monitor alone
+f="$OUT/ci-off.yaml"
+n="$(q "$f" '[select(.kind == "ServiceMonitor" or .kind == "PrometheusRule" or (.metadata.name // "" | test("alertmanager|postgres-exporter")))] | length')"
+[ "$n" = 0 ] && pass "ci-off: monitoring off renders no ServiceMonitor, PrometheusRule, Alertmanager or postgres-exporter" || fail "ci-off: $n monitoring objects rendered"
+v="$(q "$f" '[select(.kind == "Job" and .metadata.name == "qeos-migrate") | .spec.template.spec.initContainers[] | select(.name == "db-init") | (.env[] | select(.name == "MONITORING_ENABLED") | .value), (.volumeMounts[] | select(.mountPath == "/mnt/secrets/monitoring-db-password") | .mountPath)] | join(" ")')"
+[ "$v" = false ] && pass "ci-off: db-init neither creates qeos_monitor nor sees its password" || fail "ci-off: db-init has '$v'"
+n="$(q "$f" '[select(.kind == "Service") | select(.metadata.labels["qeos.io/metrics-job"] != null)] | length')"
+[ "$n" = 0 ] && pass "ci-off: no Service carries qeos.io/metrics-job" || fail "ci-off: $n Services carry qeos.io/metrics-job"
+# Monitoring on without kube-prometheus-stack's CRDs: a clear failure, not a half-applied release (Review Focus 2)
+if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" >/dev/null 2>"$OUT/nocrds.err"; then
+  fail "monitoring on renders without the ServiceMonitor CRD"
+else
+  grep -q "deploy/monitoring/install.sh" "$OUT/nocrds.err" && pass "monitoring on without the CRDs fails naming deploy/monitoring/install.sh" \
+    || fail "without the CRDs it fails for another reason: $(tail -n 2 "$OUT/nocrds.err")"
+fi
+if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" --api-versions monitoring.coreos.com/v1/ServiceMonitor >/dev/null 2>"$OUT/norules.err"; then
+  fail "monitoring on renders without the PrometheusRule CRD"
+else
+  grep -q "deploy/monitoring/install.sh" "$OUT/norules.err" && pass "monitoring on without the PrometheusRule CRD fails naming deploy/monitoring/install.sh" \
+    || fail "without PrometheusRule it fails for another reason: $(tail -n 2 "$OUT/norules.err")"
+fi
+# monitoring-db-password is required with monitoring on: listed as absent, the render stops naming it
+if helm template qeos "$CHART" -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" "${CRDS[@]}" \
+    --set 'keyvault.absent={tm-secrets-key,smtp-user,smtp-password,monitoring-db-password}' >/dev/null 2>"$OUT/nomonpw.err"; then
+  fail "monitoring-db-password in keyvault.absent renders (postgres-exporter could never start)"
+else
+  grep -q "monitoring-db-password" "$OUT/nomonpw.err" && pass "monitoring-db-password in keyvault.absent is refused" \
+    || fail "absent monitoring-db-password failed for another reason: $(tail -n 2 "$OUT/nomonpw.err")"
+fi
+# The threshold: a number of GB, as Compose's entrypoint.sh takes it
+if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" "${CRDS[@]}" --set monitoring.postgresDbSizeAlertGb=abc >/dev/null 2>"$OUT/gb.err"; then
+  fail "monitoring.postgresDbSizeAlertGb=abc renders"
+else
+  grep -q "postgresDbSizeAlertGb" "$OUT/gb.err" && pass "monitoring.postgresDbSizeAlertGb must be a number" \
+    || fail "postgresDbSizeAlertGb=abc failed for another reason: $(tail -n 2 "$OUT/gb.err")"
+fi
+render ci-tuned -f "$CHART/values-ci.yaml" "${CRDS[@]}" --set monitoring.postgresDbSizeAlertGb=35.5 --set 'monitoring.skipRuleGroups=null' \
+  --set monitoring.alertEmailTo=ops@example.com
+f="$OUT/ci-tuned.yaml"
+t="$(q "$f" 'select(.kind == "PrometheusRule") | .spec.groups[] | select(.name == "qeos-thresholds") | .rules[0].expr')"
+[ "$t" = "vector(35.5 * 1e9)" ] && pass "monitoring.postgresDbSizeAlertGb sets the threshold" || fail "postgresDbSizeAlertGb=35.5 gives '$t'"
+n="$(q "$f" '[select(.kind == "PrometheusRule") | .spec.groups[] | select(.name == "qeos-host")] | length')"
+[ "$n" = 1 ] && pass "monitoring.skipRuleGroups empty keeps qeos-host" || fail "skipRuleGroups empty: $n qeos-host groups"
+v="$(q "$f" 'select(.kind == "Deployment" and .metadata.name == "alertmanager") | .spec.template.spec.initContainers[0].env[] | select(.name == "ALERT_EMAIL_TO") | .value')"
+[ "$v" = ops@example.com ] && pass "monitoring.alertEmailTo is Alertmanager's ALERT_EMAIL_TO" || fail "ALERT_EMAIL_TO is '$v'"
+# The CI server is Flexible Server's equivalent for monitoring too: pg_stat_statements preloaded and allowed, and an
+# admin that may grant pg_monitor
+pgargs="$(q "$OUT/ci.yaml" 'select(.kind == "Deployment" and .metadata.name == "postgres") | .spec.template.spec.containers[0].args | join(" ")')"
+[[ "$pgargs" == *"shared_preload_libraries=pg_stat_statements"* ]] && pass "ci: the in-cluster server preloads pg_stat_statements" \
+  || fail "ci: the in-cluster server's args are '$pgargs'"
+init="$(q "$OUT/ci.yaml" 'select(.kind == "ConfigMap" and .metadata.name == "postgres-init") | .data["ci-postgres-init.sh"]')"
+[[ "$init" == *"GRANT pg_monitor TO :\"admin\" WITH ADMIN OPTION"* && "$init" == *"CREATE EXTENSION IF NOT EXISTS pg_stat_statements"* ]] \
+  && pass "ci: the init script lets the admin grant pg_monitor and creates pg_stat_statements" || fail "ci: the init script lacks the pg_monitor grant or the extension"
 
 # ---- Review Focus 3: none of the CI dummy secrets reaches any rendered manifest ----
 mapfile -t dummies < <(yq '.ciSecrets | to_entries | .[].value' "$CHART/values-ci.yaml" | tr -d '\r')

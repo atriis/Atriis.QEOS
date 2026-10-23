@@ -1,0 +1,91 @@
+{{- /* postgres-exporter (monitoring.enabled), as Compose's: PostgreSQL's statistics for Prometheus (job postgres, monitoring.yaml)
+over the network as qeos_monitor, which db-init creates with pg_monitor only and the password monitoring-db-password.
+One replica; only the Prometheus pods reach it (networkpolicies.yaml) */ -}}
+{{- if .Values.monitoring.enabled }}
+{{- $name := "postgres-exporter" }}
+{{- $svc := get (include "qeos.monitoringWorkloads" . | fromJson) $name }}
+{{- $ctx := dict "ctx" $ "name" $name "svc" $svc "uid" 65534 }}
+{{- /* Key Vault: its SecretProviderClass's CSI volume, which makes the driver sync qeos-secrets-postgres-exporter */}}
+{{- $keyed := and (eq .Values.secrets.source "keyvault") (gt (len (include "qeos.vaultKeys" $ctx | fromJsonArray)) 0) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" "monitoring") | nindent 4 }}
+    {{- include "qeos.metricsLabels" (dict "ctx" $ "job" "postgres") | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "qeos.selector" $ctx | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ $svc.port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels:
+    {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" "monitoring") | nindent 4 }}
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  selector:
+    matchLabels:
+      {{- include "qeos.selector" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" "monitoring") | nindent 8 }}
+    spec:
+      serviceAccountName: {{ printf "qeos-%s" $svc.identity }}
+      {{- /* The image's own user, nobody */}}
+      {{- include "qeos.podCommon" $ctx | nindent 6 }}
+      containers:
+        - name: {{ $name }}
+          image: {{ .Values.monitoring.images.postgresExporter }}
+          imagePullPolicy: IfNotPresent
+          # Compose's flag. v0.17.1 has no --collector.stat_statements.include_query: the series carry queryid only
+          command: ["/bin/postgres_exporter", "--collector.stat_statements"]
+          ports:
+            - name: http
+              containerPort: {{ $svc.port }}
+          env:
+            # The postgres database, as in Compose; postgres.sslmode as every other connection (Flexible Server: require)
+            - name: DATA_SOURCE_URI
+              value: {{ printf "%s:5432/postgres?sslmode=%s" (required "postgres.host is required" .Values.postgres.host) .Values.postgres.sslmode | quote }}
+            - name: DATA_SOURCE_USER
+              value: qeos_monitor
+            {{- include "qeos.secretEnv" $ctx | nindent 12 }}
+          # Its landing page: no database query (/metrics runs every collector)
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 4
+          {{- include "qeos.lifecycle" $ctx | nindent 10 }}
+          securityContext:
+            {{- include "qeos.containerSecurity" $ctx | nindent 12 }}
+          resources:
+            {{- toYaml (get .Values.monitoring.resources $name) | nindent 12 }}
+          {{- if $keyed }}
+          volumeMounts:
+            {{- include "qeos.secretsMount" $ctx | nindent 12 }}
+          {{- end }}
+      {{- if $keyed }}
+      volumes:
+        {{- include "qeos.secretsVolume" $ctx | nindent 8 }}
+      {{- end }}
+{{- end }}

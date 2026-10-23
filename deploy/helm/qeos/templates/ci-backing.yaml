@@ -68,6 +68,8 @@ spec:
         - name: postgres
           image: {{ .Values.ci.postgresImage }}
           imagePullPolicy: IfNotPresent
+          # Flexible Server preloads pg_stat_statements (postgres-exporter's --collector.stat_statements)
+          args: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]
           ports:
             - name: postgres
               containerPort: 5432

@@ -1,4 +1,5 @@
-{{- /* ClusterIP Services named like the Compose services: the gateway and the APIs reach each other by these names */ -}}
+{{- /* ClusterIP Services named like the Compose services: the gateway and the APIs reach each other by these names. With
+monitoring on, an API's Service carries its Prometheus job (qeos.io/metrics-job, monitoring.yaml's ServiceMonitors) */ -}}
 {{- range $name, $svc := .Values.services }}
 {{- if has $svc.kind (list "api" "dashboard" "gateway") }}
 ---
@@ -8,6 +9,9 @@ metadata:
   name: {{ $name }}
   labels:
     {{- include "qeos.labels" (dict "ctx" $ "name" $name "component" $svc.kind) | nindent 4 }}
+    {{- if and $.Values.monitoring.enabled $svc.metricsJob }}
+    {{- include "qeos.metricsLabels" (dict "ctx" $ "job" $svc.metricsJob) | nindent 4 }}
+    {{- end }}
 spec:
   type: ClusterIP
   selector:

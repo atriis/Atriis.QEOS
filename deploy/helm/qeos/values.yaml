@@ -30,6 +30,9 @@ secrets:
     - tm-secrets-key
     - smtp-user
     - smtp-password
+    # Alertmanager's channels (monitoring.enabled): without them alerts go to the null receiver
+    - alert-slack-webhook-url
+    - alert-teams-webhook-url
 
 keyvault:
   name: ""
@@ -76,9 +79,45 @@ smtp:
   # smtp-password the services log the links instead of sending them (qeos_shared.mail)
   requireLogin: true
 
-# Grafana behind the gateway and the Monitoring item (ADR-027): Stage 2 on Kubernetes
+# Monitoring (ADR-027, ADR-038 Stage 2): ServiceMonitors and PrometheusRules for the cluster's kube-prometheus-stack
+# (deploy/monitoring, installed first by a cluster admin; without its CRDs a render with monitoring on fails),
+# postgres-exporter and Alertmanager, as Compose's monitoring profile. The Prometheus pods' namespace and labels are
+# networkPolicy.prometheus's. Needs the Key Vault key monitoring-db-password (and grafana-proxy-key for the gateway)
 monitoring:
   enabled: false
+  # Grafana's data source; empty: http://qeos-monitoring-prometheus.<networkPolicy.prometheus.namespace>.svc.cluster.local:9090
+  prometheusUrl: ""
+  # Compose's rule groups (monitoring/prometheus/alerts.yml) left out on Kubernetes: qeos-host reads node-exporter and
+  # cAdvisor's Compose jobs, which do not exist here (kube-prometheus-stack's own rules cover nodes and pods)
+  skipRuleGroups:
+    - qeos-host
+  # PostgresDatabaseGrowing fires above this many GB per database (Compose: POSTGRES_DB_SIZE_ALERT_GB)
+  postgresDbSizeAlertGb: 20
+  # Alertmanager's email channel (Compose: ALERT_EMAIL_TO), sent through smtp.*; empty: no email. Slack and Teams are
+  # the optional Key Vault keys alert-slack-webhook-url and alert-teams-webhook-url. No channel: the null receiver
+  alertEmailTo: ""
+  # The workload identity of postgres-exporter's and Alertmanager's SecretProviderClasses (keyvault.clientIds)
+  identity: services
+  # Exactly as docker-compose.yml pins them
+  images:
+    alertmanager: prom/alertmanager:v0.28.1
+    postgresExporter: quay.io/prometheuscommunity/postgres-exporter:v0.17.1
+  # Limits start from Compose's mem_limit (64m each)
+  resources:
+    alertmanager:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 200m
+        memory: 64Mi
+    postgres-exporter:
+      requests:
+        cpu: 10m
+        memory: 32Mi
+      limits:
+        cpu: 200m
+        memory: 64Mi
 
 gateway:
   # Required: the edge's address range (space-separated CIDRs); the gateway believes X-Forwarded-For from it only
@@ -190,10 +229,13 @@ nginxResources: &nginxResources
 #   urls        env var -> service: http://<service><suffix>:8000
 #   publicUrlEnv env vars set to publicUrl
 #   smtp, artifacts, monitoring   add the SMTP, artifact storage or MONITORING_ENABLED settings
+#   metricsJob  (APIs) Prometheus's job label for its /metrics, Compose's scrape job name (label qeos.io/metrics-job)
+#   metricsHonorLabels  (APIs) keep the scraped series' own job label (ingestion: the loop jobs' heartbeats)
 #   env         plain settings, last (they win)
 services:
   auth-service:
     kind: api
+    metricsJob: auth
     database: auth
     appDir: /app/platforms/auth-service/auth-service
     identity: services
@@ -219,6 +261,7 @@ services:
 
   organization-service:
     kind: api
+    metricsJob: organization
     database: organization
     appDir: /app/platforms/organization-service
     identity: services
@@ -233,6 +276,7 @@ services:
 
   project-service:
     kind: api
+    metricsJob: project
     database: project
     appDir: /app/platforms/project-service
     identity: services
@@ -248,6 +292,8 @@ services:
 
   ingestion-service:
     kind: api
+    metricsJob: ingestion
+    metricsHonorLabels: true
     database: ingestion
     appDir: /app/platforms/ingestion-service
     identity: ingestion
@@ -275,6 +321,7 @@ services:
 
   test-management-service:
     kind: api
+    metricsJob: test-management
     database: testmgmt
     appDir: /app/platforms/test-management-service
     identity: services
