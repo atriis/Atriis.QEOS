@@ -14,5 +14,5 @@ annotations:
 dependencies:
   # Released 2026-10-08: the newest at least two weeks old on 2026-10-23 (README.md, "The pin")
   - name: kube-prometheus-stack
-    version: 92.2.0
+    version: 92.11.0
     repository: https://prometheus-community.github.io/helm-charts
