@@ -804,11 +804,14 @@ label.button:hover { background: var(--hover-strong); }
 .gherkin.numbered.has-gutter .gk-line { grid-template-columns: 4ch var(--gk-gutter) minmax(0, 1fr) auto; }
 .gherkin.has-gutter:not(.numbered) .gk-line { grid-template-columns: var(--gk-gutter) max-content auto; }
 .gk-gutter { display: flex; align-items: center; min-height: 1.6em; user-select: none; }
-.gk-gutter .gk-note { margin: 0; }
+.gherkin.has-gutter .gk-gutter .gk-note { margin: 0; }
 /* A step that ran and passed: the green of the passed pill, as a wash and a left bar, like the failed step's red. Steps
    that did not run stay plain; screen readers hear "Passed step:" */
 .gherkin .gk-passed { background: color-mix(in srgb, var(--status-passed) 12%, transparent); box-shadow: inset 3px 0 0 var(--status-passed); border-radius: 2px; }
 .gk-passed .sr-only { user-select: none; }
+/* The passed step's word: the failed mark's shape in the passed green (never colour alone) */
+.gk-line-end { display: inline-flex; align-items: center; gap: var(--space-3); }
+.gk-passed-mark { display: inline-flex; align-items: center; gap: 4px; font-family: var(--font-sans); font-size: 12px; font-weight: 600; color: var(--passed-text); user-select: none; white-space: nowrap; }
 .gherkin.numbered .gk-line::before { content: attr(data-line); text-align: right; color: var(--text-muted); user-select: none; font-variant-numeric: tabular-nums; }
 .gherkin.numbered .gk-note { display: inline-flex; align-items: center; gap: var(--space-2); font-family: var(--font-sans); user-select: none; white-space: nowrap; }
 .feature-source { padding: 0; overflow: hidden; }
@@ -817,7 +820,7 @@ label.button:hover { background: var(--hover-strong); }
 .case-chip { display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px; border-radius: 999px; border: 1px solid var(--border-strong);
   background: var(--surface-1); color: var(--accent-text); font-family: var(--font-mono); font-size: 12px; font-weight: 600; }
 .case-chip:hover, .case-chip:focus-visible { background: var(--hover-strong); text-decoration: underline; }
-@media (max-width: 640px) { .gherkin.numbered .gk-line { grid-template-columns: 3ch minmax(0, 1fr); } .gherkin.numbered.has-gutter .gk-line { grid-template-columns: 3ch var(--gk-gutter) minmax(0, 1fr); } .gherkin.numbered .gk-line > .gk-note { grid-column: -2 / -1; } }
+@media (max-width: 640px) { .gherkin.numbered .gk-line { grid-template-columns: 3ch minmax(0, 1fr); } .gherkin.numbered.has-gutter .gk-line { grid-template-columns: 3ch var(--gk-gutter) minmax(0, 1fr); } .gherkin.numbered .gk-line > .gk-note, .gherkin.numbered .gk-line > .gk-line-end { grid-column: -2 / -1; } }
 /* Group by: a segmented pair of pressed buttons, sized like the fields beside it */
 .segmented-field { display: flex; flex-direction: column; gap: var(--space-1); }
 .segmented-label { font-size: 13px; font-weight: 500; color: var(--text-secondary); }

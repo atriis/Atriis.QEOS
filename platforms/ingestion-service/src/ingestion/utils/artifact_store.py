@@ -214,9 +214,7 @@ class _Closing:
             self._body.close()
 
     def __del__(self) -> None:
-        # An __init__ that failed has closed the body already (close() runs once)
-        if getattr(self, "_body", None) is not None:
-            self.close()
+        self.close()  # once: a failed start, or a read to the end, has closed it already
 
 
 class S3ArtifactStore:

@@ -170,7 +170,8 @@ export default function FeaturePage() {
   useScrollToFailure(runId, anyFailure);
 
   // One card with step screenshots reserves the camera column on every card, so all the scenarios line up
-  const anyShots = cards.some(({ c, block }) => shotsOf(c, block) != null);
+  const cardShots = new Map(cards.map(({ c, block }) => [c.number, shotsOf(c, block)]));
+  const anyShots = [...cardShots.values()].some((shots) => shots != null);
 
   return (
     <section>
@@ -212,7 +213,7 @@ export default function FeaturePage() {
         const failure = failureOf(c, block);
         const passedThrough = failure?.background != null ? undefined : passedThroughOf(resultOf(c)?.status, failure?.line);
         const result = resultOf(c);
-        const shots = shotsOf(c, block);
+        const shots = cardShots.get(c.number) ?? null;
         return (
           <article key={c.number} className="card scenario-card" aria-label={`${c.key} ${c.title}`}>
             <div className="scenario-card-head">

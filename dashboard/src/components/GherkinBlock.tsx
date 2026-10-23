@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { CircleDashed, XCircle } from "lucide-react";
+import { CheckCircle2, CircleDashed, XCircle } from "lucide-react";
 import FailedTipAnchor from "./FailedTipAnchor";
 import { STEPS, tokenizeLine } from "../lib/gherkinTokens";
 
@@ -41,9 +41,10 @@ export function passedThroughOf(status: string | undefined, stoppedAt: number | 
   return status === "passed" ? Number.MAX_SAFE_INTEGER : undefined;
 }
 
-/** Which 1-based lines belong to a step that passed: the step's own line, then its table rows and doc string. */
-export function passedLines(lines: string[], through: number | undefined): Set<number> {
-  const passed = new Set<number>();
+/** Which 1-based lines belong to a step that passed: the step's own line ("step"), then its table rows and doc string
+ *  ("part", marked green but not announced again). */
+export function passedLines(lines: string[], through: number | undefined): Map<number, "step" | "part"> {
+  const passed = new Map<number, "step" | "part">();
   if (through === undefined) return passed;
   let owner = false;
   let inDoc = false;
@@ -52,16 +53,16 @@ export function passedLines(lines: string[], through: number | undefined): Set<n
     const rest = line.trim();
     if (inDoc || rest.startsWith('"""') || rest.startsWith("```")) {
       if (rest.startsWith('"""') || rest.startsWith("```")) inDoc = !inDoc;
-      if (owner) passed.add(n);
+      if (owner) passed.set(n, "part");
       return;
     }
     if (rest.startsWith("|")) {
-      if (owner) passed.add(n);
+      if (owner) passed.set(n, "part");
       return;
     }
     if (rest === "" || rest.startsWith("#")) return;
     owner = STEPS.some((k) => rest.startsWith(k)) && n <= through;
-    if (owner) passed.add(n);
+    if (owner) passed.set(n, "step");
   });
   return passed;
 }
@@ -69,14 +70,14 @@ export function passedLines(lines: string[], through: number | undefined): Set<n
 const tokens = (line: string) => tokenizeLine(line).map((t, j) => <span key={j} className={`gk-${t.kind}`}>{t.text}</span>);
 
 /** The marked line: focusable, marked in words and an icon as well as colour (red failed, yellow skipped); its tip is the shared FailedTipAnchor's. */
-function FailedLine({ numbered, n, tip, tone = "failed", children, lead, note, trailing }: { numbered: boolean; n: number; tip: ReactNode; tone?: StepTone; children: ReactNode; lead?: ReactNode; note?: ReactNode; trailing?: string }) {
+function FailedLine({ numbered, n, tip, tone = "failed", children, lead, note }: { numbered: boolean; n: number; tip: ReactNode; tone?: StepTone; children: ReactNode; lead?: ReactNode; note?: ReactNode }) {
   const { className, srText, word, Icon } = MARK[tone];
   const mark = <span className="gk-failed-mark"><Icon size={14} aria-hidden="true" /> {word}</span>;
   return (
     <FailedTipAnchor className={className} dataLine={numbered ? n : undefined} tip={tip}>
       <span className="sr-only">{srText}</span>
       {lead}
-      <span className="gk-code">{children}{trailing}</span>
+      <span className="gk-code">{children}</span>
       <span className="gk-failed-end">
         {mark}
         {note}
@@ -85,8 +86,8 @@ function FailedLine({ numbered, n, tip, tone = "failed", children, lead, note, t
   );
 }
 
-/** Gherkin: highlighted, never editable. Each line is a block (copying keeps the breaks); a numbered line's number is
- *  drawn from data-line, so it is neither read out nor copied. */
+/** Gherkin: highlighted, never editable. Each line is a block row, so copying puts each on its own line (no line feed
+ *  of its own, which would add a blank line); a numbered line's number is drawn from data-line, neither read out nor copied. */
 export default function GherkinBlock({ text, label = "Gherkin", numbered = false, startLine = 1, annotations, failed, passedThrough }: Props) {
   const lines = text.split("\n");
   const gutter = annotations !== undefined;
@@ -100,22 +101,23 @@ export default function GherkinBlock({ text, label = "Gherkin", numbered = false
         // The column on the left (when reserved) holds the line's note; otherwise the note ends the line
         const lead = gutter ? <span className="gk-gutter">{noteAt(n)}</span> : undefined;
         const note = gutter ? undefined : noteAt(n);
-        // Not numbered, the line feed is part of the text, inside the code, so copying keeps it and no blank line is added
-        const trailing = !numbered && i < lines.length - 1 ? "\n" : undefined;
         if (failed?.line === n) {
           return (
-            <FailedLine key={i} numbered={numbered} n={i + startLine} tip={failed.tip} tone={failed.tone} lead={lead} note={note} trailing={trailing}>
+            <FailedLine key={i} numbered={numbered} n={i + startLine} tip={failed.tip} tone={failed.tone} lead={lead} note={note}>
               {tokens(line)}
             </FailedLine>
           );
         }
-        const ok = passed.has(n);
+        const ok = passed.get(n);
+        // A passed step says so in a word and an icon as well as colour, like the failed one; its table rows and doc
+        // string share the green but are not announced again
+        const mark = ok === "step" && <span className="gk-passed-mark"><CheckCircle2 size={14} aria-hidden="true" /> passed</span>;
         return (
           <span key={i} className={ok ? "gk-line gk-passed" : "gk-line"} data-line={numbered ? i + startLine : undefined}>
-            {ok && <span className="sr-only">Passed step: </span>}
+            {ok === "step" && <span className="sr-only">Passed step: </span>}
             {lead}
-            <span className="gk-code">{tokens(line)}{trailing}</span>
-            {note}
+            <span className="gk-code">{tokens(line)}</span>
+            {(mark || note) && <span className="gk-line-end">{mark}{note}</span>}
           </span>
         );
       })}

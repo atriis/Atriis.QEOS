@@ -51,8 +51,9 @@ test("the failed tone has no skipped class", () => {
 test("plain mode: one line per Gherkin line, no blank line after the failed one", () => {
   const text = "Scenario: s\n  Given x\n  When a\n  Then b";
   render(<GherkinBlock text={text} failed={{ line: 3, tip: <span>boom</span> }} />);
-  const pre = document.querySelector("pre") as HTMLElement;
-  expect((pre.textContent ?? "").replace("Failed step: ", "").replace(" failed", "")).toBe(text);
+  // Each line is its own row (copying breaks between rows; jsdom has no layout, so the rows are checked instead)
+  const rows = [...document.querySelectorAll("pre > .gk-line")].map((l) => l.querySelector(".gk-code")!.textContent);
+  expect(rows).toEqual(text.split("\n"));
 });
 
 test("the tip is a portal on the body, so it is neither clipped by nor copied with the block", async () => {
@@ -114,7 +115,10 @@ const passedRows = () => [...document.querySelectorAll(".gk-passed")].map((l) =>
 test("steps up to passedThrough are marked passed, with their table rows; headings and later steps are not", () => {
   render(<GherkinBlock numbered text={SCENARIO} passedThrough={5} />);
   expect(passedRows()).toEqual(["Given a user", "| name |", "| ann  |", "When she books"]);
-  expect(document.querySelector(".gk-passed")).toHaveTextContent("Passed step:");
+  // Each passed step says so in a word (never colour alone) and to screen readers, once: its table rows do not
+  const announced = [...document.querySelectorAll(".gk-passed")].filter((l) => l.textContent!.includes("Passed step:"));
+  expect(announced.map((l) => l.querySelector(".gk-code")!.textContent!.trim())).toEqual(["Given a user", "When she books"]);
+  expect([...document.querySelectorAll(".gk-passed-mark")].map((m) => m.textContent!.trim())).toEqual(["passed", "passed"]);
 });
 
 test("a failed step ends the passed ones: the steps after it did not run and stay plain", () => {
@@ -132,10 +136,11 @@ test("without passedThrough no step is marked, and without annotations no column
   expect(document.querySelector(".gk-gutter")).toBeNull();
 });
 
-test("not numbered: the code keeps every line and its line feeds, so copying adds no blank line", () => {
+test("not numbered: every line is its own row with no line feed inside, so copying adds no blank line", () => {
   render(<GherkinBlock text={SCENARIO} passedThrough={6} annotations={new Map([[5, <span>cam</span>]])} />);
-  const codes = [...document.querySelectorAll(".gk-code")].map((c) => c.textContent).join("");
-  expect(codes).toBe(SCENARIO);
+  const codes = [...document.querySelectorAll(".gk-code")].map((c) => c.textContent);
+  expect(codes.join("\n")).toBe(SCENARIO);
+  expect(codes.some((c) => c!.includes("\n"))).toBe(false);
 });
 
 function withNeighbours() {
