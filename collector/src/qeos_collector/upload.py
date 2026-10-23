@@ -256,7 +256,8 @@ def upload_artifacts(
     Returns the sha256s QEOS holds; each TraceFile hashed carries its sha256 and size, and the caller drops every
     other reference. Hashing counts against the budget and the per-run cap. Files with the same bytes go up once
     (0.14.1): the first one hashed sends them; a copy only records that and frees its worker, then keeps its reference
-    when those bytes were stored, else it is counted with that first file's outcome. Best
+    when those bytes were stored, else it is counted with that file's outcome. When that file changed, the worker
+    that sent it sends a copy next instead (within the same deadline), and so on. Best
     effort and bounded like upload_images, with its own budget, which also cuts off a PUT still streaming. A file
     that changed since the report was read is left out (never uploaded with other bytes)."""
     prefix = base_url.strip().rstrip("/") + ARTIFACTS_PATH
@@ -265,39 +266,55 @@ def upload_artifacts(
     left_out = {"changed": 0, "refused": 0}
     by_path = {trace.path: trace for trace in artifacts}
     held: Set[str] = set()
-    owners: Dict[str, object] = {}  # sha256 -> the outcome of the file sending those bytes (None while it runs)
-    copies: List[str] = []  # sha256 of each file whose bytes another file sends
+    owners: Dict[str, list] = {}  # sha256 -> [the file sending those bytes, its outcome (None while it runs)]
+    copies: Dict[str, List[TraceFile]] = {}  # sha256 -> the files whose bytes another file sends
 
-    def claim(sha: str) -> bool:
-        """True when the caller sends these bytes; False (recorded as a copy, never waiting) when another file does."""
-        with lock:
-            if sha in owners:
-                copies.append(sha)
+    def claimer(trace: TraceFile, owned: List[str]) -> Callable[[str], bool]:
+        def claim(sha: str) -> bool:
+            """True when `trace` sends these bytes; False (recorded as a copy, never waiting) when another file
+            does. Bytes whose file changed are free again."""
+            with lock:
+                entry = owners.get(sha)
+                if entry is None or entry[0] is trace or entry[1] == "changed":
+                    owners[sha] = [trace, None]
+                    owned.append(sha)
+                    return True
+                copies.setdefault(sha, []).append(trace)
                 return False
-            owners[sha] = None
-            return True
+        return claim
 
     def store(path: str, deadline: float, first: bool) -> bool:
-        trace = by_path[path]
-        outcome = _store_artifact(prefix, headers, trace, context, deadline, first=first,
-                                  clock=clock, sleep=sleep, rand=rand, claim=claim)
-        if outcome == _COPY:
-            return False  # settled once every worker finished
-        with lock:
-            if trace.sha256 is not None and trace.sha256 in owners:
-                owners[trace.sha256] = outcome
-            if outcome is True:
-                held.add(trace.sha256)
-            elif outcome in left_out:
-                left_out[outcome] += 1
-        return outcome is True
+        trace, handed = by_path[path], None  # handed: the sha256 this worker sends for a file that changed
+        while True:
+            owned: List[str] = []
+            outcome = _store_artifact(prefix, headers, trace, context, deadline, first=first,
+                                      clock=clock, sleep=sleep, rand=rand, claim=claimer(trace, owned))
+            if outcome == _COPY:
+                return False  # settled once every worker finished
+            with lock:
+                if outcome is True:
+                    held.add(trace.sha256)
+                elif outcome in left_out:
+                    left_out[outcome] += 1
+                for sha in owned:
+                    owners[sha][1] = outcome
+                if handed is not None and handed not in owned and owners[handed][0] is trace:
+                    owners[handed][1] = "changed"  # this copy does not hold those bytes any more either
+                # A changed file's bytes go up from one of its copies, in this worker: nobody waits for it
+                again = next((sha for sha in owned + ([handed] if handed else [])
+                              if owners[sha][1] == "changed" and copies.get(sha)), None)
+                if again is None:
+                    return outcome is True
+                trace, handed, first = copies[again].pop(0), again, False
+                owners[again] = [trace, None]
 
     _each(list(by_path), MAX_ARTIFACTS_PER_RUN, store, budget_seconds, workers, warn=warn, clock=clock)
     with lock:
-        for sha in copies:  # a copy keeps its reference when its bytes were stored, else goes as its first file went
-            outcome = owners.get(sha)
+        # A copy keeps its reference when its bytes were stored, else is counted as the file that sent them went
+        for sha, waiting in copies.items():
+            outcome = owners[sha][1]
             if sha not in held and isinstance(outcome, str) and outcome in left_out:
-                left_out[outcome] += 1
+                left_out[outcome] += len(waiting)
     if left_out["changed"]:
         warn(f"{left_out['changed']} changed since the report was read")
     if left_out["refused"]:

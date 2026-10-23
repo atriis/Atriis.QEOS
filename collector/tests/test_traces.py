@@ -629,6 +629,59 @@ def test_a_copy_never_holds_a_worker_while_its_bytes_go_up(tmp_path, monkeypatch
     assert (a.sha256, copy.sha256) == (sha(ZIP_A), sha(ZIP_A)) and notes == []
 
 
+def test_a_copy_sends_its_own_bytes_when_the_file_that_sent_them_changed(tmp_path, monkeypatch):
+    import threading
+
+    first = trace_file(tmp_path, b"PK" + b"	" * 8, "first.zip")  # goes alone
+    a, copy = trace_file(tmp_path, ZIP_A, "a.zip"), trace_file(tmp_path, ZIP_A, "copy.zip")
+    a_sending, copy_hashed = threading.Event(), threading.Event()
+    real_digest = TraceFile.digest
+
+    def digest(self, *args):
+        if self is copy:
+            a_sending.wait(5)  # a.zip claimed the bytes first
+        value = real_digest(self, *args)
+        if self is a:
+            write(tmp_path / "a.zip", ZIP_B)  # same size, other bytes, after the hash
+        if self is copy:
+            copy_hashed.set()
+        return value
+
+    complete = []
+
+    def fake_send(url, body, headers, context, method=None, timeout=None):
+        if method == "HEAD":
+            if url.endswith(sha(ZIP_A)):
+                a_sending.set()
+            return 404, b"", {}
+        if url.endswith(sha(ZIP_A)) and not complete:
+            copy_hashed.wait(5)
+            time.sleep(0.2)  # copy.zip is recorded as a copy while a.zip is still being sent
+        complete.append(b"".join(body))  # a.zip's stream raises TraceChanged before its last piece
+        return 201, b"", {}
+
+    monkeypatch.setattr(TraceFile, "digest", digest)
+    monkeypatch.setattr(upload, "_send", fake_send)
+    notes = []
+    held = upload_artifacts("http://127.0.0.1:1", KEY, [first, a, copy], workers=2, warn=notes.append)
+    assert held == {first.sha256, sha(ZIP_A)}  # copy.zip still holds the bytes it was hashed with
+    assert complete.count(ZIP_A) == 1
+    assert notes == ["1 changed since the report was read"]  # a.zip only
+
+
+def test_a_dry_run_says_a_trace_that_changed_while_hashed_changed(workdir, capsys, monkeypatch):
+    trace = write(workdir / "test-results" / "a.zip", ZIP_A)
+    report = playwright_report(workdir, [zip_attachment(trace)])
+
+    def changed(self, *args):
+        raise traces.TraceChanged()
+
+    monkeypatch.setattr(TraceFile, "digest", changed)
+    assert main(["upload", report, "--no-changes", "--dry-run"], {}) == 0
+    assert trace_lines(capsys) == ["qeos: traces: 0 would be sent (0.0 MB) within the 300 s budget, 1 skipped "
+                                   "(1 changed since the report was read)"]
+
+
 def test_a_copy_is_left_out_with_the_file_that_sent_its_bytes(platform, tmp_path, monkeypatch):
     a, copy = trace_file(tmp_path, ZIP_A, "a.zip"), trace_file(tmp_path, ZIP_A, "copy.zip")
     platform.put_status[sha(ZIP_A)] = 413

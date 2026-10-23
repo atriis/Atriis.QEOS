@@ -656,7 +656,8 @@ A failed test's Playwright trace reaches QEOS with its result, and opens there i
   streaming. When it runs out the rest are skipped and the run goes without them. A trace problem never fails the run upload. One line sums it up:
   `traces: 3 stored (41.2 MB), 1 skipped`, with the reasons in brackets.
 - **From 0.14.1.** Files with the same bytes (two paths, or a Playwright and a Cucumber reference) go up once, and
-  every result still references its own (a copy never holds up the other traces; it is counted as its bytes went).
+  every result still references its own (a copy never holds up the other traces; it is counted as its bytes went,
+  and when the file that sent them changed, the copy sends its own).
   When the reports name traces but none can be read, the key is not checked and the line says
   `traces: none could be read, 2 skipped` with the reasons. `--dry-run` hashes the traces under the same 5 minutes
   and 500 per run and counts them as the upload does, saying

@@ -708,10 +708,7 @@ def _send_artifacts(results: List[dict], skips: dict, url: Optional[str], api_ke
                              "Project Settings)")
         if on and left_out:
             notes.insert(0, traces.reasons(skips))
-        stored = [trace for trace in files.values() if trace.sha256 is not None and trace.sha256 in held]
-        megabytes = sum({trace.sha256: trace.size for trace in stored}.values()) / (1024 * 1024)
-        say(f"traces: {len(stored)} stored ({megabytes:.1f} MB), {len(files) - len(stored) + left_out} skipped"
-            + (f" ({'; '.join(notes)})" if notes else ""))
+        say(_trace_line(list(files.values()), held, left_out, "stored", "", notes))
     for row, paths in row_traces:
         kept: list = []
         for path in paths:
@@ -737,6 +734,7 @@ def _dry_run_artifacts(files: List["traces.TraceFile"], skips: dict, say: _Outpu
     if len(files) > most:
         notes.append(f"{len(files) - most} beyond {most} per run")
     deadline = clock() + budget
+    changed = 0
     for trace in files[:most]:
         try:
             trace.digest(deadline, clock)
@@ -744,16 +742,25 @@ def _dry_run_artifacts(files: List["traces.TraceFile"], skips: dict, say: _Outpu
             notes.append(f"out of time after {budget:g} s")
             break
         except traces.TraceChanged:
-            traces.count(skips, "missing")
-    hashed = [trace for trace in files if trace.sha256 is not None]
-    sizes = {trace.sha256: trace.size for trace in hashed}
-    left = len(files) - len(hashed) + left_out
-    if traces.reasons(skips):
+            changed += 1
+    if changed:  # as the upload says it
+        notes.insert(0, f"{changed} changed since the report was read")
+    if left_out:
         notes.insert(0, traces.reasons(skips))
-    megabytes = sum(sizes.values()) / (1024 * 1024)
-    say(f"traces: {len(hashed)} would be sent ({megabytes:.1f} MB) within the {budget:g} s budget, {left} skipped"
-        + (f" ({'; '.join(notes)})" if notes else ""))
-    return set(sizes)
+    hashed = {trace.sha256 for trace in files if trace.sha256 is not None}
+    say(_trace_line(files, hashed, left_out, "would be sent", f" within the {budget:g} s budget", notes))
+    return hashed
+
+
+def _trace_line(files: List["traces.TraceFile"], held: set, left_out: int, verb: str, after: str,
+                notes: List[str]) -> str:
+    """The trace phase's line, for the upload and the dry run alike: the files whose bytes QEOS holds (or would be
+    sent), counted per file, their megabytes per content, and the rest skipped with `left_out` (read from the
+    reports) and the notes."""
+    sent = [trace for trace in files if trace.sha256 is not None and trace.sha256 in held]
+    megabytes = sum({trace.sha256: trace.size for trace in sent}.values()) / (1024 * 1024)
+    return (f"traces: {len(sent)} {verb} ({megabytes:.1f} MB){after}, {len(files) - len(sent) + left_out} skipped"
+            + (f" ({'; '.join(notes)})" if notes else ""))
 
 
 def _resend_spooled(spool_dir, endpoint, api_key, context, say: _Output, *, sleep, clock) -> None:
