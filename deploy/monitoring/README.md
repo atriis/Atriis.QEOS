@@ -24,7 +24,7 @@ bash deploy/monitoring/tests/install_test.sh
 ## What install.sh does
 
 `install.sh --env ci|staging|production --context <kubectl context> [--qeos-namespace qeos] [--qeos-release qeos]
-[--namespace qeos-monitoring] [--enforce-restricted] [--allow-downgrade] [--template]`; exit 2 for a usage error (an
+[--namespace qeos-monitoring] [--enforce-restricted] [--allow-downgrade] [--adopt-namespace] [--template]`; exit 2 for a usage error (an
 unknown environment, no `--context`, a namespace that is not a DNS label or is Kubernetes' own (`default`,
 `kube-system`, `kube-public`, `kube-node-lease`), the same namespace twice, a release name that is not a DNS label of
 at most 53 characters), 1 when a step fails.
@@ -42,7 +42,9 @@ at most 53 characters), 1 when a step fails.
    that already enforces `restricted` is never lowered silently: without `--enforce-restricted` the script stops (exit
    1, before any change) unless `--allow-downgrade` is given. Likewise the monitoring namespace: the script labels the
    one it creates `qeos.atriis.com/monitoring=true`, and an existing namespace without that label (someone else's, or
-   a typo in `--namespace`) is not made privileged unless `--allow-downgrade` is given. This is the only place either
+   a typo in `--namespace`) is not made privileged unless `--adopt-namespace` is given; one created by hand, or by
+   `install.sh` before it set the label, needs it once. Each flag allows only its own change: `--adopt-namespace`
+   never lowers the QEOS namespace, `--allow-downgrade` never adopts one. This is the only place either
    namespace is created; the CI step that creates the QEOS namespace does so only if it is missing.
 3. **CRDs**, from the verified archive, with `kubectl apply --server-side --force-conflicts`: Helm installs CRDs once and
    never upgrades them, so a version bump would otherwise leave the old ones.

@@ -106,13 +106,25 @@ check "--enforce-restricted keeps it" stubbed 1 "left no .*kube-prometheus-stack
   --env staging --context stub-ctx --enforce-restricted
 check "a baseline namespace needs no flag" stubbed 1 "left no .*kube-prometheus-stack" baseline \
   --env staging --context stub-ctx
-# The monitoring namespace becomes privileged: only one install.sh created (its label), unless --allow-downgrade
+# The monitoring namespace becomes privileged: only one install.sh created (its label), unless --adopt-namespace
 marker=qeos-monitoring/
 check "an existing namespace install.sh did not create is not made privileged" \
-  stubbed 1 "qeos-monitoring exists and was not created by install.sh .*--allow-downgrade" "" --env staging --context stub-ctx
+  stubbed 1 "qeos-monitoring exists and was not created by install.sh .*--adopt-namespace" "" --env staging --context stub-ctx
 check "... and nothing was changed" [ ! -s "$OUT/kubectl.log" ]
-check "... unless --allow-downgrade" stubbed 1 "left no .*kube-prometheus-stack" "" \
+check "... unless --adopt-namespace" stubbed 1 "left no .*kube-prometheus-stack" "" \
+  --env staging --context stub-ctx --adopt-namespace
+# Each flag allows only its own change: adopting the namespace never lowers a restricted QEOS namespace, and lowering it
+# never adopts a namespace
+check "--adopt-namespace does not lower a restricted QEOS namespace" \
+  stubbed 1 "qeos enforces Pod Security restricted; pass --enforce-restricted to keep it, or --allow-downgrade" \
+  restricted --env staging --context stub-ctx --adopt-namespace
+check "... and nothing was changed" [ ! -s "$OUT/kubectl.log" ]
+check "--allow-downgrade does not adopt a namespace" \
+  stubbed 1 "qeos-monitoring exists and was not created by install.sh" restricted \
   --env staging --context stub-ctx --allow-downgrade
+check "... and nothing was changed" [ ! -s "$OUT/kubectl.log" ]
+check "both flags: both changes" stubbed 1 "left no .*kube-prometheus-stack" restricted \
+  --env staging --context stub-ctx --allow-downgrade --adopt-namespace
 marker=qeos-monitoring/true
 check "the namespace install.sh created is reused" stubbed 1 "left no .*kube-prometheus-stack" "" \
   --env staging --context stub-ctx

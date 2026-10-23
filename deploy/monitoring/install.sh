@@ -6,15 +6,16 @@
 #
 # Usage: bash deploy/monitoring/install.sh --env ci|staging|production --context <kubectl context>
 #          [--qeos-namespace <name>] [--qeos-release <name>] [--namespace <name>] [--enforce-restricted]
-#          [--allow-downgrade] [--template]
+#          [--allow-downgrade] [--adopt-namespace] [--template]
 # --context names the cluster: every kubectl and helm call uses it, never the current context, and it is printed with
 # its API server before anything changes.
 # It creates or labels both namespaces for Pod Security: the monitoring namespace (--namespace, default
 # qeos-monitoring) privileged, for node-exporter; the QEOS namespace (--qeos-namespace, default qeos) enforce baseline,
 # warn and audit restricted, or enforce restricted with --enforce-restricted. A QEOS namespace that already enforces
-# restricted is not lowered to baseline, and an existing namespace this script did not create (no
-# qeos.atriis.com/monitoring=true label) is not made the privileged monitoring namespace, unless --allow-downgrade is
-# given; Kubernetes' own namespaces (default, kube-*) never. --qeos-release (default qeos) is the QEOS chart's release:
+# restricted is not lowered to baseline unless --allow-downgrade is given. An existing namespace this script did not
+# create (no qeos.atriis.com/monitoring=true label) is not made the privileged monitoring namespace unless
+# --adopt-namespace is given (each flag allows only its own change); Kubernetes' own namespaces (default, kube-*)
+# never. --qeos-release (default qeos) is the QEOS chart's release:
 # only its Grafana pods reach Prometheus. Then it applies the pinned chart's CRDs
 # server side (Helm never upgrades CRDs) and runs helm upgrade --install. --template prints what would be installed
 # (helm template) and touches no cluster (no --context needed).
@@ -23,7 +24,7 @@
 # Exit status: 0 when installed (or rendered), 1 when a step failed, 2 for a usage error.
 set -euo pipefail
 
-usage="usage: install.sh --env ci|staging|production --context <kubectl context> [--qeos-namespace <name>] [--qeos-release <name>] [--namespace <name>] [--enforce-restricted] [--allow-downgrade] [--template]"
+usage="usage: install.sh --env ci|staging|production --context <kubectl context> [--qeos-namespace <name>] [--qeos-release <name>] [--namespace <name>] [--enforce-restricted] [--allow-downgrade] [--adopt-namespace] [--template]"
 die_usage() { echo "install.sh: $1" >&2; echo "$usage" >&2; exit 2; }
 die() { echo "install.sh: $1" >&2; exit 1; }
 env=""
@@ -34,6 +35,7 @@ namespace=qeos-monitoring
 enforce=baseline
 template=""
 allow_downgrade=""
+adopt_namespace=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --env) [ "$#" -ge 2 ] || die_usage "--env needs a value"; env="$2"; shift ;;
@@ -44,6 +46,7 @@ while [ "$#" -gt 0 ]; do
     --enforce-restricted) enforce=restricted ;;
     --template) template=1 ;;
     --allow-downgrade) allow_downgrade=1 ;;
+    --adopt-namespace) adopt_namespace=1 ;;
     *) die_usage "unknown option $1" ;;
   esac
   shift
@@ -95,8 +98,8 @@ if [ -z "$template" ]; then
   # The monitoring namespace becomes privileged: only one this script made, never someone else's by a typo
   marker="$("${kc[@]}" get namespace "$namespace" --ignore-not-found \
     -o jsonpath='{.metadata.name}/{.metadata.labels.qeos\.atriis\.com/monitoring}')"
-  if [ -n "$marker" ] && [ "$marker" != "$namespace/true" ] && [ -z "$allow_downgrade" ]; then
-    die "$namespace exists and was not created by install.sh (no label qeos.atriis.com/monitoring=true); it would become Pod Security privileged: pass --allow-downgrade if that is intended"
+  if [ -n "$marker" ] && [ "$marker" != "$namespace/true" ] && [ -z "$adopt_namespace" ]; then
+    die "$namespace exists and was not created by install.sh (no label qeos.atriis.com/monitoring=true); it would become Pod Security privileged: pass --adopt-namespace if that is intended"
   fi
   # Pod Security is never lowered by accident: a re-run without --enforce-restricted on a restricted namespace
   current="$("${kc[@]}" get namespace "$qeos_namespace" --ignore-not-found \

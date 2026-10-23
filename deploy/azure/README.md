@@ -316,7 +316,9 @@ kubelogin convert-kubeconfig -l azurecli
 # in namespace qeos-monitoring. It also creates the chart's namespace qeos (the deploy identity's RBAC Admin role is
 # scoped to it) with its Pod Security labels. Again after every version bump of deploy/monitoring/Chart.yaml (it
 # upgrades the CRDs, which Helm never does). deploy/monitoring/README.md. --context is required (never the current
-# one): get-credentials names it after the cluster; the script prints it and its API server before changing anything
+# one): get-credentials names it after the cluster; the script prints it and its API server before changing anything.
+# It stops rather than make an existing qeos-monitoring it did not create privileged (--adopt-namespace, once, if that
+# namespace is meant) or lower a restricted qeos to baseline (--allow-downgrade); each flag allows only its own change
 bash deploy/monitoring/install.sh --env staging --context aks-qeos-staging
 
 # cert-manager with its CRDs and Gateway API support (the chart's Certificate and Issuer use it). Pin a current
