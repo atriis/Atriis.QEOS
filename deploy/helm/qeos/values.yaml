@@ -231,6 +231,8 @@ nginxResources: &nginxResources
 #   smtp, artifacts, monitoring   add the SMTP, artifact storage or MONITORING_ENABLED settings
 #   metricsJob  (APIs) Prometheus's job label for its /metrics, Compose's scrape job name (label qeos.io/metrics-job)
 #   metricsHonorLabels  (APIs) keep the scraped series' own job label (ingestion: the loop jobs' heartbeats)
+#   waitFor     (loop jobs) services whose /health must answer 200 before the job starts: Compose's depends_on with
+#               condition service_healthy (an init container, files/wait-for.py); each must be one of its urls
 #   env         plain settings, last (they win)
 services:
   auth-service:
@@ -343,6 +345,8 @@ services:
     kind: loop
     image: ingestion-service
     command: ["python", "-m", "src.ingestion.jobs.retention", "--loop"]
+    # Its first pass reads the policies from project-service (Compose: service_healthy); test-management only started
+    waitFor: [project-service]
     database: ingestion
     identity: ingestion-retention
     azureSdk: true

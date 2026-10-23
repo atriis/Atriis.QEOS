@@ -120,7 +120,11 @@ back with `kubectl config use-context <yours>`.
   `ingestion-service`, `test-management-service`, `dashboard` and `gateway` with 2 replicas each, a
   PodDisruptionBudget (`minAvailable: 1`) and pods spread across nodes; `ingestion-retention`, `analytics-rollup`,
   `impact-rollup` and `weekly-summary` with 1 replica each (their PostgreSQL advisory locks make a second copy
-  harmless, so a rolling update may overlap).
+  harmless, so a rolling update may overlap). A loop job with `waitFor` (retention: `project-service`, as Compose's
+  `depends_on` with `service_healthy`) first runs an init container, `wait-for` (`files/wait-for.py`, in its own
+  image), that waits up to 300 s for each service's `/health` to answer 200, so its first pass does not fail on a
+  fresh install; past that it exits 1 and the kubelet retries it. The other loop jobs wait only for the migration, as
+  in Compose.
 - **Services** (ClusterIP) with the Compose names: the APIs on 8000, the dashboard and the gateway on 8080. Nothing is
   exposed outside the cluster by these; the edge (below) sends traffic to the `gateway` Service.
 - One **ConfigMap** per workload, `qeos-<service>-env`, with its non-secret settings; secrets reach the pods only as
@@ -228,6 +232,7 @@ sleep of 5 s let in-flight requests and in-API background tasks finish while the
 | `migrate.resources` | 50m/128Mi, limit 500m/512Mi | each hook container |
 | `ci.backing` | `false` | in-cluster PostgreSQL and MinIO (kind only) |
 | `services.<name>.replicas`, `.resources`, `.env` | see `values.yaml` | per workload; `env` holds plain settings and wins over the chart's |
+| `services.<loop job>.waitFor` | `[project-service]` on ingestion-retention | services whose `/health` must answer 200 before the job starts (Compose's `service_healthy`); each must be one of its `urls`, or the render stops |
 | `services.<api>.metricsJob`, `.metricsHonorLabels` | Compose's job names; `true` on ingestion | Prometheus's `job` for the API (its Service's label `qeos.io/metrics-job`), and whether the scrape keeps the series' own labels |
 
 `values.yaml` documents the other per-workload fields (`database`, `identity`, `secretEnv`, `urls`, ...). Internal
@@ -268,7 +273,10 @@ roles the deploy identity does not have). Prometheus itself is that release's; e
   under the same `keyvault.absent` rule as the services), the webhook URLs and the SMTP login from the workload's
   synced Secret, all optional. A channel without its settings is left out; with none, every alert goes to the `null`
   receiver and stays visible in Alertmanager (`Watchdog` always is). kube-prometheus-stack sends it alerts at the
-  Service `alertmanager`, port `http` (`install.sh`'s `alertingEndpoints`).
+  Service `alertmanager`, port `http` (`install.sh`'s `alertingEndpoints`). `render.sh` runs once, at the pod's start:
+  after changing a webhook URL or the SMTP login in Key Vault, wait for the CSI driver's rotation (2 minutes), then
+  `kubectl -n <namespace> rollout restart deployment/alertmanager` (a values change, such as `monitoring.alertEmailTo`,
+  restarts it by itself: `checksum/config`).
 - Secrets follow the per-workload pattern ("Secrets" below): SecretProviderClasses `qeos-postgres-exporter` and
   `qeos-alertmanager` on `monitoring.identity` (`services`); Alertmanager's only when the vault holds one of its keys
   (staging lists the webhooks and the SMTP login in `keyvault.absent` for now).

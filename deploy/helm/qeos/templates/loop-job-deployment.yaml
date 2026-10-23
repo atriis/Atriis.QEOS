@@ -1,8 +1,16 @@
 {{- /* The loop jobs (retention, rollups, weekly summary): one replica each, no port; advisory locks make a second copy
-harmless, so a rolling update may overlap. They start after the hook has migrated ingestion_db */ -}}
+harmless, so a rolling update may overlap. They start after the hook has migrated ingestion_db, and after each service
+in waitFor answers /health (Compose's depends_on condition service_healthy) */ -}}
 {{- range $name, $svc := .Values.services }}
 {{- if eq $svc.kind "loop" }}
 {{- $ctx := dict "ctx" $ "name" $name "svc" $svc "uid" 10001 }}
+{{- $image := include "qeos.image" (dict "ctx" $ "image" (default $name $svc.image)) }}
+{{- range $target := ($svc.waitFor | default list) }}
+{{- /* Its NetworkPolicy admits the job only if one of its urls names the service */}}
+{{- if not (has $target (values ($svc.urls | default dict))) }}
+{{- fail (printf "services.%s.waitFor names %s, which none of its urls names: its NetworkPolicy would not admit the job" $name $target) }}
+{{- end }}
+{{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -26,9 +34,30 @@ spec:
     spec:
       serviceAccountName: {{ printf "qeos-%s" $svc.identity }}
       {{- include "qeos.podCommon" $ctx | nindent 6 }}
+      {{- if $svc.waitFor }}
+      initContainers:
+        # Its first pass needs these services healthy (files/wait-for.py; Compose: depends_on service_healthy)
+        - name: wait-for
+          image: {{ $image }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command:
+            - python
+            - /opt/qeos/scripts/wait-for.py
+            {{- range $target := $svc.waitFor }}
+            - {{ printf "http://%s%s:8000/health" $target (include "qeos.suffix" $) | quote }}
+            {{- end }}
+          securityContext:
+            {{- include "qeos.containerSecurity" $ctx | nindent 12 }}
+          resources:
+            {{- toYaml $svc.resources | nindent 12 }}
+          volumeMounts:
+            - name: scripts
+              mountPath: /opt/qeos/scripts
+              readOnly: true
+      {{- end }}
       containers:
         - name: {{ $name }}
-          image: {{ include "qeos.image" (dict "ctx" $ "image" (default $name $svc.image)) }}
+          image: {{ $image }}
           imagePullPolicy: {{ $.Values.image.pullPolicy }}
           command: {{ toJson $svc.command }}
           envFrom:
@@ -49,6 +78,11 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 256Mi
+        {{- if $svc.waitFor }}
+        - name: scripts
+          configMap:
+            name: qeos-scripts
+        {{- end }}
         {{- include "qeos.secretsVolume" $ctx | nindent 8 }}
 {{- end }}
 {{- end }}

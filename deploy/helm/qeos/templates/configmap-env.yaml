@@ -13,7 +13,7 @@ data:
   {{- end }}
 {{- end }}
 ---
-# The APIs' init container (files/wait-for-schema.sh)
+# The init containers: the APIs' (files/wait-for-schema.sh) and the loop jobs' waitFor (files/wait-for.py)
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -23,3 +23,5 @@ metadata:
 data:
   wait-for-schema.sh: |
     {{- .Files.Get "files/wait-for-schema.sh" | nindent 4 }}
+  wait-for.py: |
+    {{- .Files.Get "files/wait-for.py" | nindent 4 }}

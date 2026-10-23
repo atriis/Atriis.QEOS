@@ -243,6 +243,23 @@ for env in ci staging; do
     w="$(q "$f" "select(.kind == \"Deployment\" and .metadata.name == \"$name\") | [.spec.template.spec.initContainers[].name] | join(\" \")")"
     [ "$w" = wait-for-schema ] && pass "$env: $name waits for its schema" || fail "$env: $name init containers are '$w'"
   done
+  # ---- a loop job waits for the services Compose's depends_on wants healthy (retention: project-service) ----
+  for pair in "ingestion-retention:http://project-service.$NAMESPACE.svc.cluster.local:8000/health" analytics-rollup: \
+      impact-rollup: weekly-summary:; do
+    name="${pair%%:*}"
+    want="${pair#*:}"
+    w="$(q "$f" "select(.kind == \"Deployment\" and .metadata.name == \"$name\") | .spec.template.spec | [(.initContainers // [])[]
+      | .name + \" \" + .image + \" \" + (.command | join(\" \"))] | join(\";\")")"
+    img="$(q "$f" "select(.kind == \"Deployment\" and .metadata.name == \"$name\") | .spec.template.spec.containers[0].image")"
+    if [ -z "$want" ]; then
+      [ -z "$w" ] && pass "$env: $name waits for nothing (Compose: only the migration)" || fail "$env: $name init containers are '$w'"
+    else
+      [ "$w" = "wait-for $img python /opt/qeos/scripts/wait-for.py $want" ] \
+        && pass "$env: $name waits for $want in its own image" || fail "$env: $name init containers are '$w'"
+    fi
+  done
+  s="$(q "$f" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-scripts") | .data["wait-for.py"]')"
+  [ "$s" = "$(cat "$CHART/files/wait-for.py")" ] && pass "$env: qeos-scripts carries files/wait-for.py" || fail "$env: qeos-scripts lacks wait-for.py"
 
   # ---- probes, grace period, preStop, spread on every long-running workload ----
   bad="$(q "$f" '[select(.kind == "Deployment" and .metadata.labels["app.kubernetes.io/part-of"] == "qeos")
@@ -763,6 +780,14 @@ pgargs="$(q "$OUT/ci.yaml" 'select(.kind == "Deployment" and .metadata.name == "
 init="$(q "$OUT/ci.yaml" 'select(.kind == "ConfigMap" and .metadata.name == "postgres-init") | .data["ci-postgres-init.sh"]')"
 [[ "$init" == *"GRANT pg_monitor TO :\"admin\" WITH ADMIN OPTION"* && "$init" == *"CREATE EXTENSION IF NOT EXISTS pg_stat_statements"* ]] \
   && pass "ci: the init script lets the admin grant pg_monitor and creates pg_stat_statements" || fail "ci: the init script lacks the pg_monitor grant or the extension"
+
+# A loop job may wait only for a service its urls name: its NetworkPolicy admits it nowhere else
+if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" "${CRDS[@]}" --set 'services.weekly-summary.waitFor={auth-service}' >/dev/null 2>"$OUT/waitfor.err"; then
+  fail "a waitFor service outside the job's urls renders (the job would wait for ever)"
+else
+  grep -q "waitFor names auth-service" "$OUT/waitfor.err" && pass "a waitFor service outside the job's urls is refused" \
+    || fail "waitFor auth-service failed for another reason: $(tail -n 2 "$OUT/waitfor.err")"
+fi
 
 # ---- Review Focus 3: none of the CI dummy secrets reaches any rendered manifest ----
 mapfile -t dummies < <(yq '.ciSecrets | to_entries | .[].value' "$CHART/values-ci.yaml" | tr -d '\r')
