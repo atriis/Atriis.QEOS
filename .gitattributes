@@ -2,3 +2,7 @@
 # "#!/bin/sh" into "/bin/sh\r: not found". Force LF regardless of a contributor's autocrlf.
 *.sh                    text eol=lf
 *.template              text eol=lf
+# Compose's Prometheus files and the chart's byte-for-byte copies of them (tests/monitoring_files_test.sh compares the
+# bytes): LF on every checkout, so an editor's CRLF never makes a copy differ from its original
+monitoring/**/*.yml                         text eol=lf
+deploy/helm/qeos/files/monitoring/**        text eol=lf
