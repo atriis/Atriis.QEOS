@@ -436,7 +436,13 @@ check "analytics flaky" 200 GET "$BASE/api/v1/projects/$PROJECT_ID/analytics/fla
 # ---- two runs on one branch for the report's tests, duration and regressions sections ----
 # Run A: report-flaky fails, report-breaks passes. Run B: report-flaky fails and is retried and passes (a
 # repeated test in one run), report-breaks fails. So report-flaky is fixed in B and report-breaks newly fails in B.
-at() { date -u -d "$1 seconds" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v"$1"S +%Y-%m-%dT%H:%M:%SZ; }
+# `at -60` is 60 s before T0. One clock reading per group of runs: two separate `date` calls can straddle a second,
+# which made run B last 24 or 26 s instead of 25 now and then
+at() {
+  local t=$((T0 + $1))
+  date -u -d "@$t" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -r "$t" +%Y-%m-%dT%H:%M:%SZ
+}
+T0="$(date -u +%s)"
 REPORT_RUN_A="{\"run\":{\"ci_provider\":\"local\",\"branch\":\"smoke-report\",\"started_at\":\"$(at -90)\",\"finished_at\":\"$(at -70)\"},\"results\":[{\"name\":\"report-flaky\",\"status\":\"failed\",\"duration_ms\":100,\"message\":\"first\"},{\"name\":\"report-breaks\",\"status\":\"passed\",\"duration_ms\":10}]}"
 REPORT_RUN_B="{\"run\":{\"ci_provider\":\"local\",\"branch\":\"smoke-report\",\"started_at\":\"$(at -60)\",\"finished_at\":\"$(at -35)\"},\"results\":[{\"name\":\"report-flaky\",\"status\":\"failed\",\"duration_ms\":100,\"message\":\"again\"},{\"name\":\"report-flaky\",\"status\":\"passed\",\"duration_ms\":150},{\"name\":\"report-breaks\",\"status\":\"failed\",\"duration_ms\":20,\"message\":\"broke\"}]}"
 check "upload report run A" 201 POST "$BASE/api/v1/collect/runs" \
@@ -524,6 +530,7 @@ if grep -qi '^content-encoding: gzip' "$TMP/headers"; then fail "login is gzip-e
 # Two runs cannot meet the statistical thresholds, so "scoring that path suggests the test" is shown by the
 # "failing on this branch" label: run B is the branch's latest run and the test fails in it.
 IMPACT_BRANCH="smoke-impact-$SUFFIX"
+T0="$(date -u +%s)"
 IMPACT_TEST="impact-breaks-$SUFFIX"
 IMPACT_CHANGES='"changes":{"base_ref":"origin/main","truncated":false,"files":[{"path":"src/impact/smoke.py","status":"M","additions":1,"deletions":0}]}'
 IMPACT_RUN_A="{\"run\":{\"ci_provider\":\"local\",\"branch\":\"$IMPACT_BRANCH\",\"started_at\":\"$(at -50)\",\"finished_at\":\"$(at -45)\"},\"results\":[{\"name\":\"$IMPACT_TEST\",\"status\":\"passed\"}],$IMPACT_CHANGES}"
