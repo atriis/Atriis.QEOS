@@ -373,6 +373,25 @@ v="$(q "$OUT/staging-off.yaml" 'select(.kind == "Deployment" and .metadata.name 
 [ "$v" = 0 ] && pass "staging: monitoring off, the gateway mounts no secrets volume" || fail "staging: the gateway mounts $v CSI volumes with monitoring off"
 # A rendered ConfigMap never holds the key
 [ "$(q "$OUT/staging.yaml" 'select(.kind == "ConfigMap") | .data | keys | .[] | select(. == "GRAFANA_PROXY_KEY")')" = "" ]   && pass "staging: GRAFANA_PROXY_KEY is in no ConfigMap" || fail "staging: a ConfigMap sets GRAFANA_PROXY_KEY"
+# A gateway secret the vault does not hold (keyvault.absent): its reference stays, optional, but no SecretProviderClass
+# renders, so the pod must not mount one (it would stay in ContainerCreating)
+OPTIONAL='secrets.optional={tm-secrets-key,smtp-user,smtp-password,alert-slack-webhook-url,alert-teams-webhook-url,foo-key}'
+ABSENT='keyvault.absent={tm-secrets-key,smtp-user,smtp-password,alert-slack-webhook-url,alert-teams-webhook-url,foo-key}'
+render staging-gw-absent -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" --set monitoring.enabled=false \
+  --set services.gateway.secretEnv.FOO=foo-key --set "$OPTIONAL" --set "$ABSENT"
+render staging-gw-absent-mon -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" "${CRDS[@]}" \
+  --set services.gateway.secretEnv.FOO=foo-key --set "$OPTIONAL" --set "$ABSENT"
+gwpod() { q "$OUT/$1.yaml" 'select(.kind == "Deployment" and .metadata.name == "gateway") | .spec.template.spec
+  | ([.volumes[] | select(.csi) | .csi.volumeAttributes.secretProviderClass] | join(",")) + "|" + .serviceAccountName + "|"
+    + ([.containers[0].env[] | select(.valueFrom.secretKeyRef) | .name + ":" + .valueFrom.secretKeyRef.key + ":" + ((.valueFrom.secretKeyRef.optional // false) | tostring)] | join(","))'; }
+got="$(gwpod staging-gw-absent)|$(gwspc staging-gw-absent)"
+[ "$got" = "|qeos-services|FOO:foo-key:true|" ] \
+  && pass "staging: an absent gateway key keeps an optional reference, and no SecretProviderClass or CSI volume" \
+  || fail "staging: absent gateway key gives '$got'"
+got="$(gwpod staging-gw-absent-mon)|$(gwspc staging-gw-absent-mon)"
+[ "$got" = "qeos-gateway|qeos-services|FOO:foo-key:true,GRAFANA_PROXY_KEY:grafana-proxy-key:false|grafana-proxy-key" ] \
+  && pass "staging: with monitoring on, the gateway mounts qeos-gateway, which holds grafana-proxy-key only" \
+  || fail "staging: absent gateway key with monitoring on gives '$got'"
 
 # ---- environment-specific choices ----
 backend() { q "$OUT/$1.yaml" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-ingestion-service-env") | .data.ARTIFACTS_BACKEND'; }
