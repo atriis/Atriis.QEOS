@@ -315,8 +315,9 @@ kubelogin convert-kubeconfig -l azurecli
 # kube-prometheus-stack (Prometheus, its operator and CRDs, kube-state-metrics, node-exporter): release qeos-monitoring
 # in namespace qeos-monitoring. It also creates the chart's namespace qeos (the deploy identity's RBAC Admin role is
 # scoped to it) with its Pod Security labels. Again after every version bump of deploy/monitoring/Chart.yaml (it
-# upgrades the CRDs, which Helm never does). deploy/monitoring/README.md
-bash deploy/monitoring/install.sh --env staging
+# upgrades the CRDs, which Helm never does). deploy/monitoring/README.md. --context is required (never the current
+# one): get-credentials names it after the cluster; the script prints it and its API server before changing anything
+bash deploy/monitoring/install.sh --env staging --context aks-qeos-staging
 
 # cert-manager with its CRDs and Gateway API support (the chart's Certificate and Issuer use it). Pin a current
 # release from https://cert-manager.io/docs/releases/

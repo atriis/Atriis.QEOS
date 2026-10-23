@@ -10,36 +10,42 @@ CI's `helm-kind` job runs the same script before the QEOS install.
 
 ```bash
 # AKS staging, as a cluster admin (deploy/azure/README.md, section 4.5)
-bash deploy/monitoring/install.sh --env staging
+bash deploy/monitoring/install.sh --env staging --context aks-qeos-staging
 
 # kind (CI, and "Testing locally with kind" in deploy/helm/README.md): the QEOS namespace enforces restricted
-bash deploy/monitoring/install.sh --env ci --enforce-restricted
+bash deploy/monitoring/install.sh --env ci --context kind-qeos-kind --enforce-restricted
 
-# What would be installed, touching no cluster; and the checks on it (helm 3, yq v4, network; no cluster)
+# What would be installed, touching no cluster (no --context); and the checks on it (helm 3, yq v4, network; no
+# cluster: a kubectl stub stands in for one)
 bash deploy/monitoring/install.sh --env staging --template
 bash deploy/monitoring/tests/install_test.sh
 ```
 
 ## What install.sh does
 
-`install.sh --env ci|staging|production [--qeos-namespace qeos] [--namespace qeos-monitoring] [--enforce-restricted]
-[--template]`; exit 2 for a usage error (an unknown environment, a namespace that is not a DNS label, the same namespace
-twice), 1 when a step fails.
+`install.sh --env ci|staging|production --context <kubectl context> [--qeos-namespace qeos] [--namespace
+qeos-monitoring] [--enforce-restricted] [--allow-downgrade] [--template]`; exit 2 for a usage error (an unknown
+environment, no `--context`, a namespace that is not a DNS label, the same namespace twice), 1 when a step fails.
 
+0. **The cluster.** `--context` is required and every `kubectl` and `helm` call uses it, never the current context: an
+   admin signed in to another cluster would otherwise change that one. An unknown context stops the script. Before
+   anything changes it prints the context, its API server and both namespaces.
 1. **The chart.** `helm dependency build` downloads the version `Chart.lock` pins into `charts/` (ignored by git), with
    a repository configuration of its own (the admin's helm repositories are neither read nor changed). The archive's
    sha256 must equal the `qeos.atriis.com/kube-prometheus-stack-sha256` annotation in `Chart.yaml`, or nothing is
    installed: CI and every admin install the same bytes.
 2. **Namespaces.** Both are created if missing and labelled for Pod Security: the monitoring namespace `privileged`
    (node-exporter needs the host's network, PID namespace and file systems); the QEOS namespace `enforce=baseline`,
-   `warn=restricted`, `audit=restricted`, or `enforce=restricted` with `--enforce-restricted` (CI). This is the only
+   `warn=restricted`, `audit=restricted`, or `enforce=restricted` with `--enforce-restricted` (CI). A QEOS namespace
+   that already enforces `restricted` is never lowered silently: without `--enforce-restricted` the script stops (exit
+   1, before any change) unless `--allow-downgrade` is given. This is the only
    place either namespace is created; the CI step that creates the QEOS namespace does so only if it is missing.
 3. **CRDs**, from the verified archive, with `kubectl apply --server-side --force-conflicts`: Helm installs CRDs once and
    never upgrades them, so a version bump would otherwise leave the old ones.
 4. **The release:** `helm upgrade --install qeos-monitoring deploy/monitoring --skip-crds --atomic --wait`, then waits
    until Prometheus itself is available (the operator starts it after Helm is done).
 
-`--template` stops after step 1 and prints `helm template` instead; the test renders it.
+`--template` skips step 0, stops after step 1 and prints `helm template` instead; the test renders it.
 
 ## Values
 
@@ -49,8 +55,8 @@ twice), 1 when a step fails.
 | `values-ci.yaml` | kind | no persistent storage (an emptyDir), small requests |
 | `values-staging.yaml` | AKS staging | Prometheus on a 20Gi `managed-csi` volume |
 
-There is no `values-production.yaml` yet, so `--env production` is refused (production is Stage 3, like
-`deploy-aks.yml`'s).
+There is no `values-production.yaml` yet, so `--env production` is refused: production arrives in Stage 3, like
+`deploy-aks.yml`'s.
 
 Everything that depends on the namespaces comes from `install.sh`, never from a values file, so `--qeos-namespace` and
 `--namespace` change all of it: the Alertmanager endpoint, the namespace selectors, the enforcement exclusions and the

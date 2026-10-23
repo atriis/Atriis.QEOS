@@ -41,7 +41,60 @@ usage_error "a QEOS namespace that is not a DNS label" "not a Kubernetes namespa
 usage_error "a monitoring namespace that is not a DNS label" "not a Kubernetes namespace name: '-mon'" \
   --env ci --namespace -mon
 usage_error "the same namespace twice" "must differ" --env ci --namespace qeos
-usage_error "production before its values file exists" "values-production.yaml" --env production
+usage_error "production before its values file exists" "production arrives in Stage 3.*values-production.yaml" \
+  --env production --context kind-qeos-kind
+# Never the current context
+usage_error "no --context" "--context is required" --env ci
+usage_error "--context without a value" "--context needs a value" --env ci --context
+usage_error "a context that is not a context name" "not a kubectl context name: 'a b'" --env ci --context "a b"
+
+# ---- against a cluster: a kubectl stub on PATH (and a helm stub, so nothing is downloaded or installed) ----
+# The stub knows one context, stub-ctx; it answers the API server and the QEOS namespace's enforce label
+# ($STUB_ENFORCE), and logs every other call to $OUT/kubectl.log
+mkdir -p "$OUT/stub"
+cat >"$OUT/stub/kubectl" <<'EOF'
+#!/usr/bin/env bash
+case "$*" in
+  "config get-contexts stub-ctx") exit 0 ;;
+  "config get-contexts "*) exit 1 ;;
+  "--context stub-ctx config view --minify "*) echo https://stub.example:443 ;;
+  "--context stub-ctx get namespace "*) echo "${STUB_ENFORCE:-}" ;;
+  *) echo "$*" >>"$STUB_LOG" ;;
+esac
+EOF
+# shellcheck disable=SC2016 # the stub's own variables
+printf '#!/usr/bin/env bash\necho "helm $*" >>"$STUB_LOG"\n' >"$OUT/stub/helm"
+chmod +x "$OUT/stub/kubectl" "$OUT/stub/helm"
+# A copy without a downloaded chart: past the checks, the script stops at the archive the helm stub never fetched
+cp -r "$DIR" "$OUT/clean"
+rm -rf "$OUT/clean/charts"
+# stubbed STATUS PATTERN ENFORCE ARGS...: install.sh ARGS against the stub, the QEOS namespace enforcing ENFORCE
+stubbed() {
+  local want="$1" pattern="$2" enforce="$3" status=0
+  shift 3
+  : >"$OUT/kubectl.log"
+  STUB_LOG="$OUT/kubectl.log" STUB_ENFORCE="$enforce" PATH="$OUT/stub:$PATH" bash "$OUT/clean/install.sh" "$@" \
+    >"$OUT/stub.out" 2>"$OUT/stub.err" || status=$?
+  [ "$status" = "$want" ] && grep -qE -- "$pattern" "$OUT/stub.err"
+}
+check "an unknown context exits 1 before any change" \
+  stubbed 1 "no kubectl context 'other-ctx'" "" --env ci --context other-ctx
+check "... and nothing was called" [ ! -s "$OUT/kubectl.log" ]
+check "the context, its API server and both namespaces are printed first" \
+  stubbed 1 "" restricted --env staging --context stub-ctx
+check "... context" grep -q "^context: stub-ctx$" "$OUT/stub.err"
+check "... API server" grep -q "^API server: https://stub.example:443$" "$OUT/stub.err"
+check "... namespaces" grep -q "monitoring namespace: qeos-monitoring .*QEOS namespace: qeos " "$OUT/stub.err"
+check "a restricted QEOS namespace is not lowered to baseline" \
+  stubbed 1 "qeos enforces Pod Security restricted; pass --enforce-restricted to keep it, or --allow-downgrade" \
+  restricted --env staging --context stub-ctx
+check "... and nothing was changed" [ ! -s "$OUT/kubectl.log" ]
+check "--allow-downgrade lowers it" stubbed 1 "left no .*kube-prometheus-stack" restricted \
+  --env staging --context stub-ctx --allow-downgrade
+check "--enforce-restricted keeps it" stubbed 1 "left no .*kube-prometheus-stack" restricted \
+  --env staging --context stub-ctx --enforce-restricted
+check "a baseline namespace needs no flag" stubbed 1 "left no .*kube-prometheus-stack" baseline \
+  --env staging --context stub-ctx
 
 # ---- render ----
 # render NAME ARGS...: install.sh --template ARGS into $OUT/NAME.yaml
@@ -131,6 +184,7 @@ checks_for() {
 
   # Every container with the restricted settings: node-exporter keeps its host namespaces (the privileged namespace
   # admits it), the rest is restricted
+  # shellcheck disable=SC2016 # yq's variables
   local pods='select(.kind == "Deployment" or .kind == "DaemonSet" or .kind == "Job" or .kind == "StatefulSet")
     | .spec.template.spec as $pod | ($pod.containers + ($pod.initContainers // []))[] | {"pod": $pod, "c": .}'
   local bad
@@ -159,18 +213,33 @@ check "custom: nothing names the default namespaces" \
   [ "$(grep -cE '(namespace: |- )(qeos|qeos-monitoring)$' "$OUT/custom.yaml")" = 0 ]
 
 # ---- the pin ----
-# A downloaded chart whose digest differs from Chart.yaml's annotation is refused
-cp -r "$DIR" "$OUT/tampered"
-rm -rf "$OUT/tampered/charts"
-sed -i 's/\(kube-prometheus-stack-sha256: \).*/\10000000000000000000000000000000000000000000000000000000000000000/' \
-  "$OUT/tampered/Chart.yaml"
-status=0
-bash "$OUT/tampered/install.sh" --template --env ci >/dev/null 2>"$OUT/tampered.err" || status=$?
-if [ "$status" = 1 ] && grep -q "sha256" "$OUT/tampered.err"; then
-  pass "a chart archive with another digest is refused"
-else
-  fail "a chart archive with another digest is refused: exit $status, $(tail -n 3 "$OUT/tampered.err")"
-fi
+# edited_copy NAME SED_SCRIPT: deploy/monitoring copied to $OUT/NAME (no downloaded charts), Chart.yaml edited (no
+# sed -i: BSD and GNU sed disagree on it)
+edited_copy() {
+  cp -r "$DIR" "$OUT/$1"
+  rm -rf "$OUT/$1/charts"
+  sed "$2" "$DIR/Chart.yaml" >"$OUT/$1/Chart.yaml"
+}
+# refused NAME COPY PATTERN: install.sh --template in the copy exits 1 and its stderr matches PATTERN
+refused() {
+  local status=0
+  bash "$OUT/$2/install.sh" --template --env ci >/dev/null 2>"$OUT/$2.err" || status=$?
+  if [ "$status" = 1 ] && grep -qE -- "$3" "$OUT/$2.err"; then
+    pass "$1"
+  else
+    fail "$1: exit $status, $(tail -n 3 "$OUT/$2.err")"
+  fi
+}
+# A downloaded chart whose digest differs from Chart.yaml's annotation is refused, pointing to the bump procedure
+edited_copy tampered 's/\(kube-prometheus-stack-sha256: \).*/\10000000000000000000000000000000000000000000000000000000000000000/'
+refused "a chart archive with another digest is refused" tampered "sha256 .*Bumping the version"
+# Chart.yaml is read with sed: a dependency it cannot parse stops the script, never an empty version
+edited_copy no-version '/^    version:/d'
+refused "a Chart.yaml without the dependency's version is refused" no-version "expected one dependency version"
+edited_copy no-sha '/kube-prometheus-stack-sha256:/d'
+refused "a Chart.yaml without the sha256 annotation is refused" no-sha "expected one dependency version"
+edited_copy two-versions '/^    version:/p'
+refused "a Chart.yaml with two indented versions is refused" two-versions "expected one dependency version"
 check "Chart.lock pins the version Chart.yaml names" [ "$(yq '.dependencies[0].version' "$DIR/Chart.lock")" \
   = "$(yq '.dependencies[0].version' "$DIR/Chart.yaml")" ]
 

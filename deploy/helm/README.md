@@ -50,7 +50,7 @@ kind load docker-image --name qeos-kind qeos/auth-service:kind qeos/organization
 
 # 3. The cluster's kube-prometheus-stack, as a cluster admin installs it on AKS (deploy/monitoring/README.md): it creates
 #    both namespaces and labels qeos enforce restricted. About 2 minutes
-bash deploy/monitoring/install.sh --env ci --enforce-restricted
+bash deploy/monitoring/install.sh --env ci --context kind-qeos-kind --enforce-restricted
 
 # 4. The Secret and the install (above): about 4 minutes, most of it pulling PostgreSQL and MinIO
 
