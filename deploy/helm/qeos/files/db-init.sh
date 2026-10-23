@@ -87,7 +87,16 @@ if [ "$MONITORING_ENABLED" = true ]; then
 SELECT 'CREATE ROLE qeos_monitor LOGIN' WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'qeos_monitor')\gexec
 -- a server running with log_statement=ddl or all would log this password; the default is none
 ALTER ROLE qeos_monitor WITH LOGIN PASSWORD :'pw';
+-- Granting pg_monitor needs ADMIN OPTION on it (PostgreSQL 16, a non-superuser admin). Without it the role still
+-- logs in and postgres-exporter runs with fewer statistics: a warning, never a failed deploy (ADR-038)
+SELECT pg_has_role('qeos_monitor', 'pg_monitor', 'MEMBER') AS has_monitor,
+       pg_has_role(current_user, 'pg_monitor', 'MEMBER WITH ADMIN OPTION') AS can_grant \gset
+\if :has_monitor
+\elif :can_grant
 GRANT pg_monitor TO qeos_monitor;
+\else
+\warn 'db-init: WARNING: the admin login cannot grant pg_monitor (no ADMIN OPTION on it): qeos_monitor exists without it and monitoring is degraded; as a server admin run GRANT pg_monitor TO qeos_monitor'
+\endif
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 SQL
   echo "db-init: role qeos_monitor (pg_monitor) for postgres-exporter"

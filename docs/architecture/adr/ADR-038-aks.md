@@ -105,9 +105,11 @@ must keep working unchanged.
   version bump; CI's kind job runs the same script. The version is pinned in a wrapper chart Dependabot bumps, and the
   archive by its sha256. Prometheus admits 9090 from the QEOS chart's Grafana and its own namespace only.
 - **QEOS's own monitoring comes from the chart** (Stage 2; `deploy/helm/README.md`, "Monitoring"). With
-  `monitoring.enabled` (on in CI and staging) it renders ServiceMonitors with Compose's job names, PrometheusRules from
-  byte-for-byte copies of Compose's rule files (without `qeos-host`: under the namespace enforcement a QEOS rule never
-  sees `node_*` series), postgres-exporter as `qeos_monitor` (`pg_monitor` only; db-init creates it) and Alertmanager
+  `monitoring.enabled` (on in CI; on in staging once Key Vault holds its keys and the deploy checks for
+  kube-prometheus-stack) it renders ServiceMonitors with Compose's job names, PrometheusRules from byte-for-byte copies
+  of Compose's rule files (without `qeos-host`, whose `node_*` series the namespace enforcement hides, and
+  `qeos-containers`, which cannot fire when a restart makes a new series; kube-prometheus-stack's rules cover both;
+  `ServiceDown` fires per job, so one replica down is not the service down), postgres-exporter as `qeos_monitor` (`pg_monitor` only; db-init creates it) and Alertmanager
   rendered by Compose's `render.sh`, with the null receiver when no channel is configured. Without
   kube-prometheus-stack's CRDs the render stops, naming `deploy/monitoring/install.sh`, so nothing is half applied.
 - Per-process limits in ingestion (8 storage calls, a 60 s pending-deletion cache) become per pod.
@@ -132,9 +134,10 @@ Nothing here can be proved without a real subscription:
   `managed-csi` volume, its NetworkPolicy under Cilium (Grafana in the QEOS namespace admitted, other pods refused; on
   kind it is proved by hand), and the default rules quiet on a healthy cluster.
 - Monitoring on AKS: Kubernetes RBAC Admin at namespace scope also covers `monitoring.coreos.com` (ServiceMonitor,
-  PrometheusRule); Flexible Server's admin may grant `pg_monitor` and create `pg_stat_statements` (db-init with
-  monitoring on; CI's server gives its admin the same rights by hand); postgres-exporter reaches the server with
-  `sslmode=require`.
+  PrometheusRule); Flexible Server's admin holds `pg_monitor` WITH ADMIN OPTION and may create `pg_stat_statements`
+  (db-init with monitoring on; CI's server gives its admin the same rights by hand). Without ADMIN OPTION db-init
+  warns "monitoring is degraded" and goes on: look for that WARNING in the hook's log, and if it is there grant
+  `pg_monitor` to `qeos_monitor` as a server admin. postgres-exporter reaches the server with `sslmode=require`.
 - `pg_stat_statements` preloaded on Flexible Server; `db-init` with Flexible Server's admin (CI's kind job already
   runs it on PostgreSQL 16 as a `CREATEROLE CREATEDB` admin that is not a superuser, which needs the role granted
   `WITH INHERIT TRUE, SET TRUE`).

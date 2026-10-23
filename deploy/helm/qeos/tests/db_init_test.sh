@@ -171,6 +171,21 @@ real_server() {
   else
     fail "real server: rotation: $(tail -n 3 "$WORK/real.out")"
   fi
+  # An admin that may not grant pg_monitor (if Flexible Server's admin lacks ADMIN OPTION on it): qeos_monitor is still
+  # created and logs in, db-init succeeds and warns that monitoring is degraded; the deploy is not blocked
+  sup() { docker exec "$server" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -tAc "$1" >/dev/null; }
+  if sup "DROP ROLE qeos_monitor" && sup "REVOKE pg_monitor FROM qeosadmin"; then
+    if dbinit; then
+      grep -q "WARNING.*pg_monitor" "$WORK/real.out" \
+        && [ "$(q rotated-pw postgres "SELECT pg_has_role('qeos_monitor', 'pg_monitor', 'MEMBER')")" = f ] \
+        && pass "real server: without ADMIN OPTION on pg_monitor, qeos_monitor logs in without it and db-init warns" \
+        || fail "real server: no ADMIN OPTION: $(grep -i warning "$WORK/real.out"), member: $(q rotated-pw postgres "SELECT pg_has_role('qeos_monitor', 'pg_monitor', 'MEMBER')")"
+    else
+      fail "real server: db-init fails when the admin cannot grant pg_monitor: $(tail -n 3 "$WORK/real.out")"
+    fi
+  else
+    fail "real server: could not take pg_monitor's ADMIN OPTION from qeosadmin"
+  fi
 }
 if docker info >/dev/null 2>&1; then
   real_server

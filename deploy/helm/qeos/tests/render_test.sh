@@ -29,6 +29,9 @@ STAGING_SET=(
   --set artifacts.azure.accountUrl=https://placeholder.blob.core.windows.net
   # auth-service's Entra app: must reach the pod as given, never replaced by a managed identity's id
   --set services.auth-service.env.AZURE_CLIENT_ID=entra-app-from-values
+  # values-staging.yaml keeps monitoring off until Task 7 (Key Vault keys, deploy preflight): the staging renders check
+  # it on, as it will run; staging-off and the lint turn it off again
+  --set monitoring.enabled=true
 )
 # Compose settings the chart replaces on purpose: DATABASE_URL by POSTGRES_* (the password URL-escaped by the settings),
 # GATEWAY_HTTPS_PORT by GATEWAY_PUBLIC_PORT (TLS ends at the edge). Anything else Compose sets must be set here too
@@ -593,10 +596,11 @@ bad="$(q "$OUT/ci.yaml" '[.spec.template.spec | (.containers // []) + (.initCont
 
 # ---- monitoring (ADR-038 Stage 2): ServiceMonitors, PrometheusRules, postgres-exporter and Alertmanager ----
 MONITORING="$CHART/../../../monitoring"
-# The rule groups: Compose's alerts.yml and recording.yml without qeos-host (node-exporter's, Compose only), and the
-# threshold that Compose's entrypoint.sh renders from POSTGRES_DB_SIZE_ALERT_GB
+# The rule groups: Compose's alerts.yml and recording.yml without qeos-host (node-exporter's, Compose only) and
+# qeos-containers (a restarted pod's container is a new series on Kubernetes, so its restart count never rises: the
+# alert could never fire; KubePodCrashLooping covers it), and the threshold that Compose's entrypoint.sh renders
 want_groups="$( { yq '.groups[].name' "$MONITORING/prometheus/alerts.yml"; yq '.groups[].name' "$MONITORING/prometheus/recording.yml";
-  echo qeos-thresholds; } | tr -d '\r' | grep -vx qeos-host | sort | xargs)"
+  echo qeos-thresholds; } | tr -d '\r' | grep -vx -e qeos-host -e qeos-containers | sort | xargs)"
 [[ " $want_groups " == *" qeos-services "* ]] || fail "monitoring/prometheus/alerts.yml was not read"
 # The Compose job names: Prometheus's job label of each scraped Service
 want_jobs="alertmanager=alertmanager auth-service=auth ingestion-service=ingestion organization-service=organization postgres-exporter=postgres project-service=project test-management-service=test-management"
@@ -614,9 +618,9 @@ for env in ci staging; do
   # The rules themselves, unchanged: the chart's copies through fromYaml and back
   for src in alerts recording; do
     # Keys sorted on both sides: Helm's toYaml sorts them
-    a="$(yq -o json -I0 '.groups | map(select(.name != "qeos-host")) | sort_keys(..)' "$MONITORING/prometheus/$src.yml" | tr -d '\r')"
+    a="$(yq -o json -I0 '.groups | map(select(.name != "qeos-host" and .name != "qeos-containers")) | sort_keys(..)' "$MONITORING/prometheus/$src.yml" | tr -d '\r')"
     b="$(yq ea -o json -I0 "select(.kind == \"PrometheusRule\" and .metadata.name == \"qeos-$src\") | .spec.groups | sort_keys(..)" "$f" | tr -d '\r')"
-    [ -n "$a" ] && [ "$a" = "$b" ] && pass "$env: PrometheusRule qeos-$src equals monitoring/prometheus/$src.yml (but qeos-host)" \
+    [ -n "$a" ] && [ "$a" = "$b" ] && pass "$env: PrometheusRule qeos-$src equals monitoring/prometheus/$src.yml (but the skipped groups)" \
       || fail "$env: PrometheusRule qeos-$src differs from $src.yml"
   done
 
@@ -770,6 +774,17 @@ t="$(q "$f" 'select(.kind == "PrometheusRule") | .spec.groups[] | select(.name =
 [ "$t" = "vector(35.5 * 1e9)" ] && pass "monitoring.postgresDbSizeAlertGb sets the threshold" || fail "postgresDbSizeAlertGb=35.5 gives '$t'"
 n="$(q "$f" '[select(.kind == "PrometheusRule") | .spec.groups[] | select(.name == "qeos-host")] | length')"
 [ "$n" = 1 ] && pass "monitoring.skipRuleGroups empty keeps qeos-host" || fail "skipRuleGroups empty: $n qeos-host groups"
+# 8: with no API left to qeos-apis (each honours its labels, or has no metricsJob) the ServiceMonitor is left out, not
+# rendered with an empty In list
+render ci-noapis -f "$CHART/values-ci.yaml" "${CRDS[@]}" --set services.auth-service.metricsJob=null \
+  --set services.organization-service.metricsJob=null --set services.project-service.metricsJob=null \
+  --set services.test-management-service.metricsHonorLabels=true
+got="$(q "$OUT/ci-noapis.yaml" '[select(.kind == "ServiceMonitor") | .metadata.name] | sort | join(" ")')"
+[ "$got" = "qeos-alertmanager qeos-ingestion qeos-postgres qeos-test-management" ] \
+  && pass "no plain API left: no qeos-apis ServiceMonitor (never an empty In list)" || fail "ServiceMonitors without plain APIs: '$got'"
+# 1+3: values-staging.yaml alone leaves monitoring off until Task 7
+v="$(yq '.monitoring.enabled' "$CHART/values-staging.yaml" | tr -d '\r')"
+[ "$v" = false ] && pass "values-staging.yaml keeps monitoring off (Task 7 turns it on)" || fail "values-staging.yaml's monitoring.enabled is '$v'"
 v="$(q "$f" 'select(.kind == "Deployment" and .metadata.name == "alertmanager") | .spec.template.spec.initContainers[0].env[] | select(.name == "ALERT_EMAIL_TO") | .value')"
 [ "$v" = ops@example.com ] && pass "monitoring.alertEmailTo is Alertmanager's ALERT_EMAIL_TO" || fail "ALERT_EMAIL_TO is '$v'"
 # The CI server is Flexible Server's equivalent for monitoring too: pg_stat_statements preloaded and allowed, and an

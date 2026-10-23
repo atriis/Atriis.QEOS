@@ -85,7 +85,8 @@ chart's values, or the APIs refuse Prometheus's scrapes on 8000 (they time out);
   `namespace=<the QEOS namespace>`, whatever a target sends. The monitoring namespace's own ServiceMonitors and rules are
   excluded (they describe the whole cluster: a pod's or a node's series keep their own `namespace`). So a QEOS rule
   only ever matches the QEOS namespace's series and can never match `node_*` ones: the chart leaves Compose's
-  `qeos-host` group out (`monitoring.skipRuleGroups`). The QEOS ingestion scrape's `honor_labels: true` does not
+  `qeos-host` group out (`monitoring.skipRuleGroups`), with `qeos-containers`, whose restart alert cannot fire when a
+  restarted container is a new series (`KubePodCrashLooping` covers restarts). The QEOS ingestion scrape's `honor_labels: true` does not
   escape it (`scripts/check_k8s_monitoring.sh` checks both on kind).
 - **Retention 15 days**, the same as Compose's Prometheus.
 - **The control plane is not scraped** (`kubeControllerManager`, `kubeScheduler`, `kubeEtcd`, `kubeProxy` off): AKS

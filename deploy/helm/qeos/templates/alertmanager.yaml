@@ -9,7 +9,7 @@ else reaches it (networkpolicies.yaml) */ -}}
 {{- $svc := get (include "qeos.monitoringWorkloads" . | fromJson) $name }}
 {{- $ctx := dict "ctx" $ "name" $name "svc" $svc "uid" 65534 }}
 {{- /* Key Vault: a SecretProviderClass only when the vault holds one of its keys (keyvault.absent) */}}
-{{- $keyed := and (eq .Values.secrets.source "keyvault") (gt (len (include "qeos.vaultKeys" $ctx | fromJsonArray)) 0) }}
+{{- $keyed := include "qeos.vaultMounted" $ctx }}
 {{- $env := include "qeos.env" $ctx | fromJson }}
 {{- $_ := set $env "ALERT_EMAIL_TO" (toString .Values.monitoring.alertEmailTo) }}
 {{- $rendered := "/etc/alertmanager/rendered/alertmanager.yml" }}

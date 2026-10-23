@@ -4,10 +4,9 @@ its configuration into /tmp/nginx (NGINX_RENDER_DIR); the pid and temporary file
 {{- if eq $svc.kind "gateway" }}
 {{- $ctx := dict "ctx" $ "name" $name "svc" $svc "uid" 101 }}
 {{- /* Its secrets (qeos.secretRefs: GRAFANA_PROXY_KEY with monitoring on) bring the service account and the env; the
-CSI volume comes only with the SecretProviderClass, from the same keys less keyvault.absent (qeos.vaultKeys), so an
-absent key never mounts a class that does not exist */ -}}
+CSI volume comes only with the SecretProviderClass (qeos.vaultMounted) */ -}}
 {{- $keyed := include "qeos.secretRefs" $ctx | fromJson }}
-{{- $mounted := include "qeos.vaultKeys" $ctx | fromJsonArray }}
+{{- $mounted := include "qeos.vaultMounted" $ctx }}
 ---
 apiVersion: apps/v1
 kind: Deployment

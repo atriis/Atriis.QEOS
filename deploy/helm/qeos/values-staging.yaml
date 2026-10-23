@@ -48,7 +48,8 @@ edge:
 networkPolicy:
   enabled: true
 
-# A cluster admin installs deploy/monitoring first (deploy/monitoring/README.md); Key Vault holds monitoring-db-password
-# and grafana-proxy-key (deploy/azure/init-secrets.sh)
+# Off until Task 7 of AKS Stage 2: Key Vault does not hold monitoring-db-password and grafana-proxy-key yet (Bicep and
+# deploy/azure/init-secrets.sh will make them), and deploy-aks.yml does not yet check that a cluster admin installed
+# deploy/monitoring; with monitoring on, the next deploy would fail its mounts or its render and roll back
 monitoring:
-  enabled: true
+  enabled: false

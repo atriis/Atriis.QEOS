@@ -9,11 +9,13 @@ use it.
 |---|---|---|
 | `values.yaml` | always | defaults only: no hostname, no secret, no environment |
 | `values-ci.yaml` | kind in CI | images loaded as `qeos/<service>:kind`, in-cluster PostgreSQL and MinIO, secrets from the `qeos-secrets` Secret; the NetworkPolicies on (kindnet enforces them); monitoring on |
-| `values-staging.yaml` | AKS staging | Key Vault secrets, Azure Blob, the edge (Gateway API, TLS), email, the NetworkPolicies, monitoring; Bicep's outputs come with `--set` from the deploy workflow |
+| `values-staging.yaml` | AKS staging | Key Vault secrets, Azure Blob, the edge (Gateway API, TLS), email, the NetworkPolicies; monitoring off until the vault holds its keys (Task 7 of Stage 2); Bicep's outputs come with `--set` from the deploy workflow |
 
-Both environments run with `monitoring.enabled` ("Monitoring" below), which needs the cluster's kube-prometheus-stack
-(`deploy/monitoring/install.sh`) installed first: without its CRDs `helm template`, `install` and `upgrade` stop with a
-message naming that script, and nothing is applied.
+kind runs with `monitoring.enabled` ("Monitoring" below); staging keeps it off until Key Vault holds
+`monitoring-db-password` and `grafana-proxy-key` and `deploy-aks.yml` checks for kube-prometheus-stack (Task 7 of
+Stage 2): with it on, that deploy would fail its mounts or its render and roll back. Monitoring needs the cluster's
+kube-prometheus-stack (`deploy/monitoring/install.sh`) installed first: without its CRDs `helm template`, `install`
+and `upgrade` stop with a message naming that script, and nothing is applied.
 
 ```bash
 # Render and check (needs helm 3 and yq v4; no cluster; the renders pass --api-versions for the monitoring CRDs); the
@@ -207,9 +209,9 @@ sleep of 5 s let in-flight requests and in-API background tasks finish while the
 | `artifacts.s3.endpoint`, `.bucket` | `""`, `qeos-artifacts` | `ARTIFACTS_S3_*`; the keys are secrets |
 | `artifacts.azure.accountUrl`, `.container` | `""`, `qeos-artifacts` | `ARTIFACTS_AZURE_*` (workload identity, no key) |
 | `smtp.host`, `.port`, `.tls`, `.fromEmail`, `.fromName` | empty host: no email | the non-secret SMTP settings; with Key Vault, `SMTP_HOST` stays empty while `smtp-user` or `smtp-password` is in `keyvault.absent` (a server that wants a sign-in would refuse every message, and the links would be neither sent nor logged). `smtp.requireLogin` (default `true`, `SMTP_REQUIRE_LOGIN`): the services themselves treat empty SMTP credentials as no email and log the links |
-| `monitoring.enabled` | `false` (on in `values-ci.yaml` and `values-staging.yaml`) | `MONITORING_ENABLED` for auth and the gateway; the ServiceMonitors, PrometheusRules, postgres-exporter and Alertmanager ("Monitoring" below); db-init's role `qeos_monitor`. Needs kube-prometheus-stack's CRDs (`deploy/monitoring/install.sh`) and the keys `monitoring-db-password` and `grafana-proxy-key` (a render with either in `keyvault.absent` stops). With it on, the gateway also reads the Key Vault secret `grafana-proxy-key` as `GRAFANA_PROXY_KEY` (a `SecretProviderClass` `qeos-gateway` and the `qeos-services` identity, or the `qeos-secrets` key with `secrets.source: kubernetes`) and sends it to Grafana as `X-QEOS-Grafana-Key`; with it off the gateway has no secrets at all |
+| `monitoring.enabled` | `false` (on in `values-ci.yaml`; staging after Task 7) | `MONITORING_ENABLED` for auth and the gateway; the ServiceMonitors, PrometheusRules, postgres-exporter and Alertmanager ("Monitoring" below); db-init's role `qeos_monitor`. Needs kube-prometheus-stack's CRDs (`deploy/monitoring/install.sh`) and the keys `monitoring-db-password` and `grafana-proxy-key` (a render with either in `keyvault.absent` stops). With it on, the gateway also reads the Key Vault secret `grafana-proxy-key` as `GRAFANA_PROXY_KEY` (a `SecretProviderClass` `qeos-gateway` and the `qeos-services` identity, or the `qeos-secrets` key with `secrets.source: kubernetes`) and sends it to Grafana as `X-QEOS-Grafana-Key`; with it off the gateway has no secrets at all |
 | `monitoring.prometheusUrl` | `""` | Grafana's data source; empty: `http://qeos-monitoring-prometheus.<networkPolicy.prometheus.namespace>.svc.cluster.local:9090` |
-| `monitoring.skipRuleGroups` | `[qeos-host]` | groups of Compose's `alerts.yml` left out: `qeos-host` reads node-exporter and cAdvisor's Compose jobs |
+| `monitoring.skipRuleGroups` | `[qeos-host, qeos-containers]` | groups of Compose's `alerts.yml` left out ("Monitoring" below) |
 | `monitoring.postgresDbSizeAlertGb` | `20` | `PostgresDatabaseGrowing`'s threshold per database, in GB (Compose: `POSTGRES_DB_SIZE_ALERT_GB`); a number or the render stops |
 | `monitoring.alertEmailTo` | `""` | Alertmanager's `ALERT_EMAIL_TO`, sent through `smtp.*`; empty: no email |
 | `monitoring.identity` | `services` | the workload identity of postgres-exporter's and Alertmanager's SecretProviderClasses |
@@ -257,12 +259,16 @@ roles the deploy identity does not have). Prometheus itself is that release's; e
   services' own `service` label (`service="auth"`, which the alerts and dashboards group by) to `exported_service`.
 - **PrometheusRules** from Compose's own files, copied byte for byte into `files/monitoring/` (Helm reads only files
   inside the chart; `tests/monitoring_files_test.sh` fails when an original changes without its copy): `qeos-alerts`
-  (`alerts.yml` without `monitoring.skipRuleGroups`, `qeos-host` by default), `qeos-recording` (`recording.yml`) and
+  (`alerts.yml` without `monitoring.skipRuleGroups`), `qeos-recording` (`recording.yml`) and
   `qeos-thresholds` (`vector(<monitoring.postgresDbSizeAlertGb> * 1e9)`, what Compose's `entrypoint.sh` renders).
   kube-prometheus-stack runs with `enforcedNamespaceLabel: namespace`: every series these ServiceMonitors yield and
   every selector of these rules gets `namespace="<release namespace>"`, so a QEOS rule only ever sees this namespace's
-  series. A rule on `node_*` series could never match; that is why `qeos-host` stays out, and kube-prometheus-stack's
-  own node and pod rules cover the hosts instead. The ingestion scrape keeps `honor_labels` under that enforcement
+  series. Two groups stay out by default, both covered by kube-prometheus-stack's own rules (which reach this
+  Alertmanager too): `qeos-host`, whose `node_*` series could never match, and `qeos-containers`, whose restart alert
+  counts start times per container series: a restarted pod's container is a new series on Kubernetes, so it could
+  never fire (`KubePodCrashLooping` and `KubeContainerWaiting` do). `ServiceDown` fires per job, when every replica's
+  target is down; one replica down while another serves is left to the pod alerts. The ingestion scrape keeps
+  `honor_labels` under that enforcement
   (`scripts/check_k8s_monitoring.sh` reads the generated configuration and the series' namespace).
 - **postgres-exporter** (`quay.io/prometheuscommunity/postgres-exporter:v0.17.1`, 1 replica): Compose's
   `--collector.stat_statements`, connecting as `qeos_monitor` (db-init, above) to `postgres.host:5432/postgres` with
@@ -446,11 +452,15 @@ alone, and each migration sees its own role's password and `secret-key`. One ini
    password would clear the role's and lock out its running pods). With `monitoring.enabled` (`MONITORING_ENABLED`)
    it also creates postgres-exporter's login role `qeos_monitor` with `pg_monitor` only and the password
    `monitoring-db-password` (also checked first), and `pg_stat_statements` in the `postgres` database, as Compose's
-   `scripts/postgres-init.sh`. Flexible Server lets its admin grant `pg_monitor` and create the extension (allowed in
+   `scripts/postgres-init.sh`. Granting `pg_monitor` needs ADMIN OPTION on it; an admin without it still gets
+   `qeos_monitor` created and logging in, and db-init prints a WARNING (monitoring degraded, the deploy goes on; a
+   server admin then runs `GRANT pg_monitor TO qeos_monitor`). Flexible Server's admin is expected to hold it (to
+   confirm on the first deploy, ADR-038) and may create the extension (allowed in
    `azure.extensions`); on kind `files/ci-postgres-init.sh` gives `qeosadmin` the same (`pg_monitor` WITH ADMIN OPTION,
    the extension created, `shared_preload_libraries` as Flexible Server preloads it). `tests/db_init_test.sh` covers
    this with stubs, and with docker against a real PostgreSQL 16: `qeos_monitor` logs in, holds `pg_monitor`, reads
-   `pg_stat_statements`, cannot connect to a service's database, and still works after a second run and a rotation.
+   `pg_stat_statements`, cannot connect to a service's database, still works after a second run and a rotation, and
+   without ADMIN OPTION db-init warns and succeeds.
 2. Each service in `migrate.order` (`files/migrate.sh <db>`, in the service's own image): `alembic upgrade head` as
    `<db>_app`.
 

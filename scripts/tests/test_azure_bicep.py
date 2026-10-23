@@ -65,14 +65,38 @@ def chart_identities() -> set[str]:
     return identities | {"migrate"}
 
 
-def chart_keys_by_identity() -> dict[str, set[str]]:
+def monitoring_workloads() -> dict[str, dict]:
+    """With monitoring on: the chart's own workload entries (helper qeos.monitoringWorkloads in _helpers.tpl:
+    postgres-exporter and Alertmanager, on monitoring.identity), and the gateway's GRAFANA_PROXY_KEY (qeos.secretRefs)."""
+    helpers = text(CHART / "templates" / "_helpers.tpl")
+    block = re.search(r'define "qeos\.monitoringWorkloads".*?\{\{- end -\}\}\n\{\{- toJson', helpers, re.S)
+    assert block, "qeos.monitoringWorkloads moved"
+    workloads = {}
+    for name, body in re.findall(r'set \$workloads "([a-z-]+)" \(dict (.*?)\)\) -\}\}', block.group(0), re.S):
+        workloads[name] = {"identity": staging("monitoring", "identity"),
+                           "secretEnv": dict(re.findall(r'"([A-Z_]+)" "([a-z0-9-]+)"', body))}
+    assert set(workloads) == {"postgres-exporter", "alertmanager"}, workloads
+    gateway = re.search(r'set \$refs "GRAFANA_PROXY_KEY" "([a-z0-9-]+)"', helpers)
+    assert gateway, "the gateway's GRAFANA_PROXY_KEY moved"
+    workloads["gateway (monitoring)"] = {"identity": VALUES["services"]["gateway"]["identity"],
+                                         "secretEnv": {"GRAFANA_PROXY_KEY": gateway.group(1)}}
+    return workloads
+
+
+def chart_keys_by_identity(monitoring: "bool | None" = None) -> dict[str, set[str]]:
     """identity -> the Key Vault keys staging's SecretProviderClasses of its workloads read (secretproviderclass.yaml,
-    one per workload, and the migration hook's qeos-migrate, migrate-hook.yaml)."""
+    one per workload, and the migration hook's qeos-migrate, migrate-hook.yaml). monitoring: as values-staging.yaml
+    has it, unless given; on, it adds the monitoring workloads' keys and the hook's monitoring-db-password."""
+    if monitoring is None:
+        monitoring = bool(staging("monitoring", "enabled"))
     # The SMTP credentials are absent from staging only until the ACS SMTP application exists; Bicep then writes and
     # grants smtp-user and init-secrets.sh sets smtp-password (README, section 4.1), so they count as read here
     absent = set(staging("keyvault", "absent") or []) - SMTP_KEYS
     by_identity: dict[str, set[str]] = {}
-    for svc in VALUES["services"].values():
+    services = list(VALUES["services"].values())
+    if monitoring:
+        services += list(monitoring_workloads().values())
+    for svc in services:
         if not svc.get("identity"):
             continue
         keys = set((svc.get("secretEnv") or {}).values())
@@ -87,12 +111,22 @@ def chart_keys_by_identity() -> dict[str, set[str]]:
     migrate = set(re.findall(r'"([^"]+)"', match.group(1)))
     for name in VALUES["migrate"]["order"]:
         migrate.add(f"{VALUES['services'][name]['database']}-db-password")
+    if monitoring:
+        extra = re.search(r'if \.Values\.monitoring\.enabled \}\}\n\{\{- \$hookKeys = append \$hookKeys "([a-z0-9-]+)"', hook)
+        assert extra, "the migration hook's monitoring key moved"
+        migrate.add(extra.group(1))
     by_identity["migrate"] = migrate - absent
     return by_identity
 
 
-def chart_secret_keys() -> set[str]:
-    return set().union(*chart_keys_by_identity().values())
+def chart_secret_keys(monitoring: "bool | None" = None) -> set[str]:
+    return set().union(*chart_keys_by_identity(monitoring).values())
+
+
+# Monitoring keys the chart reads with monitoring.enabled that Bicep and init-secrets.sh do not make yet: Task 7 of AKS
+# Stage 2 adds them (and turns monitoring on in values-staging.yaml). Empty this set then; the test below fails as soon
+# as a key here is provided, or a new one is missing
+MISSING_UNTIL_TASK_7 = {"monitoring-db-password", "grafana-proxy-key"}
 
 
 def bicep_secret_readers() -> dict[str, set[str]]:
@@ -124,6 +158,12 @@ def provided_secret_keys() -> set[str]:
 
 def test_bicep_creates_every_secret_the_chart_reads_and_no_other():
     assert provided_secret_keys() == chart_secret_keys()
+
+
+def test_monitoring_keys_bicep_lacks_are_exactly_the_known_ones():
+    """With monitoring on, the chart reads exactly what Bicep provides plus the keys Task 7 has still to add."""
+    assert chart_secret_keys(monitoring=True) - provided_secret_keys() == MISSING_UNTIL_TASK_7
+    assert provided_secret_keys() <= chart_secret_keys(monitoring=True)
 
 
 def test_each_identity_reads_exactly_its_workloads_secrets():

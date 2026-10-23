@@ -87,10 +87,13 @@ monitoring:
   enabled: false
   # Grafana's data source; empty: http://qeos-monitoring-prometheus.<networkPolicy.prometheus.namespace>.svc.cluster.local:9090
   prometheusUrl: ""
-  # Compose's rule groups (monitoring/prometheus/alerts.yml) left out on Kubernetes: qeos-host reads node-exporter and
-  # cAdvisor's Compose jobs, which do not exist here (kube-prometheus-stack's own rules cover nodes and pods)
+  # Compose's rule groups (monitoring/prometheus/alerts.yml) left out on Kubernetes, where kube-prometheus-stack's own
+  # rules cover them: qeos-host reads node-exporter and cAdvisor's Compose jobs, which do not exist here (and namespace
+  # enforcement would hide node series from it); qeos-containers counts start times per container series, and a
+  # restarted pod's container is a new series here, so it could never fire (KubePodCrashLooping does)
   skipRuleGroups:
     - qeos-host
+    - qeos-containers
   # PostgresDatabaseGrowing fires above this many GB per database (Compose: POSTGRES_DB_SIZE_ALERT_GB)
   postgresDbSizeAlertGb: 20
   # Alertmanager's email channel (Compose: ALERT_EMAIL_TO), sent through smtp.*; empty: no email. Slack and Teams are

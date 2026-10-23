@@ -6,7 +6,7 @@ One replica; only the Prometheus pods reach it (networkpolicies.yaml) */ -}}
 {{- $svc := get (include "qeos.monitoringWorkloads" . | fromJson) $name }}
 {{- $ctx := dict "ctx" $ "name" $name "svc" $svc "uid" 65534 }}
 {{- /* Key Vault: its SecretProviderClass's CSI volume, which makes the driver sync qeos-secrets-postgres-exporter */}}
-{{- $keyed := and (eq .Values.secrets.source "keyvault") (gt (len (include "qeos.vaultKeys" $ctx | fromJsonArray)) 0) }}
+{{- $keyed := include "qeos.vaultMounted" $ctx }}
 ---
 apiVersion: v1
 kind: Service

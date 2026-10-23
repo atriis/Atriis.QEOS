@@ -35,7 +35,11 @@ ServiceMonitor for those Prometheus labels itself, one each for those that keep 
 {{- end }}
 {{- end }}
 {{- end }}
-{{- $monitors := list (dict "name" "qeos-apis" "jobs" (sortAlpha $plain) "honor" false) }}
+{{- /* No plain API left (all honour their labels): no qeos-apis, whose selector would be an empty In list */}}
+{{- $monitors := list }}
+{{- if $plain }}
+{{- $monitors = append $monitors (dict "name" "qeos-apis" "jobs" (sortAlpha $plain) "honor" false) }}
+{{- end }}
 {{- range $job := sortAlpha $honoring }}
 {{- $monitors = append $monitors (dict "name" (printf "qeos-%s" $job) "jobs" (list $job) "honor" true) }}
 {{- end }}

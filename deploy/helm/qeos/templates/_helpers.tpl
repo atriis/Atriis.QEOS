@@ -381,6 +381,15 @@ holds, those of its secrets that keyvault.absent does not list. Empty: no Secret
 {{- toJson ($keys | uniq | sortAlpha) -}}
 {{- end -}}
 
+{{/* qeos.vaultMounted (dict "ctx" $ "name" "<workload>" "svc" $svc) -- "true" when the workload mounts its
+SecretProviderClass's CSI volume: Key Vault, and the vault holds one of its keys (qeos.vaultKeys); empty otherwise, so
+an absent key never mounts a class that does not exist (the pod would stay in ContainerCreating) */}}
+{{- define "qeos.vaultMounted" -}}
+{{- if and (eq .ctx.Values.secrets.source "keyvault") (include "qeos.vaultKeys" . | fromJsonArray) -}}
+true
+{{- end -}}
+{{- end -}}
+
 {{/* qeos.metricsLabels (dict "ctx" $ "job" "<job>") -- a scraped Service's label: Prometheus's job (ServiceMonitor jobLabel) */}}
 {{- define "qeos.metricsLabels" -}}
 qeos.io/metrics-job: {{ .job }}
