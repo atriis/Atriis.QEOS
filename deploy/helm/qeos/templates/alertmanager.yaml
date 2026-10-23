@@ -8,8 +8,6 @@ else reaches it (networkpolicies.yaml) */ -}}
 {{- $name := "alertmanager" }}
 {{- $svc := get (include "qeos.monitoringWorkloads" . | fromJson) $name }}
 {{- $ctx := dict "ctx" $ "name" $name "svc" $svc "uid" 65534 }}
-{{- /* Key Vault: a SecretProviderClass only when the vault holds one of its keys (keyvault.absent) */}}
-{{- $keyed := include "qeos.vaultMounted" $ctx }}
 {{- $env := include "qeos.env" $ctx | fromJson }}
 {{- $_ := set $env "ALERT_EMAIL_TO" (toString .Values.monitoring.alertEmailTo) }}
 {{- $rendered := "/etc/alertmanager/rendered/alertmanager.yml" }}
@@ -92,9 +90,7 @@ spec:
               mountPath: /etc/alertmanager/rendered
             - name: tmp
               mountPath: /tmp
-            {{- if $keyed }}
             {{- include "qeos.secretsMount" $ctx | nindent 12 }}
-            {{- end }}
       containers:
         - name: {{ $name }}
           image: {{ .Values.monitoring.images.alertmanager }}
@@ -149,7 +145,5 @@ spec:
         - name: tmp
           emptyDir:
             sizeLimit: 16Mi
-        {{- if $keyed }}
         {{- include "qeos.secretsVolume" $ctx | nindent 8 }}
-        {{- end }}
 {{- end }}

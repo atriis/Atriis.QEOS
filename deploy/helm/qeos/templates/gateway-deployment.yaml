@@ -4,9 +4,8 @@ its configuration into /tmp/nginx (NGINX_RENDER_DIR); the pid and temporary file
 {{- if eq $svc.kind "gateway" }}
 {{- $ctx := dict "ctx" $ "name" $name "svc" $svc "uid" 101 }}
 {{- /* Its secrets (qeos.secretRefs: GRAFANA_PROXY_KEY with monitoring on) bring the service account and the env; the
-CSI volume comes only with the SecretProviderClass (qeos.vaultMounted) */ -}}
+CSI volume comes only with the SecretProviderClass (qeos.secretsVolume) */ -}}
 {{- $keyed := include "qeos.secretRefs" $ctx | fromJson }}
-{{- $mounted := include "qeos.vaultMounted" $ctx }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -70,9 +69,7 @@ spec:
               mountPath: /tmp
             - name: nginx-cache
               mountPath: /var/cache/nginx
-            {{- if $mounted }}
             {{- include "qeos.secretsMount" $ctx | nindent 12 }}
-            {{- end }}
       volumes:
         - name: tmp
           emptyDir:
@@ -80,8 +77,6 @@ spec:
         - name: nginx-cache
           emptyDir:
             sizeLimit: 64Mi
-        {{- if $mounted }}
         {{- include "qeos.secretsVolume" $ctx | nindent 8 }}
-        {{- end }}
 {{- end }}
 {{- end }}

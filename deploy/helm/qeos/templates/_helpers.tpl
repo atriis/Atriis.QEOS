@@ -249,9 +249,11 @@ azure.workload.identity/use: "true"
 {{- end }}
 {{- end -}}
 
-{{/* The CSI volume that makes the driver sync the workload's Secret (keyvault only), holding only its own keys */}}
+{{/* The CSI volume that makes the driver sync the workload's Secret, holding only its own keys: only when it mounts
+one (qeos.vaultMounted: Key Vault, and the vault holds one of its keys), so a workload whose every key is in
+keyvault.absent never waits for a SecretProviderClass that does not exist. Context: (dict "ctx" $ "name" "svc") */}}
 {{- define "qeos.secretsVolume" -}}
-{{- if eq .ctx.Values.secrets.source "keyvault" }}
+{{- if include "qeos.vaultMounted" . }}
 - name: secrets-store
   csi:
     driver: secrets-store.csi.k8s.io
@@ -262,7 +264,7 @@ azure.workload.identity/use: "true"
 {{- end -}}
 
 {{- define "qeos.secretsMount" -}}
-{{- if eq .ctx.Values.secrets.source "keyvault" }}
+{{- if include "qeos.vaultMounted" . }}
 - name: secrets-store
   mountPath: /mnt/secrets-store
   readOnly: true

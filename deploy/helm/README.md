@@ -464,7 +464,8 @@ through `secretKeyRef`s only; the hook reads them as files.
   that workload reads (its own database password, never another service's) and syncs them into the Secret
   `qeos-secrets-<workload>`. Workloads sharing an identity share its client id. The CSI driver syncs only while a pod
   mounts the volume, so each such pod mounts it at `/mnt/secrets-store`. A key the vault lacks makes the mount fail:
-  list optional keys it does not hold in `keyvault.absent`.
+  list optional keys it does not hold in `keyvault.absent`. A workload whose every key is listed there gets neither a
+  SecretProviderClass nor the volume (helper `qeos.vaultMounted`), so it never waits for a class that does not exist.
 
 Database settings go in as `POSTGRES_SERVER`, `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD` (the settings'
 components path, which URL-escapes the password, so a generated password may hold any character) plus libpq's

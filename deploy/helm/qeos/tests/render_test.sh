@@ -412,6 +412,16 @@ got="$(gwpod staging-gw-absent-mon)|$(gwspc staging-gw-absent-mon)"
 [ "$got" = "qeos-gateway|qeos-services|FOO:foo-key:true,GRAFANA_PROXY_KEY:grafana-proxy-key:false|grafana-proxy-key" ] \
   && pass "staging: with monitoring on, the gateway mounts qeos-gateway, which holds grafana-proxy-key only" \
   || fail "staging: absent gateway key with monitoring on gives '$got'"
+# The same for every workload (qeos.secretsVolume follows qeos.vaultMounted): a loop job whose every key is in
+# keyvault.absent (here only the SMTP login, which staging's vault lacks) renders no SecretProviderClass and mounts none
+render staging-loop-absent -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" "${CRDS[@]}" \
+  --set services.weekly-summary.database=null --set services.weekly-summary.secretEnv.SECRET_KEY=null \
+  --set services.weekly-summary.secretEnv.INTERNAL_API_PASSWORD=null
+got="$(q "$OUT/staging-loop-absent.yaml" 'select(.kind == "Deployment" and .metadata.name == "weekly-summary") | .spec.template.spec
+  | ([.volumes[] | select(.csi)] | length | tostring) + "|" + ([.containers[].volumeMounts[] | select(.name == "secrets-store")] | length | tostring)')"
+got="$got|$(q "$OUT/staging-loop-absent.yaml" '[select(.kind == "SecretProviderClass" and .metadata.name == "qeos-weekly-summary")] | length')"
+[ "$got" = "0|0|0" ] && pass "staging: a loop job whose every key is absent mounts no CSI volume and has no SecretProviderClass" \
+  || fail "staging: a loop job with only absent keys gives CSI volumes|mounts|SecretProviderClasses '$got'"
 
 # ---- environment-specific choices ----
 backend() { q "$OUT/$1.yaml" 'select(.kind == "ConfigMap" and .metadata.name == "qeos-ingestion-service-env") | .data.ARTIFACTS_BACKEND'; }

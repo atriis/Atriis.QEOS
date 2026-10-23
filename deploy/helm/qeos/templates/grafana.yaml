@@ -12,8 +12,6 @@ preferences start again after a restart, as everything else comes from the repos
 {{- $name := "grafana" }}
 {{- $svc := get (include "qeos.monitoringWorkloads" . | fromJson) $name }}
 {{- $ctx := dict "ctx" $ "name" $name "svc" $svc "uid" 472 }}
-{{- /* Key Vault: its SecretProviderClass's CSI volume, which makes the driver sync qeos-secrets-grafana */}}
-{{- $keyed := include "qeos.vaultMounted" $ctx }}
 {{- $secret := include "qeos.secretName" (dict "ctx" $ "name" $name) }}
 {{- $images := .Values.monitoring.images }}
 {{- $datasources := include "qeos.grafanaDatasources" . }}
@@ -184,9 +182,7 @@ spec:
             - name: dashboards
               mountPath: /etc/qeos/grafana/dashboards
               readOnly: true
-            {{- if $keyed }}
             {{- include "qeos.secretsMount" $ctx | nindent 12 }}
-            {{- end }}
         - name: grafana-proxy
           image: {{ $images.grafanaProxy }}
           imagePullPolicy: IfNotPresent
@@ -277,7 +273,5 @@ spec:
         - name: proxy-tmp
           emptyDir:
             sizeLimit: 64Mi
-        {{- if $keyed }}
         {{- include "qeos.secretsVolume" $ctx | nindent 8 }}
-        {{- end }}
 {{- end }}
