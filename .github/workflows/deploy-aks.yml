@@ -237,7 +237,7 @@ jobs:
           ref: ${{ needs.target.outputs.ref }}
           fetch-depth: 0
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
         if: steps.azure.outputs.configured == 'true'
         with:
           version: v3.16.4
