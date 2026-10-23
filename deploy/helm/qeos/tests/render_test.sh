@@ -64,7 +64,7 @@ render ci-nopolicy -f "$CHART/values-ci.yaml" --set networkPolicy.enabled=false
 # Monitoring on: the gateway gets the Grafana proxy key (ADR-038)
 render ci-monitoring -f "$CHART/values-ci.yaml" --set monitoring.enabled=true
 render staging-monitoring -f "$CHART/values-staging.yaml" "${STAGING_SET[@]}" --set monitoring.enabled=true
-render ci-prometheus -f "$CHART/values-ci.yaml" --set networkPolicy.prometheus.namespace=mon \
+render ci-prometheus -f "$CHART/values-ci.yaml" --set monitoring.enabled=true --set networkPolicy.prometheus.namespace=mon \
   --set-json 'networkPolicy.prometheus.podLabels={"app.kubernetes.io/name":null,"app":"prom"}'
 # values.yaml alone holds no environment: a render must stop on the settings each environment has to give
 if helm template qeos "$CHART" --namespace "$NAMESPACE" >/dev/null 2>"$OUT/defaults.err"; then
@@ -76,6 +76,36 @@ fi
 
 # q FILE EXPR -- yq over every document of a rendered file
 q() { yq ea "$2" "$1"; }
+
+# selects FILE POLICY "k=v ..." -- whether the NetworkPolicy's podSelector matches a pod with these labels: matchLabels
+# and matchExpressions (In, NotIn, Exists, DoesNotExist) evaluated as Kubernetes does, not compared as text
+selects() {
+  local sel kind key op vals l found v
+  sel="$(q "$1" "select(.kind == \"NetworkPolicy\" and .metadata.name == \"$2\") | .spec.podSelector
+    | ((.matchLabels // {}) | to_entries | map(\"L \" + .key + \" \" + .value))
+      + ((.matchExpressions // []) | map(\"E \" + .key + \" \" + .operator + \" \" + ((.values // []) | join(\",\"))))
+    | .[]")"
+  while read -r kind key op vals; do
+    [ -n "$kind" ] || continue
+    found=false
+    v=""
+    for l in $3; do
+      if [ "${l%%=*}" = "$key" ]; then found=true; v="${l#*=}"; fi
+    done
+    if [ "$kind" = L ]; then
+      { $found && [ "$v" = "$op" ]; } || return 1
+      continue
+    fi
+    case "$op" in
+      Exists) $found || return 1 ;;
+      DoesNotExist) ! $found || return 1 ;;
+      In) { $found && [[ ",$vals," == *",$v,"* ]]; } || return 1 ;;
+      NotIn) { $found && [[ ",$vals," == *",$v,"* ]]; } && return 1 ;;
+      *) return 1 ;;
+    esac
+  done <<< "$sel"
+  return 0
+}
 
 APIS="auth-service organization-service project-service ingestion-service test-management-service"
 WEB="dashboard gateway"
@@ -100,10 +130,22 @@ for env in ci staging; do
 
   # ---- NetworkPolicies (spec 5.3): every pod of the release denied by default, each Service open to its callers ----
   d="$(q "$f" 'select(.kind == "NetworkPolicy" and .metadata.name == "default-deny-ingress") | .spec
-    | (.podSelector.matchLabels | to_entries | map(.key + "=" + .value) | join(",")) + " " + (.policyTypes | join(","))
-      + " " + ((.ingress // []) | length | tostring)')"
-  [ "$d" = "app.kubernetes.io/instance=qeos Ingress 0" ] && pass "$env: default-deny-ingress closes every pod of the release" \
-    || fail "$env: default-deny-ingress is '$d'"
+    | (.policyTypes | join(",")) + " " + ((.ingress // []) | length | tostring)')"
+  pod="app.kubernetes.io/name=auth-service app.kubernetes.io/instance=qeos app.kubernetes.io/part-of=qeos"
+  other="app.kubernetes.io/name=auth-service app.kubernetes.io/instance=other"
+  [ "$d" = "Ingress 0" ] && selects "$f" default-deny-ingress "$pod" && ! selects "$f" default-deny-ingress "$other" \
+    && pass "$env: default-deny-ingress closes every pod of the release, no other release's" \
+    || fail "$env: default-deny-ingress is '$d', or selects the wrong pods"
+  # The edge's proxy pods run in the Gateway's namespace, the release's, and Istio may copy the Gateway's labels onto
+  # them (its instance label included): no QEOS policy may select them, or the default deny would close the site
+  edge="gateway.networking.k8s.io/gateway-name=qeos-edge app.kubernetes.io/instance=qeos app.kubernetes.io/name=qeos-edge"
+  edge="$edge $(q "$f" 'select(.kind == "Gateway") | .metadata.labels | to_entries | map(.key + "=" + .value) | join(" ")')"
+  bad=""
+  for p in $(q "$f" '[select(.kind == "NetworkPolicy") | .metadata.name] | join(" ")'); do
+    selects "$f" "$p" "$edge" && bad="$bad $p"
+  done
+  [ -z "$bad" ] && pass "$env: no NetworkPolicy selects the edge's proxy pods, even with the Gateway's labels" \
+    || fail "$env: policies selecting the edge's pods:$bad"
   bad="$(q "$f" '[select(.kind == "NetworkPolicy") | select(.spec.podSelector.matchLabels["app.kubernetes.io/instance"] != "qeos")
     | .metadata.name] | join(" ")')"
   [ -z "$bad" ] && pass "$env: every NetworkPolicy selects this release's pods only" || fail "$env: policies beyond the release: $bad"
@@ -141,22 +183,19 @@ for env in ci staging; do
       || fail "$env: $name-ingress admits '$got', want '$want'"
     [ "$(ports "$name-ingress")" = TCP/8000 ] && pass "$env: $name-ingress opens TCP 8000 only" \
       || fail "$env: $name-ingress opens '$(ports "$name-ingress")'"
-    # Prometheus scrapes /metrics from its own namespace (networkPolicy.prometheus)
-    [ "$(outside "$name-ingress")" = "qeos-monitoring app.kubernetes.io/name=prometheus" ] \
-      && pass "$env: $name-ingress admits Prometheus from qeos-monitoring" || fail "$env: $name-ingress admits from outside: '$(outside "$name-ingress")'"
+    # Monitoring off: nothing from outside the namespace (Prometheus only with monitoring.enabled, below)
+    [ -z "$(outside "$name-ingress")" ] && pass "$env: monitoring off, $name-ingress admits nothing from outside the namespace" \
+      || fail "$env: $name-ingress admits from outside: '$(outside "$name-ingress")'"
   done
   got="$(callers dashboard-ingress 8080)|$(ports dashboard-ingress)|$(outside dashboard-ingress)"
   [ "$got" = "gateway|TCP/8080|" ] && pass "$env: dashboard-ingress admits the gateway on TCP 8080 only" \
     || fail "$env: dashboard-ingress is '$got'"
   # Every Service the chart renders has a policy beyond the default deny that selects its pods
   for svc in $(q "$f" '[select(.kind == "Service") | .metadata.name] | join(" ")'); do
-    labels=" $(q "$f" "select(.kind == \"Deployment\" and .metadata.name == \"$svc\") | .spec.template.metadata.labels | to_entries | map(.key + \"=\" + .value) | join(\" \")") "
+    labels="$(q "$f" "select(.kind == \"Deployment\" and .metadata.name == \"$svc\") | .spec.template.metadata.labels | to_entries | map(.key + \"=\" + .value) | join(\" \")")"
     covered=""
     for p in $(q "$f" '[select(.kind == "NetworkPolicy" and .metadata.name != "default-deny-ingress") | .metadata.name] | join(" ")'); do
-      sel="$(q "$f" "select(.kind == \"NetworkPolicy\" and .metadata.name == \"$p\") | .spec.podSelector.matchLabels | to_entries | map(.key + \"=\" + .value) | join(\" \")")"
-      ok=true
-      for l in $sel; do case "$labels" in *" $l "*) ;; *) ok=false ;; esac; done
-      [ "$ok" = true ] && covered="$p"
+      selects "$f" "$p" "$labels" && covered="$p"
     done
     [ -n "$covered" ] && pass "$env: Service $svc's pods are opened by $covered" || fail "$env: Service $svc has no NetworkPolicy beyond the default deny"
   done
@@ -336,12 +375,31 @@ np() { q "$OUT/$1.yaml" '[select(.kind == "NetworkPolicy")] | length'; }
 # kindnet enforces NetworkPolicies (kind 0.24 and later): CI runs with them
 [ "$(np ci)" -gt 0 ] && pass "ci: NetworkPolicies rendered ($(np ci); kindnet enforces them)" || fail "ci: no NetworkPolicy rendered"
 [ "$(np ci-nopolicy)" = 0 ] && pass "networkPolicy.enabled=false renders no NetworkPolicy" || fail "networkPolicy.enabled=false renders $(np ci-nopolicy)"
+# Monitoring on: each API admits Prometheus (networkPolicy.prometheus) on 8000, nothing else does
+for env in ci-monitoring staging-monitoring; do
+  for name in $APIS; do
+    o="$(q "$OUT/$env.yaml" "[select(.kind == \"NetworkPolicy\" and .metadata.name == \"$name-ingress\") | .spec.ingress[] | select(.from[0].namespaceSelector != null)
+      | .from[0].namespaceSelector.matchLabels[\"kubernetes.io/metadata.name\"] + \" \" + (.from[0].podSelector.matchLabels | to_entries | map(.key + \"=\" + .value) | join(\",\"))
+        + \" \" + (.from | length | tostring) + \" \" + (.ports | map(.protocol + \"/\" + (.port | tostring)) | join(\",\"))] | join(\";\")")"
+    [ "$o" = "qeos-monitoring app.kubernetes.io/name=prometheus 1 TCP/8000" ] && pass "$env: $name-ingress admits Prometheus from qeos-monitoring on 8000" \
+      || fail "$env: $name-ingress Prometheus rule is '$o'"
+  done
+  o="$(q "$OUT/$env.yaml" '[select(.kind == "NetworkPolicy" and (.metadata.name == "dashboard-ingress" or .metadata.name == "gateway-ingress"))
+    | .spec.ingress[].from[] | select(.namespaceSelector.matchLabels["kubernetes.io/metadata.name"] == "qeos-monitoring")] | length')"
+  [ "$o" = 0 ] && pass "$env: Prometheus reaches the APIs only" || fail "$env: $o Prometheus sources on the dashboard or gateway"
+done
+# Monitoring off needs no Prometheus settings at all
+if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" --set networkPolicy.prometheus=null >/dev/null 2>"$OUT/promoff.err"; then
+  pass "monitoring off: networkPolicy.prometheus is not required"
+else
+  fail "monitoring off still requires networkPolicy.prometheus: $(tail -n 2 "$OUT/promoff.err")"
+fi
 ns="$(q "$OUT/ci-prometheus.yaml" '[select(.kind == "NetworkPolicy" and .metadata.name == "auth-service-ingress") | .spec.ingress[].from[]
   | select(.namespaceSelector != null) | .namespaceSelector.matchLabels["kubernetes.io/metadata.name"] + " "
   + (.podSelector.matchLabels | to_entries | map(.key + "=" + .value) | join(","))] | join(";")')"
 [ "$ns" = "mon app=prom" ] && pass "networkPolicy.prometheus sets the scraper's namespace and pod labels" \
   || fail "networkPolicy.prometheus override gives '$ns'"
-if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" --set networkPolicy.prometheus.podLabels=null >/dev/null 2>"$OUT/promlabels.err"; then
+if helm template qeos "$CHART" -f "$CHART/values-ci.yaml" --set monitoring.enabled=true --set networkPolicy.prometheus.podLabels=null >/dev/null 2>"$OUT/promlabels.err"; then
   fail "empty networkPolicy.prometheus.podLabels renders (it would admit every pod of that namespace)"
 else
   grep -q "podLabels" "$OUT/promlabels.err" && pass "empty networkPolicy.prometheus.podLabels is refused" \

@@ -1,11 +1,11 @@
 {{- /* Ingress NetworkPolicies (spec 5.3, ADR-038). default-deny-ingress closes every pod of the release (the label
-app.kubernetes.io/instance: never another release's pods, nor the edge's); each policy below opens one workload to its
-callers. A workload's callers are those whose services.<x>.urls name it (qeos.callers), and the gateway, which proxies
+app.kubernetes.io/instance: never another release's pods); each policy below opens one workload to its callers. No
+policy selects the edge's proxy pods, even when they carry the Gateway's labels (qeos.notEdge). A workload's callers
+are those whose services.<x>.urls name it (qeos.callers), and the gateway, which proxies
 to every API and the dashboard. Egress stays open: Blob, Entra and Key Vault have no stable addresses without Cilium
 FQDN policies (ADR-038). Policies are additive, so a workload added later (the monitoring workloads) needs one entry
 here; without it, the default deny leaves it unreachable */ -}}
 {{- if .Values.networkPolicy.enabled }}
-{{- $prometheus := .Values.networkPolicy.prometheus }}
 {{- $gateways := list }}
 {{- range $name, $svc := .Values.services }}
 {{- if eq $svc.kind "gateway" }}
@@ -23,6 +23,7 @@ spec:
   podSelector:
     matchLabels:
       app.kubernetes.io/instance: {{ .Release.Name }}
+    {{- include "qeos.notEdge" . | nindent 4 }}
   policyTypes: [Ingress]
 ---
 # Only the edge reaches the gateway (spec 5.3): the proxy pods the add-on runs for the Gateway qeos-edge, in the Gateway's
@@ -39,6 +40,7 @@ spec:
   podSelector:
     matchLabels:
       {{- include "qeos.selector" (dict "ctx" $ "name" "gateway") | nindent 6 }}
+    {{- include "qeos.notEdge" . | nindent 4 }}
   policyTypes: [Ingress]
   ingress:
     - from:
@@ -65,6 +67,7 @@ spec:
   podSelector:
     matchLabels:
       {{- include "qeos.selector" (dict "ctx" $ "name" $name) | nindent 6 }}
+    {{- include "qeos.notEdge" $ | nindent 4 }}
   policyTypes: [Ingress]
   ingress:
     {{- /* A rule with no sources would admit everyone: only rendered with at least one caller */}}
@@ -79,8 +82,9 @@ spec:
         - protocol: TCP
           port: {{ if eq $svc.kind "api" }}8000{{ else }}8080{{ end }}
     {{- end }}
-    {{- if eq $svc.kind "api" }}
-    # Prometheus scrapes /metrics (networkPolicy.prometheus)
+    {{- if and (eq $svc.kind "api") $.Values.monitoring.enabled }}
+    {{- $prometheus := $.Values.networkPolicy.prometheus | default dict }}
+    # Prometheus scrapes /metrics (networkPolicy.prometheus), with monitoring on only
     - from:
         - namespaceSelector:
             matchLabels:
@@ -123,6 +127,7 @@ spec:
     matchLabels:
       app.kubernetes.io/instance: {{ .Release.Name }}
       app.kubernetes.io/component: ci-backing
+    {{- include "qeos.notEdge" . | nindent 4 }}
   policyTypes: [Ingress]
   ingress:
     {{- range $rule := list (dict "port" 5432 "from" $postgres) (dict "port" 9000 "from" $minio) }}

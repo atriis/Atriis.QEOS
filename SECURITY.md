@@ -355,9 +355,10 @@ details.
   (`externalTrafficPolicy: Local`) and a NetworkPolicy lets only its proxy pods reach the gateway, which believes
   `X-Forwarded-For` from the pod range alone; the edge itself has no rate or body-size limits, so the gateway's (halved,
   per pod) stay the enforcing ones. Inside the namespace every pod of the release is denied ingress by default and each
-  Service admits only its callers (the workloads whose internal URLs name it, and the gateway) plus Prometheus on the
-  APIs' port; egress stays open, as Blob, Entra ID and Key Vault have no stable addresses (ADR-038, residual). CI's kind
-  cluster enforces these policies and Pod Security `restricted`, and `scripts/check_k8s_policies.sh` checks both from
+  Service admits only its callers (the workloads whose internal URLs name it, and the gateway) plus, with monitoring
+  on, Prometheus on the APIs' port; the edge's proxy pods are left out of every policy (the add-on rules them).
+  Egress stays open, as Blob, Entra ID and Key Vault have no stable addresses (ADR-038, residual). CI's kind cluster
+  enforces these policies and Pod Security `restricted`, and `scripts/check_k8s_policies.sh` checks both from
   inside the cluster. GitHub signs in to Azure as one of two Entra applications, by OIDC with no
   stored secret (`deploy/azure/README.md`, section 2):
   - the **build identity** (`build-platform.yml`) holds AcrPush on the registry and nothing else; its federated

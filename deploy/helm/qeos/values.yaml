@@ -118,7 +118,8 @@ edge:
 networkPolicy:
   enabled: true
   # The Prometheus pods that scrape the APIs on 8000 (kube-prometheus-stack, deploy/monitoring): their namespace, by
-  # name, and their pod labels. The single source of the monitoring namespace
+  # name, and their pod labels. The single source of the monitoring namespace. Used (and required) with
+  # monitoring.enabled only
   prometheus:
     namespace: qeos-monitoring
     podLabels:

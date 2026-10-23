@@ -118,14 +118,20 @@ back with `kubectl config use-context <yours>`.
   edge" below). Off in `values-ci.yaml`: the smoke reaches the gateway through a port-forward.
 - **NetworkPolicies** (when `networkPolicy.enabled`, `templates/networkpolicies.yaml`), ingress only:
   - `default-deny-ingress` selects every pod of the release (`app.kubernetes.io/instance`, so never another release's
-    pods or the edge's) and admits nothing.
+    pods) and admits nothing.
+  - No policy selects the edge's proxy pods: every podSelector also requires the label
+    `gateway.networking.k8s.io/gateway-name` to be absent (helper `qeos.notEdge`). The add-on runs those pods in the
+    Gateway's namespace, the release's, and Istio may copy the Gateway's labels onto them, `app.kubernetes.io/instance`
+    included; without the exclusion the default deny would close 80/443 and the HTTP-01 challenge. Their traffic is
+    left to the add-on.
   - `gateway-ingress`: the gateway's pods accept traffic only from the edge's proxy pods: those labelled
     `gateway.networking.k8s.io/gateway-name: qeos-edge` (Istio's own selector for a Gateway's pods) in
     `edge.namespace` (empty, also in staging: the release namespace, where the add-on runs them).
   - `<api>-ingress` per API and `dashboard-ingress`: each admits its callers only, on its port (8000; the dashboard
     8080). The callers are the workloads whose `services.<x>.urls` name it (helper `qeos.callers`) and the gateway,
-    which proxies to all of them; so a new `urls` entry opens the path by itself. The APIs also admit
-    `networkPolicy.prometheus` (Prometheus, by namespace name and pod labels) on 8000 for scraping.
+    which proxies to all of them; so a new `urls` entry opens the path by itself. With `monitoring.enabled` the APIs
+    also admit `networkPolicy.prometheus` (Prometheus, by namespace name and pod labels) on 8000 for scraping;
+    with monitoring off nothing outside the namespace reaches them.
   - `ci-backing-ingress` (kind only): PostgreSQL on 5432 for every workload with a `database` and the migration hook,
     MinIO on 9000 for those with `artifacts` and the bucket Job.
   The loop jobs listen on nothing and get no policy of their own: the default deny closes them. Egress stays open:
@@ -185,7 +191,7 @@ sleep of 5 s let in-flight requests and in-API background tasks finish while the
 | `edge.acme.email` | required with `edge.enabled` | Let's Encrypt's contact (expiry notices) |
 | `edge.acme.server` | Let's Encrypt production | the ACME directory; `https://acme-staging-v02.api.letsencrypt.org/directory` for untrusted test certificates |
 | `networkPolicy.enabled` | `true` | renders the NetworkPolicies (`default-deny-ingress` and one per Service) |
-| `networkPolicy.prometheus.namespace`, `.podLabels` | `qeos-monitoring`, `app.kubernetes.io/name: prometheus` | the Prometheus pods the APIs admit on 8000; the single source of the monitoring namespace. Empty `podLabels` is refused (it would admit the whole namespace) |
+| `networkPolicy.prometheus.namespace`, `.podLabels` | `qeos-monitoring`, `app.kubernetes.io/name: prometheus` | the Prometheus pods the APIs admit on 8000, with `monitoring.enabled` only (and required then); the single source of the monitoring namespace. Empty `podLabels` is refused (it would admit the whole namespace) |
 | `migrate.order` | the five APIs | the hook's migration order, after db-init |
 | `migrate.imageTag` | `""` | the migration images' tag; empty: `image.tag` |
 | `migrate.activeDeadlineSeconds`, `.backoffLimit` | `900`, `0` | a longer or failed migration fails the release; Helm's `--timeout` must be longer (20m) |

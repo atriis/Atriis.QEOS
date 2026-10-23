@@ -47,6 +47,15 @@ the service. The gateway, which proxies to every API and the dashboard, has no u
 {{- toJson (sortAlpha $callers) -}}
 {{- end -}}
 
+{{/* Every NetworkPolicy's podSelector ends with this: never the edge's proxy pods. The add-on runs them in the Gateway's
+namespace (the release's) and Istio may copy the Gateway's labels onto them, app.kubernetes.io/instance included;
+gateway.networking.k8s.io/gateway-name, which it always sets, tells them apart. Their traffic is the add-on's to rule */}}
+{{- define "qeos.notEdge" -}}
+matchExpressions:
+  - key: gateway.networking.k8s.io/gateway-name
+    operator: DoesNotExist
+{{- end -}}
+
 {{/* qeos.labels (dict "ctx" $ "name" "<service>" "component" "<kind>") */}}
 {{- define "qeos.labels" -}}
 app.kubernetes.io/name: {{ .name }}
