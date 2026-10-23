@@ -7,7 +7,10 @@ collector-vX.Y.Z in it must be the current version, except a tag a history phras
 pin joins PINNED.
 """
 import re
+import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 PINNED = ["README.md", "docs/SETUP.md", "collector/README.md", "collector-jenkins/vars/qeosCollectorUpload.groovy",
@@ -65,25 +68,37 @@ def test_history_is_recognised_next_to_its_own_tag_only():
     assert pins("Use collector-v0.1.0.") == [(1, "0.1.0", False)]
 
 
-# Documents that record history (plans, specs, decisions, the to-do list) may name any tag
-HISTORY_FILES = ("docs/superpowers/", "docs/architecture/adr/", "TODO.md", "IMPLEMENTATION_PLAN.md", "NEXT_STEPS.md")
+# Documents that record history (plans, specs, decisions, the to-do list) may name any tag: ADRs and plans keep the
+# version they were written for on purpose
+HISTORY_DIRS = ("docs/superpowers/", "docs/architecture/adr/")
+HISTORY_ROOT_FILES = {"TODO.md", "IMPLEMENTATION_PLAN.md", "NEXT_STEPS.md"}
+THIS_FILE = Path(__file__).resolve().relative_to(ROOT).as_posix()
 
 
-def test_no_file_outside_pinned_carries_the_current_pin():
-    """A file that starts carrying a pin is caught at the release that adds it: the current tag anywhere outside
+def candidate_files() -> "list[str] | None":
+    """Tracked and untracked (not ignored) files that name a collector tag, so a new file is checked before it is
+    staged; None when there is no git checkout to ask."""
+    try:
+        out = subprocess.run(["git", "grep", "-lzI", "--untracked", "-E", "collector-v[0-9]"], cwd=ROOT,
+                             capture_output=True)
+    except FileNotFoundError:
+        return None
+    if out.returncode not in (0, 1):  # 1: no match
+        return None
+    return [name for name in out.stdout.decode("utf-8").split("\0") if name]
+
+
+def test_no_file_outside_pinned_carries_a_collector_pin():
+    """A file that starts carrying a pin is caught when it is added, whatever tag it names: a pin anywhere outside
     PINNED (and the history documents) fails, so the file joins PINNED and is checked from then on."""
-    import subprocess
-
-    version = current_version()
-    names = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, check=True).stdout.decode().split("\0")
+    names = candidate_files()
+    if names is None:
+        pytest.skip("not a git checkout")
     strays = []
-    for name in filter(None, names):
-        if name in PINNED or name.startswith(HISTORY_FILES) or name == "scripts/tests/test_collector_pins.py":
+    for name in names:
+        if name in PINNED or name == THIS_FILE or name.startswith(HISTORY_DIRS) or name in HISTORY_ROOT_FILES:
             continue
-        try:
-            text = (ROOT / name).read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            continue  # binary files and unreadable entries hold no pins to copy
-        if any(v == version and not old for _, v, old in pins(text)):
+        text = (ROOT / name).read_text(encoding="utf-8", errors="replace")
+        if any(not old for _, _, old in pins(text)):
             strays.append(name)
-    assert strays == [], "these files carry the collector pin: add them to PINNED"
+    assert strays == [], "these files carry a collector pin: add them to PINNED"
