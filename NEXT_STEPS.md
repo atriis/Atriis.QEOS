@@ -27,7 +27,8 @@ CI, and listed shipped features as unbuilt).
 
 - **Separate image retention.** Images follow their results' retention days. If storage grows, add a shorter retention for images only.
 - **Traces.** Stage 1 done 2026-10-21 (ADR-037): upload, `keep_traces` switch (off by default), Trace download button.
-  The collector 0.14.0 release and the OBT hook (PR "QEOS: send failure traces to QEOS") are pending. Stage 2, the
+  Collector 0.14.0 (2026-10-22) and 0.14.1 (2026-10-23, follow-ups) are released and pinned; the OBT hook (PR "QEOS:
+  send failure traces to QEOS") waits for its merge. Stage 2, the
   trace viewer in the browser, is done 2026-10-22: one-time links and Playwright's viewer (`playwright-core` pinned)
   served by the dashboard at `/trace-viewer/`. When bumping `playwright-core`, open a real trace before shipping.
   Design: `docs/superpowers/specs/2026-10-21-traces-and-videos-design.md`.

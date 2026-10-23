@@ -799,12 +799,17 @@ label.button:hover { background: var(--hover-strong); }
    text keeps its width (the block scrolls sideways) and a mark follows it */
 .gherkin:not(.numbered) .gk-line { display: grid; grid-template-columns: max-content auto; justify-content: start; column-gap: var(--space-3); align-items: start; padding-inline-start: var(--space-2); border-radius: 2px; }
 /* A step's screenshot button sits on the left, in a column every line of the block reserves: the steps stay aligned */
-.gherkin { --gk-gutter: 36px; }
+.gherkin { --gk-gutter: 30px; }
 @media (pointer: coarse) { .gherkin { --gk-gutter: 48px; } }
 .gherkin.numbered.has-gutter .gk-line { grid-template-columns: 4ch var(--gk-gutter) minmax(0, 1fr) auto; }
 .gherkin.has-gutter:not(.numbered) .gk-line { grid-template-columns: var(--gk-gutter) max-content auto; }
 .gk-gutter { display: flex; align-items: center; min-height: 1.6em; user-select: none; }
 .gherkin.has-gutter .gk-gutter .gk-note { margin: 0; }
+/* In the column the camera keeps its 24px whatever the count (up to 50 per result): the count is a small badge on its
+   corner, so the column fits any count and every step stays in line */
+.gherkin.has-gutter .gk-gutter button.shot-button-step { position: relative; width: 24px; min-width: 24px; padding: 0; }
+.gherkin.has-gutter .gk-gutter button.shot-button-step .shot-button-count { position: absolute; top: -5px; right: -6px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: var(--surface-1); border: 1px solid var(--border-strong); font-size: 10px; line-height: 12px; text-align: center; }
+@media (pointer: coarse) { .gherkin.has-gutter .gk-gutter button.shot-button-step { width: 44px; min-width: 44px; } }
 /* A step that ran and passed: the green of the passed pill, as a wash and a left bar, like the failed step's red. Steps
    that did not run stay plain; screen readers hear "Passed step:" */
 .gherkin .gk-passed { background: color-mix(in srgb, var(--status-passed) 12%, transparent); box-shadow: inset 3px 0 0 var(--status-passed); border-radius: 2px; }
