@@ -42,7 +42,8 @@ export default function ScreenshotButton({ count, kind, name, onOpen }: Props) {
     <button type="button" className={`shot-button shot-button-${kind}`} aria-label={accessible} aria-haspopup="dialog" onClick={onOpen}>
       <Camera size={14} aria-hidden="true" />
       {kind === "link" && <span>Screenshots</span>}
-      {(kind === "count" || count > 1) && <span className="shot-button-count">{count}</span>}
+      {/* A step's camera sits in a fixed-width column: above 9 it shows "9+" (the accessible name keeps the number) */}
+      {(kind === "count" || count > 1) && <span className="shot-button-count">{kind === "step" && count > 9 ? "9+" : count}</span>}
     </button>
   );
 }

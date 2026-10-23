@@ -805,8 +805,8 @@ label.button:hover { background: var(--hover-strong); }
 .gherkin.has-gutter:not(.numbered) .gk-line { grid-template-columns: var(--gk-gutter) max-content auto; }
 .gk-gutter { display: flex; align-items: center; min-height: 1.6em; user-select: none; }
 .gherkin.has-gutter .gk-gutter .gk-note { margin: 0; }
-/* In the column the camera is a fixed 34px button: the icon and a count of up to two digits (the collector keeps 50
-   per result) side by side, in the 12px of the other counts, so the column fits any count and every step stays in line */
+/* In the column the camera is a fixed 34px button: the icon and a count of at most two characters side by side (above
+   9 it reads "9+"), in the 12px of the other counts, so the column fits any count and every step stays in line */
 .gherkin.has-gutter .gk-gutter button.shot-button-step { width: 34px; min-width: 34px; padding: 0 2px; gap: 2px; }
 @media (pointer: coarse) { .gherkin.has-gutter .gk-gutter button.shot-button-step { width: 44px; min-width: 44px; } }
 /* A step that ran and passed: the green of the passed pill, as a wash and a left bar, like the failed step's red. Steps

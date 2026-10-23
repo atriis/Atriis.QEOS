@@ -13,8 +13,8 @@ pip install "qeos-collector @ git+https://github.com/atriis/Atriis.QEOS@collecto
 
 ### Renamed from `qav-collector` (0.4.0)
 
-The collector was `qav-collector` before QEOS got its name. Version 0.4.0, the `collector-v0.4.0`
-tag that comes with this release, is the first one called `qeos-collector`. The old names keep
+The collector was `qav-collector` before QEOS got its name; it is `qeos-collector` from `collector-v0.4.0`
+(version 0.4.0) on. The old names keep
 working, so a pipeline that already uses them does not break:
 
 - The `qav-collector` command still runs the collector, after one stderr line:
