@@ -46,6 +46,23 @@ test("fetches with the Bearer token and saves trace-<id>.zip for each trace", as
   await userEvent.click(screen.getByRole("button", { name: "Download traces for test_ok" }));
   await waitFor(() => expect(saved).toEqual(["trace-5.zip", "trace-6.zip"]));
   expect(auth).toEqual(["Bearer acc", "Bearer acc"]);
+  // Browsers may hold back a second automatic download: the files go one at a time, and the page says what to allow
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("2 traces downloaded"));
+  expect(screen.getByText("If the browser blocked any, allow this site to download several files.")).toBeVisible();
+});
+
+test("one trace downloads without the several-files note", async () => {
+  setAccessToken("acc");
+  const saved = stubSave();
+  server.use(
+    http.get(`${P}/runs/9/results/1/artifacts`, () => HttpResponse.json({ artifacts: [{ id: 5, kind: "trace", name: "a.zip", bytes: 4 }] })),
+    http.get(`${P}/artifacts/:id`, () => new HttpResponse("PK")),
+  );
+  render(<TraceButton projectId={42} runId={9} resultId={1} name="test_ok" count={1} />);
+  await userEvent.click(screen.getByRole("button", { name: "Download trace for test_ok" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Trace downloaded"));
+  expect(saved).toEqual(["trace-5.zip"]);
+  expect(screen.queryByText(/download several files/)).toBeNull();
 });
 
 test("a failed download says so and the button works again", async () => {

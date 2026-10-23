@@ -18,10 +18,15 @@ interface Props {
 
 export const TRACE_NOTE = "A downloaded trace opens with npx playwright show-trace";
 
+// Browsers may hold back a page's second automatic download; a pause between files and a note make that visible
+const SAVE_GAP_MS = 400;
+const SEVERAL_NOTE = "If the browser blocked any, allow this site to download several files.";
+
 const VIEWER_BLOCKED = "This browser cannot run the trace viewer for this site, usually because it does not trust the "
   + "site's certificate. Download the trace instead, or ask an administrator for a trusted certificate.";
 
-type Status = "" | "Opening trace…" | `Trace${string} opened in a new tab` | "Downloading trace…" | "Trace downloaded";
+type Status = "" | "Opening trace…" | `Trace${string} opened in a new tab` | "Downloading trace…" | "Trace downloaded"
+  | `${number} traces downloaded`;
 
 /**
  * A result's Playwright traces (ADR-037): "Trace" opens it in the self-hosted trace viewer in a new tab (several get
@@ -34,6 +39,7 @@ export default function TraceButton({ projectId, runId, resultId, name, count, s
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState<Status>("");
+  const [savedSeveral, setSavedSeveral] = useState(false);
   const total = count ?? 0;
   if (total <= 0) return null;
   // The viewer opens one trace per tab: several traces get one numbered button each
@@ -87,13 +93,17 @@ export default function TraceButton({ projectId, runId, resultId, name, count, s
   async function download() {
     setBusy(true);
     setError("");
+    setSavedSeveral(false);
     setStatus("Downloading trace…");
     try {
       const { artifacts } = await listResultArtifacts(projectId, runId, resultId);
-      for (const a of artifacts.filter((x) => x.kind === "trace")) {
+      const traces = artifacts.filter((x) => x.kind === "trace");
+      for (const [i, a] of traces.entries()) {
+        if (i > 0) await new Promise((r) => setTimeout(r, SAVE_GAP_MS));
         downloadBlob(`trace-${a.id}.zip`, await downloadArtifact(projectId, a.id));
       }
-      setStatus("Trace downloaded");
+      setStatus(traces.length > 1 ? `${traces.length} traces downloaded` : "Trace downloaded");
+      setSavedSeveral(traces.length > 1);
     } catch {
       setStatus("");
       setError("The trace could not be downloaded. Try again.");
@@ -131,6 +141,7 @@ export default function TraceButton({ projectId, runId, resultId, name, count, s
         {busy && <span>Downloading…</span>}
       </button>
       {showNote && <span className="muted trace-note">{TRACE_NOTE}</span>}
+      {savedSeveral && <span className="muted trace-note">{SEVERAL_NOTE}</span>}
       <span role="status" className="sr-only">{status}</span>
       {error && <span role="alert" className="trace-error">{error}</span>}
     </>

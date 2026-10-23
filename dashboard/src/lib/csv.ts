@@ -16,11 +16,14 @@ export function downloadCsv(filename: string, csv: string): void {
   downloadBlob(filename, new Blob([csv], { type: "text/csv;charset=utf-8" }));
 }
 
+const REVOKE_AFTER_MS = 10_000;
+
 export function downloadBlob(filename: string, blob: Blob): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = filename;
   anchor.click();
-  URL.revokeObjectURL(url);
+  // Not at once: some browsers read the URL after click() returns, and an early revoke cancels the download
+  setTimeout(() => URL.revokeObjectURL?.(url), REVOKE_AFTER_MS);
 }
